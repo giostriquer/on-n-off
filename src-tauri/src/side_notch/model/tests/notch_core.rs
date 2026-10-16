@@ -7,6 +7,13 @@ fn rail(id: &str, edge: Edge, size: NotchSize) -> NotchSettings {
     }
 }
 
+fn contains(outer: &Layout, inner: &Layout) -> bool {
+    inner.x >= outer.x
+        && inner.y >= outer.y
+        && inner.x + inner.width <= outer.x + outer.width
+        && inner.y + inner.height <= outer.y + outer.height
+}
+
 fn frame(x: f64, y: f64, width: f64, height: f64) -> Option<Layout> {
     Some(Layout {
         x,
@@ -83,6 +90,7 @@ fn missing_mirrored_ambiguous_and_disabled_displays_hide_without_fallback() {
         vec![display("chosen", 0.0, 2.0), display("chosen", 0.0, 2.0)],
     ] {
         assert_eq!(layout(&selected, &displays), None);
+        assert_eq!(pill_frame(&selected, &displays), None);
     }
     assert_eq!(
         layout(&NotchSettings::default(), &[display("chosen", 0.0, 2.0)]),
@@ -109,4 +117,47 @@ fn presets_scale_the_whole_rail_on_the_pixel_grid() {
             assert_eq!(value, value.round(), "{size:?}: {frame:?}");
         }
     }
+}
+
+#[test]
+fn pills_hug_the_edge_centred_on_the_rail() {
+    let displays = [display("main", 0.0, 1.0)];
+    for edge in [Edge::Left, Edge::Right, Edge::Top, Edge::Bottom] {
+        let current = rail("main", edge, NotchSize::Standard);
+        let rail = layout(&current, &displays).expect("fits");
+        let pill = pill_frame(&current, &displays).expect("fits");
+        assert!(contains(&rail, &pill), "{edge:?}: {pill:?} in {rail:?}");
+        let (flush, edge_of_rail) = match edge {
+            Edge::Left => (pill.x, rail.x),
+            Edge::Right => (pill.x + pill.width, rail.x + rail.width),
+            Edge::Top => (pill.y, rail.y),
+            Edge::Bottom => (pill.y + pill.height, rail.y + rail.height),
+        };
+        assert_eq!(flush, edge_of_rail, "{edge:?}");
+        let (pill_middle, rail_middle) = if edge.is_vertical() {
+            (pill.y + pill.height / 2.0, rail.y + rail.height / 2.0)
+        } else {
+            (pill.x + pill.width / 2.0, rail.x + rail.width / 2.0)
+        };
+        assert_eq!(pill_middle, rail_middle, "{edge:?}");
+    }
+}
+
+#[test]
+fn cells_tile_the_rail() {
+    let metrics = rail_metrics(NotchSize::Standard, 1.0, Edge::Right);
+    let cells = rail_cell_frames(Edge::Right, &metrics, 4);
+    assert_eq!(cells.len(), 4);
+    assert_eq!(cells[0].y, metrics.ear());
+    assert_eq!(
+        cells[3].y + cells[3].height,
+        metrics.length(4) - metrics.ear()
+    );
+    let bar = rail_metrics(NotchSize::Standard, 1.0, Edge::Top);
+    assert_eq!(bar.thickness, 73.0);
+    assert_eq!(rail_cell_frames(Edge::Top, &bar, 2)[1].x, 40.0 + 76.0 + 8.0);
+    assert_eq!(
+        cells[0].y,
+        metrics.length(4) - (cells[3].y + cells[3].height)
+    );
 }

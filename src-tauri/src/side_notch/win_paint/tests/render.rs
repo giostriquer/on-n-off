@@ -25,7 +25,7 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
     let cell = &planned.cells[0];
     let scale = planned.display_scale as f32;
     let cx = (cell.rect.mid_x() * scale as f64) as u32;
-    let cy = ((cell.rect.y + planned.metrics.cell_padding + planned.metrics.icon_slot / 2.0)
+    let cy = ((cell.rect.y + planned.metrics.cell.padding + planned.metrics.cell.icon_slot / 2.0)
         * scale as f64) as u32;
     let pixel = first.pixel(cx, cy).expect("inside the pixmap");
     assert!(pixel.alpha() > 200, "the glyph slot area has ink");
@@ -309,9 +309,10 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     let scale = planned.display_scale;
     let cell = &planned.cells[0];
     let cx = cell.rect.mid_x() * scale;
-    let cy = (cell.rect.y + planned.metrics.cell_padding + planned.metrics.icon_slot / 2.0) * scale;
-    let stroke = planned.metrics.ring_stroke * scale;
-    let radius = (planned.metrics.icon_slot * scale - stroke) / 2.0;
+    let cy =
+        (cell.rect.y + planned.metrics.cell.padding + planned.metrics.cell.icon_slot / 2.0) * scale;
+    let stroke = planned.metrics.cell.ring_stroke * scale;
+    let radius = (planned.metrics.cell.icon_slot * scale - stroke) / 2.0;
     let mut red = 0;
     for (index, (before, after)) in plain.pixels().iter().zip(conflict.pixels()).enumerate() {
         if before != after {

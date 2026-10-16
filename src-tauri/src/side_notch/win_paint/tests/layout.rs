@@ -1,81 +1,12 @@
 use super::*;
 
 #[test]
-fn metrics_mirror_the_notchcore_constants_at_standard_size() {
-    let standard = metrics(NotchSize::Standard, 1.0, Edge::Right);
-    assert_eq!(standard.thickness, 76.0);
+fn values_snap_to_the_display_pixel_grid() {
     assert_eq!(
-        standard.cell_length, 73.0,
-        "icon slot 46 + label 22 + spacing 3 + padding 2"
+        value(10.25, 1.0, 1.0),
+        10.0,
+        "1x displays snap to whole pixels"
     );
-    assert_eq!(standard.cell_spacing, 8.0);
-    assert_eq!(standard.inset, 40.0);
-    assert_eq!(standard.ear, 40.0);
-    assert_eq!(standard.ring_stroke, 4.0);
-
-    let vertical_m = metrics(NotchSize::Standard, 1.0, Edge::Right);
-    let horizontal_m = metrics(NotchSize::Standard, 1.0, Edge::Top);
-    assert_eq!(vertical_m.thickness, horizontal_m.cell_length);
-    assert_eq!(vertical_m.cell_length, horizontal_m.thickness);
-}
-#[test]
-fn fractional_presets_snap_to_the_display_pixel_grid() {
-    let metric_set = metrics(NotchSize::Compact, 1.5, Edge::Right);
-    assert_eq!(metric_set.thickness, 100.0 / 1.5);
-    let snapped = value(10.25, 1.0, 1.0);
-    assert_eq!(snapped, 10.0, "1x displays snap to whole pixels");
-}
-#[test]
-fn rail_cells_stack_along_the_axis_after_the_first_ear() {
-    let metric_set = metrics(NotchSize::Standard, 1.0, Edge::Right);
-    let frames = rail_cell_frames(Edge::Right, &metric_set, 3);
-    assert_eq!(frames.len(), 3);
-    assert_eq!(frames[0].y, metric_set.inset);
-    assert_eq!(
-        frames[1].y,
-        metric_set.inset + metric_set.cell_length + metric_set.cell_spacing
-    );
-    assert_eq!(
-        frames[2].y,
-        metric_set.inset + 2.0 * (metric_set.cell_length + metric_set.cell_spacing)
-    );
-    assert_eq!(frames[2].x, 0.0);
-    assert_eq!(frames[0].w, metric_set.thickness);
-
-    let horizontal = rail_cell_frames(Edge::Top, &metric_set, 2);
-    assert_eq!(
-        horizontal[0].x, metric_set.inset,
-        "cells run along x for horizontal edges"
-    );
-    assert_eq!(
-        horizontal[1].x,
-        metric_set.inset + metric_set.cell_length + metric_set.cell_spacing
-    );
-    assert_eq!(horizontal[0].y, 0.0);
-}
-#[test]
-fn the_collapsed_pill_is_a_thin_strip_centred_on_the_rail() {
-    let rail = R::new(1854.0, 480.0, 66.0, 366.0);
-    let settings = settings();
-    let pill = pill_frame(&settings, &rail);
-    assert_eq!(pill.w, 6.0);
-    assert_eq!(pill.h, 120.0);
-    assert_eq!(pill.mid_y(), rail.mid_y());
-    assert_eq!(
-        pill.x + pill.w,
-        rail.x + rail.w,
-        "flush with the right edge"
-    );
-
-    let top = pill_frame(
-        &NotchSettings {
-            edge: Edge::Top,
-            ..settings
-        },
-        &rail,
-    );
-    assert_eq!(top.h, 6.0);
-    assert_eq!(top.x + top.w, rail.x + rail.w);
 }
 #[test]
 fn the_popover_places_inward_from_the_edge_and_clamps_to_the_work_area() {

@@ -4,9 +4,9 @@ mod marks;
 mod text;
 
 use super::model::{
-    layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
-    workspace_share_wording, Edge, GithubList, InnerRing, NotchSettings, NotchSize, PrContext,
-    ShowMode,
+    layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display,
+    workspace_share_note, workspace_share_renewed, workspace_share_window, workspace_share_wording,
+    Edge, GithubList, InnerRing, Layout, NotchSettings, PrContext, RailMetrics, ShowMode,
 };
 use crate::dto::{
     AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
@@ -21,10 +21,6 @@ pub struct R {
     pub y: f64,
     pub w: f64,
     pub h: f64,
-}
-
-fn vertical(edge: Edge) -> bool {
-    matches!(edge, Edge::Left | Edge::Right)
 }
 
 impl R {
@@ -45,6 +41,12 @@ impl R {
     }
 }
 
+impl From<Layout> for R {
+    fn from(frame: Layout) -> Self {
+        R::new(frame.x, frame.y, frame.width, frame.height)
+    }
+}
+
 fn union(a: &R, b: &R) -> R {
     let x = a.x.min(b.x);
     let y = a.y.min(b.y);
@@ -54,98 +56,7 @@ fn union(a: &R, b: &R) -> R {
 }
 
 fn value(points: f64, size_scale: f64, display_scale: f64) -> f64 {
-    (points * size_scale * display_scale).round() / display_scale
-}
-
-fn size_scale_of(size: NotchSize) -> f64 {
-    match size {
-        NotchSize::Compact => 0.875,
-        NotchSize::Standard => 1.0,
-        NotchSize::Large => 1.125,
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Metrics {
-    pub thickness: f64,
-    pub cell_length: f64,
-    pub cell_spacing: f64,
-    pub inset: f64,
-    pub ear: f64,
-    pub cell_padding: f64,
-    pub content_spacing: f64,
-    pub icon_slot: f64,
-    pub ring_stroke: f64,
-    pub inner_ring_stroke: f64,
-    pub inner_ring_inset: f64,
-    pub glyph: f64,
-    pub label_height: f64,
-}
-
-pub fn metrics(size: NotchSize, display_scale: f64, edge: Edge) -> Metrics {
-    let v = |points: f64| value(points, size_scale_of(size), display_scale);
-    let cell_padding = v(1.0);
-    let content_spacing = v(3.0);
-    let icon_slot = v(46.0);
-    let label_height = v(22.0);
-    let cell_width = v(76.0);
-    let cell_height = icon_slot + label_height + content_spacing + 2.0 * cell_padding;
-    let vertical = vertical(edge);
-    Metrics {
-        thickness: if vertical { cell_width } else { cell_height },
-        cell_length: if vertical { cell_height } else { cell_width },
-        cell_spacing: v(8.0),
-        inset: v(40.0),
-        ear: v(40.0),
-        cell_padding,
-        content_spacing,
-        icon_slot,
-        ring_stroke: v(4.0),
-        inner_ring_stroke: v(3.0),
-        inner_ring_inset: v(6.0),
-        glyph: v(24.0),
-        label_height,
-    }
-}
-
-pub fn rail_cell_frames(edge: Edge, metrics: &Metrics, count: usize) -> Vec<R> {
-    (0..count)
-        .map(|index| {
-            let offset =
-                metrics.inset + index as f64 * (metrics.cell_length + metrics.cell_spacing);
-            if vertical(edge) {
-                R::new(0.0, offset, metrics.thickness, metrics.cell_length)
-            } else {
-                R::new(offset, 0.0, metrics.cell_length, metrics.thickness)
-            }
-        })
-        .collect()
-}
-
-pub fn pill_frame(settings: &NotchSettings, rail: &R) -> R {
-    let scale = size_scale_of(settings.size);
-    let thickness = value(6.0, scale, 1.0);
-    let length = value(120.0, scale, 1.0).min(if vertical(settings.edge) {
-        rail.h
-    } else {
-        rail.w
-    });
-    match settings.edge {
-        Edge::Left => R::new(rail.x, rail.mid_y() - length / 2.0, thickness, length),
-        Edge::Right => R::new(
-            rail.x + rail.w - thickness,
-            rail.mid_y() - length / 2.0,
-            thickness,
-            length,
-        ),
-        Edge::Top => R::new(rail.mid_x() - length / 2.0, rail.y, length, thickness),
-        Edge::Bottom => R::new(
-            rail.mid_x() - length / 2.0,
-            rail.y + rail.h - thickness,
-            length,
-            thickness,
-        ),
-    }
+    pixel_aligned(points * size_scale, display_scale)
 }
 
 pub const POPOVER_WIDTH: f64 = 272.0;
@@ -319,7 +230,7 @@ pub struct Plan {
     pub size_scale: f64,
     pub window: R,
     pub rail: R,
-    pub metrics: Metrics,
+    pub metrics: RailMetrics,
     pub cells: Vec<CellPlan>,
     pub cap: CapPlan,
     pub pill: Option<R>,
@@ -428,38 +339,30 @@ pub fn plan(
     data: &RailData,
     hover: Hover,
 ) -> Option<Plan> {
-    let rail_frame = layout(settings, displays)?;
-    let display = displays
-        .iter()
-        .find(|d| Some(&d.id) == settings.display_id.as_ref())?;
+    let rail = R::from(layout(settings, displays)?);
+    let display = selected_display(settings, displays)?;
     let edge = settings.edge;
     let display_scale = display.scale;
-    let size_scale = size_scale_of(settings.size);
+    let size_scale = settings.size.scale();
     let scaled = |points: f64| value(points, size_scale, display_scale);
-    let metrics = metrics(settings.size, display_scale, edge);
-    let rail = R::new(
-        rail_frame.x,
-        rail_frame.y,
-        rail_frame.width,
-        rail_frame.height,
-    );
+    let metrics = rail_metrics(settings.size, display_scale, edge);
     let collapsed = settings.show == ShowMode::OnHover && !hover.rail_open;
 
     let cells: Vec<CellPlan> = rail_cell_frames(edge, &metrics, data.cells.len())
         .into_iter()
         .enumerate()
-        .map(|(index, rect)| CellPlan {
-            rect: rect.translated(rail.x, rail.y),
+        .map(|(index, frame)| CellPlan {
+            rect: R::from(frame).translated(rail.x, rail.y),
             content: cell_content(&data.cells[index]),
             active: hover.active == Some(index),
         })
         .collect();
 
     let cap = CapPlan {
-        rect: if vertical(edge) {
-            R::new(rail.x, rail.y, rail.w, metrics.ear)
+        rect: if edge.is_vertical() {
+            R::new(rail.x, rail.y, rail.w, metrics.ear())
         } else {
-            R::new(rail.x, rail.y, metrics.ear, rail.h)
+            R::new(rail.x, rail.y, metrics.ear(), rail.h)
         },
         hovered: hover.cap_hovered,
         pinned: settings.show == ShowMode::Always,
@@ -470,7 +373,7 @@ pub fn plan(
         let card_w = scaled(POPOVER_WIDTH);
         let padding = scaled(12.0);
         let inner_w = card_w - 2.0 * padding;
-        let tail_space = if vertical(edge) {
+        let tail_space = if edge.is_vertical() {
             scaled(TAIL_LENGTH)
         } else {
             0.0
@@ -478,7 +381,7 @@ pub fn plan(
         let (entries, zones) = popover_entries(data, index, inner_w, size_scale, display_scale);
         let card_h = measure(&entries, size_scale, display_scale, padding);
         let height = card_h
-            + if vertical(edge) {
+            + if edge.is_vertical() {
                 0.0
             } else {
                 scaled(TAIL_LENGTH)
@@ -504,7 +407,7 @@ pub fn plan(
             card_w,
             card_h,
         );
-        let tail = if vertical(edge) {
+        let tail = if edge.is_vertical() {
             cell_rect.mid_y() - placed.y
         } else {
             cell_rect.mid_x() - placed.x
@@ -529,7 +432,11 @@ pub fn plan(
         Some(popover) => union(&rail, &popover.rect),
         None => rail,
     };
-    let pill = collapsed.then(|| pill_frame(settings, &rail));
+    let pill = if collapsed {
+        pill_frame(settings, displays).map(R::from)
+    } else {
+        None
+    };
 
     Some(Plan {
         edge,
@@ -1423,14 +1330,14 @@ fn draw_silhouette_masked(
     pixmap: &mut Pixmap,
     rail: &R,
     edge: Edge,
-    metrics: &Metrics,
+    metrics: &RailMetrics,
     scale: f32,
     color: Color,
     mask: Option<&tiny_skia::Mask>,
 ) {
-    let t = if vertical(edge) { rail.w } else { rail.h } as f32;
-    let length = if vertical(edge) { rail.h } else { rail.w } as f32;
-    let ear = (metrics.ear as f32).min(length / 2.0);
+    let t = if edge.is_vertical() { rail.w } else { rail.h } as f32;
+    let length = if edge.is_vertical() { rail.h } else { rail.w } as f32;
+    let ear = (metrics.ear() as f32).min(length / 2.0);
     let edge_x = t + 1.0;
     let mut pb = PathBuilder::new();
     pb.move_to(edge_x, 0.0);
@@ -1503,7 +1410,7 @@ fn draw_cap(
     pixmap: &mut Pixmap,
     cap: &CapPlan,
     edge: Edge,
-    metrics: &Metrics,
+    metrics: &RailMetrics,
     rail: &R,
     scale: f32,
 ) {
@@ -1658,12 +1565,12 @@ fn stroke_ring(
 }
 
 fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
-    let metrics = &plan.metrics;
+    let metrics = &plan.metrics.cell;
     let icon_slot = metrics.icon_slot as f32 * scale;
     let ring_stroke = metrics.ring_stroke as f32 * scale;
     let center = (
         cell.rect.mid_x() as f32 * scale,
-        cell.rect.y as f32 * scale + metrics.cell_padding as f32 * scale + icon_slot / 2.0,
+        cell.rect.y as f32 * scale + metrics.padding as f32 * scale + icon_slot / 2.0,
     );
     let radius = (icon_slot - ring_stroke) / 2.0;
 
@@ -1783,7 +1690,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
 
     let label_size = 17.0 * plan.size_scale as f32 * scale;
     let baseline = cell.rect.y as f32 * scale
-        + metrics.cell_padding as f32 * scale
+        + metrics.padding as f32 * scale
         + icon_slot
         + metrics.content_spacing as f32 * scale
         + text::ascent_px(label_size, text::Weight::Medium);
@@ -1802,12 +1709,12 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
 fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: f32) {
     let edge = plan.edge;
     let card = &popover.card;
-    let tail_space = if vertical(edge) {
+    let tail_space = if edge.is_vertical() {
         TAIL_LENGTH * plan.size_scale
     } else {
         0.0
     };
-    let tail_space_y = if vertical(edge) {
+    let tail_space_y = if edge.is_vertical() {
         0.0
     } else {
         TAIL_LENGTH * plan.size_scale
@@ -1837,7 +1744,7 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
 
     let half = (7.0 * plan.size_scale) as f32 * scale;
     let length = tail_space.max(tail_space_y) as f32 * scale;
-    let along = if vertical(edge) {
+    let along = if edge.is_vertical() {
         (card.y + popover.tail) as f32 * scale
     } else {
         (card.x + popover.tail) as f32 * scale
