@@ -23,8 +23,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   `DEFAULT_APP_SETTINGS`; the contract tests on each side fail until both have it.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.
-- Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
-  pipe deadlocks.
+- Child processes: `process.rs` for a command run to its exit; `json_line_session.rs` for a CLI
+  kept running and spoken to in line-delimited JSON-RPC (Codex app-server, Muse serve), whose
+  readers keep only their command, methods and normalisation. Drain stdout and stderr concurrently
+  from the start, or a full pipe deadlocks.
 - File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
   leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
@@ -35,6 +37,17 @@ locates the subsystems. Module doc-comments explain their implementation.
   module's refresh. A new source needs the four changes
   [the guide lists](architecture/shared-reads.md#in-the-ui).
 - `item_install/` never shells out to a provider CLI.
+- The banked reset alert rule: `reset_alert.rs`, which does no I/O; `limits_monitor.rs` only
+  performs the plan it returns, through an `Io` trait its tests fake. A number the UI restates
+  from the rule (`ui/src/lib/appSettings.ts`) is checked against `reset_alert/fixtures/rule.json`
+  by `ui/src/lib/resetAlertRule.test.ts`, and a Rust test keeps the fixture equal to the rule, so a
+  change to one side fails until the other follows.
+- How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
+  (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
+  keeps its own failure count and passes its own interval; it never restates the formula. The UI's
+  `LIMITS_CHECK_MINUTES` (`ui/src/lib/sharedReads/limits.ts`) is checked against
+  `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
+  keeps the fixture equal to `check_interval`.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
@@ -77,6 +90,7 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   directory a plain `mod tests;` resolves against, so it pins
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
+  `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's

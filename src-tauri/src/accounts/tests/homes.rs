@@ -598,29 +598,37 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
 
 #[test]
 fn a_failed_read_of_a_home_holds_the_next_one_back() {
-    let harness = Harness::new().with_homes();
-    two_accounts(&harness);
-    read(&harness);
-    *harness.homes().answer.lock().unwrap() = Some(crate::limits::SavedReadError::Http(
-        crate::http::HttpError::RateLimited(crate::http::RateLimitReset::RetryAfter(7200)),
-    ));
-    read(&harness);
+    use crate::http::{HttpError, RateLimitReset};
+    for (failure, message) in [
+        (
+            HttpError::RateLimited(RateLimitReset::RetryAfter(7200)),
+            "Usage refresh is rate limited. The last reading is retained.",
+        ),
+        (
+            HttpError::Status(503),
+            "Usage refresh is unavailable. The last reading is retained.",
+        ),
+    ] {
+        let harness = Harness::new().with_homes();
+        two_accounts(&harness);
+        read(&harness);
+        *harness.homes().answer.lock().unwrap() =
+            Some(crate::limits::SavedReadError::Http(failure));
+        read(&harness);
 
-    let cards = read(&harness);
+        let cards = read(&harness);
 
-    assert_eq!(
-        asked(&harness).len(),
-        2,
-        "read the home again while held back"
-    );
-    let card = cards
-        .iter()
-        .find(|card| card.account.as_ref().unwrap().id == key("b"))
-        .unwrap();
-    assert_eq!(
-        card.message.as_deref(),
-        Some("Usage refresh is rate limited. The last reading is retained.")
-    );
+        assert_eq!(
+            asked(&harness).len(),
+            2,
+            "read the home again while held back after: {message}"
+        );
+        let card = cards
+            .iter()
+            .find(|card| card.account.as_ref().unwrap().id == key("b"))
+            .unwrap();
+        assert_eq!(card.message.as_deref(), Some(message));
+    }
 }
 
 #[test]

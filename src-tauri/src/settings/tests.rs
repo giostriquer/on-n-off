@@ -321,20 +321,6 @@ fn reset_alerts_stay_within_the_spend_rule() {
 }
 
 #[test]
-fn an_alert_spends_at_its_own_share_and_never_above_five_percent() {
-    let alert = |max_left_percent| ResetAlert {
-        label: None,
-        max_left_percent,
-        min_hours_to_renewal: 24,
-        automatic: true,
-    };
-
-    assert_eq!(alert(3).spend_limit(), 3);
-    assert_eq!(alert(5).spend_limit(), 5);
-    assert_eq!(alert(10).spend_limit(), 5);
-}
-
-#[test]
 fn one_setting_the_app_cannot_read_leaves_every_other_one() {
     let settings = parse_settings(Some(
         r#"{
@@ -463,13 +449,7 @@ fn every_setting_reads_back_as_it_was_written() {
     let settings = every_setting_away_from_its_default();
     let written = serde_json::to_value(&settings).unwrap();
     let defaults = serde_json::to_value(AppSettings::default()).unwrap();
-    let alert_defaults = serde_json::to_value(ResetAlert {
-        label: None,
-        max_left_percent: reset_max_left_default(),
-        min_hours_to_renewal: reset_min_hours_default(),
-        automatic: false,
-    })
-    .unwrap();
+    let alert_defaults = serde_json::to_value(ResetAlert::default()).unwrap();
     for (key, value) in written.as_object().unwrap() {
         assert_ne!(Some(value), defaults.get(key), "{key} is at its default");
     }
@@ -492,4 +472,34 @@ fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
 
     assert!(settings.close_to_tray);
     assert_eq!(settings.github_scopes, ["org:acme"]);
+}
+
+#[test]
+fn a_reset_alert_is_written_and_received_in_its_settings_shape() {
+    let alert = ResetAlert {
+        label: Some("you@example.com".into()),
+        max_left_percent: 4,
+        min_hours_to_renewal: 36,
+        automatic: true,
+    };
+
+    assert_eq!(
+        serde_json::to_value(&alert).unwrap(),
+        serde_json::json!({
+            "label": "you@example.com",
+            "maxLeftPercent": 4,
+            "minHoursToRenewal": 36,
+            "automatic": true
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ResetAlert>(serde_json::json!({})).unwrap(),
+        ResetAlert {
+            label: None,
+            max_left_percent: 5,
+            min_hours_to_renewal: 24,
+            automatic: false,
+        },
+        "an alert received over IPC without its figures"
+    );
 }
