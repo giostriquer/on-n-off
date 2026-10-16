@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
+    sync::{LazyLock, Mutex, PoisonError},
     time::Duration,
 };
 
@@ -8,10 +9,13 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
 
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto, ResetCreditOutcome};
-use crate::limits::ResetSpend;
+use crate::dto::{
+    AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
+};
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
+use crate::read_revision::{announce, Source};
+use crate::reset_alert::{self, AlertMemory, Due, Notice, ResetSpend, Waiting, WaitingSpend};
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
@@ -24,7 +28,7 @@ struct MonitorState {
     schema_version: u8,
     providers: HashMap<AgentId, ProviderObservation>,
     #[serde(default)]
-    reset_alerts: HashMap<String, reset_alerts::AlertState>,
+    reset_alerts: AlertMemory,
 }
 
 impl Default for MonitorState {
@@ -32,7 +36,7 @@ impl Default for MonitorState {
         Self {
             schema_version: MONITOR_STATE_SCHEMA_VERSION,
             providers: HashMap::new(),
-            reset_alerts: HashMap::new(),
+            reset_alerts: AlertMemory::default(),
         }
     }
 }
@@ -75,16 +79,63 @@ pub fn wake(app: &AppHandle) {
     monitor::wake::<LimitsMonitor>(app);
 }
 
+#[derive(Default)]
+struct Queue(Mutex<Waiting>);
+
+static WAITING: LazyLock<Queue> = LazyLock::new(Queue::default);
+
+impl Queue {
+    fn read<R>(&self, look: impl FnOnce(&Waiting) -> R) -> R {
+        look(&self.0.lock().unwrap_or_else(PoisonError::into_inner))
+    }
+
+    fn change<R>(&self, change: impl FnOnce(&mut Waiting) -> R) -> R {
+        let mut waiting = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let before = waiting.clone();
+        let result = change(&mut waiting);
+        let changed = *waiting != before;
+        drop(waiting);
+        if changed {
+            announce(Source::ResetSpends);
+        }
+        result
+    }
+
+    fn spend_by_hand(
+        &self,
+        account_id: &str,
+        spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+    ) -> Result<ResetCreditOutcome, String> {
+        let outcome = spend(ResetSpend::ByHand)?;
+        self.change(|waiting| waiting.used_by_hand(account_id, outcome));
+        Ok(outcome)
+    }
+}
+
+pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
+    WAITING.read(Waiting::listed)
+}
+
+pub fn cancel_reset_spend(account_id: &str) -> bool {
+    WAITING.change(|waiting| waiting.cancel(account_id))
+}
+
+pub fn spend_reset_by_hand(
+    account_id: &str,
+    spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+) -> Result<ResetCreditOutcome, String> {
+    WAITING.spend_by_hand(account_id, spend)
+}
+
 trait Io {
     async fn read(&self, reads: Vec<(AgentId, bool)>) -> Result<Vec<ProviderLimitsDto>, String>;
     async fn save(&self, state: &MonitorState) -> Result<(), String>;
     async fn spend(
         &self,
-        account_id: String,
-        idempotency_key: String,
+        spend: &WaitingSpend,
         how: ResetSpend,
     ) -> Result<ResetCreditOutcome, String>;
-    fn notify(&self, title: String, body: String);
+    fn notify(&self, notice: Notice);
     fn now(&self) -> DateTime<Utc>;
 }
 
@@ -119,10 +170,11 @@ impl Io for App {
 
     async fn spend(
         &self,
-        account_id: String,
-        idempotency_key: String,
+        spend: &WaitingSpend,
         how: ResetSpend,
     ) -> Result<ResetCreditOutcome, String> {
+        let account_id = spend.account_id().to_string();
+        let idempotency_key = spend.idempotency_key().to_string();
         async_runtime::spawn_blocking(move || {
             crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key, how)
         })
@@ -130,7 +182,7 @@ impl Io for App {
         .unwrap_or_else(|error| Err(format!("The banked reset could not be used: {error}")))
     }
 
-    fn notify(&self, title: String, body: String) {
+    fn notify(&self, (title, body): Notice) {
         monitor::notify(&self.app, "limits monitor", title, body, Sound::Default);
     }
 
@@ -155,7 +207,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
         .await
         .unwrap_or_default();
     let io = App { app, state_path };
-    let waiting = auto_spend::queue();
+    let waiting: &Queue = &WAITING;
     loop {
         let settings = async_runtime::spawn_blocking(crate::settings::load_settings)
             .await
@@ -170,24 +222,24 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             }
             crate::limits_refresh::check_interval(minutes(settings.limits_poll_minutes))
         } else {
-            rest(&io, waiting, &mut state, &settings).await;
+            rest(&io, waiting, &mut state).await;
             minutes(DISABLED_WAKE_MINUTES)
         };
 
-        let delay = next_wake(poll_delay, waiting.next_due(), polled_at, Utc::now());
+        let delay = next_wake(
+            poll_delay,
+            waiting.read(Waiting::next_due),
+            polled_at,
+            Utc::now(),
+        );
         wait_for_wake_or_deadline(&mut wake_receiver, delay).await;
     }
 }
 
-async fn rest(
-    io: &impl Io,
-    waiting: &auto_spend::Queue,
-    state: &mut MonitorState,
-    settings: &crate::settings::AppSettings,
-) {
-    waiting.clear();
+async fn rest(io: &impl Io, waiting: &Queue, state: &mut MonitorState) {
+    waiting.change(Waiting::clear);
     if !state.providers.is_empty() || !state.reset_alerts.is_empty() {
-        observe_poll(state, &[], settings, io.now());
+        *state = MonitorState::default();
         if let Err(error) = io.save(state).await {
             eprintln!("limits monitor could not clear its state: {error}");
         }
@@ -223,84 +275,66 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
 
 async fn poll_once(
     io: &impl Io,
-    waiting: &auto_spend::Queue,
+    waiting: &Queue,
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
     now: DateTime<Utc>,
 ) -> Result<(), String> {
-    let fresh_codex = waiting.any_due(now);
+    let fresh_codex = waiting.read(|waiting| waiting.any_due(now));
     let reads = watched
         .iter()
         .map(|&provider| (provider, fresh_codex && provider == AgentId::Codex))
         .collect();
-    let snapshots = io.read(reads).await?;
-    let due = waiting.take_due(&snapshots, &settings.reset_alerts, now);
+    let readings = io.read(reads).await?;
     let previous = state.clone();
-    let outcome = observe_poll(state, &snapshots, settings, now);
+    let mut notices = limit_notices(state, &readings, settings);
+    let plan = waiting.change(|waiting| {
+        reset_alert::plan(
+            &mut state.reset_alerts,
+            waiting,
+            &readings,
+            &settings.reset_alerts,
+            now,
+        )
+    });
     let saved = io.save(state).await;
     if saved.is_err() {
         *state = previous;
     } else {
-        let scheduled = waiting.schedule_all(&outcome.automatic_offers, io.now());
-        for (title, body) in outcome.notices.into_iter().chain(scheduled) {
-            io.notify(title, body);
+        notices.extend(plan.notices);
+        notices.extend(waiting.change(|waiting| waiting.schedule(&plan.automatic, io.now())));
+        for notice in notices {
+            io.notify(notice);
         }
     }
-    for due in due {
-        let (title, body) = match due {
-            auto_spend::Due::Spend(spend, how) => {
-                let spent = io
-                    .spend(spend.account_id.clone(), spend.idempotency_key.clone(), how)
-                    .await;
-                auto_spend::outcome_copy(&spend, &spent)
-            }
-            auto_spend::Due::Kept(spend, why) => auto_spend::kept_copy(&spend, why),
+    for due in plan.due {
+        let notice = match due {
+            Due::Spend(spend, how) => spend.outcome_notice(&io.spend(&spend, how).await),
+            Due::Kept(spend, why) => spend.kept_notice(why),
         };
-        io.notify(title, body);
+        io.notify(notice);
     }
-    saved.map_err(|error| format!("could not save state: {error}"))?;
-    Ok(())
+    saved.map_err(|error| format!("could not save state: {error}"))
 }
 
-struct PollOutcome {
-    notices: Vec<(String, String)>,
-    automatic_offers: Vec<reset_alerts::Offer>,
-}
-
-fn observe_poll(
+fn limit_notices(
     state: &mut MonitorState,
-    snapshots: &[ProviderLimitsDto],
+    readings: &[ProviderLimitsDto],
     settings: &crate::settings::AppSettings,
-    now: DateTime<Utc>,
-) -> PollOutcome {
-    let events = if settings.limit_notifications {
-        observe(state, snapshots)
+) -> Vec<Notice> {
+    if settings.limit_notifications {
+        observe(state, readings)
+            .iter()
+            .map(notification_copy)
+            .collect()
     } else {
         state.providers.clear();
         Vec::new()
-    };
-    let mut notices: Vec<(String, String)> = events.iter().map(notification_copy).collect();
-    let (automatic_offers, offers): (Vec<_>, Vec<_>) = reset_alerts::observe(
-        &mut state.reset_alerts,
-        snapshots,
-        &settings.reset_alerts,
-        now,
-    )
-    .into_iter()
-    .partition(|offer| offer.automatic);
-    notices.extend(
-        offers
-            .iter()
-            .map(|offer| reset_alerts::notification_copy(offer, now)),
-    );
-    PollOutcome {
-        notices,
-        automatic_offers,
     }
 }
 
-fn notification_copy(event: &LimitEvent) -> (String, String) {
+fn notification_copy(event: &LimitEvent) -> Notice {
     let account = event
         .account_label
         .as_deref()
@@ -431,9 +465,6 @@ fn load_state(path: &Path) -> MonitorState {
         state.schema_version == MONITOR_STATE_SCHEMA_VERSION
     })
 }
-
-pub mod auto_spend;
-mod reset_alerts;
 
 #[cfg(test)]
 mod tests;

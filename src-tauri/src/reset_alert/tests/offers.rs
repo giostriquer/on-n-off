@@ -1,151 +1,133 @@
 use super::*;
-use crate::dto::{LimitWindowDto, LimitsResetCreditsDto, Reading};
-
-const NOW: &str = "2026-10-01T12:00:00Z";
-const RENEWS: &str = "2026-10-05T12:00:00Z";
-
-fn now() -> DateTime<Utc> {
-    instant(NOW).unwrap()
-}
-
-fn card(
-    account: &str,
-    used: f64,
-    renews: &str,
-    observed_at: &str,
-    banked: u32,
-) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(AgentId::Codex, account)
-        .labelled("you@example.com")
-        .with_reading(Reading {
-            windows: vec![LimitWindowDto {
-                id: "weekly".into(),
-                label: "Weekly".into(),
-                kind: LimitWindowKind::Weekly,
-                used_percent: used,
-                resets_at: Some(renews.into()),
-                window_seconds: Some(604_800),
-                observed_at: observed_at.into(),
-            }],
-            reset_credits: Some(LimitsResetCreditsDto {
-                available_count: banked,
-                next_expires_at: None,
-                resets: Vec::new(),
-            }),
-            ..Reading::default()
-        })
-}
 
 fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
-    HashMap::from([(
-        account.to_string(),
-        ResetAlert {
-            label: None,
-            max_left_percent: 5,
-            min_hours_to_renewal: 24,
-            automatic: false,
-        },
-    )])
+    alerts_for(account, alert(5, false))
+}
+
+fn poll(
+    memory: &mut AlertMemory,
+    cards: &[ProviderLimitsDto],
+    alerts: &HashMap<String, ResetAlert>,
+) -> Plan {
+    plan(memory, &mut Waiting::default(), cards, alerts, now())
+}
+
+fn offered(
+    memory: &mut AlertMemory,
+    card: &ProviderLimitsDto,
+    alerts: &HashMap<String, ResetAlert>,
+) -> usize {
+    let plan = poll(memory, std::slice::from_ref(card), alerts);
+    plan.notices.len() + plan.automatic.len()
 }
 
 fn two_polls(
     first: &ProviderLimitsDto,
     second: &ProviderLimitsDto,
     alerts: &HashMap<String, ResetAlert>,
-) -> (Vec<Offer>, Vec<Offer>) {
-    let mut state = HashMap::new();
-    let before = observe(&mut state, std::slice::from_ref(first), alerts, now());
-    let after = observe(&mut state, std::slice::from_ref(second), alerts, now());
-    (before, after)
+) -> usize {
+    let mut memory = AlertMemory::default();
+    assert_eq!(
+        offered(&mut memory, first, alerts),
+        0,
+        "offered on one poll"
+    );
+    offered(&mut memory, second, alerts)
 }
 
 #[test]
 fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
-    let alerts = opted_in("acct");
-    let first = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 2);
-    let second = card("acct", 96.0, RENEWS, "2026-10-01T12:00:00Z", 2);
-    let mut state = HashMap::new();
+    for automatic in [false, true] {
+        let alerts = alerts_for("acct", alert(5, automatic));
+        let mut memory = AlertMemory::default();
+        let polls: Vec<Plan> = [
+            card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 2),
+            card("acct", 96.0, RENEWS, "2026-10-01T12:00:00Z", 2),
+            card("acct", 97.0, RENEWS, "2026-10-01T12:10:00Z", 2),
+        ]
+        .iter()
+        .map(|card| poll(&mut memory, std::slice::from_ref(card), &alerts))
+        .collect();
 
-    let one = observe(&mut state, std::slice::from_ref(&first), &alerts, now());
-    let two = observe(&mut state, std::slice::from_ref(&second), &alerts, now());
-    let third = card("acct", 97.0, RENEWS, "2026-10-01T12:10:00Z", 2);
-    let three = observe(&mut state, std::slice::from_ref(&third), &alerts, now());
-
-    assert!(one.is_empty(), "offered on one reading");
-    assert_eq!(
-        two,
-        [Offer {
+        assert_eq!(polls[0], Plan::default(), "offered on one reading");
+        let offer = Offer {
             account_id: "acct".into(),
             account_label: Some("you@example.com".into()),
             cycle: RENEWS.into(),
             left_percent: 4.0,
-            renews_at: instant(RENEWS).unwrap(),
-            available: 2,
-            automatic: false,
-        }]
-    );
-    assert!(three.is_empty(), "offered twice in one weekly cycle");
+            renews_at: at(RENEWS),
+            automatic,
+        };
+        let expected = if automatic {
+            Plan {
+                automatic: vec![offer],
+                ..Plan::default()
+            }
+        } else {
+            Plan {
+                notices: vec![offer.notice(now())],
+                ..Plan::default()
+            }
+        };
+        assert_eq!(polls[1], expected, "automatic: {automatic}");
+        assert_eq!(
+            polls[2],
+            Plan::default(),
+            "offered twice in one weekly cycle"
+        );
+    }
 }
 
 #[test]
 fn the_same_reading_twice_is_not_two_polls() {
-    let alerts = opted_in("acct");
     let low = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 1);
 
-    let (_, second) = two_polls(&low, &low, &alerts);
-
-    assert!(second.is_empty());
+    assert_eq!(two_polls(&low, &low, &opted_in("acct")), 0);
 }
 
 #[test]
 fn no_reset_is_offered_while_more_than_the_share_is_left() {
-    let alerts = opted_in("acct");
     let first = card("acct", 85.0, RENEWS, "2026-10-01T11:50:00Z", 1);
     let second = card("acct", 94.0, RENEWS, "2026-10-01T12:00:00Z", 1);
 
-    assert!(two_polls(&first, &second, &alerts).1.is_empty());
+    assert_eq!(two_polls(&first, &second, &opted_in("acct")), 0);
 }
 
 #[test]
 fn exactly_the_share_left_is_low() {
-    let alerts = opted_in("acct");
     let first = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 1);
     let second = card("acct", 95.0, RENEWS, "2026-10-01T12:00:00Z", 1);
 
-    assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
+    assert_eq!(two_polls(&first, &second, &opted_in("acct")), 1);
 }
 
 #[test]
 fn no_reset_is_offered_when_the_limit_renews_soon_anyway() {
-    let alerts = opted_in("acct");
     let soon = "2026-10-02T11:00:00Z";
     let first = card("acct", 99.0, soon, "2026-10-01T11:50:00Z", 1);
     let second = card("acct", 99.0, soon, "2026-10-01T12:00:00Z", 1);
 
-    assert!(two_polls(&first, &second, &alerts).1.is_empty());
+    assert_eq!(two_polls(&first, &second, &opted_in("acct")), 0);
 }
 
 #[test]
 fn no_reset_is_offered_without_one_to_spend() {
-    let alerts = opted_in("acct");
     let first = card("acct", 99.0, RENEWS, "2026-10-01T11:50:00Z", 0);
     let second = card("acct", 99.0, RENEWS, "2026-10-01T12:00:00Z", 0);
 
-    assert!(two_polls(&first, &second, &alerts).1.is_empty());
+    assert_eq!(two_polls(&first, &second, &opted_in("acct")), 0);
 }
 
 #[test]
 fn an_account_not_opted_in_is_never_offered_a_reset() {
-    let alerts = opted_in("someone-else");
     let first = card("acct", 99.0, RENEWS, "2026-10-01T11:50:00Z", 1);
     let second = card("acct", 99.0, RENEWS, "2026-10-01T12:00:00Z", 1);
 
-    assert!(two_polls(&first, &second, &alerts).1.is_empty());
+    assert_eq!(two_polls(&first, &second, &opted_in("someone-else")), 0);
 }
 
 #[test]
 fn only_the_signed_in_accounts_live_read_counts() {
-    let alerts = opted_in("acct");
     for change in [
         |card: &mut ProviderLimitsDto| card.current_account = false,
         |card: &mut ProviderLimitsDto| card.status = LimitsStatus::Failed,
@@ -156,26 +138,25 @@ fn only_the_signed_in_accounts_live_read_counts() {
         change(&mut first);
         change(&mut second);
 
-        assert!(two_polls(&first, &second, &alerts).1.is_empty());
+        assert_eq!(two_polls(&first, &second, &opted_in("acct")), 0);
     }
 }
 
 #[test]
 fn a_poll_that_is_not_low_starts_the_count_again() {
     let alerts = opted_in("acct");
-    let mut state = HashMap::new();
+    let mut memory = AlertMemory::default();
     for (used, observed_at) in [
         (95.0, "2026-10-01T11:40:00Z"),
         (50.0, "2026-10-01T11:50:00Z"),
         (95.0, "2026-10-01T12:00:00Z"),
     ] {
-        let offers = observe(
-            &mut state,
-            &[card("acct", used, RENEWS, observed_at, 1)],
+        let offers = offered(
+            &mut memory,
+            &card("acct", used, RENEWS, observed_at, 1),
             &alerts,
-            now(),
         );
-        assert!(offers.is_empty(), "{used} at {observed_at}");
+        assert_eq!(offers, 0, "{used} at {observed_at}");
     }
 }
 
@@ -183,8 +164,8 @@ fn a_poll_that_is_not_low_starts_the_count_again() {
 fn a_new_weekly_cycle_can_be_offered_again() {
     let alerts = opted_in("acct");
     let later = "2026-10-08T12:00:00Z";
-    let mut state = HashMap::new();
-    let offered: Vec<usize> = [
+    let mut memory = AlertMemory::default();
+    let offers: Vec<usize> = [
         (RENEWS, "2026-10-01T11:40:00Z"),
         (RENEWS, "2026-10-01T11:50:00Z"),
         (later, "2026-10-01T12:00:00Z"),
@@ -192,22 +173,19 @@ fn a_new_weekly_cycle_can_be_offered_again() {
     ]
     .into_iter()
     .map(|(renews, observed_at)| {
-        observe(
-            &mut state,
-            &[card("acct", 95.0, renews, observed_at, 1)],
+        offered(
+            &mut memory,
+            &card("acct", 95.0, renews, observed_at, 1),
             &alerts,
-            now(),
         )
-        .len()
     })
     .collect();
 
-    assert_eq!(offered, [0, 1, 0, 1]);
+    assert_eq!(offers, [0, 1, 0, 1]);
 }
 
 #[test]
 fn a_reset_that_may_have_lapsed_is_not_offered() {
-    let alerts = opted_in("acct");
     for (expires, offers) in [("2026-10-01T11:00:00Z", 0), ("2026-10-03T00:00:00Z", 1)] {
         let lapsing = |observed_at| {
             let mut card = card("acct", 95.0, RENEWS, observed_at, 1);
@@ -218,7 +196,7 @@ fn a_reset_that_may_have_lapsed_is_not_offered() {
         let second = lapsing("2026-10-01T12:00:00Z");
 
         assert_eq!(
-            two_polls(&first, &second, &alerts).1.len(),
+            two_polls(&first, &second, &opted_in("acct")),
             offers,
             "{expires}"
         );
@@ -227,33 +205,26 @@ fn a_reset_that_may_have_lapsed_is_not_offered() {
 
 #[test]
 fn an_alerts_lower_share_is_the_one_kept() {
-    let mut alerts = opted_in("acct");
-    alerts.get_mut("acct").unwrap().max_left_percent = 3;
+    let alerts = alerts_for("acct", alert(3, false));
     for (used, offers) in [(96.0, 0), (97.0, 1)] {
         let first = card("acct", used, RENEWS, "2026-10-01T11:50:00Z", 1);
         let second = card("acct", used, RENEWS, "2026-10-01T12:00:00Z", 1);
 
-        assert_eq!(
-            two_polls(&first, &second, &alerts).1.len(),
-            offers,
-            "{used}% used"
-        );
+        assert_eq!(two_polls(&first, &second, &alerts), offers, "{used}% used");
     }
 }
 
 #[test]
 fn exactly_the_wait_before_renewal_is_offered() {
-    let alerts = opted_in("acct");
     let a_day_away = "2026-10-02T12:00:00Z";
     let first = card("acct", 95.0, a_day_away, "2026-10-01T11:50:00Z", 1);
     let second = card("acct", 95.0, a_day_away, "2026-10-01T12:00:00Z", 1);
 
-    assert_eq!(two_polls(&first, &second, &alerts).1.len(), 1);
+    assert_eq!(two_polls(&first, &second, &opted_in("acct")), 1);
 }
 
 #[test]
 fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
-    let alerts = opted_in("acct");
     for (kind, offers) in [(LimitWindowKind::Session, 1), (LimitWindowKind::Model, 0)] {
         let with_window = |observed_at: &str| {
             let mut card = card("acct", 40.0, RENEWS, observed_at, 1);
@@ -272,7 +243,7 @@ fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
         let second = with_window("2026-10-01T12:00:00Z");
 
         assert_eq!(
-            two_polls(&first, &second, &alerts).1.len(),
+            two_polls(&first, &second, &opted_in("acct")),
             offers,
             "{kind:?}"
         );
@@ -281,19 +252,14 @@ fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
 
 #[test]
 fn an_account_turned_off_is_forgotten() {
-    let mut state = HashMap::new();
+    let mut memory = AlertMemory::default();
     let low = card("acct", 95.0, RENEWS, "2026-10-01T11:50:00Z", 1);
-    observe(
-        &mut state,
-        std::slice::from_ref(&low),
-        &opted_in("acct"),
-        now(),
-    );
-    assert!(state.contains_key("acct"));
+    offered(&mut memory, &low, &opted_in("acct"));
+    assert!(!memory.is_empty());
 
-    observe(&mut state, &[low], &HashMap::new(), now());
+    offered(&mut memory, &low, &HashMap::new());
 
-    assert!(state.is_empty());
+    assert!(memory.is_empty());
 }
 
 #[test]
@@ -303,13 +269,12 @@ fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
         account_label: Some("you@example.com".into()),
         cycle: RENEWS.into(),
         left_percent: 6.0,
-        renews_at: instant("2026-10-05T15:00:00Z").unwrap(),
-        available: 2,
+        renews_at: at("2026-10-05T15:00:00Z"),
         automatic: false,
     };
 
     assert_eq!(
-        notification_copy(&offer, now()),
+        offer.notice(now()),
         (
             "Codex: a banked reset is available".into(),
             "you@example.com has 6% of its limit left and renews in 4d 3h. Open on-n-off to use a banked reset.".into()

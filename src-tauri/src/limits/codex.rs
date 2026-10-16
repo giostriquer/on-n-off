@@ -18,6 +18,7 @@ use crate::dto::{
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
+use crate::reset_alert::ResetSpend;
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
@@ -394,12 +395,6 @@ pub(crate) fn codex_card(
         window.observed_at = observed_at.to_string();
     }
     super::signed_in_card(AgentId::Codex, account_id, reading)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResetSpend {
-    ByHand,
-    Automatic { max_left_percent: u8 },
 }
 
 pub fn consume_codex_reset_credit(

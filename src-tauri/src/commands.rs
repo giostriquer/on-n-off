@@ -383,7 +383,7 @@ pub async fn consume_codex_reset_credit(
     idempotency_key: String,
 ) -> Result<ResetCreditOutcome, AdapterError> {
     blocking("banked reset", move || {
-        crate::limits_monitor::auto_spend::spend_by_hand(&account_id, |how| {
+        crate::limits_monitor::spend_reset_by_hand(&account_id, |how| {
             crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key, how)
         })
         .map_err(AdapterError::message)
@@ -393,12 +393,12 @@ pub async fn consume_codex_reset_credit(
 
 #[tauri::command]
 pub fn pending_reset_spends() -> Vec<PendingResetSpendDto> {
-    crate::limits_monitor::auto_spend::listed()
+    crate::limits_monitor::pending_reset_spends()
 }
 
 #[tauri::command]
 pub fn cancel_reset_spend(account_id: String) -> bool {
-    crate::limits_monitor::auto_spend::cancel_listed(&account_id)
+    crate::limits_monitor::cancel_reset_spend(&account_id)
 }
 
 #[tauri::command]

@@ -35,6 +35,7 @@ mod plugin_meta;
 mod process;
 mod project;
 mod read_revision;
+mod reset_alert;
 mod scanner;
 mod settings;
 mod sha;

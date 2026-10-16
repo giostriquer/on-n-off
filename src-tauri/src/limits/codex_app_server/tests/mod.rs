@@ -4,6 +4,7 @@ mod spend_rule;
 
 use super::*;
 use crate::json_line_session::{Exchange, Script};
+use crate::reset_alert::ResetAlert;
 use serde::de::DeserializeOwned;
 use serde_json::json;
 
@@ -235,9 +236,7 @@ fn spend(
 ) -> (Result<ResetCreditOutcome, String>, Option<Script>) {
     spend_as(
         card,
-        ResetSpend::Automatic {
-            max_left_percent: crate::settings::CODEX_RESET_MAX_LEFT_PERCENT,
-        },
+        ResetSpend::Automatic(ResetAlert::default().spend_share()),
         identity,
         replies,
     )
