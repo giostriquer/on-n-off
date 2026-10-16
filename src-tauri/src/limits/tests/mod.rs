@@ -45,7 +45,7 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
 }
 
 #[test]
-fn every_provider_with_a_limits_reader_reads_under_its_own_lock() {
+fn every_provider_with_a_limits_reader_has_a_read_lock_of_its_own() {
     for (i, a) in crate::provider_catalogue::WITH_LIMITS
         .into_iter()
         .enumerate()
@@ -60,6 +60,56 @@ fn every_provider_with_a_limits_reader_reads_under_its_own_lock() {
             );
         }
     }
+}
+
+#[test]
+fn a_limits_read_waits_while_its_provider_is_being_read() {
+    use crate::cli_stub::CliStub;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let home = scratch_dir("limits-read-waits-for-its-lock");
+    fs::write(
+        home.join(".claude.json"),
+        json!({"oauthAccount": {"accountUuid": "user", "organizationUuid": "team"}}).to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(
+        bin.join("report.jsonl"),
+        r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00+00:00"}]}}}"#,
+    )
+    .unwrap();
+    let stub = CliStub::new("claude")
+        .stdout_file("report.jsonl")
+        .write(&bin);
+
+    let held = provider_read_guard(AgentId::Claude);
+    let (sent, received) = mpsc::channel();
+    let reader = {
+        let home = home.clone();
+        std::thread::spawn(move || {
+            let cards = crate::accounts::native::with_test_cli(&stub, || {
+                read_limits_at(AgentId::Claude, false, &home)
+            });
+            let _ = sent.send(cards);
+        })
+    };
+
+    assert!(
+        received.recv_timeout(Duration::from_millis(500)).is_err(),
+        "a Claude read went ahead while another held Claude's lock"
+    );
+    drop(held);
+    let cards = received
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read goes ahead once the lock is free");
+    reader.join().unwrap();
+    assert_eq!(cards[0].provider, AgentId::Claude);
+    assert_eq!(cards[0].status, LimitsStatus::Ok, "{:?}", cards[0].message);
+    let _ = fs::remove_dir_all(&home);
 }
 
 #[test]
