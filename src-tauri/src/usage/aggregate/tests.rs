@@ -116,6 +116,41 @@ fn a_bucket_for_a_provider_usage_does_not_know_is_left_out_rather_than_counted_a
 }
 
 #[test]
+fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
+    let result = aggregate(
+        &[
+            record(|r| {
+                r.provider = UsageProvider::Muse;
+                r.model = "a-model".into();
+            }),
+            record(|r| {
+                r.provider = UsageProvider::Codex;
+                r.model = "b-model".into();
+            }),
+            record(|r| r.model = "c-model".into()),
+            record(|r| r.model = "a-model".into()),
+        ],
+        "UTC",
+        Resolution::Day,
+    );
+
+    let order: Vec<(UsageProvider, &str)> = result
+        .buckets
+        .iter()
+        .map(|bucket| (bucket.provider, bucket.model.as_str()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (UsageProvider::Claude, "a-model"),
+            (UsageProvider::Claude, "c-model"),
+            (UsageProvider::Codex, "b-model"),
+            (UsageProvider::Muse, "a-model"),
+        ]
+    );
+}
+
+#[test]
 fn add_says_whether_the_record_was_counted() {
     let mut agg = august_by_day();
     assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
