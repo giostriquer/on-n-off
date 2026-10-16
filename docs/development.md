@@ -15,8 +15,10 @@ locates the subsystems. Module doc-comments explain their implementation.
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.
-- Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
-  pipe deadlocks.
+- Child processes: `process.rs` for a command run to its exit; `json_line_session.rs` for a CLI
+  kept running and spoken to in line-delimited JSON-RPC (Codex app-server, Muse serve), whose
+  readers keep only their command, methods and normalisation. Drain stdout and stderr concurrently
+  from the start, or a full pipe deadlocks.
 - File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
   leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
@@ -66,6 +68,7 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   directory a plain `mod tests;` resolves against, so it pins
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
+  `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's

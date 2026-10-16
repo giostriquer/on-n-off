@@ -327,11 +327,42 @@ gone nothing can rebuild it.
 | --- | --- |
 | `cli_locate.rs` | A GUI app does not inherit a terminal's `PATH`. Builds one merged search list and hands it to spawned CLIs as their `PATH`. |
 | `process.rs` | Child-process draining with a hard deadline; stdout and stderr drained concurrently, or a full pipe deadlocks. |
+| `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server` and `muse serve`. See below. |
 | `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
-| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. |
+| `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
+
+### JSON-line sessions
+
+Codex's app-server and Muse's serve are read the same way, so one module, `json_line_session.rs`,
+owns the conversation and each reader keeps only what is its own: the command, its arguments and
+environment, the method names and answer types, the checks on what it is told, and the
+normalisation into a reading. A reader describes its CLI as a `Peer`: the name every message
+starts with ("Codex app-server", "Muse serve"), whether each line carries `"jsonrpc": "2.0"` (Muse
+requires it, Codex omits it), and what to say when the CLI exits before it answers `initialize`.
+
+- **One deadline and one line limit per session**, 30 seconds and 1 MiB, so a CLI that stops
+  answering or writes an unbounded line fails the read rather than hanging it or filling memory.
+  Its stderr is drained to nowhere from spawn and never reaches a message, since a provider's
+  diagnostics may be sensitive.
+- **Requests are numbered by the reader.** The handshake is request 1 (`initialize` with
+  on-n-off's `clientInfo`, the reader's check of the answer, then the `initialized`
+  notification), and the reader numbers the rest, so a Codex spend by hand still sends its consume
+  as request 4 though it skips the limit read. A request waits for the answer with its id and
+  skips everything else the CLI says.
+- **An early exit is an old CLI.** A pipe that closes before `initialize` is answered, from a CLI
+  that then exits unsuccessfully, is a CLI without the subcommand, and the card asks for an update.
+  Every other failure keeps its own message, and a failure the reader decided on
+  (`Failure::rejected`: a different home, an account that changed mid-read, a spend refused) is
+  shown as the reader wrote it.
+- **Ending a session** closes stdin and waits for the child to exit until the deadline. A child
+  still running then is killed and its drainers are left behind, so a descendant still holding a
+  pipe cannot hold the read. A session dropped without ending kills its child too.
+
+Tests drive a reader through `json_line_session::Script`, which replays scripted answers and
+records what was sent and received, and the real child through `cli_stub.rs` stubs.
 
 ## Where the state lives
 
