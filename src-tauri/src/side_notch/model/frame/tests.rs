@@ -202,17 +202,19 @@ fn only_the_viewers_own_personal_repository_loses_its_owner() {
 
 #[test]
 fn the_viewers_own_personal_repository_is_named_without_its_owner() {
-    let row = |number: u64, repo: &str, in_organization: bool| {
+    let row = |number: u64, repo: &str, in_organization: serde_json::Value| {
         let mut row = pr(number);
         row["repo"] = repo.into();
         row["url"] = format!("https://github.com/{repo}/pull/{number}").into();
-        row["inOrganization"] = in_organization.into();
+        row["inOrganization"] = in_organization;
         row
     };
     let mut dto = prs(vec![
-        row(1, "acme/webapp", true),
-        row(2, "octocat/dotfiles", false),
-        row(3, "alice/dotfiles", false),
+        row(1, "acme/webapp", true.into()),
+        row(2, "octocat/dotfiles", false.into()),
+        row(3, "alice/dotfiles", false.into()),
+        row(4, "octocat/webapp", true.into()),
+        row(5, "octocat/notes", serde_json::Value::Null),
     ]);
     dto.data.viewer = Some("octocat".into());
     let frame = rail(
@@ -227,7 +229,13 @@ fn the_viewers_own_personal_repository_is_named_without_its_owner() {
             .iter()
             .map(|row| row.repo.as_str())
             .collect::<Vec<_>>(),
-        ["acme/webapp", "dotfiles", "alice/dotfiles"]
+        [
+            "acme/webapp",
+            "dotfiles",
+            "alice/dotfiles",
+            "octocat/webapp",
+            "octocat/notes"
+        ]
     );
 }
 
