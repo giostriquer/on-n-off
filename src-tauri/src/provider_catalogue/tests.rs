@@ -214,6 +214,11 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
 #[test]
 fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
     let keys = |ids: &[AgentId]| ids.iter().map(|id| id.key()).collect::<Vec<_>>();
+    let keyed = |ids: &[AgentId]| {
+        ids.iter()
+            .map(|id| (id.key().to_string(), serde_json::Value::Bool(true)))
+            .collect::<serde_json::Map<_, _>>()
+    };
     let providers: serde_json::Map<String, serde_json::Value> = AgentId::ALL
         .into_iter()
         .map(|id| {
@@ -240,6 +245,8 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
         "tabOrder": keys(&AgentId::ALL),
         "railOrder": keys(&RAIL_ORDER),
         "notchDefault": keys(&crate::side_notch::model::NotchSettings::default().providers),
+        "withLimits": keyed(&WITH_LIMITS),
+        "withSavedAccounts": keyed(&WITH_SAVED_ACCOUNTS),
         "providers": providers,
     });
     assert_eq!(

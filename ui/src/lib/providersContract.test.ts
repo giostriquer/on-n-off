@@ -37,13 +37,11 @@ describe("the provider catalogue Rust keeps", () => {
     }
   });
 
-  it("decides which screens each provider has, and the UI's narrow types name exactly those", () => {
-    const limits = { claude: true, codex: true, muse: true } satisfies Record<LimitsProvider, true>;
-    const accounts = { claude: true, codex: true } satisfies Record<AccountProvider, true>;
+  it("gives the Limits and saved-account lists, and the types drawn from them, exactly the providers whose rows have those screens", () => {
+    expectTypeOf<LimitsProvider>().toExtend<AgentId>();
+    expectTypeOf<AccountProvider>().toExtend<AgentId>();
     expect(LIMITS_PROVIDERS).toEqual(withFact((row) => row.limitsReader));
-    expect(Object.keys(limits)).toEqual(LIMITS_PROVIDERS);
     expect(ACCOUNT_PROVIDERS).toEqual(withFact((row) => row.savedAccounts));
-    expect(Object.keys(accounts)).toEqual(ACCOUNT_PROVIDERS);
     expect(USAGE_PROVIDERS).toEqual(withFact((row) => row.usage !== null));
     for (const id of USAGE_PROVIDERS) expect(rows[id].usage, id).toBe(id);
   });

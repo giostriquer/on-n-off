@@ -1,17 +1,10 @@
 import catalogue from "../../../src-tauri/src/provider_catalogue/fixtures/providers.json";
 import type { AgentId } from "./types";
 
-export type LimitsProvider = Extract<AgentId, "claude" | "codex" | "muse">;
-export type AccountProvider = Extract<AgentId, "claude" | "codex">;
+export type LimitsProvider = keyof typeof catalogue.withLimits;
+export type AccountProvider = keyof typeof catalogue.withSavedAccounts;
 
-type CatalogueRow = {
-  readonly displayName: string;
-  readonly binary: string;
-  readonly binaryAliases: readonly string[];
-  readonly limitsReader: boolean;
-  readonly usage: string | null;
-  readonly savedAccounts: boolean;
-};
+type CatalogueRow = (typeof catalogue.providers)[AgentId];
 
 const ROWS: Readonly<Record<AgentId, CatalogueRow>> = catalogue.providers;
 
@@ -20,11 +13,11 @@ export function isAgentId(value: unknown): value is AgentId {
 }
 
 export function hasLimits(id: AgentId): id is LimitsProvider {
-  return ROWS[id].limitsReader;
+  return Object.hasOwn(catalogue.withLimits, id);
 }
 
 export function hasSavedAccounts(id: AgentId): id is AccountProvider {
-  return ROWS[id].savedAccounts;
+  return Object.hasOwn(catalogue.withSavedAccounts, id);
 }
 
 export const PROVIDER_IDS: readonly AgentId[] = catalogue.tabOrder.filter(isAgentId);

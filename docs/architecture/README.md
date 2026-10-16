@@ -401,9 +401,11 @@ test and dev-mock helper, not a placeholder the app shows, and keeps every provi
 
 The UI knows the catalogue through a fixture Rust writes:
 `src-tauri/src/provider_catalogue/fixtures/providers.json` holds the tab order, the rail order, the
-notch default and, by key, each row's name, binary and aliases, Limits reader, Usage provider and
-saved accounts. A Rust test builds that document from `AgentId::ALL`, `facts()`, `RAIL_ORDER` and
-`NotchSettings::default()` and asserts the file equals it. `ui/src/lib/providers.ts` imports the
+notch default, the providers with Limits and with saved accounts as maps keyed by provider
+(`withLimits`, `withSavedAccounts`) and, by key, each row's name, binary and aliases, Limits reader,
+Usage provider and saved accounts. A Rust test builds that document from `AgentId::ALL`, `facts()`,
+`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS` and `NotchSettings::default()` and asserts the
+file equals it. `ui/src/lib/providers.ts` imports the
 file at build time and is the one place the UI learns a provider fact: `PROVIDER_IDS` (tabs),
 `RAIL_ORDER`, `LIMITS_PROVIDERS`, `ACCOUNT_PROVIDERS`, `USAGE_PROVIDERS`, `providerLabel`,
 `providerBinary`, `providerNames`, `providerRecord` and the guards `isAgentId`, `hasLimits` and
@@ -413,8 +415,11 @@ remembered tab, the mock's agent list and the prose that names providers come fr
 The providers are keyed by their key in the fixture, so `tsc` can compare its keys with the
 `AgentId` union (`ui/src/lib/providersContract.test.ts`); orders are arrays, because JSON object
 order is not something either side's equality checks. JSON booleans reach `tsc` as `boolean`, so the
-narrow unions `LimitsProvider` and `AccountProvider` are declared beside the module and the contract
-test holds each to the providers the fixture gives the fact. Facts Rust does not own are
+narrow unions come from keys too: `LimitsProvider` is `keyof` the fixture's `withLimits` and
+`AccountProvider` of its `withSavedAccounts`, and `hasLimits` and `hasSavedAccounts` look a provider
+up in the same maps. A provider that gains or loses Limits in Rust changes those unions, so every
+record keyed by one (the Limits shared-read table, the dev mock's limits state) stops compiling
+until it agrees. Facts Rust does not own are
 `Record<AgentId, …>` tables in the same module, so a provider without a row does not compile: its
 bar, icon and chart colours; how its plugins and MCP servers are switched (`providerToggles`, whose
 MCP row is either a toggle or read-only with the notice the MCP screen shows, and decides Agent

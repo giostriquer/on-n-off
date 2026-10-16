@@ -199,10 +199,9 @@ adapter assumes today (change the adapter and this file together).
    names, commands and which screens a provider has from that fixture. Add the `AgentId` member
    (`ui/src/lib/types.ts`), which `providersContract.test.ts` holds equal to the fixture's keys, then
    the rows `tsc` asks for: the provider's colours, toggles and display paths in `providers.ts`,
-   its icon in `ProviderIcon.tsx`, and, for a provider with Limits or saved accounts, its member of
-   `LimitsProvider` or `AccountProvider` and the records keyed by them (the contract test fails
-   until those unions name exactly the providers the fixture gives the fact). The notch helper still
-   keeps its own list, Swift's `ProviderId`
+   its icon in `ProviderIcon.tsx`, and, for a provider with Limits or saved accounts, the records
+   keyed by `LimitsProvider` or `AccountProvider`, which the fixture's `withLimits` and
+   `withSavedAccounts` widen to it. The notch helper still keeps its own list, Swift's `ProviderId`
    (`src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift`).
 4. Every write through `ConfigIo`; a regression test with a temp home (`paths::scratch_dir`) before the change.
 5. Document the layout here, and mark what is verified vs assumed.

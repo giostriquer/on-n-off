@@ -18,6 +18,15 @@
     "codex",
     "muse"
   ],
+  "withLimits": {
+    "claude": true,
+    "codex": true,
+    "muse": true
+  },
+  "withSavedAccounts": {
+    "claude": true,
+    "codex": true
+  },
   "providers": {
     "claude": {
       "displayName": "Claude",
