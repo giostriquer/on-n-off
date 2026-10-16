@@ -110,6 +110,15 @@ describe("Limits", () => {
     expect(within(muse).queryByRole("button", { name: /^More actions/ })).toBeNull();
   });
 
+  it("lays an account's tags on the name's own wrapping line, so they sit beside it when there is room", async () => {
+    answer([okClaude({ plan: "max ×5" })], [okCodex()]);
+    renderLimits();
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+    const tags = within(claude).getByTestId("account-tags");
+    expect(within(tags).getByText("Max ×5")).toBeTruthy();
+    expect(tags.parentElement).toBe(within(claude).getByTitle("me@claude.example").parentElement);
+  });
+
   it("draws the active account's dot beside its headline window, or in its header without one", async () => {
     const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
     answer([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);

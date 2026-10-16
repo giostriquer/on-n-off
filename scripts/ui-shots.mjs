@@ -117,6 +117,52 @@ async function ensureDevServer() {
   throw new Error(`the dev server did not come up on :${PORT}; see ${log}`);
 }
 
+function accountHeaderIssues(element) {
+  const title = element.querySelector(".truncate");
+  const bounds = element.getBoundingClientRect();
+  const issues = [];
+  if (title.getBoundingClientRect().width < Math.min(100, title.scrollWidth)) {
+    issues.push(`account name has less than 100px to display: ${title.textContent}`);
+  }
+  for (const button of element.querySelectorAll("button")) {
+    const rect = button.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) {
+      issues.push(`account header action overflows: ${button.getAttribute("aria-label") ?? button.textContent}`);
+    }
+  }
+  const tags = element.querySelector('[data-testid="account-tags"]');
+  if (!tags) return { measured: false, issues };
+  const name = title.getBoundingClientRect();
+  const middle = rect => (rect.top + rect.bottom) / 2;
+  const icon = title.parentElement.parentElement.firstElementChild;
+  const controls = [icon, ...element.querySelectorAll("button, [role='img']")]
+    .filter(node => !tags.contains(node) && node.getBoundingClientRect().width > 0);
+  for (const control of controls) {
+    if (Math.abs(middle(control.getBoundingClientRect()) - middle(name)) > 2) {
+      issues.push(`account header control leaves the name's line: ${control.getAttribute("aria-label") ?? control.tagName} on ${title.textContent}`);
+    }
+  }
+  if (tags.children.length > 0) {
+    const gap = node => parseFloat(getComputedStyle(node).columnGap) || 0;
+    const range = document.createRange();
+    range.selectNodeContents(title);
+    const nameWidth = range.getBoundingClientRect().width;
+    const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
+    const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + gap(tags) * (tagRects.length - 1);
+    const line = title.parentElement;
+    const fits = name.left + nameWidth + gap(line) + tagsWidth <= line.getBoundingClientRect().right + 0.5;
+    const inline = tagRects.every(rect => rect.top < name.bottom && rect.bottom > name.top);
+    if (fits && !inline) {
+      issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
+    }
+    if (inline && title.scrollWidth > title.clientWidth + 0.5) {
+      issues.push(`account tags beside the name truncate it: ${title.textContent}`);
+    }
+  }
+  return { measured: true, issues };
+}
+
 function validateScene(scene, index) {
   if (!scene || typeof scene.name !== "string" || typeof scene.url !== "string") {
     throw new Error(`scene ${index}: needs a string "name" and "url"`);
@@ -186,46 +232,13 @@ async function runScene(browser, scene) {
     const headers = page.locator('[data-testid="limits-screen"] header').filter({ has: page.locator(".truncate") });
     const columns = await headers.evaluateAll(elements => new Set(elements.map(element => Math.round(element.getBoundingClientRect().left))).size);
     if (columns !== scene.limitsColumns) problems.push(`expected ${scene.limitsColumns} provider columns, got ${columns}`);
+    let measured = 0;
     for (const header of await headers.all()) {
-      const issues = await header.evaluate(element => {
-        const title = element.querySelector(".truncate");
-        const bounds = element.getBoundingClientRect();
-        const issues = [];
-        if (title.getBoundingClientRect().width < Math.min(100, title.scrollWidth)) {
-          issues.push(`account name has less than 100px to display: ${title.textContent}`);
-        }
-        for (const button of element.querySelectorAll("button")) {
-          const rect = button.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) continue;
-          if (rect.left < bounds.left - 1 || rect.right > bounds.right + 1) {
-            issues.push(`account header action overflows: ${button.getAttribute("aria-label") ?? button.textContent}`);
-          }
-        }
-        const tags = element.querySelector('[data-testid="account-tags"]');
-        if (tags && tags.children.length > 0) {
-          const name = title.getBoundingClientRect();
-          const range = document.createRange();
-          range.selectNodeContents(title);
-          const nameWidth = range.getBoundingClientRect().width;
-          const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
-          const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + parseFloat(getComputedStyle(tags).columnGap || "0") * (tagRects.length - 1);
-          const onNameRow = rect => rect.top < name.bottom && rect.bottom > name.top;
-          const trailing = [...element.querySelectorAll("button, [role='img']")]
-            .filter(node => !tags.contains(node))
-            .map(node => node.getBoundingClientRect())
-            .filter(rect => rect.width > 0 && rect.left >= name.left && onNameRow(rect));
-          const rowEnd = trailing.length > 0
-            ? Math.min(...trailing.map(rect => rect.left)) - 10
-            : bounds.right - parseFloat(getComputedStyle(element).paddingRight);
-          const fits = name.left + nameWidth + 10 + tagsWidth <= rowEnd + 0.5;
-          if (fits && !tagRects.every(onNameRow)) {
-            issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
-          }
-        }
-        return issues;
-      });
-      problems.push(...issues);
+      const result = await header.evaluate(accountHeaderIssues);
+      if (result.measured) measured += 1;
+      problems.push(...result.issues);
     }
+    if (measured === 0) problems.push("the account tag guard measured no tag container");
   }
   if (scene.checkMuseChart) {
     const blueLine = page.locator('.usage-chart-host path[stroke="#0082fb"]');
