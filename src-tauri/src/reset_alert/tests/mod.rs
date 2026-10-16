@@ -165,3 +165,50 @@ fn the_fullest_main_window_says_how_much_is_left_and_a_models_own_limit_never_do
         )
     );
 }
+
+#[test]
+fn the_numbers_the_ui_restates_are_the_ones_the_rule_keeps() {
+    let bounded = |max_left_percent, min_hours_to_renewal| {
+        let mut alert = ResetAlert {
+            max_left_percent,
+            min_hours_to_renewal,
+            ..ResetAlert::default()
+        };
+        alert.keep_within_bounds();
+        (alert.max_left_percent, alert.min_hours_to_renewal)
+    };
+    let (least_share, least_hours) = bounded(0, 0);
+    let (most_share, most_hours) = bounded(u8::MAX, u16::MAX);
+    let mut waiting = Waiting::default();
+    waiting.schedule(
+        &[Offer {
+            account_id: "acct".into(),
+            account_label: None,
+            cycle: RENEWS.into(),
+            left_percent: 5.0,
+            renews_at: at(RENEWS),
+            automatic: true,
+        }],
+        now(),
+    );
+    let delay = waiting.next_due().unwrap() - now();
+    let share = |max_left_percent| alert(max_left_percent, true).spend_share().0;
+    let shares = [1, 3, 5, 6, 40].map(|left| [left, share(left)]);
+    let rule = serde_json::json!({
+        "spendCapPercent": share(u8::MAX),
+        "autoSpendDelayMinutes": delay.num_minutes(),
+        "defaultAlert": ResetAlert::default(),
+        "bounds": {
+            "maxLeftPercent": {"min": least_share, "max": most_share},
+            "minHoursToRenewal": {"min": least_hours, "max": most_hours}
+        },
+        "spendShares": shares
+    });
+
+    assert_eq!(
+        rule,
+        serde_json::from_str::<serde_json::Value>(include_str!("../fixtures/rule.json")).unwrap(),
+        "src-tauri/src/reset_alert/fixtures/rule.json must read:\n{}",
+        serde_json::to_string_pretty(&rule).unwrap()
+    );
+}
