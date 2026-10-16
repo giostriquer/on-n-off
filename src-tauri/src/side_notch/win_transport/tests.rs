@@ -145,6 +145,7 @@ fn turning_the_notch_off_shuts_the_window() {
 fn quitting_shuts_the_window_and_no_other_opens() {
     let (mut overlay, lifetime, _) = overlay();
     let screen = show(&mut overlay);
+    assert!(!lifetime.stopped());
     lifetime.shutdown();
     assert!(lifetime.stopped());
     assert!(matches!(

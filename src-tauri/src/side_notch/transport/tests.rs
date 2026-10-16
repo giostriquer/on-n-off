@@ -9,7 +9,9 @@ fn shutdown_reaps_an_unresponsive_child_without_the_supervisor() {
     ));
     let lifetime = Lifetime::default();
     lifetime.0.lock().unwrap().child = Some(child.clone());
+    assert!(!lifetime.stopped());
     lifetime.shutdown();
+    assert!(lifetime.stopped());
     let exited = child.lock().unwrap().try_wait().unwrap().is_some();
     if !exited {
         let mut child = child.lock().unwrap();
