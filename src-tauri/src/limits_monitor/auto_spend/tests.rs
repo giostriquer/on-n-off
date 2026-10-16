@@ -352,60 +352,102 @@ fn the_notifications_say_when_and_what_came_of_it() {
 #[test]
 fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
     use crate::read_revision::{take_announced, Source};
-    let _ = take_announced();
-    clear();
+    let queue = Queue::default();
     let _ = take_announced();
 
-    let notices = schedule_all(&[offer()], at(NOW));
+    let notices = queue.schedule_all(&[offer()], at(NOW));
     assert_eq!(notices, [scheduled_copy(&offer())]);
     assert_eq!(take_announced(), [Source::ResetSpends]);
-    assert!(schedule_all(&[], at(NOW)).is_empty());
+    assert!(queue.schedule_all(&[], at(NOW)).is_empty());
     assert!(take_announced().is_empty(), "announced scheduling nothing");
     assert_eq!(
-        listed(),
+        queue.listed(),
         [PendingResetSpendDto {
             account_id: "acct".into(),
             due_at: "2026-10-01T12:10:00Z".into(),
         }]
     );
     assert_eq!(
-        serde_json::to_value(listed()).unwrap(),
+        serde_json::to_value(queue.listed()).unwrap(),
         serde_json::json!([{"accountId": "acct", "dueAt": "2026-10-01T12:10:00Z"}])
     );
-    assert_eq!(next_due(), Some(minutes_after_now(10)));
-    assert!(!any_due(minutes_after_now(9)));
-    assert!(any_due(minutes_after_now(10)));
+    assert_eq!(queue.next_due(), Some(minutes_after_now(10)));
+    assert!(!queue.any_due(minutes_after_now(9)));
+    assert!(queue.any_due(minutes_after_now(10)));
 
-    assert!(take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(9)).is_empty());
+    assert!(queue
+        .take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(9))
+        .is_empty());
     assert!(take_announced().is_empty(), "announced deciding nothing");
 
-    assert!(cancel_listed("acct"));
+    assert!(queue.cancel("acct"));
     assert_eq!(take_announced(), [Source::ResetSpends]);
-    assert!(!cancel_listed("acct"));
+    assert!(!queue.cancel("acct"));
     assert!(take_announced().is_empty(), "announced a cancel of nothing");
-    assert!(listed().is_empty());
+    assert!(queue.listed().is_empty());
 
-    schedule_all(&[offer()], at(NOW));
+    queue.schedule_all(&[offer()], at(NOW));
     let _ = take_announced();
     assert!(matches!(
-        take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(10)).as_slice(),
+        queue
+            .take_due(&[card(96.0, RENEWS)], &automatic(), minutes_after_now(10))
+            .as_slice(),
         [Due::Spend(..)]
     ));
     assert_eq!(take_announced(), [Source::ResetSpends]);
-    assert_eq!(next_due(), None);
+    assert_eq!(queue.next_due(), None);
 
-    schedule_all(&[offer()], at(NOW));
+    queue.schedule_all(&[offer()], at(NOW));
     let _ = take_announced();
-    assert!(clear());
+    assert!(queue.clear());
     assert_eq!(take_announced(), [Source::ResetSpends]);
-    assert!(!clear());
+    assert!(!queue.clear());
     assert!(take_announced().is_empty(), "announced clearing nothing");
+}
 
-    schedule_all(&[offer()], at(NOW));
+#[test]
+fn a_reset_used_by_hand_is_spent_by_hand_and_ends_the_waiting_spend_only_once_it_reset() {
+    use crate::read_revision::{take_announced, Source};
+    let queue = Queue::default();
+    queue.schedule_all(&[offer()], at(NOW));
     let _ = take_announced();
-    used_by_hand("acct", ResetCreditOutcome::NothingToReset);
-    assert_eq!(listed().len(), 1);
-    used_by_hand("acct", ResetCreditOutcome::Reset);
-    assert!(listed().is_empty());
+    let asked = std::cell::RefCell::new(Vec::new());
+    let by_hand = |outcome: Result<ResetCreditOutcome, String>| {
+        let asked = &asked;
+        move |how| {
+            asked.borrow_mut().push(how);
+            outcome
+        }
+    };
+
+    assert_eq!(
+        queue.spend_by_hand("acct", by_hand(Err("Codex is not signed in.".into()))),
+        Err("Codex is not signed in.".to_string())
+    );
+    assert_eq!(
+        queue.spend_by_hand("acct", by_hand(Ok(ResetCreditOutcome::NothingToReset))),
+        Ok(ResetCreditOutcome::NothingToReset)
+    );
+    assert_eq!(queue.listed().len(), 1);
+    assert!(
+        take_announced().is_empty(),
+        "announced a spend that reset nothing"
+    );
+    assert_eq!(
+        queue.spend_by_hand("other", by_hand(Ok(ResetCreditOutcome::Reset))),
+        Ok(ResetCreditOutcome::Reset)
+    );
+    assert_eq!(
+        queue.listed().len(),
+        1,
+        "another account's reset ended this one's"
+    );
+
+    assert_eq!(
+        queue.spend_by_hand("acct", by_hand(Ok(ResetCreditOutcome::Reset))),
+        Ok(ResetCreditOutcome::Reset)
+    );
+    assert!(queue.listed().is_empty());
     assert_eq!(take_announced(), [Source::ResetSpends]);
+    assert_eq!(asked.into_inner(), [ResetSpend::ByHand; 4]);
 }

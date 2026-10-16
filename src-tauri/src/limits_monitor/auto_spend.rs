@@ -153,85 +153,119 @@ pub(super) fn outcome_copy(
     }
 }
 
-static PENDING: LazyLock<Mutex<HashMap<String, PendingSpend>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+#[derive(Default)]
+pub(super) struct Queue(Mutex<HashMap<String, PendingSpend>>);
 
-fn with_pending<R>(change: impl FnOnce(&mut HashMap<String, PendingSpend>) -> R) -> R {
-    change(&mut PENDING.lock().unwrap_or_else(PoisonError::into_inner))
+static PENDING: LazyLock<Queue> = LazyLock::new(Queue::default);
+
+pub(super) fn queue() -> &'static Queue {
+    &PENDING
 }
 
-pub(super) fn schedule_all(offers: &[Offer], now: DateTime<Utc>) -> Vec<(String, String)> {
-    if offers.is_empty() {
-        return Vec::new();
+impl Queue {
+    fn with<R>(&self, change: impl FnOnce(&mut HashMap<String, PendingSpend>) -> R) -> R {
+        change(&mut self.0.lock().unwrap_or_else(PoisonError::into_inner))
     }
-    with_pending(|pending| {
-        for offer in offers {
-            let spend = schedule(offer, now);
-            pending.insert(spend.account_id.clone(), spend);
+
+    pub(super) fn schedule_all(
+        &self,
+        offers: &[Offer],
+        now: DateTime<Utc>,
+    ) -> Vec<(String, String)> {
+        if offers.is_empty() {
+            return Vec::new();
         }
-    });
-    announce(Source::ResetSpends);
-    offers.iter().map(scheduled_copy).collect()
-}
-
-pub(super) fn any_due(now: DateTime<Utc>) -> bool {
-    with_pending(|pending| pending.values().any(|spend| spend.due_at <= now))
-}
-
-pub(super) fn take_due(
-    snapshots: &[ProviderLimitsDto],
-    alerts: &HashMap<String, ResetAlert>,
-    now: DateTime<Utc>,
-) -> Vec<Due> {
-    let (taken, changed) = with_pending(|pending| {
-        let before = pending.len();
-        let taken = due(pending, snapshots, alerts, now);
-        (taken, pending.len() != before)
-    });
-    if changed {
+        self.with(|pending| {
+            for offer in offers {
+                let spend = schedule(offer, now);
+                pending.insert(spend.account_id.clone(), spend);
+            }
+        });
         announce(Source::ResetSpends);
+        offers.iter().map(scheduled_copy).collect()
     }
-    taken
-}
 
-pub(super) fn next_due() -> Option<DateTime<Utc>> {
-    with_pending(|pending| pending.values().map(|spend| spend.due_at).min())
-}
-
-pub(super) fn clear() -> bool {
-    let cleared = with_pending(|pending| !std::mem::take(pending).is_empty());
-    if cleared {
-        announce(Source::ResetSpends);
+    pub(super) fn any_due(&self, now: DateTime<Utc>) -> bool {
+        self.with(|pending| pending.values().any(|spend| spend.due_at <= now))
     }
-    cleared
+
+    pub(super) fn take_due(
+        &self,
+        snapshots: &[ProviderLimitsDto],
+        alerts: &HashMap<String, ResetAlert>,
+        now: DateTime<Utc>,
+    ) -> Vec<Due> {
+        let (taken, changed) = self.with(|pending| {
+            let before = pending.len();
+            let taken = due(pending, snapshots, alerts, now);
+            (taken, pending.len() != before)
+        });
+        if changed {
+            announce(Source::ResetSpends);
+        }
+        taken
+    }
+
+    pub(super) fn next_due(&self) -> Option<DateTime<Utc>> {
+        self.with(|pending| pending.values().map(|spend| spend.due_at).min())
+    }
+
+    pub(super) fn clear(&self) -> bool {
+        let cleared = self.with(|pending| !std::mem::take(pending).is_empty());
+        if cleared {
+            announce(Source::ResetSpends);
+        }
+        cleared
+    }
+
+    fn listed(&self) -> Vec<PendingResetSpendDto> {
+        self.with(|pending| {
+            pending
+                .values()
+                .map(|spend| PendingResetSpendDto {
+                    account_id: spend.account_id.clone(),
+                    due_at: spend
+                        .due_at
+                        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                })
+                .collect()
+        })
+    }
+
+    fn spend_by_hand(
+        &self,
+        account_id: &str,
+        spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+    ) -> Result<ResetCreditOutcome, String> {
+        let outcome = spend(ResetSpend::ByHand)?;
+        if outcome == ResetCreditOutcome::Reset {
+            self.cancel(account_id);
+        }
+        Ok(outcome)
+    }
+
+    fn cancel(&self, account_id: &str) -> bool {
+        let cancelled = self.with(|pending| pending.remove(account_id).is_some());
+        if cancelled {
+            announce(Source::ResetSpends);
+        }
+        cancelled
+    }
 }
 
 pub fn listed() -> Vec<PendingResetSpendDto> {
-    with_pending(|pending| {
-        pending
-            .values()
-            .map(|spend| PendingResetSpendDto {
-                account_id: spend.account_id.clone(),
-                due_at: spend
-                    .due_at
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
-            })
-            .collect()
-    })
+    PENDING.listed()
 }
 
-pub fn used_by_hand(account_id: &str, outcome: ResetCreditOutcome) {
-    if outcome == ResetCreditOutcome::Reset {
-        cancel_listed(account_id);
-    }
+pub fn spend_by_hand(
+    account_id: &str,
+    spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+) -> Result<ResetCreditOutcome, String> {
+    PENDING.spend_by_hand(account_id, spend)
 }
 
 pub fn cancel_listed(account_id: &str) -> bool {
-    let cancelled = with_pending(|pending| pending.remove(account_id).is_some());
-    if cancelled {
-        announce(Source::ResetSpends);
-    }
-    cancelled
+    PENDING.cancel(account_id)
 }
 
 #[cfg(test)]
