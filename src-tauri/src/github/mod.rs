@@ -86,6 +86,11 @@ pub fn revision() -> u64 {
     READ_MEMO.revision.current()
 }
 
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn bump_revision() -> u64 {
+    READ_MEMO.revision.bump()
+}
+
 fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {
     let _guard = READ_LOCK.lock().unwrap_or_else(PoisonError::into_inner);
     let settings = settings::load_settings();

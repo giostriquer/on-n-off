@@ -179,6 +179,11 @@ pub fn revision(agent: AgentId) -> u64 {
     cache_for(agent).map_or(0, |cache| cache.revision.current())
 }
 
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn bump_revision(agent: AgentId) -> u64 {
+    cache_for(agent).map_or(0, |cache| cache.revision.bump())
+}
+
 pub fn forget_snapshot(
     agent: AgentId,
     account_id: &str,

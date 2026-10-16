@@ -84,7 +84,12 @@ pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
 }
 
 fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport) {
-    let mut host = Host::new(app, transport, initial_snapshot(), Instant::now());
+    let mut host = Host::new(
+        Production(app),
+        transport,
+        initial_snapshot(),
+        Instant::now(),
+    );
     while !controller.lifetime.stopped() {
         if let Ok(mut desired) = controller.desired.lock() {
             if let Some(next) = desired.take() {
@@ -123,13 +128,15 @@ fn initial_snapshot() -> NotchSnapshot {
     }
 }
 
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Changed {
-    snapshot: NotchSnapshot,
+pub(super) trait Shell: Clone + Send + 'static {
+    fn open(&self, page: Page) -> Result<(), String>;
+    fn emit(&self, status: &NotchSnapshot);
 }
 
-impl App for AppHandle {
+#[derive(Clone)]
+pub(super) struct Production<S>(S);
+
+impl<S: Shell> App for Production<S> {
     fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
         crate::limits_refresh::read_limits_revisioned(agent, force)
     }
@@ -167,10 +174,7 @@ impl App for AppHandle {
     }
 
     fn open(&self, page: Page) -> Result<(), String> {
-        match page {
-            Page::Limits => crate::tray::open_limits_window(self),
-            Page::PullRequests => crate::tray::open_github_window(self),
-        }
+        self.0.open(page)
     }
 
     fn settings_revision(&self) -> u64 {
@@ -187,6 +191,25 @@ impl App for AppHandle {
     }
 
     fn publish(&self, status: &NotchSnapshot) {
+        self.0.emit(status);
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Changed {
+    snapshot: NotchSnapshot,
+}
+
+impl Shell for AppHandle {
+    fn open(&self, page: Page) -> Result<(), String> {
+        match page {
+            Page::Limits => crate::tray::open_limits_window(self),
+            Page::PullRequests => crate::tray::open_github_window(self),
+        }
+    }
+
+    fn emit(&self, status: &NotchSnapshot) {
         let _ = Emitter::emit(
             self,
             "side-notch-changed",
@@ -196,3 +219,6 @@ impl App for AppHandle {
         );
     }
 }
+
+#[cfg(test)]
+mod tests;
