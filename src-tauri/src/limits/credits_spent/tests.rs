@@ -2,6 +2,8 @@ use super::*;
 use crate::http::{never_asked, was_asked};
 use serde_json::json;
 
+const INTERVAL: Duration = Duration::from_secs(60);
+
 fn now() -> DateTime<Utc> {
     DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
         .unwrap()
@@ -202,17 +204,31 @@ fn a_refused_or_failed_read_is_no_figure() {
 fn a_failed_read_backs_off_before_the_account_is_asked_again() {
     let key = account("backoff");
     assert_eq!(
-        read_backed_off(&projection(&key), &crate::http::refused_url(), now()),
+        read_backed_off(
+            &projection(&key),
+            &crate::http::refused_url(),
+            INTERVAL,
+            now()
+        ),
         None
     );
     let (listener, url) = never_asked();
 
-    assert_eq!(read_backed_off(&projection(&key), &url, now()), None);
+    assert_eq!(
+        read_backed_off(&projection(&key), &url, INTERVAL, now()),
+        None
+    );
     assert!(!was_asked(&listener), "asked again while backing off");
 
     let (url, request) =
         crate::http::serve_once("200 OK", &breakdown(&[("2026-09-24", &[1.0])]).to_string());
-    assert!(read_backed_off(&projection(&account("backoff-other")), &url, now()).is_some());
+    assert!(read_backed_off(
+        &projection(&account("backoff-other")),
+        &url,
+        INTERVAL,
+        now()
+    )
+    .is_some());
     request.join().unwrap();
 }
 
@@ -223,8 +239,8 @@ fn a_successful_read_does_not_hold_the_next_one_back() {
     let (url, requests) =
         crate::http::serve_sequence(&[("200 OK", &[], &body), ("200 OK", &[], &body)]);
 
-    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
-    assert!(read_backed_off(&projection(&key), &url, now()).is_some());
+    assert!(read_backed_off(&projection(&key), &url, INTERVAL, now()).is_some());
+    assert!(read_backed_off(&projection(&key), &url, INTERVAL, now()).is_some());
     assert_eq!(requests.join().unwrap().len(), 2);
 }
 
