@@ -34,25 +34,35 @@ fn the_popover_places_inward_from_the_edge_and_clamps_to_the_work_area() {
 fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
-    let planned = plan(&settings(), &displays, &data(cells), Hover::default()).expect("fits");
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(cells.clone()),
+        Hover::default(),
+    )
+    .expect("fits");
     assert_eq!(planned.cells.len(), 1);
     assert_eq!(planned.window.w, 76.0);
     assert!(planned.pill.is_none());
     assert!(planned.popover.is_none());
+    assert!(
+        plan(&settings(), &displays, &data(Vec::new()), Hover::default()).is_none(),
+        "a frame without cells has no rail"
+    );
 
     let mut mirrored_display = display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0);
     mirrored_display.mirrored = true;
     let mirrored = vec![mirrored_display];
-    assert!(plan(&settings(), &mirrored, &data(Vec::new()), Hover::default()).is_none());
-
-    let off_screen = vec![display("other", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     assert!(plan(
         &settings(),
-        &off_screen,
-        &data(Vec::new()),
+        &mirrored,
+        &data(cells.clone()),
         Hover::default()
     )
     .is_none());
+
+    let off_screen = vec![display("other", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    assert!(plan(&settings(), &off_screen, &data(cells), Hover::default()).is_none());
 }
 #[test]
 fn the_popover_unions_with_the_rail_and_places_zones() {

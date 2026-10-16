@@ -30,11 +30,31 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
     let pixel = first.pixel(cx, cy).expect("inside the pixmap");
     assert!(pixel.alpha() > 200, "the glyph slot area has ink");
 
-    let left_edge = first.pixel(0, first.height() / 2).unwrap();
-    assert_eq!(
-        left_edge.alpha(),
-        0,
-        "per-pixel alpha keeps the rest see-through"
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    let gap_from = popover.rect.x + popover.rect.w;
+    assert!(
+        planned.rail.x - gap_from >= 1.0,
+        "the popover keeps its gap from the rail"
+    );
+    let column = ((gap_from + (planned.rail.x - gap_from) / 2.0) * scale as f64) as u32;
+    let tail = cell.rect.mid_y() * scale as f64;
+    let tail_band = (7.0 + 1.0) * planned.size_scale * scale as f64;
+    let mut probed = 0;
+    for y in 0..first.height() {
+        if (f64::from(y) - tail).abs() <= tail_band {
+            continue;
+        }
+        let pixel = first.pixel(column, y).expect("inside the pixmap");
+        assert_eq!(
+            pixel.alpha(),
+            0,
+            "per-pixel alpha keeps the gap between the popover and the rail see-through at row {y}"
+        );
+        probed += 1;
+    }
+    assert!(
+        probed > 100,
+        "the gap was probed down the window: {probed} rows"
     );
 }
 #[test]
