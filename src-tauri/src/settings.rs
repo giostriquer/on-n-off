@@ -14,14 +14,6 @@ use crate::dto::{AdapterError, AgentId};
 use crate::paths;
 use crate::reset_alert::ResetAlert;
 
-const ALL_AGENTS: [AgentId; 5] = [
-    AgentId::Claude,
-    AgentId::Codex,
-    AgentId::Antigravity,
-    AgentId::Cursor,
-    AgentId::Muse,
-];
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -196,15 +188,10 @@ fn save_settings_to(
     settings
         .binary_paths
         .retain(|_, value| !value.trim().is_empty());
-    settings.hidden_agents.retain(|id| ALL_AGENTS.contains(id));
-    settings.hidden_agents.sort_by_key(|id| match id {
-        AgentId::Claude => 0,
-        AgentId::Codex => 1,
-        AgentId::Antigravity => 2,
-        AgentId::Cursor => 3,
-        AgentId::Muse => 4,
-    });
-    settings.hidden_agents.dedup();
+    settings.hidden_agents = AgentId::ALL
+        .into_iter()
+        .filter(|id| settings.hidden_agents.contains(id))
+        .collect();
     if hidden_covers_all(&settings.hidden_agents) {
         return Err(AdapterError::message(
             "Keep at least one provider visible in the agent tabs.",
@@ -274,33 +261,16 @@ fn is_github_repo_name(value: &str) -> bool {
 }
 
 fn hidden_covers_all(hidden: &[AgentId]) -> bool {
-    ALL_AGENTS.iter().all(|id| hidden.contains(id))
+    AgentId::ALL.iter().all(|id| hidden.contains(id))
 }
 
 pub fn binary_override_for(cli_name: &str) -> Option<PathBuf> {
-    let agent = agent_for_binary(cli_name)?;
+    let agent = AgentId::from_binary(cli_name)?;
     let raw = load_settings().binary_paths.get(&agent)?.trim().to_string();
     if raw.is_empty() {
         return None;
     }
     Some(PathBuf::from(raw))
-}
-
-fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
-    match PathBuf::from(cli_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(cli_name)
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "claude" => Some(AgentId::Claude),
-        "codex" => Some(AgentId::Codex),
-        "agy" => Some(AgentId::Antigravity),
-        "agent" | "cursor-agent" => Some(AgentId::Cursor),
-        "muse" => Some(AgentId::Muse),
-        _ => None,
-    }
 }
 
 fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
@@ -431,7 +401,7 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
 }
 
 pub fn diagnose_all() -> Vec<ProviderDiagnose> {
-    ALL_AGENTS.into_iter().map(diagnose_provider).collect()
+    AgentId::ALL.into_iter().map(diagnose_provider).collect()
 }
 
 #[cfg(test)]

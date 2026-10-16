@@ -154,13 +154,10 @@ pub async fn open_url(url: String, app: tauri::AppHandle) -> Result<(), AdapterE
 pub async fn list_agents(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<AgentInfo>, AdapterError> {
-    let adapters = [
-        Arc::clone(&state.claude),
-        Arc::clone(&state.codex),
-        Arc::clone(&state.antigravity),
-        Arc::clone(&state.cursor),
-        Arc::clone(&state.muse),
-    ];
+    let adapters: Vec<_> = AgentId::ALL
+        .into_iter()
+        .map(|id| state.adapter(id))
+        .collect();
     blocking("provider health", move || {
         Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())
     })
@@ -592,3 +589,6 @@ pub async fn add_account(
 pub fn cancel_account_login(operation_id: String) {
     crate::accounts::cancel(&operation_id);
 }
+
+#[cfg(test)]
+mod tests;

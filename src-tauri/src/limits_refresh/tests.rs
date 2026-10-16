@@ -17,6 +17,21 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
 }
 
 #[test]
+fn every_provider_with_a_limits_reader_has_its_own_cache_and_no_other_has_one() {
+    for id in AgentId::ALL {
+        assert_eq!(cache_for(id).is_some(), id.facts().limits_reader, "{id:?}");
+    }
+    let sources: Vec<Source> = crate::provider_catalogue::WITH_LIMITS
+        .into_iter()
+        .filter_map(cache_for)
+        .map(|cache| cache.source)
+        .collect();
+    for (i, source) in sources.iter().enumerate() {
+        assert!(!sources[i + 1..].contains(source), "{source:?} is shared");
+    }
+}
+
+#[test]
 fn cache_freshness_uses_the_configured_interval_and_force_bypasses_it() {
     let refreshed_at = Instant::now();
     let interval = Duration::from_secs(5 * 60);

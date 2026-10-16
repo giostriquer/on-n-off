@@ -41,7 +41,7 @@ impl AntigravityAdapter {
             gemini: crate::paths::gemini_root().ok(),
             io: ConfigIo::production(),
             write: Mutex::new(()),
-            cli: AgentCli::new("agy"),
+            cli: AgentCli::new(AgentId::Antigravity.binary_name()),
         }
     }
 

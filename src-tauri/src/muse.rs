@@ -108,7 +108,7 @@ impl MuseAdapter {
             agents_skills: agents_skills_root().ok(),
             io: ConfigIo::production(),
             write: Mutex::new(()),
-            cli: AgentCli::new("muse"),
+            cli: AgentCli::new(AgentId::Muse.binary_name()),
         }
     }
 

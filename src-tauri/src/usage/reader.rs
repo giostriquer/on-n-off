@@ -5,8 +5,9 @@ use std::time::SystemTime;
 
 use super::transcripts::{
     might_carry_usage, parse_claude_line, parse_codex_line, parse_muse_line, CodexScanState,
-    UsageProvider, UsageRecord,
+    UsageRecord,
 };
+use crate::provider_catalogue::UsageProvider;
 
 pub const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
 

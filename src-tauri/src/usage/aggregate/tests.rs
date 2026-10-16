@@ -89,9 +89,8 @@ fn hourly_requires_bounds() {
     }
 }
 
-#[test]
-fn add_says_whether_the_record_was_counted() {
-    let mut agg = UsageAggregator::new(AggregateOptions {
+fn august_by_day() -> UsageAggregator {
+    UsageAggregator::new(AggregateOptions {
         time_zone: "UTC".into(),
         since_day: "2026-08-01".into(),
         until_day: "2026-08-31".into(),
@@ -100,7 +99,47 @@ fn add_says_whether_the_record_was_counted() {
         until_time_ms: None,
         rates: sample_rates(),
     })
-    .unwrap();
+    .unwrap()
+}
+
+#[test]
+fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
+    let result = aggregate(
+        &[
+            record(|r| {
+                r.provider = UsageProvider::Muse;
+                r.model = "a-model".into();
+            }),
+            record(|r| {
+                r.provider = UsageProvider::Codex;
+                r.model = "b-model".into();
+            }),
+            record(|r| r.model = "c-model".into()),
+            record(|r| r.model = "a-model".into()),
+        ],
+        "UTC",
+        Resolution::Day,
+    );
+
+    let order: Vec<(UsageProvider, &str)> = result
+        .buckets
+        .iter()
+        .map(|bucket| (bucket.provider, bucket.model.as_str()))
+        .collect();
+    assert_eq!(
+        order,
+        [
+            (UsageProvider::Claude, "a-model"),
+            (UsageProvider::Claude, "c-model"),
+            (UsageProvider::Codex, "b-model"),
+            (UsageProvider::Muse, "a-model"),
+        ]
+    );
+}
+
+#[test]
+fn add_says_whether_the_record_was_counted() {
+    let mut agg = august_by_day();
     assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
     assert!(!agg.add(&record(|r| {
         r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
