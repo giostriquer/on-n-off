@@ -371,7 +371,8 @@ pub fn rail_cell_frames(edge: Edge, metrics: &RailMetrics, count: usize) -> Vec<
 #[cfg(any(target_os = "windows", test))]
 pub fn pill_frame(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
     let rail = layout(settings, displays)?;
-    let value = |points: f64| pixel_aligned(points * settings.size.scale(), 1.0);
+    let display = selected_display(settings, displays)?;
+    let value = |points: f64| pixel_aligned(points * settings.size.scale(), display.scale);
     let thickness = value(6.0);
     let length = value(120.0).min(if settings.edge.is_vertical() {
         rail.height

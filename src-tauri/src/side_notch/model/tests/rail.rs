@@ -338,27 +338,36 @@ fn the_rail_metrics_at_every_size_and_display_scale() {
 
 #[test]
 fn the_pill_at_every_size_and_display_scale() {
-    for scale in [1.0, 1.25, 1.5, 2.0] {
-        for (size, thickness, length) in [
-            (NotchSize::Compact, 5.0, 105.0),
-            (NotchSize::Standard, 6.0, 120.0),
-            (NotchSize::Large, 7.0, 135.0),
-        ] {
-            let mut current = settings("main", Edge::Right);
-            current.size = size;
-            let displays = [display("main", 0.0, scale)];
-            let rail = layout(&current, &displays).expect("fits");
-            assert_eq!(
-                pill_frame(&current, &displays),
-                Some(Layout {
-                    x: rail.x + rail.width - thickness,
-                    y: rail.y + rail.height / 2.0 - length / 2.0,
-                    width: thickness,
-                    height: length,
-                }),
-                "{size:?} at {scale}x"
-            );
-        }
+    use NotchSize::{Compact, Large, Standard};
+    for (scale, size, thickness_px, length_px) in [
+        (1.0, Compact, 5.0, 105.0),
+        (1.0, Standard, 6.0, 120.0),
+        (1.0, Large, 7.0, 135.0),
+        (1.25, Compact, 7.0, 131.0),
+        (1.25, Standard, 8.0, 150.0),
+        (1.25, Large, 8.0, 169.0),
+        (1.5, Compact, 8.0, 158.0),
+        (1.5, Standard, 9.0, 180.0),
+        (1.5, Large, 10.0, 203.0),
+        (2.0, Compact, 11.0, 210.0),
+        (2.0, Standard, 12.0, 240.0),
+        (2.0, Large, 14.0, 270.0),
+    ] {
+        let (thickness, length) = (thickness_px / scale, length_px / scale);
+        let mut current = settings("main", Edge::Right);
+        current.size = size;
+        let displays = [display("main", 0.0, scale)];
+        let rail = layout(&current, &displays).expect("fits");
+        assert_eq!(
+            pill_frame(&current, &displays),
+            Some(Layout {
+                x: rail.x + rail.width - thickness,
+                y: rail.y + rail.height / 2.0 - length / 2.0,
+                width: thickness,
+                height: length,
+            }),
+            "{size:?} at {scale}x"
+        );
     }
 }
 
