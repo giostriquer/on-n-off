@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import { LimitsPopover } from "./LimitsPopover";
 
 const readLimits = vi.hoisted(() => vi.fn());
@@ -54,7 +55,9 @@ function renderPopover() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <LimitsPopover />
+      <AppSettingsProvider>
+        <LimitsPopover />
+      </AppSettingsProvider>
     </QueryClientProvider>,
   );
 }

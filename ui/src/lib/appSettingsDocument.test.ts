@@ -1,0 +1,101 @@
+import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_APP_SETTINGS } from "./appSettings";
+import { createAppSettingsDocument, type AppSettingsTransport } from "./appSettingsDocument";
+import type { AppSettings } from "./types";
+
+const LOADED: AppSettings = { ...DEFAULT_APP_SETTINGS, githubScopes: ["org:acme"], limitsPollMinutes: 10 };
+
+function rust(loaded: AppSettings = LOADED) {
+  const transport = {
+    load: vi.fn<AppSettingsTransport["load"]>(async () => loaded),
+    save: vi.fn<AppSettingsTransport["save"]>(async (settings) => settings),
+  };
+  return { transport, document: createAppSettingsDocument(transport) };
+}
+
+describe("the app settings document", () => {
+  it("holds the default settings as a placeholder until Rust's document loads", async () => {
+    const { document } = rust();
+    const changed = vi.fn();
+    document.subscribe(changed);
+
+    expect(document.state()).toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
+    await expect(document.load()).resolves.toEqual(LOADED);
+
+    expect(document.state()).toEqual({ settings: LOADED, loaded: true });
+    expect(changed).toHaveBeenCalledTimes(1);
+  });
+
+  it("shares a load already under way", async () => {
+    const { transport, document } = rust();
+
+    const [first, second] = await Promise.all([document.load(), document.load()]);
+
+    expect(first).toEqual(LOADED);
+    expect(second).toEqual(LOADED);
+    expect(transport.load).toHaveBeenCalledTimes(1);
+    await document.load();
+    expect(transport.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps what it holds when a load fails", async () => {
+    const { transport, document } = rust();
+    transport.load.mockRejectedValueOnce(new Error("settings unavailable"));
+
+    await expect(document.load()).resolves.toEqual(DEFAULT_APP_SETTINGS);
+    expect(document.state()).toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
+
+    await document.load();
+    transport.load.mockRejectedValueOnce(new Error("settings unavailable"));
+    await expect(document.load()).resolves.toEqual(LOADED);
+    expect(document.state()).toEqual({ settings: LOADED, loaded: true });
+  });
+
+  it("saves a change over the whole document and holds the document Rust saved", async () => {
+    const { transport, document } = rust();
+    await document.load();
+    const normalised = { ...LOADED, closeToTray: true, githubScopes: ["org:acme", "repo:acme/webapp"] };
+    transport.save.mockResolvedValueOnce(normalised);
+
+    await expect(document.patch({ closeToTray: true, githubScopes: ["org:acme", "acme/webapp"] })).resolves.toEqual(normalised);
+
+    expect(transport.save).toHaveBeenCalledWith({ ...LOADED, closeToTray: true, githubScopes: ["org:acme", "acme/webapp"] });
+    expect(document.state()).toEqual({ settings: normalised, loaded: true });
+  });
+
+  it("hands an updater the document to change", async () => {
+    const { transport, document } = rust({ ...LOADED, hiddenAgents: ["cursor"] });
+    await document.load();
+
+    await document.patch((latest) => ({ hiddenAgents: [...latest.hiddenAgents, "muse"] }));
+
+    expect(transport.save).toHaveBeenCalledWith({ ...LOADED, hiddenAgents: ["cursor", "muse"] });
+  });
+
+  it("reports a failed save once to every listener, answers null and keeps the document", async () => {
+    const { transport, document } = rust();
+    await document.load();
+    const refusal = { kind: "message", message: "Keep at least one provider visible in the agent tabs.", path: null };
+    transport.save.mockRejectedValueOnce(refusal);
+    const session = vi.fn();
+    const gone = vi.fn();
+    document.onSaveFailed(session);
+    document.onSaveFailed(gone)();
+
+    await expect(document.patch({ hiddenAgents: ["claude", "codex", "antigravity", "cursor", "muse"] })).resolves.toBeNull();
+
+    expect(session.mock.calls).toEqual([[refusal]]);
+    expect(gone).not.toHaveBeenCalled();
+    expect(document.state()).toEqual({ settings: LOADED, loaded: true });
+  });
+
+  it("stops telling a listener that unsubscribed", async () => {
+    const { document } = rust();
+    const changed = vi.fn();
+    document.subscribe(changed)();
+
+    await document.load();
+
+    expect(changed).not.toHaveBeenCalled();
+  });
+});

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, useAgentSession } from "./SessionProvider";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import type { AgentId, AgentInfo, AgentTabDto, InstallItemsRequest, InstallItemsResult } from "$lib/types";
 
 const state = vi.hoisted(() => ({
@@ -111,6 +112,7 @@ describe("SessionProvider.installItems", () => {
       <SessionProvider>
         <Probe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.listCalls.length).toBeGreaterThanOrEqual(4));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
@@ -136,6 +138,7 @@ describe("SessionProvider.installItems", () => {
       <SessionProvider>
         <Probe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.listCalls.length).toBeGreaterThanOrEqual(4));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));

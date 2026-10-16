@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_KEY, SCOPE_KEY, SessionProvider, useAgentSession } from "./SessionProvider";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
 type Deferred<T> = {
@@ -215,6 +216,7 @@ function renderSession() {
     <SessionProvider>
       <Probe />
     </SessionProvider>,
+    { wrapper: AppSettingsProvider },
   );
 }
 

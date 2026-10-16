@@ -27,9 +27,6 @@ type SettingsProps = {
   settings: AppSettings;
   onToggleVisible: (id: AgentId, hidden: boolean) => void;
   onSaveBinary: (id: AgentId, path: string) => void;
-  onAutomaticUpdatesChange: (enabled: boolean) => void;
-  onLimitNotificationsChange: (enabled: boolean) => void;
-  onLimitsPollMinutesChange: (minutes: LimitsPollMinutes) => void;
   onSettingsChange: (patch: Partial<AppSettings>) => void;
 };
 
@@ -57,9 +54,6 @@ export function Settings({
   settings,
   onToggleVisible,
   onSaveBinary,
-  onAutomaticUpdatesChange,
-  onLimitNotificationsChange,
-  onLimitsPollMinutesChange,
   onSettingsChange,
 }: SettingsProps) {
   const health = agents.map((agent) => `${agent.id}:${agent.cliOk}`).join(",");
@@ -83,14 +77,14 @@ export function Settings({
 
       <UpdaterSettingsCard
         automaticUpdates={settings.automaticUpdates}
-        onAutomaticUpdatesChange={onAutomaticUpdatesChange}
+        onAutomaticUpdatesChange={(enabled) => onSettingsChange({ automaticUpdates: enabled })}
       />
 
       <LimitNotificationsCard
         enabled={settings.limitNotifications}
         pollMinutes={settings.limitsPollMinutes}
-        onEnabledChange={onLimitNotificationsChange}
-        onPollMinutesChange={onLimitsPollMinutesChange}
+        onEnabledChange={(enabled) => onSettingsChange({ limitNotifications: enabled })}
+        onPollMinutesChange={(minutes) => onSettingsChange({ limitsPollMinutes: minutes })}
       />
 
       <ResetAlertsCard

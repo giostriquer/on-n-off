@@ -60,6 +60,17 @@ function normalizeGithubPollSeconds(value: number | undefined): GithubPollSecond
   return value === 30 || value === 60 || value === 120 || value === 300 ? value : 60;
 }
 
+export function withBinaryPath(
+  paths: AppSettings["binaryPaths"],
+  id: AgentId,
+  path: string,
+): AppSettings["binaryPaths"] {
+  const next = { ...paths };
+  if (path.trim()) next[id] = path.trim();
+  else delete next[id];
+  return next;
+}
+
 export function visibleAgentIds(hidden: readonly AgentId[]): AgentId[] {
   const set = new Set(hidden);
   const visible = ALL_AGENTS.filter((id) => !set.has(id));

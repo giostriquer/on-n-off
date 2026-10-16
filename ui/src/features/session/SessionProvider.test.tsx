@@ -10,6 +10,7 @@ import {
   readScreen,
   useAgentSession,
 } from "./SessionProvider";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
 const state = vi.hoisted(() => ({
@@ -215,6 +216,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(screen.getByTestId("selected-provider")).toHaveTextContent("claude"));
     await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
@@ -225,9 +227,11 @@ describe("SessionProvider startup", () => {
   it("finishes the selected provider before starting background providers", async () => {
     render(
       <StrictMode>
-        <SessionProvider>
-          <span>session</span>
-        </SessionProvider>
+        <AppSettingsProvider>
+          <SessionProvider>
+            <span>session</span>
+          </SessionProvider>
+        </AppSettingsProvider>
       </StrictMode>,
     );
 
@@ -245,6 +249,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
@@ -274,6 +279,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
@@ -299,6 +305,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);

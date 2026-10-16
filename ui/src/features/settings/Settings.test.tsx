@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Settings } from "./Settings";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
-import type { AgentInfo, AppSettings, LimitsPollMinutes } from "$lib/types";
+import type { AgentInfo, AppSettings } from "$lib/types";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 const apiMocks = vi.hoisted(() => ({
@@ -93,15 +93,11 @@ const updaterClient: UpdaterClient = {
 
 function renderSettings({
   onToggleVisible = () => undefined,
-  onLimitNotificationsChange = () => undefined,
-  onLimitsPollMinutesChange = () => undefined,
   onSettingsChange = () => undefined,
   githubScopes = [],
   resetAlerts = {},
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
-  onLimitNotificationsChange?: (enabled: boolean) => void;
-  onLimitsPollMinutesChange?: (minutes: LimitsPollMinutes) => void;
   onSettingsChange?: (patch: Partial<AppSettings>) => void;
   githubScopes?: string[];
   resetAlerts?: AppSettings["resetAlerts"];
@@ -126,9 +122,6 @@ function renderSettings({
           }}
           onToggleVisible={onToggleVisible}
           onSaveBinary={() => undefined}
-          onAutomaticUpdatesChange={() => undefined}
-          onLimitNotificationsChange={onLimitNotificationsChange}
-          onLimitsPollMinutesChange={onLimitsPollMinutesChange}
           onSettingsChange={onSettingsChange}
         />
       </UpdateProvider>
@@ -169,31 +162,40 @@ describe("Settings", () => {
 
   it("requests notification permission before enabling limit polling and persists the interval", async () => {
     const user = userEvent.setup();
-    const onLimitNotificationsChange = vi.fn();
-    const onLimitsPollMinutesChange = vi.fn();
-    renderSettings({ onLimitNotificationsChange, onLimitsPollMinutesChange });
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about limit changes" }));
 
     expect(apiMocks.requestNotificationPermission).toHaveBeenCalledTimes(1);
-    expect(onLimitNotificationsChange).toHaveBeenCalledWith(true);
+    expect(onSettingsChange).toHaveBeenCalledWith({ limitNotifications: true });
 
     await user.selectOptions(
       screen.getByRole("combobox", { name: "Limits polling interval" }),
       "15",
     );
-    expect(onLimitsPollMinutesChange).toHaveBeenCalledWith(15);
+    expect(onSettingsChange).toHaveBeenCalledWith({ limitsPollMinutes: 15 });
+  });
+
+  it("turns automatic updates off through the shared settings patch", async () => {
+    const user = userEvent.setup();
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
+
+    await user.click(screen.getByRole("button", { name: "Automatically download updates" }));
+
+    expect(onSettingsChange).toHaveBeenCalledWith({ automaticUpdates: false });
   });
 
   it("keeps limit polling disabled when notification permission is denied", async () => {
     apiMocks.requestNotificationPermission.mockResolvedValue(false);
     const user = userEvent.setup();
-    const onLimitNotificationsChange = vi.fn();
-    renderSettings({ onLimitNotificationsChange });
+    const onSettingsChange = vi.fn();
+    renderSettings({ onSettingsChange });
 
     await user.click(screen.getByRole("button", { name: "Notify about limit changes" }));
 
-    expect(onLimitNotificationsChange).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
     expect(screen.getByRole("status")).toHaveTextContent(
       "Notifications are blocked in system settings.",
     );

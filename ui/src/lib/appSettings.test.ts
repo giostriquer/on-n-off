@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings, resetSpendLimit } from "./appSettings";
+import { visibleAgentIds, setAgentHidden, ALL_AGENTS, mergeAppSettings, resetSpendLimit, withBinaryPath } from "./appSettings";
 
 describe("appSettings", () => {
   it("defaults to every provider visible", () => {
@@ -18,6 +18,17 @@ describe("appSettings", () => {
 
   it("can show a hidden provider again", () => {
     expect(setAgentHidden(["antigravity"], "antigravity", false)).toEqual([]);
+  });
+
+  it("sets a provider's binary path trimmed and drops one left blank", () => {
+    const paths = { claude: "/opt/acme/bin/claude" };
+
+    expect(withBinaryPath(paths, "codex", "  /opt/acme/bin/codex ")).toEqual({
+      claude: "/opt/acme/bin/claude",
+      codex: "/opt/acme/bin/codex",
+    });
+    expect(withBinaryPath(paths, "claude", "   ")).toEqual({});
+    expect(paths).toEqual({ claude: "/opt/acme/bin/claude" });
   });
 
   it("enables automatic updates by default and preserves an opt-out", () => {

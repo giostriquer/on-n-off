@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import { defaultNotchSettings } from "$lib/notchTypes";
 import type { AgentInfo, AgentTabDto, AppSettings } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import { AGENT_KEY, SessionProvider, useAgentSession } from "@/features/session/SessionProvider";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
@@ -78,7 +79,11 @@ function SessionProbe() {
 }
 
 function Window({ children }: { children: ReactNode }) {
-  return <SessionProvider>{children}</SessionProvider>;
+  return (
+    <AppSettingsProvider>
+      <SessionProvider>{children}</SessionProvider>
+    </AppSettingsProvider>
+  );
 }
 
 async function renderSettings() {
