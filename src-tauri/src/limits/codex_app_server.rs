@@ -105,7 +105,7 @@ fn spend_in_session(
 ) -> Result<ResetCreditOutcome, Failure> {
     let (_, account) = handshake(codex_home, false, session)?;
     require_chatgpt(&account).map_err(|failure| {
-        Failure::rejected(match failure {
+        Failure::new(match failure {
             AppServerFailure::SignedOut => {
                 "Codex is not signed in, so there is no banked reset to use."
             }
@@ -114,11 +114,11 @@ fn spend_in_session(
     })?;
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
-        .map_err(Failure::rejected)?;
+        .map_err(Failure::new)?;
     if let ResetSpend::Automatic { max_left_percent } = how {
         let rate_limits = read_rate_limits(session)?;
         spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
-            .map_err(Failure::rejected)?;
+            .map_err(Failure::new)?;
     }
     let response: ConsumeResetCreditResponse = session.request(
         Request::new(4, "account/rateLimitResetCredit/consume")

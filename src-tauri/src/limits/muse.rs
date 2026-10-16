@@ -115,7 +115,7 @@ fn query_serve(expected_data: &Path, session: &mut Session) -> Result<ServeSessi
         ))?;
     let after: AccountState = session.request(Request::new(4, "account/read"))?;
     if after != account {
-        return Err(Failure::rejected(
+        return Err(Failure::new(
             "The signed-in Muse account changed while its usage was read.",
         ));
     }

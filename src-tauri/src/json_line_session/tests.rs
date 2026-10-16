@@ -21,10 +21,6 @@ fn exit_status(code: i32) -> ExitStatus {
         .unwrap()
 }
 
-fn closed(message: &str) -> Failure {
-    Failure::new(FailureKind::Closed, message)
-}
-
 fn initialize_then(rest: impl IntoIterator<Item = Value>) -> Script {
     Script::new(std::iter::once(json!({"id": 1, "result": {}})).chain(rest))
 }
@@ -41,7 +37,6 @@ fn a_session_that_never_answers_times_out_and_stops_the_child() {
     let error = process.receive().unwrap_err();
     process.finish();
 
-    assert_eq!(error.kind, FailureKind::Timeout);
     assert_eq!(error.message, "Acme server timed out.");
     assert!(started.elapsed() < Duration::from_secs(3));
     assert!(process.child.try_wait().unwrap().is_some());
@@ -58,7 +53,6 @@ fn an_oversized_stdout_line_is_rejected_with_its_limit() {
     let error = process.receive().unwrap_err();
     process.finish();
 
-    assert_eq!(error.kind, FailureKind::InvalidOutput);
     assert_eq!(error.message, "Webapp serve output line exceeded 64 bytes.");
 }
 
@@ -89,7 +83,6 @@ fn stderr_never_reaches_a_message() {
     let error = process.receive().unwrap_err();
     process.finish();
 
-    assert_eq!(error.kind, FailureKind::InvalidOutput);
     assert!(
         error
             .message
@@ -218,7 +211,7 @@ fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
     let message = explained(
         STRICT,
         false,
-        closed("Could not write to Webapp serve: Broken pipe"),
+        Failure::closed("Could not write to Webapp serve: Broken pipe"),
         Some(exit_status(2)),
     );
 
@@ -226,29 +219,16 @@ fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
 }
 
 #[test]
-fn an_unsuccessful_exit_does_not_hide_a_timeout_or_invalid_output() {
-    for (kind, message) in [
-        (FailureKind::Timeout, "Acme server timed out."),
-        (
-            FailureKind::InvalidOutput,
-            "Acme server returned invalid JSON.",
+fn an_unsuccessful_exit_does_not_hide_a_failure_other_than_a_closed_pipe() {
+    assert_eq!(
+        explained(
+            LITE,
+            false,
+            Failure::new("Acme server timed out."),
+            Some(exit_status(2))
         ),
-        (
-            FailureKind::Protocol,
-            "Acme server `initialize` failed: no.",
-        ),
-        (FailureKind::Rejected, "Acme server used the wrong home."),
-    ] {
-        assert_eq!(
-            explained(
-                LITE,
-                false,
-                Failure::new(kind, message),
-                Some(exit_status(2))
-            ),
-            message
-        );
-    }
+        "Acme server timed out."
+    );
 }
 
 #[test]
@@ -256,14 +236,17 @@ fn a_peer_that_closes_after_initializing_or_exits_cleanly_keeps_its_own_message(
     let message = "Acme server closed before returning limits.";
 
     assert_eq!(
-        explained(LITE, true, closed(message), Some(exit_status(2))),
+        explained(LITE, true, Failure::closed(message), Some(exit_status(2))),
         message
     );
     assert_eq!(
-        explained(LITE, false, closed(message), Some(exit_status(0))),
+        explained(LITE, false, Failure::closed(message), Some(exit_status(0))),
         message
     );
-    assert_eq!(explained(LITE, false, closed(message), None), message);
+    assert_eq!(
+        explained(LITE, false, Failure::closed(message), None),
+        message
+    );
 }
 
 #[test]
@@ -376,7 +359,7 @@ fn a_reader_can_reject_mid_session_with_its_own_message() {
         .session(LITE)
         .run(|session| {
             session.handshake::<Value>(None, |_| Ok(()))?;
-            Err::<(), _>(Failure::rejected("The signed-in account changed."))
+            Err::<(), _>(Failure::new("The signed-in account changed."))
         })
         .unwrap_err();
 

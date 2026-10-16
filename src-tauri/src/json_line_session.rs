@@ -57,28 +57,21 @@ pub(crate) enum NotStarted {
 
 #[derive(Debug)]
 pub(crate) struct Failure {
-    kind: FailureKind,
+    closed: bool,
     message: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum FailureKind {
-    Closed,
-    Timeout,
-    InvalidOutput,
-    Protocol,
-    Rejected,
-    Other,
-}
-
 impl Failure {
-    pub(crate) fn rejected(message: impl Into<String>) -> Self {
-        Self::new(FailureKind::Rejected, message)
+    pub(crate) fn new(message: impl Into<String>) -> Self {
+        Self {
+            closed: false,
+            message: message.into(),
+        }
     }
 
-    fn new(kind: FailureKind, message: impl Into<String>) -> Self {
+    fn closed(message: impl Into<String>) -> Self {
         Self {
-            kind,
+            closed: true,
             message: message.into(),
         }
     }
@@ -147,7 +140,7 @@ impl Session {
         }
         let answer = self.request(Request::new(1, "initialize").params(params))?;
         self.initialized = true;
-        accept(&answer).map_err(Failure::rejected)?;
+        accept(&answer).map_err(Failure::new)?;
         self.send(None, "initialized", json!({}))?;
         Ok(answer)
     }
@@ -194,10 +187,9 @@ fn answer<R: DeserializeOwned>(
     let name = peer.name;
     if let Some(result) = message.get("result") {
         return serde_json::from_value(result.clone()).map_err(|error| {
-            Failure::new(
-                FailureKind::Protocol,
-                format!("{name} `{method}` returned a malformed response: {error}"),
-            )
+            Failure::new(format!(
+                "{name} `{method}` returned a malformed response: {error}"
+            ))
         });
     }
     let error = message.get("error");
@@ -212,17 +204,13 @@ fn answer<R: DeserializeOwned>(
         .filter(|_| code == Some(METHOD_NOT_FOUND))
         .map_or_else(String::new, |guidance| format!(" {guidance}"));
     let code = code.map_or_else(String::new, |code| format!(" (code {code})"));
-    Err(Failure::new(
-        FailureKind::Protocol,
-        format!("{name} `{method}` failed{code}: {detail}.{guidance}"),
-    ))
+    Err(Failure::new(format!(
+        "{name} `{method}` failed{code}: {detail}.{guidance}"
+    )))
 }
 
 fn explained(peer: Peer, initialized: bool, failure: Failure, exit: Option<ExitStatus>) -> String {
-    if !initialized
-        && failure.kind == FailureKind::Closed
-        && exit.is_some_and(|status| !status.success())
-    {
+    if !initialized && failure.closed && exit.is_some_and(|status| !status.success()) {
         return peer.exited_early.to_string();
     }
     failure.message
@@ -272,20 +260,15 @@ impl Process {
             loop {
                 let message = match read_bounded_line(&mut reader, &mut line, line_limit) {
                     Ok(None) => break,
-                    Ok(Some(true)) => Err(Failure::new(
-                        FailureKind::InvalidOutput,
-                        format!("{name} output line exceeded {line_limit} bytes."),
-                    )),
+                    Ok(Some(true)) => Err(Failure::new(format!(
+                        "{name} output line exceeded {line_limit} bytes."
+                    ))),
                     Ok(Some(false)) => serde_json::from_slice::<Value>(&line).map_err(|error| {
-                        Failure::new(
-                            FailureKind::InvalidOutput,
-                            format!("{name} returned invalid JSON: {error}"),
-                        )
+                        Failure::new(format!("{name} returned invalid JSON: {error}"))
                     }),
-                    Err(error) => Err(Failure::new(
-                        FailureKind::Other,
-                        format!("Could not read {name} output: {error}"),
-                    )),
+                    Err(error) => Err(Failure::new(format!(
+                        "Could not read {name} output: {error}"
+                    ))),
                 };
                 if send.send(message).is_err() {
                     break;
@@ -313,32 +296,26 @@ impl Transport for Process {
         let stdin = self
             .stdin
             .as_mut()
-            .ok_or_else(|| Failure::new(FailureKind::Closed, format!("{name} input is closed.")))?;
-        let mut line = serde_json::to_vec(message).map_err(|error| {
-            Failure::new(
-                FailureKind::Other,
-                format!("Could not encode {name} request: {error}"),
-            )
-        })?;
+            .ok_or_else(|| Failure::closed(format!("{name} input is closed.")))?;
+        let mut line = serde_json::to_vec(message)
+            .map_err(|error| Failure::new(format!("Could not encode {name} request: {error}")))?;
         line.push(b'\n');
         stdin
             .write_all(&line)
             .and_then(|()| stdin.flush())
             .map_err(|error| {
-                Failure::new(
-                    if matches!(
-                        error.kind(),
-                        io::ErrorKind::BrokenPipe
-                            | io::ErrorKind::ConnectionAborted
-                            | io::ErrorKind::ConnectionReset
-                            | io::ErrorKind::NotConnected
-                    ) {
-                        FailureKind::Closed
-                    } else {
-                        FailureKind::Other
-                    },
-                    format!("Could not write to {name}: {error}"),
-                )
+                let message = format!("Could not write to {name}: {error}");
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::NotConnected
+                ) {
+                    Failure::closed(message)
+                } else {
+                    Failure::new(message)
+                }
             })
     }
 
@@ -346,23 +323,17 @@ impl Transport for Process {
         let name = self.name;
         let remaining = self.deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
-            return Err(Failure::new(
-                FailureKind::Timeout,
-                format!("{name} timed out."),
-            ));
+            return Err(Failure::new(format!("{name} timed out.")));
         }
         self.messages
             .as_ref()
-            .ok_or_else(|| Failure::new(FailureKind::Closed, format!("{name} output is closed.")))?
+            .ok_or_else(|| Failure::closed(format!("{name} output is closed.")))?
             .recv_timeout(remaining)
             .map_err(|error| match error {
-                mpsc::RecvTimeoutError::Timeout => {
-                    Failure::new(FailureKind::Timeout, format!("{name} timed out."))
+                mpsc::RecvTimeoutError::Timeout => Failure::new(format!("{name} timed out.")),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    Failure::closed(format!("{name} closed before returning limits."))
                 }
-                mpsc::RecvTimeoutError::Disconnected => Failure::new(
-                    FailureKind::Closed,
-                    format!("{name} closed before returning limits."),
-                ),
             })?
     }
 

@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use serde_json::Value;
 
-use super::{Failure, FailureKind, Peer, Session, Transport};
+use super::{Failure, Peer, Session, Transport};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Exchange {
@@ -64,7 +64,7 @@ impl Transport for Script {
         let message = exchanges
             .replies
             .pop_front()
-            .ok_or_else(|| Failure::new(FailureKind::Other, "the script has no more messages"))?;
+            .ok_or_else(|| Failure::new("the script has no more messages"))?;
         exchanges.log.push(Exchange::Received(message.clone()));
         Ok(message)
     }
