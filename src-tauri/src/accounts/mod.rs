@@ -16,6 +16,7 @@ pub(crate) mod claude_store;
 pub(crate) mod codex;
 pub(crate) mod codex_store;
 mod keychain;
+pub(crate) mod muse_store;
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use keychain::with_real_keychain;
 pub(crate) mod native;

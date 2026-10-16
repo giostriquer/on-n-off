@@ -207,7 +207,7 @@ use (a Keychain item that parses, token or not, else the credentials file; an un
 refuses every write), the Keychain item under Claude Code's own account name first, and one lock
 protocol, which a write takes as Claude Code takes it around its own renewals. An emptied
 `claudeAiOauth`, Claude Code's sign-out, is no native login. The Limits readers (`limits/`) read no
-Claude credential at all; for Codex they consume access-only projections. The one projection that
+Claude credential at all; for Codex and Muse they consume access-only projections. The one projection that
 carries a credential is `codex_store::metadata_and_access`: the signed-in Codex login's identity
 and its access token alone (never its refresh or id token, never the login JSON), wrapped in
 `model::AccessToken`, which has no `Debug`, `Clone` or serialization and reads back only as an
@@ -224,6 +224,13 @@ without starting a CLI or writing auth.json. Which backend holds Codex's login, 
 keyring item is named and reached, is `accounts/codex_store.rs`'s question, as Claude's store is
 `claude_store.rs`'s. Limits reads a saved login's credential only through the typed views and
 the signed-in Codex login only through `codex_store`'s projections.
+
+Muse is the second exception, also the user's decision (2026-10-16). `accounts/muse_store.rs`
+reads Muse Code's signed-in device login, inline in its `auth.json` or else its macOS Keychain
+item, and yields only the access token, as `model::AccessToken`, with the login's email. Its one
+caller is the Muse Limits read (`limits/muse.rs`), which sends one POST per read to the key-mint
+endpoint the CLI calls itself (`limits/muse/mint.rs`) and keeps only the quota fields of the
+answer. on-n-off never writes, renews or saves a Muse login, and Muse has no saved accounts.
 
 ## Operations
 

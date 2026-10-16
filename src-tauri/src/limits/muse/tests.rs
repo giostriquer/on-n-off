@@ -1,4 +1,7 @@
 use super::*;
+use crate::accounts::model::AccessToken;
+use crate::accounts::muse_store::MuseLogin;
+use crate::dto::LimitWindowDto;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::json_line_session::Script;
 use serde_json::{json, Value};
@@ -411,4 +414,274 @@ fn a_muse_read_writes_these_exact_lines() {
             r#"{"jsonrpc":"2.0","id":4,"method":"account/read","params":{}}"#.to_string(),
         ]
     );
+}
+
+fn login(email: Option<&str>) -> MuseLogin {
+    MuseLogin {
+        token: AccessToken::new("device-token"),
+        email: email.map(str::to_string),
+    }
+}
+
+fn mint_body() -> Value {
+    json!({
+        "is_subs_active": true,
+        "require_payment": false,
+        "subs_tier_name": "Wonder",
+        "subs_usage": {
+            "tier": "27681631238169137",
+            "window": {"used_percent": 41, "window_duration_mins": 300, "resets_at": 1_760_000_000i64},
+            "weekly": {"used_percent": 22, "resets_at": 1_760_500_000i64}
+        }
+    })
+}
+
+fn mint_response(body: Value) -> mint::MintResponse {
+    serde_json::from_value(body).expect("mint response")
+}
+
+fn normalized(body: Value) -> Option<Result<Parsed, ServeFailure>> {
+    mint::normalize(Some("You@Example.com".to_string()), &mint_response(body))
+}
+
+fn mint_reading(body: Value) -> Parsed {
+    normalized(body).expect("mint reading").expect("parsed")
+}
+
+fn window_of(parsed: &Parsed, kind: LimitWindowKind) -> &LimitWindowDto {
+    parsed
+        .reading
+        .windows
+        .iter()
+        .find(|window| window.kind == kind)
+        .expect("window")
+}
+
+#[test]
+fn a_mint_response_normalizes_to_the_same_card_as_serve() {
+    let parsed = mint_reading(mint_body());
+    let account = parsed.account.as_ref().expect("account");
+    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.label.as_deref(), Some("You@Example.com"));
+    assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
+    assert_eq!(parsed.reading.windows.len(), 2);
+
+    let weekly = window_of(&parsed, LimitWindowKind::Weekly);
+    assert_eq!(weekly.id, "weekly");
+    assert_eq!(weekly.label, "Weekly · all models");
+    assert_eq!(weekly.window_seconds, None);
+    assert_eq!(weekly.used_percent, 22.0);
+    assert_eq!(
+        weekly.resets_at.as_deref(),
+        Some("2025-10-15T03:46:40.000Z")
+    );
+
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.id, "session");
+    assert_eq!(session.label, "5 hour · all models");
+    assert_eq!(session.used_percent, 41.0);
+    assert_eq!(session.window_seconds, Some(18_000));
+    assert_eq!(
+        session.resets_at.as_deref(),
+        Some("2025-10-09T08:53:20.000Z")
+    );
+}
+
+#[test]
+fn a_session_window_without_a_duration_is_the_five_hour_window() {
+    for duration in [json!(null), json!(0), json!(-5)] {
+        let mut body = mint_body();
+        body["subs_usage"]["window"]["window_duration_mins"] = duration.clone();
+        let parsed = mint_reading(body);
+        let session = window_of(&parsed, LimitWindowKind::Session);
+        assert_eq!(session.label, "5 hour · all models", "{duration}");
+        assert_eq!(session.window_seconds, Some(18_000), "{duration}");
+    }
+    let mut body = mint_body();
+    body["subs_usage"]["window"]["window_duration_mins"] = json!(120);
+    let parsed = mint_reading(body);
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.label, "2 hour · all models");
+    assert_eq!(session.window_seconds, Some(7_200));
+}
+
+#[test]
+fn the_plan_is_the_tier_name_else_a_tier_that_reads_as_a_name() {
+    let mut body = mint_body();
+    body["subs_tier_name"] = json!(" ");
+    body["subs_usage"]["tier"] = json!("wonder");
+    assert_eq!(mint_reading(body).reading.plan.as_deref(), Some("wonder"));
+
+    let mut body = mint_body();
+    body["subs_tier_name"] = json!("");
+    assert_eq!(mint_reading(body).reading.plan, None);
+}
+
+#[test]
+fn a_mint_answer_with_no_usable_window_falls_back() {
+    let idle = json!({"is_subs_active": true, "subs_tier_name": "Wonder", "subs_usage": null});
+    assert!(normalized(idle).is_none());
+
+    let mut empty = mint_body();
+    empty["subs_usage"]["window"] = json!(null);
+    empty["subs_usage"]["weekly"] = json!(null);
+    assert!(normalized(empty).is_none());
+
+    let mut unusable = mint_body();
+    unusable["subs_usage"]["window"] = json!({"window_duration_mins": 300});
+    unusable["subs_usage"]["weekly"] = json!({"used_percent": null, "resets_at": 1_760_500_000i64});
+    assert!(normalized(unusable).is_none());
+
+    let mut weekly_only = mint_body();
+    weekly_only["subs_usage"]["window"] = json!(null);
+    let parsed = mint_reading(weekly_only);
+    assert_eq!(parsed.reading.windows.len(), 1);
+    assert_eq!(parsed.reading.windows[0].id, "weekly");
+}
+
+#[test]
+fn an_inactive_or_unpaid_subscription_reads_unsupported() {
+    let inactive = normalized(json!({"is_subs_active": false, "subs_tier_name": "Wonder"}));
+    assert!(
+        matches!(&inactive, Some(Err(ServeFailure::Unsupported(message))) if message.contains("inactive")),
+        "{inactive:?}"
+    );
+    let billing = normalized(json!({"is_subs_active": true, "require_payment": true}));
+    assert!(
+        matches!(&billing, Some(Err(ServeFailure::Unsupported(message))) if message.contains("billing")),
+        "{billing:?}"
+    );
+}
+
+#[test]
+fn a_mint_login_without_an_email_is_the_default_account() {
+    let parsed = mint::normalize(None, &mint_response(mint_body()))
+        .expect("mint reading")
+        .expect("parsed");
+    assert_eq!(
+        parsed.account.expect("account").id,
+        super::super::DEFAULT_ACCOUNT
+    );
+}
+
+#[test]
+fn a_minted_key_in_the_response_is_never_kept() {
+    let mut body = mint_body();
+    body["api_key"] = json!("LLM|secret-minted-key");
+    body["account"] = json!({"id": "acct-1"});
+    let debug = format!("{:?}", mint_response(body));
+    assert!(!debug.contains("secret-minted-key"), "{debug}");
+    assert!(!debug.contains("acct-1"), "{debug}");
+}
+
+#[test]
+fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &serde_json::to_string(&mint_body()).expect("body"),
+    );
+    let response = mint::fetch(&url, &AccessToken::new("device-token")).expect("fetch");
+    let captured = request.join().expect("captured");
+    assert_eq!(
+        crate::http::head_header(&captured.head, "authorization"),
+        Some("Bearer device-token"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        crate::http::head_header(&captured.head, "x-api-version"),
+        Some("1.0.0"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(captured.body, "{}");
+    assert!(mint::normalize(None, &response).is_some());
+}
+
+#[test]
+fn a_failed_mint_call_gives_no_answer() {
+    for (status, body) in [
+        ("401 Unauthorized", r#"{"title":"Authentication Error"}"#),
+        ("403 Forbidden", "{}"),
+        ("429 Too Many Requests", "{}"),
+        ("500 Internal Server Error", "{}"),
+        ("200 OK", "not json"),
+        ("200 OK", r#"{"subs_usage": "wrong shape"}"#),
+    ] {
+        let (url, server) = crate::http::serve_once(status, body);
+        assert!(
+            mint::fetch(&url, &AccessToken::new("device-token")).is_none(),
+            "{status} {body}"
+        );
+        server.join().expect("served");
+    }
+    assert!(mint::fetch(
+        &crate::http::refused_url(),
+        &AccessToken::new("device-token")
+    )
+    .is_none());
+}
+
+fn serve_read(root: &Path) -> impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure> {
+    let mut replies = happy_replies();
+    replies[1]["result"]["museHome"] = json!(crate::paths::muse_data_for(root).to_string_lossy());
+    move |_, _, _| Ok(Script::new(replies).session(SERVE))
+}
+
+fn serve_must_not_run(_: &Path, _: &Path, _: &Path) -> Result<Session, ServeFailure> {
+    panic!("serve must not run")
+}
+
+#[test]
+fn a_mint_reading_answers_without_starting_serve() {
+    let root = crate::paths::scratch_dir("muse-mint-reading");
+    let config = crate::paths::muse_config_for(&root);
+    let read = read_current(
+        &root,
+        serve_must_not_run,
+        |asked: &Path| {
+            assert_eq!(asked, config);
+            Some(login(Some("you@example.com")))
+        },
+        |token| {
+            assert_eq!(token.authorization(), "Bearer device-token");
+            Some(mint_response(mint_body()))
+        },
+    )
+    .expect("mint reading");
+    assert_eq!(read.reading.plan.as_deref(), Some("Wonder"));
+}
+
+#[test]
+fn every_mint_miss_falls_back_to_the_serve_read() {
+    let root = crate::paths::scratch_dir("muse-mint-fallback");
+    let serve_windows = |read: Result<Parsed, ServeFailure>| {
+        let read = read.expect("serve fallback");
+        assert_eq!(read.reading.plan.as_deref(), Some("wonder"));
+        read.reading.windows.len()
+    };
+
+    let no_login = read_current(
+        &root,
+        serve_read(&root),
+        |_| None,
+        |_| panic!("no login means no mint"),
+    );
+    assert_eq!(serve_windows(no_login), 2);
+
+    let rejected = read_current(&root, serve_read(&root), |_| Some(login(None)), |_| None);
+    assert_eq!(serve_windows(rejected), 2);
+
+    let idle = read_current(
+        &root,
+        serve_read(&root),
+        |_| Some(login(None)),
+        |_| {
+            Some(mint_response(
+                json!({"is_subs_active": true, "subs_usage": null}),
+            ))
+        },
+    );
+    assert_eq!(serve_windows(idle), 2);
 }

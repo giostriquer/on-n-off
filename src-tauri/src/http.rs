@@ -79,13 +79,25 @@ pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError>
 }
 
 pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpError> {
+    let authorization = format!("Bearer {bearer}");
+    post_json_headers(url, &[("Authorization", authorization.as_str())], body)
+}
+
+pub fn post_json_headers(
+    url: &str,
+    headers: &[(&str, &str)],
+    body: &Value,
+) -> Result<Value, HttpError> {
     let payload =
         serde_json::to_string(body).map_err(|error| HttpError::Parse(error.to_string()))?;
-    let response = agent()
+    let mut request = agent()
         .post(url)
         .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Authorization", &format!("Bearer {bearer}"))
+        .header("Content-Type", "application/json");
+    for (name, value) in headers {
+        request = request.header(*name, *value);
+    }
+    let response = request
         .send(&payload)
         .map_err(|error| HttpError::Network(error.to_string()))?;
     finish(response, Forbidden::RateLimitWhenSaid)

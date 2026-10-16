@@ -1,9 +1,3 @@
-// Muse subscription limits, read the way Muse exposes them: `muse serve`
-// speaks MSP over stdio, and its experimental `usage/read` reports the last
-// subscription usage the host observed from a provider frame. on-n-off opens
-// no Muse credential and never starts a model turn to poll: when the fresh
-// host has observed nothing, the card says so and keeps its account so the
-// remembered reading stands in.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -13,6 +7,8 @@ use serde_json::json;
 
 use super::pipeline::finish;
 use super::Parsed;
+use crate::accounts::model::AccessToken;
+use crate::accounts::muse_store::MuseLogin;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{
@@ -20,6 +16,8 @@ use crate::dto::{
     Reading,
 };
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
+
+mod mint;
 
 const SERVE: Peer = Peer::jsonrpc(
     "Muse serve",
@@ -164,15 +162,7 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .map(str::to_string);
-    let account_dto = LimitsAccountDto {
-        legacy_id: None,
-        id: label
-            .as_deref()
-            .filter(|label| label.contains('@'))
-            .map(|label| format!("email:{}", label.to_lowercase()))
-            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
-        label: label.clone(),
-    };
+    let account_dto = account_dto(label);
     let Some(usage) = answers.usage else {
         return Err(ServeFailure::NoUsageYet(account_dto));
     };
@@ -197,14 +187,24 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
     Ok(Parsed {
         account: Some(account_dto),
         reading: Reading {
-            // The tier arrives as an opaque numeric id, not a plan name;
-            // keep it only when it reads as one.
             plan: Some(usage.tier.trim().to_string())
                 .filter(|tier| tier.chars().any(|c| c.is_alphabetic())),
             windows: vec![weekly_window, session_window],
             ..Reading::default()
         },
     })
+}
+
+fn account_dto(label: Option<String>) -> LimitsAccountDto {
+    LimitsAccountDto {
+        legacy_id: None,
+        id: label
+            .as_deref()
+            .filter(|label| label.contains('@'))
+            .map(|label| format!("email:{}", label.to_lowercase()))
+            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
+        label,
+    }
 }
 
 fn session_label(minutes: u64) -> String {
@@ -286,7 +286,25 @@ fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
 }
 
 pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
-    finish_read(read_with(home, start))
+    finish_read(read_current(
+        home,
+        start,
+        crate::accounts::muse_store::signed_in_login,
+        |token| mint::fetch(mint::KEY_ENDPOINT, token),
+    ))
+}
+
+fn read_current(
+    home: &Path,
+    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
+    login: impl FnOnce(&Path) -> Option<MuseLogin>,
+    mint: impl FnOnce(&AccessToken) -> Option<mint::MintResponse>,
+) -> Result<Parsed, ServeFailure> {
+    login(&crate::paths::muse_config_for(home))
+        .and_then(|login| {
+            mint(&login.token).and_then(|response| mint::normalize(login.email, &response))
+        })
+        .unwrap_or_else(|| read_with(home, start))
 }
 
 fn read_with(
