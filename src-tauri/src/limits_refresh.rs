@@ -44,21 +44,20 @@ impl Cache {
 static CLAUDE_CACHE: Cache = Cache::new(Source::LimitsClaude);
 static CODEX_CACHE: Cache = Cache::new(Source::LimitsCodex);
 static MUSE_CACHE: Cache = Cache::new(Source::LimitsMuse);
-static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 pub fn set_poll_minutes(minutes: u16) {
     POLL_SECONDS.store(u64::from(minutes) * 60, Ordering::Release);
 }
 
 pub fn poll_interval() -> Duration {
-    let cached = POLL_SECONDS.load(Ordering::Acquire);
-    if cached > 0 {
-        return Duration::from_secs(cached);
-    }
-    let minutes = crate::settings::load_settings().limits_poll_minutes;
-    let seconds = u64::from(minutes) * 60;
-    let _ = POLL_SECONDS.compare_exchange(0, seconds, Ordering::AcqRel, Ordering::Acquire);
-    Duration::from_secs(POLL_SECONDS.load(Ordering::Acquire))
+    poll_interval_in(&POLL_SECONDS)
+}
+
+pub(crate) fn poll_interval_in(memo: &AtomicU64) -> Duration {
+    crate::settings::remembered_seconds(memo, || {
+        u64::from(crate::settings::load_settings().limits_poll_minutes) * 60
+    })
 }
 
 pub(crate) fn check_interval(default: Duration) -> Duration {
@@ -178,9 +177,14 @@ fn announce(cache: &Cache, reading: Reading) {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn revision(agent: AgentId) -> u64 {
     cache_for(agent).map_or(0, |cache| cache.revision.current())
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn bump_revision(agent: AgentId) -> u64 {
+    cache_for(agent).map_or(0, |cache| cache.revision.bump())
 }
 
 pub fn forget_snapshot(

@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::hash::Hash;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -158,6 +160,15 @@ fn entries<K: DeserializeOwned + Eq + Hash, V>(
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn remembered_seconds(memo: &AtomicU64, load: impl FnOnce() -> u64) -> Duration {
+    let cached = memo.load(Ordering::Acquire);
+    if cached > 0 {
+        return Duration::from_secs(cached);
+    }
+    let _ = memo.compare_exchange(0, load(), Ordering::AcqRel, Ordering::Acquire);
+    Duration::from_secs(memo.load(Ordering::Acquire))
 }
 
 pub fn load_settings() -> AppSettings {

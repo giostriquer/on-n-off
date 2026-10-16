@@ -1,4 +1,7 @@
-use super::protocol::{decode_event, Action, MAX_MESSAGE};
+use super::host::frame::RailData;
+use super::host::{self, Inbound, Link, Transport, STOPPED};
+use super::model::NotchSnapshot;
+use super::protocol::{decode_event, encode, Action, MAX_MESSAGE};
 use std::{
     io::{BufRead, BufReader, Read, Write},
     path::PathBuf,
@@ -33,10 +36,14 @@ pub fn executable() -> Result<PathBuf, String> {
     Ok(binary)
 }
 
-pub struct Connection {
+const ACK_DEADLINE: Duration = Duration::from_secs(10);
+const STEADY: Duration = Duration::from_secs(30);
+const MAX_RETRY_SECONDS: u64 = 30;
+
+struct Connection {
     child: Arc<Mutex<Child>>,
     writer: Option<SyncSender<Vec<u8>>>,
-    pub events: Receiver<Result<Action, String>>,
+    events: Receiver<Result<Action, String>>,
 }
 
 #[derive(Default)]
@@ -49,11 +56,7 @@ struct LifetimeState {
 pub struct Lifetime(Mutex<LifetimeState>);
 
 impl Lifetime {
-    pub fn stopped(&self) -> bool {
-        self.0.lock().unwrap_or_else(|e| e.into_inner()).stopped
-    }
-
-    pub fn connect(&self) -> Result<Connection, String> {
+    fn connect(&self) -> Result<Connection, String> {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         if state.stopped {
             return Err("Native notch is shutting down.".into());
@@ -62,13 +65,154 @@ impl Lifetime {
         state.child = Some(connection.child.clone());
         Ok(connection)
     }
+}
 
-    pub fn shutdown(&self) {
+impl host::Lifetime for Lifetime {
+    fn stopped(&self) -> bool {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).stopped
+    }
+
+    fn shutdown(&self) {
         let mut state = self.0.lock().unwrap_or_else(|e| e.into_inner());
         state.stopped = true;
         if let Some(child) = state.child.take() {
             stop_child(&child);
         }
+    }
+}
+
+pub struct Pipe {
+    lifetime: Arc<Lifetime>,
+    connection: Option<Connection>,
+    connected_at: Instant,
+    sequence: u64,
+    awaiting_ack: Option<(u64, Instant)>,
+    next_start: Option<Instant>,
+    retry_delay: u64,
+}
+
+impl Pipe {
+    pub fn new() -> (Self, Arc<Lifetime>) {
+        let lifetime = Arc::new(Lifetime::default());
+        let pipe = Self {
+            lifetime: lifetime.clone(),
+            connection: None,
+            connected_at: Instant::now(),
+            sequence: 0,
+            awaiting_ack: None,
+            next_start: None,
+            retry_delay: 1,
+        };
+        (pipe, lifetime)
+    }
+
+    fn back_off(&mut self, now: Instant) {
+        self.next_start = Some(now + Duration::from_secs(self.retry_delay));
+        self.retry_delay = (self.retry_delay * 2).min(MAX_RETRY_SECONDS);
+    }
+
+    fn fail(&mut self, now: Instant, error: String) -> String {
+        self.connection = None;
+        self.awaiting_ack = None;
+        self.back_off(now);
+        error
+    }
+}
+
+impl Transport for Pipe {
+    fn connect(&mut self, now: Instant) -> Result<Link, String> {
+        if self.connection.is_some() {
+            return Ok(Link::Open);
+        }
+        if self.next_start.is_some_and(|at| now < at) {
+            return Ok(Link::Closed);
+        }
+        match self.lifetime.connect() {
+            Ok(connection) => {
+                self.connection = Some(connection);
+                self.connected_at = now;
+                Ok(Link::Opened)
+            }
+            Err(error) => {
+                self.back_off(now);
+                Err(error)
+            }
+        }
+    }
+
+    fn receive(&mut self, now: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
+        let Some(connection) = &self.connection else {
+            return Err(STOPPED.into());
+        };
+        let failure = loop {
+            let action = match connection.events.try_recv() {
+                Ok(Ok(Action::Ready)) => continue,
+                Ok(Ok(Action::Ack { sequence })) => {
+                    if self
+                        .awaiting_ack
+                        .is_some_and(|(awaited, _)| awaited == sequence)
+                    {
+                        self.awaiting_ack = None;
+                        if now.saturating_duration_since(self.connected_at) >= STEADY {
+                            self.retry_delay = 1;
+                        }
+                        inbound.push(Inbound::Confirmed);
+                    }
+                    continue;
+                }
+                Ok(Ok(Action::ScreensChanged)) => host::Action::ScreensChanged,
+                Ok(Ok(Action::Refresh)) => host::Action::Refresh,
+                Ok(Ok(Action::OpenLimits)) => host::Action::OpenLimits,
+                Ok(Ok(Action::OpenPullRequests)) => host::Action::OpenPullRequests,
+                Ok(Ok(Action::SetShow { show })) => host::Action::SetShow(show),
+                Ok(Err(error)) => break Some(error),
+                Err(mpsc::TryRecvError::Empty) => break None,
+                Err(mpsc::TryRecvError::Disconnected) => break Some(STOPPED.into()),
+            };
+            inbound.push(Inbound::Action(action));
+        };
+        let unanswered = self
+            .awaiting_ack
+            .is_some_and(|(_, sent)| now.saturating_duration_since(sent) > ACK_DEADLINE);
+        let failure = if unanswered {
+            Some("Native notch stopped responding. Retrying…".to_string())
+        } else {
+            failure
+        };
+        failure.map_or(Ok(()), |error| Err(self.fail(now, error)))
+    }
+
+    fn ready(&self) -> bool {
+        self.awaiting_ack.is_none()
+    }
+
+    fn send(
+        &mut self,
+        now: Instant,
+        snapshot: &NotchSnapshot,
+        frame: RailData,
+    ) -> Result<(), String> {
+        let Some(connection) = &self.connection else {
+            return Err(STOPPED.into());
+        };
+        self.sequence += 1;
+        match encode(self.sequence, snapshot, &frame).and_then(|message| connection.send(message)) {
+            Ok(()) => {
+                self.awaiting_ack = Some((self.sequence, now));
+                Ok(())
+            }
+            Err(error) => Err(self.fail(now, error)),
+        }
+    }
+
+    fn close(&mut self) {
+        self.connection = None;
+        self.awaiting_ack = None;
+        self.retry_delay = 1;
+    }
+
+    fn settings_changed(&mut self) {
+        self.next_start = None;
     }
 }
 
@@ -141,7 +285,7 @@ impl Connection {
             events,
         })
     }
-    pub fn send(&self, mut message: Vec<u8>) -> Result<(), String> {
+    fn send(&self, mut message: Vec<u8>) -> Result<(), String> {
         if message.len() > MAX_MESSAGE {
             return Err("Native notch snapshot is too large.".into());
         }

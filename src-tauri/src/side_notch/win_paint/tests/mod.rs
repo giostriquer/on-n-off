@@ -1,6 +1,8 @@
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading};
-use crate::side_notch::model::{Display, NotchSettings};
+use crate::side_notch::host::frame::{PrCellData, PrListData, ProviderData};
+use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
+use crate::side_notch::sessions::LiveSession;
 
 mod content;
 mod layout;

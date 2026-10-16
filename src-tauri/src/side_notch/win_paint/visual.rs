@@ -1,6 +1,8 @@
 use super::*;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
-use crate::side_notch::model::{Display, NotchSettings, ShowMode, RAIL_ORDER};
+use crate::side_notch::host::frame::{PrCellData, PrListData, ProviderData};
+use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
+use crate::side_notch::sessions::LiveSession;
 
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
     Display {
@@ -171,6 +173,7 @@ fn visual_dump() {
                     title: format!("Fix the flaky resize test number {n} on Windows builds"),
                     url: format!("https://github.com/octo/tools/pull/{n}"),
                     repo: "octo/tools".into(),
+                    author: "octocat".into(),
                     is_draft: n == 2,
                     review_decision: if n % 2 == 0 {
                         Some(ReviewDecision::Approved)
@@ -183,6 +186,7 @@ fn visual_dump() {
                         CiState::Success
                     },
                     merge_kind: if n == 1 { Some(MergeKind::Ready) } else { None },
+                    updated_at: "2026-09-01T10:00:00Z".into(),
                     context: Some(if n == 3 {
                         PrContext::Personal
                     } else {

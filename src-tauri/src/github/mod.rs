@@ -9,6 +9,7 @@ mod snapshot;
 mod tests;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -29,6 +30,7 @@ const RATE_LIMIT_FALLBACK_SECS: i64 = 60;
 
 static READ_LOCK: Mutex<()> = Mutex::new(());
 static READ_MEMO: ReadMemo = ReadMemo::new();
+pub(crate) static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 type Failure = (GithubStatus, String);
 
@@ -81,9 +83,25 @@ pub fn read_prs_revisioned(force: bool) -> (GithubPrsDto, u64) {
     (dto, reading.revision())
 }
 
-#[cfg(target_os = "macos")]
+pub fn set_poll_seconds(seconds: u16) {
+    POLL_SECONDS.store(u64::from(seconds), Ordering::Release);
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub(crate) fn poll_interval_in(memo: &AtomicU64) -> std::time::Duration {
+    settings::remembered_seconds(memo, || {
+        u64::from(settings::load_settings().github_poll_seconds)
+    })
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn revision() -> u64 {
     READ_MEMO.revision.current()
+}
+
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub(crate) fn bump_revision() -> u64 {
+    READ_MEMO.revision.bump()
 }
 
 fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::side_notch::host::frame::{CellData, ProviderData};
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::win_paint::R;
 use std::time::Duration;
@@ -32,7 +33,7 @@ fn settings(show: ShowMode) -> NotchSettings {
 fn data(show: ShowMode) -> RailData {
     RailData {
         settings: settings(show),
-        cells: vec![win_paint::CellData::Provider(win_paint::ProviderData {
+        cells: vec![CellData::Provider(ProviderData {
             cell: NotchProvider::current(vec![crate::limits::signed_in_card(
                 AgentId::Claude,
                 "acct",
@@ -450,4 +451,17 @@ fn a_notch_hidden_for_a_full_screen_app_or_by_itself_is_not_raised() {
     }
     keep_on_top(overlay.0, false);
     assert!(is_above(&ordinary, &overlay), "raised while hidden");
+}
+
+#[test]
+fn the_screens_change_only_after_the_first_read() {
+    let mut machine = Machine::new();
+    assert!(
+        !machine.set_displays(vec![display("d1", false)]),
+        "the first read is what the host started with"
+    );
+    assert!(!machine.set_displays(vec![display("d1", false)]));
+    assert!(machine.set_displays(vec![display("d1", false), display("d2", false)]));
+    assert!(machine.set_displays(Vec::new()), "a read that failed");
+    assert!(machine.set_displays(vec![display("d1", true)]));
 }

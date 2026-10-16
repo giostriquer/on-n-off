@@ -5,70 +5,15 @@ mod text;
 
 use super::model::{
     layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
-    workspace_share_wording, Edge, GithubList, InnerRing, NotchProvider, NotchSettings, NotchSize,
-    PrContext, ShowMode,
+    workspace_share_wording, Edge, GithubList, InnerRing, NotchSettings, NotchSize, PrContext,
+    ShowMode,
 };
 use crate::dto::{
     AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
 };
-use crate::side_notch::sessions::LiveSession;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct RailData {
-    pub settings: NotchSettings,
-    pub cells: Vec<CellData>,
-    pub action_error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CellData {
-    Provider(ProviderData),
-    PullRequests(PrCellData),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProviderData {
-    pub cell: NotchProvider,
-    pub sessions: Vec<LiveSession>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrCellData {
-    pub status: GithubStatus,
-    pub hint: Option<String>,
-    pub stale: bool,
-    pub lists: Vec<PrListData>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrListData {
-    pub id: GithubList,
-    pub total: u64,
-    pub items: Vec<PrRowData>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrRowData {
-    pub id: String,
-    pub number: u64,
-    pub title: String,
-    pub url: String,
-    pub repo: String,
-    pub is_draft: bool,
-    pub review_decision: Option<ReviewDecision>,
-    pub ci: CiState,
-    pub merge_kind: Option<MergeKind>,
-    pub context: Option<PrContext>,
-}
-
-impl PrRowData {
-    pub fn keeps(url: &str) -> bool {
-        url.starts_with("https://github.com/")
-    }
-}
-
-pub const MAX_PULL_REQUESTS: usize = 25;
+use super::host::frame::{CellData, PrRowData, RailData};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {

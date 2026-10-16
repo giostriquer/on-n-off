@@ -42,14 +42,17 @@ intervals or the hour. So a failing native read never delays the other provider,
 figure never delays the usage read it rides on. A forced read bypasses the native
 backoff but not a saved profile's after a failure, nor a backend figure's.
 
-Two directions, because the Rust consumers can poll a counter and the WebViews cannot.
+Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
+notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll
+per provider and one for pull requests, each due as soon as the shared cache's revision is newer
+than the one its last read reported, without waiting for its interval.
 
 ```mermaid
 flowchart TB
     cache["Shared cache<br/><b>Revision</b> moves once per replacement"]
 
     subgraph pull["Pull — Rust consumers"]
-        notch["Notch Poll::due<br/><i>compares the revision it read at<br/>against the one now current</i>"]
+        notch["Notch host Poll::due<br/><i>compares the revision it read at<br/>against the one now current</i>"]
     end
 
     subgraph push["Push — WebViews"]

@@ -8,13 +8,63 @@ open. It is the only part of the product that is not a WebView. It exists twice:
 bundled helper executable, on Windows 11 as a window the app paints itself. Rust owns the settings
 and the data on both, and both draw the same rail and popovers from the same layout maths.
 
+## One host, two transports
+
+`host.rs` is the only supervisor, on both platforms. It owns the settings snapshot the notch is
+drawn for, a poll per provider and one each for sessions and pull requests, the actions both
+notches report (refresh, open Limits or Pull requests, show on hover), the status it emits as
+`side-notch-changed`, and the one projection of what it read into the rail frame (`RailData`): the
+selected providers that have been read, in rail order, with their sessions, then the pull request
+cell when it is on and has been read, each list keeping at most 25 rows and only those on
+github.com, each row with its context. The frame and that projection are `host/frame.rs`; the
+Tauri side, the supervisor thread and the app the host reads through (`Production`, which opens
+windows and emits through the `AppHandle`), is `host/app.rs`. The host keeps no interval of its
+own: it asks `Production` for the limits check interval and the pull request interval at every
+check. Both come from the settings once, are then held in memory (`settings::remembered_seconds`
+over `limits_refresh::POLL_SECONDS` and `github::POLL_SECONDS`), and are replaced when settings
+are saved.
+
+What differs between the platforms is how a frame reaches the pixels and how actions come back.
+That is the `Transport` the host is given, and it is the only thing that differs:
+
+- **macOS, `transport.rs` (`Pipe`).** Starts the helper, sends each frame as one protocol-6 line
+  (`protocol::encode`) and waits for its ack before sending the next. A helper that fails to start,
+  exits or acks nothing for 10 s is started again after a wait of 1 s, doubling to 30 s; new
+  settings try again at once, and an ack after 30 s up, or turning the notch off, sets the wait back
+  to 1 s. Its time is the host's, passed in on every call, so its tests run on a clock of their own.
+- **Windows, `win_transport.rs` (`Overlay`).** Starts the window thread, hands it each frame over a
+  channel, pings it every tick to notice it died, and confirms each frame the window took, which
+  clears the error a lost window left. It carries out the two actions only it has, opening a pull
+  request and copying a review request, and gives the host their result to show.
+
+Both report a screen change, which makes the host re-read the displays and the limits: the helper
+when macOS says the screens changed, the Windows window when its screen poll reads other displays
+than the last time.
+
+Things that are easy to get wrong:
+
+- **A platform difference goes in its transport, never in a second loop.** There used to be one
+  loop per platform, and they drifted: the Windows one never learned the
+  [shared-read revisions](shared-reads.md), so a refresh on the Limits screen reached the Windows
+  notch only on its next interval, and it redrew after every Limits read whether or not it changed.
+- **A read redraws only when it changed what the frame shows.** Otherwise a frame goes out on the
+  30 s heartbeat, and after an action or new settings.
+- **What only one transport reports is gated to its platform** (and to test builds): a wait before
+  retrying on macOS, an action the transport carried out on Windows.
+- **The host's rules are tested on every OS** through a fake transport and a fake `App`
+  (`host/tests/`), the seam that stands for the reads, the settings store and the windows it opens.
+  `host/tests/wire.rs` pins the exact bytes the helper receives; `transport/tests.rs` the pipe's
+  acks, waits and frame numbers; `host/app/tests.rs` that `Production` follows the shared reads'
+  own revisions and intervals; `win_transport/tests.rs`, on Windows only, the overlay.
+
 ## On macOS
 
 ```mermaid
 flowchart LR
     subgraph rust["Rust — owns the state"]
         cfg["config.rs<br/>~/.on-n-off/side-notch.json"]
-        win["window.rs<br/><i>supervisor loop</i>"]
+        host["host.rs<br/><i>the one supervisor</i>"]
+        pipe["transport.rs · protocol.rs<br/><i>the pipe transport</i>"]
         sess["sessions.rs<br/><i>~/.claude/sessions/*.json +<br/>recent Codex rollouts, read-only</i>"]
         model["model.rs<br/><i>layout, mirrored ·<br/>each cell's rings</i>"]
     end
@@ -26,11 +76,12 @@ flowchart LR
 
     reads["limits_refresh · github<br/><i>current-account numbers only</i>"]
 
-    reads --> win
-    sess --> win
-    cfg --> win
-    win -->|"snapshots →<br/>bounded private pipe"| panel
-    panel -->|"← typed actions<br/>refresh · open · setShow"| win
+    reads --> host
+    sess --> host
+    cfg --> host
+    host -->|frames| pipe
+    pipe -->|"snapshots →<br/>bounded private pipe"| panel
+    panel -->|"← typed actions<br/>refresh · open · setShow"| pipe
     core --- panel
     model -.->|"same pure layout,<br/>checked by NotchCoreChecks"| core
 ```
@@ -109,8 +160,8 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
 non-activating `tao` window per selected display and presents it with `UpdateLayeredWindow`;
 `win_paint.rs` draws the rail, the marks and the popovers into a tiny-skia pixmap; `win_displays.rs`
-enumerates monitors; and `win_host.rs` is the `window.rs` supervisor with in-process channels where
-macOS has pipes. The display is chosen by device name rather than UUID, and the same rule holds —
+enumerates monitors; and `win_transport.rs` is the host's Windows transport, in-process channels
+where macOS has pipes. The display is chosen by device name rather than UUID, and the same rule holds —
 a disconnected or mirrored selection hides the notch. Windows 11 is the floor
 (`CurrentBuildNumber` >= 22000); the settings card says so on older builds.
 

@@ -612,3 +612,9 @@ fn the_memory_window_follows_the_current_poll_interval() {
         "a shorter interval shrinks the window"
     );
 }
+
+#[test]
+fn a_saved_pull_request_interval_replaces_the_remembered_one() {
+    set_poll_seconds(120);
+    assert_eq!(POLL_SECONDS.load(Ordering::Acquire), 120);
+}
