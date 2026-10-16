@@ -660,6 +660,37 @@ fn a_state_written_before_alerts_keeps_its_limit_baselines() {
 }
 
 #[test]
+fn a_state_file_with_alerts_reads_and_writes_back_as_it_was() {
+    let root = scratch_dir("limits-monitor-alert-shape");
+    let path = root.join("monitor.json");
+    let document = serde_json::json!({
+        "schema_version": 2,
+        "providers": {"codex": {"account_id": "acct-codex", "windows": {"weekly": {
+            "used_percent": 95.0,
+            "resets_at": "2026-08-24T12:00:00+00:00",
+            "observed_at": "2026-08-19T12:00:00Z",
+            "exhausted": false
+        }}}},
+        "reset_alerts": {
+            "acct-codex": {
+                "low": {"cycle": "2026-08-24T12:00:00+00:00", "observedAt": "2026-08-19T12:00:00Z"},
+                "offeredCycle": "2026-08-17T12:00:00+00:00"
+            },
+            "acct-other": {"low": null, "offeredCycle": null}
+        }
+    });
+    fs::write(&path, document.to_string()).unwrap();
+
+    let state = load_state(&path);
+    monitor::save_state(&path, &state).unwrap();
+
+    let written: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(written, document);
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn an_offer_is_not_made_again_after_a_restart() {
     let now = chrono::DateTime::parse_from_rfc3339("2026-08-19T13:00:00Z")
         .unwrap()

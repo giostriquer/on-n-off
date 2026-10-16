@@ -464,3 +464,33 @@ fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
     assert!(settings.close_to_tray);
     assert_eq!(settings.github_scopes, ["org:acme"]);
 }
+
+#[test]
+fn a_reset_alert_is_written_and_received_in_its_settings_shape() {
+    let alert = ResetAlert {
+        label: Some("you@example.com".into()),
+        max_left_percent: 4,
+        min_hours_to_renewal: 36,
+        automatic: true,
+    };
+
+    assert_eq!(
+        serde_json::to_value(&alert).unwrap(),
+        serde_json::json!({
+            "label": "you@example.com",
+            "maxLeftPercent": 4,
+            "minHoursToRenewal": 36,
+            "automatic": true
+        })
+    );
+    assert_eq!(
+        serde_json::from_value::<ResetAlert>(serde_json::json!({})).unwrap(),
+        ResetAlert {
+            label: None,
+            max_left_percent: 5,
+            min_hours_to_renewal: 24,
+            automatic: false,
+        },
+        "an alert received over IPC without its figures"
+    );
+}

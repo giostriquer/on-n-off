@@ -368,6 +368,10 @@ fn the_waiting_spends_move_through_their_life_and_every_change_is_told() {
             due_at: "2026-10-01T12:10:00Z".into(),
         }]
     );
+    assert_eq!(
+        serde_json::to_value(listed()).unwrap(),
+        serde_json::json!([{"accountId": "acct", "dueAt": "2026-10-01T12:10:00Z"}])
+    );
     assert_eq!(next_due(), Some(minutes_after_now(10)));
     assert!(!any_due(minutes_after_now(9)));
     assert!(any_due(minutes_after_now(10)));
