@@ -80,7 +80,7 @@ fn active_interval(entries: &[ProviderLimitsDto], default: Duration) -> Duration
         .filter(|used| used.is_finite())
         .reduce(f64::max);
     if used.is_some_and(|used| (90.0..100.0).contains(&used)) {
-        default.min(CHECK_INTERVAL)
+        check_interval(default)
     } else {
         default
     }
