@@ -1,5 +1,6 @@
+import { USAGE_PROVIDERS } from "./providers";
 import type { AgentId } from "./types";
-import { PROVIDERS, type FoldedUsage, type PeriodTotals } from "./usageMerge";
+import type { FoldedUsage, PeriodTotals } from "./usageMerge";
 import type { UsageMetric } from "./usageTypes";
 import { enumerateDays, enumerateHourStarts, formatDayShort } from "./usageFormat";
 
@@ -58,7 +59,7 @@ export function buildChartSeries(args: {
 
   const columns: ChartColumn[] = keys.map((key) => {
     const period = byKey.get(key);
-    const bands = PROVIDERS.map((provider) => ({
+    const bands = USAGE_PROVIDERS.map((provider) => ({
       provider,
       value: periodValue(period, provider, metric),
     }));

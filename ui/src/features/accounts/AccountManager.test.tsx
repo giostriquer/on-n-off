@@ -3,11 +3,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Profiler } from "react";
 import { afterEach, it, expect, vi } from "vitest";
 import * as api from "$lib/api";
+import type { AccountsReading } from "$lib/accountTypes";
+import { accountListQuery } from "$lib/sharedReads/accounts";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
 import { AccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
-vi.mock("$lib/useSharedRead", () => ({ useSharedRead: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
 const forget = vi.fn().mockResolvedValue(undefined);
@@ -128,6 +129,56 @@ it("keeps email as the account name and allows a free-text category to be edited
   fireEvent.change(screen.getByRole("textbox", { name: "Category (optional)" }), { target: { value: "" } });
   fireEvent.click(screen.getByRole("button", { name: "Save category" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
+});
+it("re-reads both account lists, the Codex subscription dates and that provider's limits after an account action, and no other read", async () => {
+  const client = setup();
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  const others = [["limits", "codex"], ["limits", "claude"], ["subscription", "codex", "profile:billing-a"], ["github", "prs"], ["reset-spends"]];
+  for (const key of others) client.setQueryData(key, []);
+  expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"]]);
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  await waitFor(() => expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"], ["claude"], ["codex"]]));
+  expect(others.map(key => client.getQueryState(key)?.isInvalidated)).toEqual([true, false, true, false, false]);
+});
+it("re-reads the account lists and the remembering preference, not the subscription dates, when automatic saving changes", async () => {
+  const client = setup({ preferences: true });
+  const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  client.setQueryData(["accounts", "codex"], { profiles: [] });
+  client.setQueryData(["subscription", "codex", "profile:billing-a"], null);
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(api.readAccountPreferences).toHaveBeenCalledTimes(2));
+  expect(client.getQueryState(["accounts", "codex"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["subscription", "codex", "profile:billing-a"])?.isInvalidated).toBe(false);
+});
+function openSignOut(card: HTMLElement) {
+  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
+  return within(card).getByRole("button", { name: "Sign out" });
+}
+it("signs the signed-in account out once confirmed, and closes the confirmation", async () => {
+  setup({ signedIn: true });
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  const signOut = openSignOut(card);
+  await waitFor(() => expect(signOut).toBeEnabled());
+  fireEvent.click(signOut);
+  fireEvent.click(within(card).getByRole("button", { name: "Confirm sign out" }));
+  await waitFor(() => expect(vi.mocked(api.accountAction).mock.calls).toEqual([["codex", "signOut", undefined, undefined]]));
+  await waitFor(() => expect(within(card).queryByRole("group", { name: "Confirm account action" })).toBeNull());
+});
+it("refuses a sign-out confirmed after the cached account list already names another signed-in account, before the card redraws", async () => {
+  const client = setup({ signedIn: true });
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  const signOut = openSignOut(card);
+  await waitFor(() => expect(signOut).toBeEnabled());
+  fireEvent.click(signOut);
+  const confirm = within(card).getByRole("button", { name: "Confirm sign out" });
+  const { queryKey } = accountListQuery("codex");
+  client.setQueryData<AccountsReading>(queryKey, (reading) => reading && { ...reading, nativeObservationId: "profile:billing-b" });
+  expect(confirm, "the card has not redrawn from the new list yet").toBeEnabled();
+  fireEvent.click(confirm);
+  expect(within(card).queryByRole("group", { name: "Confirm account action" })).toBeNull();
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  expect(api.accountAction).not.toHaveBeenCalled();
 });
 it("requires opt-in in Settings before automatically saving accounts", async () => {
   setup({ preferences: true }); const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" });

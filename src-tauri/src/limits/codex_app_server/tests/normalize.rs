@@ -10,7 +10,7 @@ fn normalizes_the_chatgpt_account_and_rate_limits_without_reading_a_token() {
     .unwrap();
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let parsed = normalize_app_server(
-        AppServerResult {
+        AppServerAnswers {
             codex_home,
             account: typed(json!({
                 "account": {
@@ -57,7 +57,7 @@ fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
     let codex_home = crate::paths::scratch_dir("codex-app-server-email");
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let parsed = normalize_app_server(
-        AppServerResult {
+        AppServerAnswers {
             codex_home,
             account: typed(json!({
                 "account": {
@@ -87,7 +87,7 @@ fn falls_back_to_a_normalized_email_identity_when_codex_has_no_account_id() {
 #[test]
 fn api_key_accounts_are_explicitly_unsupported() {
     let error = normalize_app_server(
-        AppServerResult {
+        AppServerAnswers {
             codex_home: crate::paths::scratch_dir("codex-app-server-api-key"),
             account: typed(json!({
                 "account": {"type": "apiKey"},
@@ -121,7 +121,7 @@ fn scoped_codex_observation_carries_its_previous_workspace_key() {
     )
     .unwrap();
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
-    let parsed = normalize_app_server(AppServerResult {
+    let parsed = normalize_app_server(AppServerAnswers {
         codex_home,
         account: typed(json!({"account":{"type":"chatgpt", "email":"me@example.com", "planType":"pro"}, "requiresOpenaiAuth":true})),
         rate_limits: typed(json!({"rateLimits":{"planType":"pro"}})),
@@ -154,28 +154,25 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
             };
             write_identity("user-1", "workspace-1");
             let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
-            let mut transport = FakeTransport {
-                received: VecDeque::from([
-                    json!({"id":1,"result":{"codexHome":codex_home}}),
-                    json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":plan}}}),
-                    json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
-                ]),
-                sent: vec![],
-            };
-            let session = query_app_server(&codex_home, false, &mut transport).unwrap();
+            let script = Script::new([
+                json!({"id":1,"result":{"codexHome":codex_home}}),
+                json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":plan}}}),
+                json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
+            ]);
+            let answers = query(&script, &codex_home, false).unwrap();
             write_identity(user, workspace);
             assert!(
-                matches!(normalize_app_server(session, before), Err(AppServerFailure::Failed(message)) if message.contains("changed")),
+                matches!(normalize_app_server(answers, before), Err(AppServerFailure::Failed(message)) if message.contains("changed")),
                 "{plan}: {user} / {workspace}"
             );
         }
     }
 }
 
-fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Value)>) {
+fn signed_in_on(plan: &str, name: &str) -> (AppServerAnswers, Option<(String, Value)>) {
     let codex_home = business_home(name).join(".codex");
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
-    let session = AppServerResult {
+    let answers = AppServerAnswers {
         codex_home,
         account: typed(json!({
             "account": {"type": "chatgpt", "email": "you@example.com", "planType": plan},
@@ -183,14 +180,14 @@ fn signed_in_on(plan: &str, name: &str) -> (AppServerResult, Option<(String, Val
         })),
         rate_limits: typed(json!({"rateLimits": {"planType": plan}})),
     };
-    (session, before)
+    (answers, before)
 }
 
 #[test]
 fn a_workspace_plan_takes_its_access_from_the_identity_check() {
-    let (session, before) = signed_in_on("business", "codex-app-server-access");
+    let (answers, before) = signed_in_on("business", "codex-app-server-access");
 
-    let (parsed, access) = normalize_app_server(session, before).unwrap();
+    let (parsed, access) = normalize_app_server(answers, before).unwrap();
 
     let access = access.unwrap();
     assert_eq!(
@@ -203,9 +200,9 @@ fn a_workspace_plan_takes_its_access_from_the_identity_check() {
 
 #[test]
 fn a_personal_plan_takes_the_access_projection_too_for_the_term_read() {
-    let (session, before) = signed_in_on("pro", "codex-app-server-no-access");
+    let (answers, before) = signed_in_on("pro", "codex-app-server-no-access");
 
-    let (parsed, access) = normalize_app_server(session, before).unwrap();
+    let (parsed, access) = normalize_app_server(answers, before).unwrap();
 
     assert_eq!(
         access.map(|access| access.observation_key),
@@ -218,7 +215,7 @@ fn a_personal_plan_takes_the_access_projection_too_for_the_term_read() {
 fn the_accounts_plan_decides_the_card() {
     let codex_home = business_home("codex-app-server-plan-precedence").join(".codex");
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
-    let session = AppServerResult {
+    let answers = AppServerAnswers {
         codex_home,
         account: typed(json!({
             "account": {"type": "chatgpt", "email": "you@example.com", "planType": "business"},
@@ -227,7 +224,7 @@ fn the_accounts_plan_decides_the_card() {
         rate_limits: typed(json!({"rateLimits": {"planType": "pro"}})),
     };
 
-    let (parsed, access) = normalize_app_server(session, before).unwrap();
+    let (parsed, access) = normalize_app_server(answers, before).unwrap();
 
     assert_eq!(parsed.reading.plan.as_deref(), Some("business"));
     assert_eq!(

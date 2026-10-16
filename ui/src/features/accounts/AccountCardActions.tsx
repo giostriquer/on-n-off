@@ -1,7 +1,9 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
+import type { SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
+import { providerLabel } from "$lib/providers";
+import { cachedAccountList } from "$lib/sharedReads/accounts";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
@@ -66,7 +68,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     void use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
   }
   async function confirm() {
-    if (confirmation === "signOut" && (!current || !nativeMatches || client.getQueryData<AccountsReading>(["accounts", provider])?.nativeObservationId !== accountId)) { setPanel(null); return; }
+    if (confirmation === "signOut" && (!current || !nativeMatches || cachedAccountList(client, provider)?.nativeObservationId !== accountId)) { setPanel(null); return; }
     setError(null); setRemoving(true);
     try {
       if (confirmation === "signOut") await action("signOut");
@@ -125,7 +127,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {primaryAction()}
       {switchingAlongside
-        ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}
+        ? <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchingAlongside.clients} disabled={!!disabled}
           onSwitch={() => { setClients(null); void action("useAlongsideClients", switchingAlongside.profile.id).catch(() => {}); }}
           onCancel={() => { setClients(null); useButton.current?.focus(); }} />
         : footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}

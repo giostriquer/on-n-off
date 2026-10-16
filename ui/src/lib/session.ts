@@ -1,4 +1,5 @@
-import type { AgentId, AgentInfo, AgentTabDto } from "./types";
+import { PROVIDER_IDS, providerLabel } from "./providers";
+import type { AgentInfo, AgentTabDto } from "./types";
 
 export type TabState = {
   dto: AgentTabDto | null;
@@ -9,68 +10,16 @@ export type TabState = {
   error: string | null;
 };
 
-export const LOCKED_AGENTS: AgentInfo[] = [
-  {
-    id: "claude",
-    displayName: "Claude",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "codex",
-    displayName: "Codex",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "antigravity",
-    displayName: "Antigravity",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "cursor",
-    displayName: "Cursor",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "muse",
-    displayName: "Muse",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-];
-
-export function emptyAgentRecord<T>(value: () => T): Record<AgentId, T> {
-  return {
-    claude: value(),
-    codex: value(),
-    antigravity: value(),
-    cursor: value(),
-    muse: value(),
-  };
-}
+export const LOCKED_AGENTS: readonly AgentInfo[] = PROVIDER_IDS.map((id) => ({
+  id,
+  displayName: providerLabel(id),
+  cliOk: false,
+  cliError: null,
+  installGit: false,
+  installFolder: false,
+  pluginToggle: false,
+  readsHooks: false,
+}));
 
 export function emptyTab(): TabState {
   return {

@@ -18,8 +18,11 @@ use crate::dto::{
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
+use crate::reset_alert::ResetSpend;
 
 const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
+
+const RESET_TOLERANCE_SECONDS: i64 = 2;
 
 const HIDDEN_BUCKETS: [&str; 2] = ["base_model_inference", "codex_bengalfox"];
 const HIDDEN_NAMES: [&str; 2] = ["gpt-reserve", "gpt-5.3-codex-spark"];
@@ -281,6 +284,10 @@ fn workspace_credits(
     })
 }
 
+pub(crate) fn same_reset_instant(one: DateTime<Utc>, other: DateTime<Utc>) -> bool {
+    (one - other).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
+}
+
 fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
     DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
@@ -396,12 +403,6 @@ pub(crate) fn codex_card(
     super::signed_in_card(AgentId::Codex, account_id, reading)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResetSpend {
-    ByHand,
-    Automatic { max_left_percent: u8 },
-}
-
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
@@ -483,11 +484,12 @@ fn backend_figures(
         .plan
         .as_deref()
         .is_some_and(credits_spent::is_codex_workspace_plan);
-    card.reading.credits_spent = access
-        .filter(|_| workspace)
-        .and_then(|access| credits_spent::read_backed_off(access, urls.credit_usage, now));
-    card.reading.subscription =
-        access.and_then(|access| renewal::read_backed_off(access, urls.subscriptions, now));
+    let interval = crate::limits_refresh::poll_interval();
+    card.reading.credits_spent = access.filter(|_| workspace).and_then(|access| {
+        credits_spent::read_backed_off(access, urls.credit_usage, interval, now)
+    });
+    card.reading.subscription = access
+        .and_then(|access| renewal::read_backed_off(access, urls.subscriptions, interval, now));
 }
 
 fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {

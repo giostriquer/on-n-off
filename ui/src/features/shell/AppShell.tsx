@@ -18,6 +18,8 @@ import { preloadUsageChart } from "@/features/usage/LazyUsageChart";
 import { globalItemCount, tallyLine, type Screen } from "$lib/catalog";
 import { copy } from "$lib/copy";
 import * as api from "$lib/api";
+import { rereadAccountListsAndPreference } from "$lib/sharedReads/accounts";
+import { refreshLimits } from "$lib/sharedReads/limits";
 import type { AgentInfo } from "$lib/types";
 import { useQueryClient } from "@tanstack/react-query";
 import markUrl from "../../../../src-tauri/icons/128x128.png";
@@ -62,7 +64,6 @@ export function AppShell() {
     pickProjectFolder,
     openProjectPath,
     masterCut,
-    pickFolder,
     install,
     installItems,
     installBusy,
@@ -71,7 +72,7 @@ export function AppShell() {
 
   async function refresh() {
     setRefreshingReads(true);
-    try { await Promise.allSettled([refreshAll(), import("@/features/limits/useLimitsProviders").then(({ refreshLimits }) => refreshLimits(client)), client.invalidateQueries({ queryKey: ["accounts"] })]); }
+    try { await Promise.allSettled([refreshAll(), refreshLimits(client), rereadAccountListsAndPreference(client)]); }
     finally { setRefreshingReads(false); }
   }
 
@@ -294,7 +295,7 @@ export function AppShell() {
             }
             return result;
           }}
-          onPickFolder={pickFolder}
+          onPickFolder={api.pickFolder}
         />
       ) : null}
 

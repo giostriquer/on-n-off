@@ -478,7 +478,7 @@ fn popover_entries(
                 y,
                 inner_w - v(13.0) - v(7.0),
                 line_h(13.0, TextWeight::Semibold),
-                format!("{} Usage", provider_name(provider.provider)),
+                format!("{} Usage", provider.provider.display_name()),
                 v(13.0),
                 TextWeight::Semibold,
                 [255, 255, 255, 255],
@@ -1163,16 +1163,6 @@ fn ci_color(ci: CiState) -> Color {
         CiState::Failure | CiState::Error => TRIP_RED,
         CiState::Pending => WARN_AMBER,
         CiState::None => UNREADABLE_INK,
-    }
-}
-
-fn provider_name(provider: AgentId) -> &'static str {
-    match provider {
-        AgentId::Claude => "Claude",
-        AgentId::Codex => "Codex",
-        AgentId::Antigravity => "Antigravity",
-        AgentId::Cursor => "Cursor",
-        AgentId::Muse => "Muse",
     }
 }
 

@@ -9,13 +9,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub mod frame;
 
-pub const RAIL_ORDER: [AgentId; 5] = [
-    AgentId::Claude,
-    AgentId::Codex,
-    AgentId::Muse,
-    AgentId::Antigravity,
-    AgentId::Cursor,
-];
+pub use crate::provider_catalogue::RAIL_ORDER;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -162,7 +156,7 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            providers: vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
+            providers: crate::provider_catalogue::WITH_LIMITS.to_vec(),
             pull_requests: NotchPullRequests::default(),
             popover_style: NotchStyle::default(),
         }

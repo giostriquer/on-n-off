@@ -8,6 +8,14 @@ Where each term lives in code: the Glossary in
 
 ## Language
 
+### Providers
+
+**Provider catalogue**:
+Every provider on-n-off knows, in tab order, with one row of facts about each: its key, names and
+CLI, and which of Limits, Usage and saved accounts it has, beside the side notch's order. Every list
+of providers the Rust side and the UI keep is drawn from it; the notch helper still keeps its own.
+_Avoid_: registry, provider list
+
 ### Limits
 
 **Quota window**:
@@ -56,6 +64,14 @@ user cancels it on the account's card. An automatic spend happens only with 5% o
 left, or the alert's lower share, and an alert acts at most once a weekly cycle. A reset used by
 hand from the card is never refused for what is left; above that share its confirmation warns.
 _Avoid_: auto-reset
+
+**Failure backoff**:
+How long a Limits read waits after failing before it is made again: its poll interval doubled for
+each failure in a row, at most sixteen intervals and never more than an hour. The signed-in
+account's read, each saved profile and each Codex backend figure count their own failures; a
+success starts the count over. A backend figure starts one doubling behind the others: one
+interval after its first failure, where they wait two.
+_Avoid_: retry delay, cooldown
 
 ### Accounts
 

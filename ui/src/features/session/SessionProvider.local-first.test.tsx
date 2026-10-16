@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AGENT_KEY, SCOPE_KEY, SessionProvider, useAgentSession } from "./SessionProvider";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -132,14 +134,9 @@ const AGENTS: AgentInfo[] = [
   },
 ];
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () =>
-    Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {}, automaticUpdates: true }),
+  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
   listAgents: () => {
     state.events.push("agents");
     return Promise.resolve(AGENTS);
@@ -219,6 +216,7 @@ function renderSession() {
     <SessionProvider>
       <Probe />
     </SessionProvider>,
+    { wrapper: AppSettingsProvider },
   );
 }
 
@@ -262,8 +260,10 @@ describe("SessionProvider local-first startup", () => {
 
     renderSession();
 
-    await waitFor(() => expect(screen.getByTestId("plugin-id")).toHaveTextContent("workbench@workshop"));
-    expect(screen.getByTestId("ready")).toHaveTextContent("yes");
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-id")).toHaveTextContent("workbench@workshop");
+      expect(screen.getByTestId("ready")).toHaveTextContent("yes");
+    });
     expect(screen.getByTestId("busy")).toHaveTextContent("no");
     expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0");
     await waitFor(() => {

@@ -16,8 +16,8 @@ mod snapshots;
 
 #[cfg(test)]
 pub(crate) use codex::codex_card;
-pub use codex::{consume_codex_reset_credit, ResetSpend};
-pub(crate) use codex::{read_saved_codex, CodexEndpoints};
+pub use codex::consume_codex_reset_credit;
+pub(crate) use codex::{read_saved_codex, same_reset_instant, CodexEndpoints};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 
@@ -129,30 +129,34 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
-    let _provider_guard = match agent {
-        AgentId::Claude | AgentId::Codex | AgentId::Muse => Some(provider_read_guard(agent)),
+type Reader = fn(&Path, bool) -> ProviderLimitsDto;
+
+fn limits_reader(agent: AgentId) -> Option<Reader> {
+    match agent {
+        AgentId::Claude => Some(|home, _| claude::claude_current(home)),
+        AgentId::Codex => Some(codex::codex_limits),
+        AgentId::Muse => Some(|home, _| muse::muse_current(home)),
         AgentId::Antigravity | AgentId::Cursor => None,
+    }
+}
+
+fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
+    let Some(read) = limits_reader(agent) else {
+        return vec![finish(
+            agent,
+            LimitsStatus::Unsupported,
+            Some(format!(
+                "{} has no subscription limits to show.",
+                agent.display_name()
+            )),
+            Parsed::default(),
+        )];
     };
+    let _provider_guard = provider_read_guard(agent);
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let current = match agent {
-        AgentId::Claude => claude::claude_current(home),
-        AgentId::Codex => codex::codex_limits(home, force),
-        AgentId::Muse => muse::muse_current(home),
-        AgentId::Antigravity | AgentId::Cursor => {
-            return vec![finish(
-                agent,
-                LimitsStatus::Unsupported,
-                Some(format!(
-                    "{} has no subscription limits to show.",
-                    agent.display_name()
-                )),
-                Parsed::default(),
-            )]
-        }
-    };
+    let current = read(home, force);
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current);
     if agent == AgentId::Codex {

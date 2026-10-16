@@ -174,6 +174,30 @@ fn fold_splits_rows_by_provider_and_model() {
 }
 
 #[test]
+fn a_saved_row_names_its_provider_by_key() {
+    let history = folded(
+        &[
+            record("2026-08-07T04:01:00Z", |_| {}),
+            record("2026-08-07T04:02:00Z", |r| {
+                r.provider = UsageProvider::Codex
+            }),
+            record("2026-08-07T04:03:00Z", |r| r.provider = UsageProvider::Muse),
+        ],
+        "2026-09-01T00:00:00Z",
+    );
+
+    let document: serde_json::Value = serde_json::from_str(&encode(&history)).unwrap();
+    let providers: Vec<&str> = document["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row[1].as_str().unwrap())
+        .collect();
+    assert_eq!(providers, ["claude", "codex", "muse"]);
+    assert_eq!(decode(&document.to_string()).unwrap(), history);
+}
+
+#[test]
 fn fold_never_moves_the_watermark_back() {
     let mut history = UsageHistory::default();
     history.fold(&[], ms("2026-08-15T00:00:00Z"), 0);

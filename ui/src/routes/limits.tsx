@@ -1,14 +1,14 @@
 import { Limits } from "@/features/limits/Limits";
-import { useAgentSession } from "@/features/session/SessionProvider";
+import { useAppSettings } from "$lib/useAppSettings";
 
 export function LimitsRoute() {
-  const session = useAgentSession();
+  const { settings, patch } = useAppSettings();
   return (
     <Limits
-      pollMinutes={session.appSettings.limitsPollMinutes}
-      resetAlerts={session.appSettings.resetAlerts}
+      pollMinutes={settings.limitsPollMinutes}
+      resetAlerts={settings.resetAlerts}
       onResetAlertsChange={async (resetAlerts) => {
-        if (!(await session.persistAppSettings({ ...session.appSettings, resetAlerts }))) {
+        if (!(await patch({ resetAlerts }))) {
           throw new Error("The banked reset alert was not saved.");
         }
       }}

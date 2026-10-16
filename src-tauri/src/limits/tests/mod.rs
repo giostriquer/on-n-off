@@ -45,9 +45,93 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
 }
 
 #[test]
+fn a_provider_has_a_limits_reader_exactly_when_the_catalogue_says_so() {
+    for id in AgentId::ALL {
+        assert_eq!(
+            limits_reader(id).is_some(),
+            id.facts().limits_reader,
+            "{id:?}"
+        );
+    }
+}
+
+#[test]
+fn every_provider_with_a_limits_reader_has_a_read_lock_of_its_own() {
+    for (i, a) in crate::provider_catalogue::WITH_LIMITS
+        .into_iter()
+        .enumerate()
+    {
+        for b in crate::provider_catalogue::WITH_LIMITS
+            .into_iter()
+            .skip(i + 1)
+        {
+            assert!(
+                !std::ptr::eq(provider_read_lock(a), provider_read_lock(b)),
+                "{a:?} and {b:?} share a lock"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_limits_read_waits_while_its_provider_is_being_read() {
+    use crate::cli_stub::CliStub;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let home = scratch_dir("limits-read-waits-for-its-lock");
+    fs::write(
+        home.join(".claude.json"),
+        json!({"oauthAccount": {"accountUuid": "user", "organizationUuid": "team"}}).to_string(),
+    )
+    .unwrap();
+    fs::create_dir_all(home.join(".claude")).unwrap();
+    let bin = home.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    fs::write(
+        bin.join("report.jsonl"),
+        r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"weekly_all","group":"weekly","percent":34,"resets_at":"2026-10-05T09:00:00+00:00"}]}}}"#,
+    )
+    .unwrap();
+    let stub = CliStub::new("claude")
+        .stdout_file("report.jsonl")
+        .write(&bin);
+
+    let held = provider_read_guard(AgentId::Claude);
+    let (sent, received) = mpsc::channel();
+    let reader = {
+        let home = home.clone();
+        std::thread::spawn(move || {
+            let cards = crate::accounts::native::with_test_cli(&stub, || {
+                read_limits_at(AgentId::Claude, false, &home)
+            });
+            let _ = sent.send(cards);
+        })
+    };
+
+    assert!(
+        received.recv_timeout(Duration::from_millis(500)).is_err(),
+        "a Claude read went ahead while another held Claude's lock"
+    );
+    drop(held);
+    let cards = received
+        .recv_timeout(Duration::from_secs(30))
+        .expect("the read goes ahead once the lock is free");
+    reader.join().unwrap();
+    assert_eq!(cards[0].provider, AgentId::Claude);
+    assert_eq!(cards[0].status, LimitsStatus::Ok, "{:?}", cards[0].message);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn providers_without_a_subscription_are_unsupported() {
     let home = scratch_dir("limits-unsupported");
-    for provider in [AgentId::Cursor, AgentId::Antigravity] {
+    let unsupported: Vec<AgentId> = AgentId::ALL
+        .into_iter()
+        .filter(|id| !id.facts().limits_reader)
+        .collect();
+    assert!(!unsupported.is_empty());
+    for provider in unsupported {
         let dtos = read_limits_at(provider, false, &home);
         assert_eq!(dtos.len(), 1);
         assert_eq!(dtos[0].provider, provider);
@@ -226,7 +310,7 @@ fn probe_real_home_limits() {
 
 fn print_real_home_limits() {
     let home = crate::paths::probe_home();
-    for provider in [AgentId::Claude, AgentId::Codex, AgentId::Muse] {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
         for dto in read_limits_at(provider, false, &home) {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",

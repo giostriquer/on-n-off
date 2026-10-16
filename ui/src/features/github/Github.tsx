@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, RefreshCw, Search, X } from "lucide-react";
 import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
@@ -14,7 +15,7 @@ import { formatAgo } from "$lib/timeFormat";
 import type { GithubPollSeconds } from "$lib/types";
 import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
-import { useGithubPrs } from "./useGithubPrs";
+import { githubPrsQuery, refreshGithubPrs } from "$lib/sharedReads/githubPrs";
 
 type GithubProps = {
   pollSeconds: GithubPollSeconds;
@@ -51,7 +52,11 @@ function bannerFor(prs: GithubPrs | null, invokeError: unknown): Banner | null {
 }
 
 export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
-  const { query, loading, now, refresh } = useGithubPrs(pollSeconds);
+  const client = useQueryClient();
+  const query = useQuery(githubPrsQuery(pollSeconds));
+  const refresh = () => void refreshGithubPrs(client);
+  const loading = query.isFetching;
+  const now = Date.now();
   const prs = query.data ?? null;
   const banner = bannerFor(prs, query.error);
   const updated = formatAgo(prs?.fetchedAt, now);

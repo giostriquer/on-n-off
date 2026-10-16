@@ -14,14 +14,7 @@ use crate::cli_locate::{
 };
 use crate::dto::{AdapterError, AgentId};
 use crate::paths;
-
-const ALL_AGENTS: [AgentId; 5] = [
-    AgentId::Claude,
-    AgentId::Codex,
-    AgentId::Antigravity,
-    AgentId::Cursor,
-    AgentId::Muse,
-];
+use crate::reset_alert::ResetAlert;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,37 +39,6 @@ pub struct AppSettings {
     pub close_to_tray: bool,
     #[serde(default)]
     pub reset_alerts: HashMap<String, ResetAlert>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ResetAlert {
-    #[serde(default)]
-    pub label: Option<String>,
-    #[serde(default = "reset_max_left_default")]
-    pub max_left_percent: u8,
-    #[serde(default = "reset_min_hours_default")]
-    pub min_hours_to_renewal: u16,
-    #[serde(default)]
-    pub automatic: bool,
-}
-
-pub const CODEX_RESET_MAX_LEFT_PERCENT: u8 = 5;
-
-pub const RESET_ALERT_MAX_HOURS: u16 = 7 * 24;
-
-impl ResetAlert {
-    pub fn spend_limit(&self) -> u8 {
-        self.max_left_percent.min(CODEX_RESET_MAX_LEFT_PERCENT)
-    }
-}
-
-const fn reset_max_left_default() -> u8 {
-    CODEX_RESET_MAX_LEFT_PERCENT
-}
-
-const fn reset_min_hours_default() -> u16 {
-    24
 }
 
 const fn automatic_updates_default() -> bool {
@@ -160,14 +122,18 @@ fn read_settings(document: &Map<String, Value>) -> AppSettings {
 
 fn read_reset_alert(alert: &Value) -> Option<ResetAlert> {
     let alert = alert.as_object()?;
+    let defaults = ResetAlert::default();
     let figure = |key: &str| alert.get(key).and_then(Value::as_f64).map(f64::round);
     Some(ResetAlert {
         label: alert.get("label").and_then(read),
         max_left_percent: figure("maxLeftPercent")
-            .map_or_else(reset_max_left_default, |percent| percent as u8),
+            .map_or(defaults.max_left_percent, |percent| percent as u8),
         min_hours_to_renewal: figure("minHoursToRenewal")
-            .map_or_else(reset_min_hours_default, |hours| hours as u16),
-        automatic: alert.get("automatic").and_then(read).unwrap_or(false),
+            .map_or(defaults.min_hours_to_renewal, |hours| hours as u16),
+        automatic: alert
+            .get("automatic")
+            .and_then(read)
+            .unwrap_or(defaults.automatic),
     })
 }
 
@@ -233,15 +199,10 @@ fn save_settings_to(
     settings
         .binary_paths
         .retain(|_, value| !value.trim().is_empty());
-    settings.hidden_agents.retain(|id| ALL_AGENTS.contains(id));
-    settings.hidden_agents.sort_by_key(|id| match id {
-        AgentId::Claude => 0,
-        AgentId::Codex => 1,
-        AgentId::Antigravity => 2,
-        AgentId::Cursor => 3,
-        AgentId::Muse => 4,
-    });
-    settings.hidden_agents.dedup();
+    settings.hidden_agents = AgentId::ALL
+        .into_iter()
+        .filter(|id| settings.hidden_agents.contains(id))
+        .collect();
     if hidden_covers_all(&settings.hidden_agents) {
         return Err(AdapterError::message(
             "Keep at least one provider visible in the agent tabs.",
@@ -275,10 +236,7 @@ fn normalize_settings(mut settings: AppSettings) -> AppSettings {
     scopes.retain(|scope| seen.insert(scope.clone()));
     settings.github_scopes = scopes;
     for alert in settings.reset_alerts.values_mut() {
-        alert.max_left_percent = alert
-            .max_left_percent
-            .clamp(1, CODEX_RESET_MAX_LEFT_PERCENT);
-        alert.min_hours_to_renewal = alert.min_hours_to_renewal.min(RESET_ALERT_MAX_HOURS);
+        alert.keep_within_bounds();
     }
     settings
 }
@@ -314,33 +272,16 @@ fn is_github_repo_name(value: &str) -> bool {
 }
 
 fn hidden_covers_all(hidden: &[AgentId]) -> bool {
-    ALL_AGENTS.iter().all(|id| hidden.contains(id))
+    AgentId::ALL.iter().all(|id| hidden.contains(id))
 }
 
 pub fn binary_override_for(cli_name: &str) -> Option<PathBuf> {
-    let agent = agent_for_binary(cli_name)?;
+    let agent = AgentId::from_binary(cli_name)?;
     let raw = load_settings().binary_paths.get(&agent)?.trim().to_string();
     if raw.is_empty() {
         return None;
     }
     Some(PathBuf::from(raw))
-}
-
-fn agent_for_binary(cli_name: &str) -> Option<AgentId> {
-    match PathBuf::from(cli_name)
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or(cli_name)
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "claude" => Some(AgentId::Claude),
-        "codex" => Some(AgentId::Codex),
-        "agy" => Some(AgentId::Antigravity),
-        "agent" | "cursor-agent" => Some(AgentId::Cursor),
-        "muse" => Some(AgentId::Muse),
-        _ => None,
-    }
 }
 
 fn home_for(id: AgentId) -> Result<PathBuf, AdapterError> {
@@ -471,7 +412,7 @@ pub fn diagnose_provider(id: AgentId) -> ProviderDiagnose {
 }
 
 pub fn diagnose_all() -> Vec<ProviderDiagnose> {
-    ALL_AGENTS.into_iter().map(diagnose_provider).collect()
+    AgentId::ALL.into_iter().map(diagnose_provider).collect()
 }
 
 #[cfg(test)]

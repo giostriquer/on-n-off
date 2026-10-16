@@ -601,3 +601,24 @@ fn no_share_without_an_individual_limit() {
     assert_eq!(parse_codex(&reached_only).workspace_credits, None);
     assert_eq!(parse_codex(&unreadable).workspace_credits, None);
 }
+
+#[test]
+fn a_reset_time_within_two_seconds_is_the_same_instant() {
+    let at = |value: &str| {
+        DateTime::parse_from_rfc3339(value)
+            .unwrap()
+            .with_timezone(&Utc)
+    };
+    let reset = at("2026-10-05T12:00:00Z");
+
+    for (other, same) in [
+        ("2026-10-05T12:00:00+00:00", true),
+        ("2026-10-05T12:00:02Z", true),
+        ("2026-10-05T11:59:58Z", true),
+        ("2026-10-05T12:00:03Z", false),
+        ("2026-10-05T11:59:57Z", false),
+    ] {
+        assert_eq!(same_reset_instant(reset, at(other)), same, "{other}");
+        assert_eq!(same_reset_instant(at(other), reset), same, "{other}");
+    }
+}

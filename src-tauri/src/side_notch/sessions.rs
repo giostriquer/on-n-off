@@ -42,8 +42,12 @@ struct Observed {
 
 pub fn read(agent: AgentId, home: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
     match agent {
-        AgentId::Claude => read_claude(&home.join(".claude").join("sessions"), now, live_pids),
-        AgentId::Codex => read_codex(&home.join(".codex").join("sessions"), now),
+        AgentId::Claude => read_claude(
+            &crate::paths::claude_root_for(home).join("sessions"),
+            now,
+            live_pids,
+        ),
+        AgentId::Codex => read_codex(&crate::paths::codex_root_for(home).join("sessions"), now),
         AgentId::Muse => read_muse(&crate::paths::muse_data_for(home), now),
         AgentId::Antigravity | AgentId::Cursor => Vec::new(),
     }

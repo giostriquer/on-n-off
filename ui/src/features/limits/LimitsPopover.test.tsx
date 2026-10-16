@@ -2,7 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
 import { LimitsPopover } from "./LimitsPopover";
 
 const readLimits = vi.hoisted(() => vi.fn());
@@ -54,7 +56,9 @@ function renderPopover() {
   });
   return render(
     <QueryClientProvider client={client}>
-      <LimitsPopover />
+      <AppSettingsProvider>
+        <LimitsPopover />
+      </AppSettingsProvider>
     </QueryClientProvider>,
   );
 }
@@ -94,7 +98,7 @@ beforeEach(() => {
   quitApp.mockReset();
   quitApp.mockResolvedValue(undefined);
   loadAppSettings.mockReset();
-  loadAppSettings.mockResolvedValue({ limitsPollMinutes: 5 });
+  loadAppSettings.mockResolvedValue(DEFAULT_APP_SETTINGS);
 });
 
 afterEach(() => {
@@ -294,6 +298,17 @@ describe("LimitsPopover", () => {
       ["codex", false],
       ["muse", false],
     ]);
+  });
+
+  it("reads the app settings again each time the popover opens", async () => {
+    renderPopover();
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openedHandler).not.toBeNull());
+
+    await act(async () => openedHandler?.());
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(2));
+    await act(async () => openedHandler?.());
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(3));
   });
 
   it("reapplies the stored theme each time the popover opens", async () => {
