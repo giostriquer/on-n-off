@@ -424,6 +424,33 @@ mod keychain {
     }
 
     #[test]
+    fn clearing_the_signed_in_login_deletes_the_item_and_the_metadata() {
+        let dir = scratch_dir("muse-keychain-clear");
+        let store = native(&dir);
+        fs::create_dir_all(&store.config).unwrap();
+        fs::write(
+            store.auth_file(),
+            r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain"},"anthropic":{}}}"#,
+        )
+        .unwrap();
+
+        let (cleared, sent) = with_test_runner(
+            fake_items(&[("meta", r#"{"access_token":"t1","api_key":"key-1"}"#)]),
+            || store.write(None),
+        );
+        cleared.unwrap();
+
+        assert!(sent.iter().any(|command| {
+            command.starts_with("delete-generic-password")
+                && command.contains("ai.meta.dev.credentials")
+        }));
+        let document: Value =
+            serde_json::from_slice(&fs::read(store.auth_file()).unwrap()).unwrap();
+        assert!(document["providers"].get("meta").is_none());
+        assert!(document["providers"].get("anthropic").is_some());
+    }
+
+    #[test]
     fn a_malformed_keychain_item_is_refused_and_never_overwritten() {
         let dir = scratch_dir("muse-keychain-malformed");
         let store = native(&dir);

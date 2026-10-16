@@ -129,3 +129,15 @@ fn the_sign_in_gets_the_input_its_provider_asks_for_and_nothing_otherwise() {
         assert_eq!(added.is_ok(), completes, "{input:?}: {added:?}");
     }
 }
+
+#[test]
+fn claude_and_codex_sign_ins_are_sent_no_input() {
+    for provider in [AgentId::Claude, AgentId::Codex] {
+        let dir = crate::paths::scratch_dir("sign-in-no-input");
+        let isolated = crate::accounts::adapter(provider)
+            .unwrap()
+            .isolated(&dir)
+            .unwrap();
+        assert!(isolated.sign_in_input().is_empty(), "{provider:?}");
+    }
+}

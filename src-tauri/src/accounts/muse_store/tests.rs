@@ -550,8 +550,12 @@ fn clearing_removes_the_login_from_its_store_and_keeps_other_providers() {
 }
 
 #[test]
-fn a_write_forgets_the_cached_lookup_so_the_next_read_sees_the_new_login() {
+fn a_write_forgets_the_cached_lookup_even_when_auth_json_looks_unchanged() {
     let config = config_with_auth(KEYCHAIN_AUTH);
+    let path = config.join("auth.json");
+    let stamp = std::fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .unwrap();
     let keychain = FakeKeychain::holding(r#"{"access_token":"old","api_key":"old"}"#);
     let cache = LoginCache::new();
     assert_eq!(
@@ -570,6 +574,12 @@ fn a_write_forgets_the_cached_lookup_so_the_next_read_sees_the_new_login() {
             Some((&metadata("you@example.com"), &secret("t1"))),
         )
         .unwrap();
+    std::fs::write(&path, KEYCHAIN_AUTH).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.set_modified(stamp))
+        .unwrap();
 
     assert_eq!(
         cache
@@ -579,6 +589,32 @@ fn a_write_forgets_the_cached_lookup_so_the_next_read_sees_the_new_login() {
             .secret["access_token"],
         "t1"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_login_file_is_refused_and_left_alone() {
+    use std::os::unix::fs::PermissionsExt;
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let path = config.join("auth.json");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::read(&path).is_ok() {
+        return;
+    }
+    let keychain = FakeKeychain::holding(r#"{"access_token":"old"}"#);
+
+    let read = read_native(&config, &keychain);
+    let write = LoginCache::new().write(
+        &config,
+        Some(&keychain),
+        Some((&metadata("you@example.com"), &secret("t1"))),
+    );
+
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(read.is_err());
+    assert!(write.is_err());
+    assert_eq!(keychain.writes.get(), 0);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), KEYCHAIN_AUTH);
 }
 
 #[test]
