@@ -18,13 +18,26 @@ numbers left both screens on their last answer.
 
 ## The mechanism
 
-Limits consumers check the shared cache at least every five minutes while polling is enabled.
+Limits consumers check the shared cache at least every five minutes while polling is enabled
+(`limits_refresh::check_interval`; the WebViews restate it as `LIMITS_CHECK_MINUTES`, which
+`ui/src/features/limits/limitsCadence.test.ts` holds to `src-tauri/src/limits_refresh/fixtures/cadence.json`,
+a fixture a Rust test keeps equal to `check_interval`). The poll setting is 5, 10, 15 or 30
+minutes, so that check is every five minutes today.
 The cache keeps separate deadlines for the native account and saved profiles. Only a successful
 active account reading whose fullest quota window is at least 90% and below 100% used shortens
 its next read to five minutes (or the configured interval, if shorter). At 100%, or below 90%
 after a reset, that account returns to the configured interval. Saved profiles keep their own
-configured cadence, and native failures keep their provider's backoff without delaying the other
-provider. Extra native reads retain saved cards and announce the replacement as usual.
+configured cadence. Extra native reads retain saved cards and announce the replacement as usual.
+
+A read that fails waits the Limits **failure backoff** before it is made again
+(`limits_refresh::failure_backoff`): its interval doubled for each failure in a row, the last one
+included, at most sixteen intervals and never more than an hour; a success starts the count
+over. Each read keeps its own count and passes its own interval: a provider's native read (the
+cache's freshness, `cache_is_fresh`), each saved profile's poll (`accounts/usage.rs`, which also
+waits out a Retry-After that is longer), and each Codex backend figure, per account
+(`limits/backend_memo.rs`). So a failing native read never delays the other provider, and a
+failing figure never delays the usage read it rides on. A forced read bypasses the native
+backoff but not a saved profile's after a failure, nor a backend figure's.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot.
 

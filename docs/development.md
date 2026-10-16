@@ -31,6 +31,12 @@ locates the subsystems. Module doc-comments explain their implementation.
   from the rule (`ui/src/lib/appSettings.ts`) is checked against `reset_alert/fixtures/rule.json`
   by `ui/src/lib/resetAlertRule.test.ts`, and a Rust test keeps the fixture equal to the rule, so a
   change to one side fails until the other follows.
+- How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
+  (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
+  keeps its own failure count and passes its own interval; it never restates the formula. The UI's
+  `LIMITS_CHECK_MINUTES` (`ui/src/features/limits/useLimitsProviders.ts`) is checked against
+  `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
+  keeps the fixture equal to `check_interval`.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
