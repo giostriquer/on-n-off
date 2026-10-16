@@ -91,18 +91,27 @@ fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport)
         Instant::now(),
     );
     while !controller.lifetime.stopped() {
-        if let Ok(mut desired) = controller.desired.lock() {
-            if let Some(next) = desired.take() {
-                host.desire(next);
-            }
-        }
-        host.tick(Instant::now());
-        if let Ok(mut error) = controller.error.lock() {
-            *error = host.runtime_error();
-        }
-        host.publish();
-        controller.wait(host.enabled().then_some(Duration::from_millis(100)));
+        let wait = step(controller, &mut host, Instant::now());
+        controller.wait(wait);
     }
+}
+
+fn step<T: Transport, A: App>(
+    controller: &Controller,
+    host: &mut Host<T, A>,
+    now: Instant,
+) -> Option<Duration> {
+    if let Ok(mut desired) = controller.desired.lock() {
+        if let Some(next) = desired.take() {
+            host.desire(next);
+        }
+    }
+    host.tick(now);
+    if let Ok(mut error) = controller.error.lock() {
+        *error = host.runtime_error();
+    }
+    host.publish();
+    host.enabled().then_some(Duration::from_millis(100))
 }
 
 fn initial_snapshot() -> NotchSnapshot {
