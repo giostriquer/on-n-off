@@ -11,7 +11,7 @@ fn typed<T: DeserializeOwned>(value: Value) -> T {
     serde_json::from_value(value).unwrap()
 }
 
-fn query(script: &Script, codex_home: &Path, force: bool) -> Result<AppServerResult, String> {
+fn query(script: &Script, codex_home: &Path, force: bool) -> Result<AppServerAnswers, String> {
     query_app_server(script.session(APP_SERVER), codex_home, force)
 }
 
@@ -429,7 +429,7 @@ fn the_card_account_id_from_a_read_is_the_id_a_spend_accepts() {
     .unwrap();
     let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
     let card = normalize_app_server(
-        AppServerResult {
+        AppServerAnswers {
             codex_home: codex_home.clone(),
             account: typed(chatgpt_account()),
             rate_limits: typed(json!({"rateLimits": {"planType": "pro"}})),

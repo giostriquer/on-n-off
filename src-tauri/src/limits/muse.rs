@@ -68,7 +68,7 @@ struct UsageWeekly {
 }
 
 #[derive(Debug)]
-struct ServeSession {
+struct ServeAnswers {
     account: AccountState,
     usage: Option<SubscriptionUsage>,
 }
@@ -82,7 +82,7 @@ enum ServeFailure {
     Failed(String),
 }
 
-fn query_serve(session: Session, expected_data: &Path) -> Result<ServeSession, String> {
+fn query_serve(session: Session, expected_data: &Path) -> Result<ServeAnswers, String> {
     session.run(
         Some(json!({"experimentalApi": true, "userInputDialogs": false})),
         |initialize: &InitializeResult| {
@@ -105,10 +105,10 @@ fn query_serve(session: Session, expected_data: &Path) -> Result<ServeSession, S
     )
 }
 
-fn read_account_usage(conversation: &mut Conversation) -> Result<ServeSession, Failure> {
+fn read_account_usage(conversation: &mut Conversation) -> Result<ServeAnswers, Failure> {
     let account: AccountState = conversation.request(Request::new(2, "account/read"))?;
     if account.state != "accountLogin" {
-        return Ok(ServeSession {
+        return Ok(ServeAnswers {
             account,
             usage: None,
         });
@@ -123,7 +123,7 @@ fn read_account_usage(conversation: &mut Conversation) -> Result<ServeSession, F
             "The signed-in Muse account changed while its usage was read.",
         ));
     }
-    Ok(ServeSession {
+    Ok(ServeAnswers {
         account,
         usage: usage_read.usage,
     })
@@ -136,8 +136,8 @@ struct UsageReadResult {
     usage: Option<SubscriptionUsage>,
 }
 
-fn normalize(session: ServeSession) -> Result<Parsed, ServeFailure> {
-    let account = &session.account;
+fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
+    let account = &answers.account;
     match account.state.as_str() {
         "accountLogin" => {}
         "loggedOut" => return Err(ServeFailure::SignedOut),
@@ -173,7 +173,7 @@ fn normalize(session: ServeSession) -> Result<Parsed, ServeFailure> {
             .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
         label: label.clone(),
     };
-    let Some(usage) = session.usage else {
+    let Some(usage) = answers.usage else {
         return Err(ServeFailure::NoUsageYet(account_dto));
     };
     let observed_at = rfc3339_ms(usage.observed_at_ms);
@@ -295,8 +295,8 @@ fn read_with(
 ) -> Result<Parsed, ServeFailure> {
     let config = crate::paths::muse_config_for(home);
     let data = crate::paths::muse_data_for(home);
-    let session = query_serve(start(home, &config, &data)?, &data).map_err(ServeFailure::Failed)?;
-    normalize(session)
+    let answers = query_serve(start(home, &config, &data)?, &data).map_err(ServeFailure::Failed)?;
+    normalize(answers)
 }
 
 fn start(home: &Path, config: &Path, data: &Path) -> Result<Session, ServeFailure> {

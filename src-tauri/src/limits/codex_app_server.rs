@@ -18,7 +18,7 @@ const APP_SERVER: Peer = Peer::jsonrpc_lite(
 );
 
 #[derive(Debug)]
-struct AppServerResult {
+struct AppServerAnswers {
     codex_home: PathBuf,
     account: AccountReadResponse,
     rate_limits: super::codex::RateLimitsResponse,
@@ -174,10 +174,10 @@ fn read_with(
     let expected_codex_home = home.join(".codex");
     let before = crate::accounts::codex_store::metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
-    let session = start(&expected_codex_home)
+    let answers = start(&expected_codex_home)
         .and_then(|session| query_app_server(session, &expected_codex_home, force))
         .map_err(AppServerFailure::Failed)?;
-    let (mut parsed, access) = normalize_app_server(session, before)?;
+    let (mut parsed, access) = normalize_app_server(answers, before)?;
     after_identity(&mut parsed, access.as_ref());
     Ok(parsed)
 }
@@ -206,14 +206,14 @@ fn query_app_server(
     session: Session,
     expected_codex_home: &Path,
     force: bool,
-) -> Result<AppServerResult, String> {
+) -> Result<AppServerAnswers, String> {
     open_account(
         session,
         expected_codex_home,
         force,
         |codex_home, account, conversation| {
             let rate_limits = read_rate_limits(conversation)?;
-            Ok(AppServerResult {
+            Ok(AppServerAnswers {
                 codex_home,
                 account,
                 rate_limits,
@@ -257,17 +257,17 @@ fn open_account<T>(
 }
 
 fn normalize_app_server(
-    session: AppServerResult,
+    answers: AppServerAnswers,
     before: Option<(String, Value)>,
 ) -> Result<(Parsed, Option<CodexAccess>), AppServerFailure> {
-    let account = require_chatgpt(&session.account)?;
+    let account = require_chatgpt(&answers.account)?;
     let email = account
         .email
         .as_deref()
         .map(str::trim)
         .filter(|email| !email.is_empty())
         .map(str::to_string);
-    let mut reading = super::codex::parse_codex(&session.rate_limits);
+    let mut reading = super::codex::parse_codex(&answers.rate_limits);
     reading.plan = account
         .plan_type
         .as_deref()
@@ -275,7 +275,7 @@ fn normalize_app_server(
         .filter(|plan| !plan.is_empty())
         .map(str::to_string)
         .or(reading.plan);
-    let (after, access) = crate::accounts::codex_store::metadata_and_access(&session.codex_home)
+    let (after, access) = crate::accounts::codex_store::metadata_and_access(&answers.codex_home)
         .map_err(AppServerFailure::Failed)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {

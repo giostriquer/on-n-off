@@ -4,7 +4,7 @@ use crate::json_line_session::Script;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
-fn query(script: &Script) -> Result<ServeSession, String> {
+fn query(script: &Script) -> Result<ServeAnswers, String> {
     query_serve(script.session(SERVE), &data_home())
 }
 
@@ -46,8 +46,8 @@ fn happy_replies() -> Vec<Value> {
 #[test]
 fn handshake_requests_the_experimental_api_and_reads_usage() {
     let script = Script::new(happy_replies());
-    let session = query(&script).expect("query");
-    let parsed = normalize(session).expect("normalize");
+    let answers = query(&script).expect("query");
+    let parsed = normalize(answers).expect("normalize");
 
     assert_eq!(
         script.sent()[0],
@@ -107,8 +107,8 @@ fn handshake_requests_the_experimental_api_and_reads_usage() {
 fn an_opaque_numeric_tier_is_not_a_plan_name() {
     let mut replies = happy_replies();
     replies[3]["result"]["usage"]["tier"] = json!("27681631238169137");
-    let session = query(&Script::new(replies)).expect("query");
-    let parsed = normalize(session).expect("normalize");
+    let answers = query(&Script::new(replies)).expect("query");
+    let parsed = normalize(answers).expect("normalize");
     assert_eq!(parsed.reading.plan, None);
     assert_eq!(parsed.reading.windows.len(), 2, "windows still read");
 }
@@ -144,8 +144,8 @@ fn signed_out_and_api_key_states_map_to_their_cards() {
             initialized(),
             json!({"id": 2, "result": account(state, None)}),
         ]);
-        let session = query(&script).expect("query");
-        let card = finish_read(normalize(session));
+        let answers = query(&script).expect("query");
+        let card = finish_read(normalize(answers));
         assert_eq!(card.status, status, "{state}");
         assert!(
             card.message.as_deref().is_some_and(|m| m.contains(needle)),
@@ -164,8 +164,8 @@ fn unobserved_usage_keeps_the_account_on_a_failed_card() {
         json!({"id": 3, "result": {}}),
         json!({"id": 4, "result": account("accountLogin", Some("you@example.com"))}),
     ]);
-    let session = query(&script).expect("query");
-    let card = finish_read(normalize(session));
+    let answers = query(&script).expect("query");
+    let card = finish_read(normalize(answers));
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(
         card.account.as_ref().map(|account| account.id.as_str()),
