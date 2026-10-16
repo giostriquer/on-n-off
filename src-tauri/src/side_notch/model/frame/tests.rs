@@ -167,6 +167,40 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
 }
 
 #[test]
+fn only_the_viewers_own_personal_repository_loses_its_owner() {
+    let personal = Some(PrContext::Personal);
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, Some("octocat")),
+        "dotfiles"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, Some("OctoCat")),
+        "dotfiles",
+        "GitHub logins ignore case"
+    );
+    assert_eq!(
+        repo_label("alice/dotfiles", personal, Some("octocat")),
+        "alice/dotfiles",
+        "someone else's personal repository keeps its owner"
+    );
+    assert_eq!(
+        repo_label("octocat/webapp", Some(PrContext::Work), Some("octocat")),
+        "octocat/webapp",
+        "the viewer's fork of an organization's repository is work and keeps its owner"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", None, Some("octocat")),
+        "octocat/dotfiles",
+        "an unread owner keeps the full name"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, None),
+        "octocat/dotfiles",
+        "without the viewer's login the owner stays"
+    );
+}
+
+#[test]
 fn the_viewers_own_personal_repository_is_named_without_its_owner() {
     let row = |number: u64, repo: &str, in_organization: bool| {
         let mut row = pr(number);

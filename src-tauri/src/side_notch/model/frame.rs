@@ -1,4 +1,4 @@
-use super::{repo_label, GithubList, NotchProvider, NotchSettings, PrContext};
+use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
     AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitsStatus, MergeKind,
     ReviewDecision,
@@ -295,17 +295,29 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
 }
 
 fn pr_row(pr: &GithubPrDto, viewer: Option<&str>) -> PrRow {
+    let context = PrContext::of(pr);
     PrRow {
         id: pr.id.clone(),
         number: pr.number,
         title: pr.title.clone(),
         url: pr.url.clone(),
-        repo: repo_label(pr, viewer),
+        repo: repo_label(&pr.repo, context, viewer),
         author: pr.author.clone(),
         ci: pr.ci,
         updated_at: pr.updated_at.clone(),
         badges: badges(pr),
-        tag: PrContext::of(pr).map(tag),
+        tag: context.map(tag),
+    }
+}
+
+fn repo_label(repo: &str, context: Option<PrContext>, viewer: Option<&str>) -> String {
+    match (context, viewer, repo.split_once('/')) {
+        (Some(PrContext::Personal), Some(viewer), Some((owner, name)))
+            if owner.eq_ignore_ascii_case(viewer) =>
+        {
+            name.to_string()
+        }
+        _ => repo.to_string(),
     }
 }
 

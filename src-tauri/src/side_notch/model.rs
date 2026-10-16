@@ -130,18 +130,6 @@ impl PrContext {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub fn repo_label(pr: &GithubPrDto, viewer: Option<&str>) -> String {
-    match (PrContext::of(pr), viewer, pr.repo.split_once('/')) {
-        (Some(PrContext::Personal), Some(viewer), Some((owner, name)))
-            if owner.eq_ignore_ascii_case(viewer) =>
-        {
-            name.to_string()
-        }
-        _ => pr.repo.clone(),
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct NotchSettings {
