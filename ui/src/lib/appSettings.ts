@@ -1,4 +1,4 @@
-import type { AgentId, AppSettings, GithubPollSeconds, LimitsPollMinutes, ResetAlert } from "./types";
+import type { AgentId, AppSettings, ResetAlert } from "./types";
 
 export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor", "muse"];
 
@@ -41,27 +41,15 @@ export function withResetAlert(alerts: Record<string, ResetAlert>, accountId: st
   return next;
 }
 
-export function mergeAppSettings(overlay: Partial<AppSettings> | null | undefined): AppSettings {
-  return {
-    hiddenAgents: overlay?.hiddenAgents ?? [],
-    binaryPaths: overlay?.binaryPaths ?? {},
-    automaticUpdates: overlay?.automaticUpdates ?? true,
-    limitNotifications: overlay?.limitNotifications ?? false,
-    limitsPollMinutes: normalizeLimitsPollMinutes(overlay?.limitsPollMinutes),
-    githubScopes: overlay?.githubScopes ?? [],
-    githubNotifications: overlay?.githubNotifications ?? false,
-    githubPollSeconds: normalizeGithubPollSeconds(overlay?.githubPollSeconds),
-    closeToTray: overlay?.closeToTray ?? false,
-    resetAlerts: overlay?.resetAlerts ?? {},
-  };
-}
-
-function normalizeLimitsPollMinutes(value: number | undefined): LimitsPollMinutes {
-  return value === 5 || value === 10 || value === 15 || value === 30 ? value : 5;
-}
-
-function normalizeGithubPollSeconds(value: number | undefined): GithubPollSeconds {
-  return value === 30 || value === 60 || value === 120 || value === 300 ? value : 60;
+export function withBinaryPath(
+  paths: AppSettings["binaryPaths"],
+  id: AgentId,
+  path: string,
+): AppSettings["binaryPaths"] {
+  const next = { ...paths };
+  if (path.trim()) next[id] = path.trim();
+  else delete next[id];
+  return next;
 }
 
 export function visibleAgentIds(hidden: readonly AgentId[]): AgentId[] {

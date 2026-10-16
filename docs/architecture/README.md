@@ -349,6 +349,43 @@ gone nothing can rebuild it.
   how far back the history reaches and can clear it; clearing forgets what only the history held
   and counts what the transcripts still hold again.
 
+## App settings
+
+`settings.rs` owns `~/.on-n-off/settings.json`. It reads the file one field at a time, so a
+setting it cannot read falls back to its default and leaves the rest, normalises what it read, and
+validates and normalises again on save. `load_app_settings` and `save_app_settings` carry the whole
+document, and a save replaces the file with it.
+
+In the UI one module owns that document in each window: `AppSettingsProvider` and
+`useAppSettings` (`ui/src/lib/useAppSettings.tsx`) over `createAppSettingsDocument`
+(`ui/src/lib/appSettingsDocument.ts`). The main window and the menu-bar popover each mount their
+own, so they share its code and never its state.
+
+- **Verbatim.** The document is held exactly as Rust returned it, keys the UI has no type for
+  included, so a setting added on the Rust side survives the next save from a UI that does not
+  know it. The UI never re-normalises; Rust already has.
+- **One patch path, in order.** Every caller changes settings with `patch`, a partial document or
+  an updater given the latest one. Loads and saves run one at a time in the order asked, and each
+  change is applied to the document the save before it returned, so two quick changes both land
+  and a load answers with what every change asked before it saved. A change to a list or a map
+  (hidden providers, binary paths, GitHub scopes, a reset alert turned off in Settings) is an
+  updater, so two quick edits to the same one both land too. Limits' reset-alert form still hands
+  over the whole map it rendered.
+- **Defaults are a placeholder.** `DEFAULT_APP_SETTINGS` is shown until the first load answers. A
+  change made before then waits for it, and one made after a failed load reads the document first
+  and fails rather than save the placeholder over the user's file.
+- **One failure path.** A failed save resolves `null` for its caller and is reported once to
+  `onSaveFailed`, which the session turns into its trip-log note; Limits' reset-alert form says it
+  could not save the alert.
+
+The two sides agree on the document's keys through fixtures Rust writes:
+`src-tauri/src/settings/fixtures/app-settings.json` (every setting away from its default) and
+`app-settings.default.json`, which Rust's tests assert it serialises, and
+`ui/src/lib/settingsContract.test.ts` checks against `AppSettings` (at the type level),
+`DEFAULT_APP_SETTINGS` and `ResetAlert`. `NotchSettings` has the same key check through
+`src-tauri/src/side_notch/model/fixtures/notch-settings.json`. The dev mock saves as Rust does, keeping
+only the fixture's keys, so a setting added only in TypeScript snaps back in a `?mock` build too.
+
 ## Cross-cutting plumbing
 
 | Module | Why it exists |

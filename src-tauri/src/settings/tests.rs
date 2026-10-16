@@ -396,9 +396,8 @@ fn a_document_that_is_not_an_object_loads_as_defaults() {
     assert_eq!(parse_settings(Some("null")), AppSettings::default());
 }
 
-#[test]
-fn every_setting_reads_back_as_it_was_written() {
-    let settings = AppSettings {
+fn every_setting_away_from_its_default() -> AppSettings {
+    AppSettings {
         hidden_agents: vec![AgentId::Antigravity],
         binary_paths: HashMap::from([(AgentId::Codex, "/opt/acme/bin/codex".to_string())]),
         automatic_updates: false,
@@ -411,13 +410,43 @@ fn every_setting_reads_back_as_it_was_written() {
         reset_alerts: HashMap::from([(
             "acct-a".to_string(),
             ResetAlert {
-                label: Some("a@example.com".into()),
+                label: Some("you@example.com".into()),
                 max_left_percent: 4,
                 min_hours_to_renewal: 36,
                 automatic: true,
             },
         )]),
-    };
+    }
+}
+
+#[test]
+fn the_documents_the_ui_checks_its_settings_against_are_the_ones_rust_writes() {
+    for (name, fixture, settings) in [
+        (
+            "app-settings.json",
+            include_str!("fixtures/app-settings.json"),
+            every_setting_away_from_its_default(),
+        ),
+        (
+            "app-settings.default.json",
+            include_str!("fixtures/app-settings.default.json"),
+            AppSettings::default(),
+        ),
+    ] {
+        let written = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            written,
+            serde_json::from_str::<Value>(fixture).unwrap(),
+            "src-tauri/src/settings/fixtures/{name} must read:\n{}",
+            serde_json::to_string_pretty(&written).unwrap()
+        );
+        assert_eq!(parse_settings(Some(fixture)), settings, "{name}");
+    }
+}
+
+#[test]
+fn every_setting_reads_back_as_it_was_written() {
+    let settings = every_setting_away_from_its_default();
     let written = serde_json::to_value(&settings).unwrap();
     let defaults = serde_json::to_value(AppSettings::default()).unwrap();
     let alert_defaults = serde_json::to_value(ResetAlert::default()).unwrap();

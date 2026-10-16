@@ -62,7 +62,6 @@ export function AppShell() {
     pickProjectFolder,
     openProjectPath,
     masterCut,
-    pickFolder,
     install,
     installItems,
     installBusy,
@@ -294,7 +293,7 @@ export function AppShell() {
             }
             return result;
           }}
-          onPickFolder={pickFolder}
+          onPickFolder={api.pickFolder}
         />
       ) : null}
 
