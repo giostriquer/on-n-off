@@ -1,9 +1,9 @@
 import type { ReactNode, RefCallback } from "react";
-import { useIsFetching, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
+import { ActionMenu, type ActionMenuItem } from "@/components/ActionMenu";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import type { LimitsProvider } from "$lib/providers";
-import { checkLimitsNow, limitsKey } from "$lib/sharedReads/limits";
-import { CardMenu, type CardMenuItem } from "./CardMenu";
+import { providerLabel, type LimitsProvider } from "$lib/providers";
+import { checkLimitsNow } from "$lib/sharedReads/limits";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
 import type { LimitCard } from "./limitCards";
 import { SignInBadge } from "./SignInBadge";
@@ -11,37 +11,32 @@ import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { useTagsBeside } from "./useTagsBeside";
 
-export function LimitCardFrame({ provider, card, title, ariaLabel, status, now, menuLabel, items = [], menuButtonRef, footer, children }: {
+export function LimitCardFrame({ provider, card, now, checking, items = [], danger = [], menuButtonRef, footer, children }: {
   provider: LimitsProvider;
-  card?: LimitCard;
-  title: string;
-  ariaLabel: string;
-  status: string;
+  card: LimitCard | null;
   now: number;
-  menuLabel: string;
-  items?: CardMenuItem[];
+  checking: boolean;
+  items?: ActionMenuItem[];
+  danger?: ActionMenuItem[];
   menuButtonRef?: RefCallback<HTMLButtonElement>;
   footer?: ReactNode;
   children?: ReactNode;
 }) {
-  const checkNow = useCheckLimitsNow(provider);
+  const client = useQueryClient();
+  const name = providerLabel(provider);
+  const title = card?.identity.label ?? name;
+  const checkNow: ActionMenuItem = { id: "checkNow", label: "Check limits now", disabled: checking, run: () => void checkLimitsNow(client, provider).catch(() => {}) };
   return (
-    <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={ariaLabel} data-status={status}>
+    <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={card?.identity.ariaLabel ?? `${name} limits`} data-status={card?.freshness.readStatus ?? "pending"}>
       <CardHeader card={card} provider={provider} title={title} now={now}
-        menu={<CardMenu label={menuLabel} items={[checkNow, ...items]} buttonRef={menuButtonRef} />} />
+        menu={<ActionMenu label={card?.account?.name ?? title} items={[checkNow, ...items, ...danger]} buttonRef={menuButtonRef} />} />
       {children}
       <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">{footer}</footer>
     </section>
   );
 }
 
-function useCheckLimitsNow(provider: LimitsProvider): CardMenuItem {
-  const client = useQueryClient();
-  const checking = useIsFetching({ queryKey: limitsKey(provider) }) > 0;
-  return { id: "checkNow", label: "Check limits now", disabled: checking, run: () => void checkLimitsNow(client, provider).catch(() => {}) };
-}
-
-function CardHeader({ card, provider, title, now, menu }: { card?: LimitCard; provider: LimitsProvider; title: string; now: number; menu: ReactNode }) {
+function CardHeader({ card, provider, title, now, menu }: { card: LimitCard | null; provider: LimitsProvider; title: string; now: number; menu: ReactNode }) {
   const updatedAt = card?.freshness.updatedAt;
   const { beside, line, name, tags: tagsRow } = useTagsBeside();
   const tags = (

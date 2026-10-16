@@ -7,7 +7,7 @@ import { readForced } from "./forcedRead";
 
 const LIMITS = ["limits"] as const;
 
-export function limitsKey(provider: LimitsProvider) {
+function limitsKey(provider: LimitsProvider) {
   return [...LIMITS, provider] as const;
 }
 

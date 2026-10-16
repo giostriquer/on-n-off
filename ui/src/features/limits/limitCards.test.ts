@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
 import type { LimitsCredits, LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
-import type { LimitsProvider } from "$lib/providers";
+import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { limitCards, limitColumn, type LimitCard } from "./limitCards";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
@@ -33,7 +33,7 @@ describe("which cards a provider shows", () => {
     expect(card).toEqual({
       key: "current-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
-      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], resetActions: null },
+      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], resetActions: null, resetAlert: false },
       plan: null, status: null, active: true, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
@@ -47,8 +47,8 @@ describe("which cards a provider shows", () => {
   it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
     const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example")], AT_NOW, "codex");
     expect(card).toMatchObject({
-      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", resetActions: null },
-      subscription: { provider: "codex", accountId: "profile:unread", current: false, term: null },
+      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", resetActions: null, resetAlert: true },
+      subscription: { accountId: "profile:unread", current: false, term: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
     });
   });
@@ -398,8 +398,8 @@ describe("a card's subscription badge", () => {
   it("reads Codex's paid-through date per account, refreshing only the signed-in one", () => {
     const term = { activeUntil: "2026-10-10T12:00:00Z", willRenew: false, note: "cancelled" as const, checkedAt: NOW };
     expect(cards([okCodex({ subscription: term }), staleCodex()]).map(card => card.subscription)).toEqual([
-      { provider: "codex", accountId: "acct-work", current: true, term },
-      { provider: "codex", accountId: "acct-personal", current: false, term: null },
+      { accountId: "acct-work", current: true, term },
+      { accountId: "acct-personal", current: false, term: null },
     ]);
     expect(cards([statusOnly("codex", "signedOut", null)])[0].subscription).toBeNull();
   });
@@ -504,5 +504,39 @@ describe("a saved Claude sign-in's end", () => {
     expect(cards(undefined, [codex], AT_NOW, "codex")[0]).toMatchObject({
       signIn: null, signInAgain: false, empty: { reason: "usageUnavailable" }, freshness: { message: null },
     });
+  });
+});
+
+describe("each provider's card features", () => {
+  type Features = { signIn: boolean; term: boolean; paidOffer: boolean; resetActions: boolean; resetAlert: boolean; sessionNote: string };
+  const EXPECTED: Record<LimitsProvider, Features> = {
+    claude: { signIn: true, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Starts with your first message" },
+    codex: { signIn: false, term: true, paidOffer: true, resetActions: true, resetAlert: true, sessionNote: "Reset time unavailable" },
+    muse: { signIn: false, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Reset time unavailable" },
+  };
+
+  it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {
+    const reading: ProviderLimits = {
+      provider,
+      status: "ok",
+      account: { id: "acct-every", label: "every@example.com" },
+      currentAccount: true,
+      windows: [
+        { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 10, resetsAt: "2026-08-24T13:59:59Z", observedAt: NOW },
+        { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, observedAt: NOW },
+      ],
+      subscription: { activeUntil: "2026-10-10T12:00:00Z", willRenew: true, checkedAt: NOW },
+      resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } },
+    };
+    const profile = saved(provider, "every", "acct-every", "every@example.com", { active: true, signInEndsAt: new Date(AT_NOW + 2 * 24 * 3_600_000).toISOString() });
+    const [card] = cards([reading], [profile], AT_NOW, provider);
+    expect({
+      signIn: card.signIn !== null,
+      term: card.subscription !== null,
+      paidOffer: card.figures.paidOffer !== null,
+      resetActions: card.account?.resetActions != null,
+      resetAlert: card.account?.resetAlert,
+      sessionNote: card.rows.find(row => row.id === "session")?.note,
+    }).toEqual(EXPECTED[provider]);
   });
 });

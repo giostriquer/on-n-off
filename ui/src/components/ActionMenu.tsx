@@ -1,16 +1,17 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefCallback } from "react";
-import { accountButton as button } from "@/features/accounts/AccountManager";
+import { parseInvokeError } from "$lib/error";
+import { actionButton as button } from "./actionButton";
 
-export type CardMenuItem = {
+export type ActionMenuItem = {
   id: string;
   label: string;
   disabled?: boolean;
   busy?: boolean;
 } & ({ run: () => void; panel?: never } | { panel: (done: () => void) => ReactNode; run?: never });
 
-export function CardMenu({ label, items, buttonRef }: {
+export function ActionMenu({ label, items, buttonRef }: {
   label: string;
-  items: CardMenuItem[];
+  items: ActionMenuItem[];
   buttonRef?: RefCallback<HTMLButtonElement>;
 }) {
   const [panel, setPanel] = useState<string | null>(null);
@@ -54,4 +55,33 @@ export function CardMenu({ label, items, buttonRef }: {
       {opened?.panel?.(done)}
     </div>
   </div>;
+}
+
+export function confirmItem({ id, label, question, confirmLabel, disabled = false, onConfirm }: {
+  id: string;
+  label: string;
+  question: string;
+  confirmLabel: string;
+  disabled?: boolean;
+  onConfirm: (done: () => void) => Promise<void>;
+}): ActionMenuItem {
+  return { id, label, disabled, panel: done => <ConfirmPanel question={question} confirmLabel={confirmLabel} disabled={disabled} onConfirm={() => onConfirm(done)} onCancel={done} /> };
+}
+
+function ConfirmPanel({ question, confirmLabel, disabled, onConfirm, onCancel }: {
+  question: string; confirmLabel: string; disabled: boolean; onConfirm: () => Promise<void>; onCancel: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  async function confirm() {
+    setError(null);
+    try { await onConfirm(); }
+    catch (reason) { setError(parseInvokeError(reason).message); }
+  }
+  return <>
+    <div role="group" aria-label="Confirm account action" className="text-[12px]">
+      <p>{question}</p>
+      <div className="flex gap-2"><button type="button" className={button} disabled={disabled} onClick={() => void confirm()}>{confirmLabel}</button><button type="button" className={button} onClick={onCancel}>Cancel</button></div>
+    </div>
+    {error && <p role="alert" className="text-[12px] text-[var(--trip)]">{error}</p>}
+  </>;
 }

@@ -557,8 +557,10 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  await screen.findByRole("button",{name:"Use account"});
  fireEvent.click(screen.getByRole("button",{name:"More actions for shared@example.com"}));
  fireEvent.click(screen.getByRole("button",{name:"Remove account"}));
+ expect(accountAction).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
- await waitFor(()=>expect(accountAction).toHaveBeenCalled());
+ await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","remove","saved",undefined));
+ expect(accountAction).not.toHaveBeenCalledWith("codex","signOut",expect.anything(),expect.anything());
  await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team",undefined));
  expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team",undefined]]);
  await act(async()=>{await client.invalidateQueries({queryKey:["limits","codex"]});});

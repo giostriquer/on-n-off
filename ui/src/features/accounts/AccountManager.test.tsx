@@ -6,17 +6,15 @@ import * as api from "$lib/api";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { accountListQuery } from "$lib/sharedReads/accounts";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
-import { CardMenu } from "@/features/limits/CardMenu";
+import { ActionMenu } from "@/components/ActionMenu";
 import { useAccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
-const forget = vi.fn().mockResolvedValue(undefined);
-const archive = vi.fn().mockResolvedValue(undefined);
 function AccountCard({ profile }: { profile: SavedProfile }) {
-  const actions = useAccountCardActions({ accountId: profile.observationId, label: profile.email!, current: profile.active, profile, onForget: forget, onArchive: archive });
-  return <><header><CardMenu label={profile.email!} items={[...actions.items, ...actions.danger]} /></header><footer>{actions.footer}</footer></>;
+  const actions = useAccountCardActions({ accountId: profile.observationId, label: profile.email!, current: profile.active, profile, archive: { run: () => {}, busy: false } });
+  return <><header><ActionMenu label={profile.email!} items={[...actions.items, ...actions.danger]} /></header><footer>{actions.footer}</footer></>;
 }
 function Cards() {
   const manager = useAccountManagement();
@@ -91,16 +89,6 @@ it("switches normally when running clients cannot be checked, and waits for the 
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
   expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
 });
-it("removes saved login and its card only after confirmation without signing out", async () => {
-  setup(); await screen.findByText("person@example.com");
-  fireEvent.click(screen.getByText("•••"));
-  fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
-  expect(api.accountAction).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
-  await waitFor(() => expect(forget).toHaveBeenCalledTimes(1));
-  expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined);
-  expect(api.accountAction).not.toHaveBeenCalledWith("codex", "signOut", expect.anything(), expect.anything());
-});
 it("asks nothing while the menu or one of its panels is open", async () => {
   setup(); await screen.findByText("person@example.com");
   fireEvent.click(screen.getByText("•••"));
@@ -118,7 +106,6 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined));
-  expect(forget).not.toHaveBeenCalled();
 });
 it("keeps email as the account name and allows a free-text category to be edited or cleared", async () => {
   setup(); await screen.findByText("person@example.com");
@@ -169,6 +156,18 @@ it("signs the signed-in account out once confirmed, and closes the confirmation"
   fireEvent.click(within(card).getByRole("button", { name: "Confirm sign out" }));
   await waitFor(() => expect(vi.mocked(api.accountAction).mock.calls).toEqual([["codex", "signOut", undefined, undefined]]));
   await waitFor(() => expect(within(card).queryByRole("group", { name: "Confirm account action" })).toBeNull());
+});
+it("says in its confirmation why a confirmed sign-out failed, and lets it be tried again", async () => {
+  setup({ signedIn: true });
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  const signOut = openSignOut(card);
+  await waitFor(() => expect(signOut).toBeEnabled());
+  fireEvent.click(signOut);
+  vi.mocked(api.accountAction).mockRejectedValueOnce(new Error("the provider refused the sign-out"));
+  fireEvent.click(within(card).getByRole("button", { name: "Confirm sign out" }));
+  await waitFor(() => expect(within(card).getByRole("alert")).toHaveTextContent("the provider refused the sign-out"));
+  expect(within(card).getByRole("group", { name: "Confirm account action" })).toBeInTheDocument();
+  await waitFor(() => expect(within(card).getByRole("button", { name: "Confirm sign out" })).toBeEnabled());
 });
 it("refuses a sign-out confirmed after the cached account list already names another signed-in account, before the card redraws", async () => {
   const client = setup({ signedIn: true });

@@ -38,7 +38,7 @@ export type CardFigures = {
   paidOffer: LimitsResetOffer | null;
 };
 
-export type CardSubscription = { provider: LimitsProvider; accountId: string; current: boolean; term: LimitsSubscription | null };
+export type CardSubscription = { accountId: string; current: boolean; term: LimitsSubscription | null };
 
 export type ForgetStep = { accountId: string; expectedEmail?: string };
 
@@ -48,6 +48,7 @@ export type CardAccount = {
   profile: SavedProfile | null;
   forget: ForgetStep[];
   resetActions: ProviderLimits | null;
+  resetAlert: boolean;
 };
 
 export type LimitCard = {
@@ -154,7 +155,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const cardSubscription = subscription(provider, account?.id ?? null, current, reading);
   const active = !!account && (profile?.active ?? current);
-  const signIn = features.signInDeadline ? claudeSignIn(profile?.signInEndsAt, now) : null;
+  const signIn = features.signInDeadline === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null
     : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
@@ -171,13 +172,14 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       name: label ?? account.id,
       profile,
       forget: [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }) => ({ accountId: id, expectedEmail: email })), { accountId: account.id }],
-      resetActions: features.bankedResetActions ? reading : null,
+      resetActions: features.bankedResets === "codex" ? reading : null,
+      resetAlert: features.bankedResets === "codex",
     },
     plan: planLabel(reading?.plan, provider) || null,
     status: presentation.status,
     active,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, features.firstMessageSession, now)),
+    rows: rest.map(window => presentRow(window, features.firstMessageSession === "claude", now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
@@ -206,8 +208,8 @@ function subscription(
   current: boolean,
   reading: ProviderLimits | null,
 ): CardSubscription | null {
-  if (!LIMITS_FEATURES[provider].subscriptionTerm || accountId === null) return null;
-  return { provider, accountId, current, term: reading?.subscription ?? null };
+  if (LIMITS_FEATURES[provider].subscriptionTerm !== "codex" || accountId === null) return null;
+  return { accountId, current, term: reading?.subscription ?? null };
 }
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {
@@ -233,6 +235,6 @@ function figures(reading: ProviderLimits, provider: LimitsProvider, now: number)
     workspaceShare: share,
     creditsSpent: spent,
     bankedResets: banked,
-    paidOffer: LIMITS_FEATURES[provider].paidResetOffer ? reading.resetOffer ?? null : null,
+    paidOffer: LIMITS_FEATURES[provider].paidResetOffer === "codex" ? reading.resetOffer ?? null : null,
   };
 }

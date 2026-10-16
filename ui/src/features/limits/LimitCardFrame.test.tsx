@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
+import { LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
@@ -59,25 +59,33 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+const MENUS: Record<LimitsProvider, { current: string[]; remembered: string[] }> = {
+  claude: { current: ["Check limits now", "Sign out"], remembered: ["Check limits now", "Archive account", "Remove account"] },
+  codex: {
+    current: ["Check limits now", "Banked reset alert", "Sign out"],
+    remembered: ["Check limits now", "Archive account", "Banked reset alert", "Remove account"],
+  },
+  muse: { current: ["Check limits now"], remembered: ["Check limits now", "Archive account", "Remove account"] },
+};
+
 describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
   const name = providerLabel(provider);
 
-  it("has a header with its tags and a menu that checks limits now", async () => {
+  it("has a header with its tags and a menu that starts with Check limits now and ends with its destructive item", async () => {
     answer(read => [CURRENT[read](), remembered(read)]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     expect(within(current).getByTestId("account-tags")).toBeInTheDocument();
-    const items = openMenu(current, label(provider));
-    expect(items[0]).toBe("Check limits now");
-    if (hasSavedAccounts(provider)) expect(items).toContain("Sign out");
-    else expect(items).toEqual(["Check limits now"]);
+    expect(openMenu(current, label(provider))).toEqual(MENUS[provider].current);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(openMenu(card(`${name} limits · ${oldLabel(provider)}`), oldLabel(provider))).toEqual(MENUS[provider].remembered);
   });
 
   it("archives a remembered account from its menu", async () => {
     answer(read => [CURRENT[read](), remembered(read)]);
     renderLimits();
     const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
-    expect(openMenu(old, oldLabel(provider))).toEqual(expect.arrayContaining(["Check limits now", "Archive account", "Remove account"]));
+    openMenu(old, oldLabel(provider));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith(provider, [`${provider}-old`], true));
     await waitFor(() => expect(screen.queryByRole("region", { name: `${name} limits · ${oldLabel(provider)}` })).toBeNull());
@@ -95,12 +103,47 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     await waitFor(() => expect(screen.queryByRole("region", { name: `${name} limits · ${oldLabel(provider)}` })).toBeNull());
   });
 
-  it("offers Check limits now while its first read is still pending", async () => {
+  it("offers Check limits now while its first read is pending, disabled there and nowhere else", async () => {
     answer(read => read === provider ? new Promise<ProviderLimits[]>(() => {}) : [CURRENT[read]()]);
     renderLimits();
     const pending = await screen.findByRole("region", { name: `${name} limits` });
     expect(pending.getAttribute("data-status")).toBe("pending");
     expect(openMenu(pending, name)).toEqual(["Check limits now"]);
+    expect(within(pending).getByRole("button", { name: "Check limits now" })).toBeDisabled();
+    const other = LIMITS_PROVIDERS.find(read => read !== provider)!;
+    const loaded = await screen.findByRole("region", { name: `${providerLabel(other)} limits · ${label(other)}` });
+    openMenu(loaded, label(other));
+    await waitFor(() => expect(within(loaded).getByRole("button", { name: "Check limits now" })).toBeEnabled());
+  });
+
+  it("cancels a removal back to the menu button, removing nothing", async () => {
+    answer(read => [CURRENT[read](), remembered(read)]);
+    renderLimits();
+    const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
+    openMenu(old, oldLabel(provider));
+    fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
+    fireEvent.click(within(screen.getByRole("group", { name: "Confirm account action" })).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+    expect(within(old).getByRole("button", { name: `More actions for ${oldLabel(provider)}` })).toHaveFocus();
+    expect(forgetLimitsSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("runs a confirmed removal once, and says why it failed in its confirmation", async () => {
+    let fail!: (reason: Error) => void;
+    forgetLimitsSnapshot.mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = reject; }));
+    answer(read => [CURRENT[read](), remembered(read)]);
+    renderLimits();
+    const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
+    openMenu(old, oldLabel(provider));
+    fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
+    const confirm = screen.getByRole("button", { name: "Confirm removal" });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(confirm).toBeDisabled());
+    fireEvent.click(confirm);
+    expect(forgetLimitsSnapshot).toHaveBeenCalledTimes(1);
+    await act(async () => fail(new Error("history is locked")));
+    expect(within(old).getByRole("alert")).toHaveTextContent("history is locked");
+    expect(confirm).toBeEnabled();
   });
 
   it("checks only its own provider again, with force, from Check limits now", async () => {

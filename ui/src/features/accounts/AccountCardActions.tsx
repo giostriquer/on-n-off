@@ -1,11 +1,11 @@
 import { useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { confirmItem, type ActionMenuItem } from "@/components/ActionMenu";
+import { actionButton as button } from "@/components/actionButton";
 import type { SavedProfile } from "$lib/accountTypes";
-import { parseInvokeError } from "$lib/error";
 import { providerLabel } from "$lib/providers";
 import { cachedAccountList } from "$lib/sharedReads/accounts";
-import type { CardMenuItem } from "@/features/limits/CardMenu";
-import { accountButton as button, useAccountManagement } from "./AccountManager";
+import { useAccountManagement } from "./AccountManager";
 
 export type AccountFooterState = { current: boolean; blocked: boolean; unconfirmedCurrent: boolean };
 
@@ -14,56 +14,26 @@ export type AccountCardInput = {
   label: string;
   current: boolean;
   profile?: SavedProfile;
-  onForget: () => Promise<void>;
-  onArchive: () => Promise<void>;
+  archive: { run: () => void; busy: boolean };
+  blocked?: boolean;
   archiveInsteadOfUse?: boolean;
   signInAgain?: boolean;
   footer?: (state: AccountFooterState) => ReactNode;
 };
 
-export type AccountCardActions = { items: CardMenuItem[]; danger: CardMenuItem[]; footer: ReactNode };
-
-export function removeAccountQuestion(label: string): string {
-  return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
-}
+export type AccountCardActions = { items: ActionMenuItem[]; danger: ActionMenuItem[]; footer: ReactNode };
 
 const NO_ACTIONS: AccountCardActions = { items: [], danger: [], footer: null };
 
 export function useAccountCardActions(account: AccountCardInput | null): AccountCardActions {
   const manager = useAccountManagement();
   const client = useQueryClient();
-  const [removing, setRemoving] = useState(false);
-  const [archiving, setArchiving] = useState(false);
   const [clients, setClients] = useState<string[] | null>(null);
   const useButton = useRef<HTMLButtonElement>(null);
-  if (!account) return NO_ACTIONS;
-  const { accountId, label, current, profile, onForget, onArchive, archiveInsteadOfUse = false, signInAgain = false, footer } = account;
-  const disabled = (manager?.blocked ?? false) || removing;
-  async function whileRemoving(run: () => Promise<void>) {
-    setRemoving(true);
-    try { await run(); }
-    finally { setRemoving(false); }
-  }
-  function archive() {
-    if (archiving) return;
-    setArchiving(true);
-    void onArchive().finally(() => setArchiving(false));
-  }
-  const archiveItem: CardMenuItem = { id: "archive", label: "Archive account", disabled, busy: archiving, run: archive };
-  const confirm = (id: string, itemLabel: string, question: string, confirmLabel: string, run: (done: () => void) => Promise<void>, blockedToo = false): CardMenuItem => ({
-    id, label: itemLabel, disabled: disabled || blockedToo,
-    panel: done => <ConfirmPanel question={question} confirmLabel={confirmLabel} disabled={disabled || blockedToo} onConfirm={() => run(done)} onCancel={done} />,
-  });
-
-  if (!manager) {
-    return {
-      items: current ? [] : [archiveItem],
-      danger: current ? [] : [confirm("remove", "Remove account", removeAccountQuestion(label), "Confirm removal", done => whileRemoving(onForget).then(done))],
-      footer: footer?.({ current, blocked: removing, unconfirmedCurrent: false }) ?? null,
-    };
-  }
-
-  const { provider, busy, query, action, removeAccount, use, add, cancel, loginTarget } = manager;
+  if (!manager || !account) return NO_ACTIONS;
+  const { accountId, label, current, profile, archive, archiveInsteadOfUse = false, signInAgain = false, footer } = account;
+  const { provider, busy, query, action, use, add, cancel, loginTarget } = manager;
+  const disabled = manager.blocked || !!account.blocked;
   const nativeMatches = !query.isFetching && query.data?.nativeObservationId === accountId;
   const unconfirmedCurrent = current && !nativeMatches;
   const signingIn = loginTarget === accountId && (busy === "login" || busy === "cancelLogin");
@@ -75,56 +45,39 @@ export function useAccountCardActions(account: AccountCardInput | null): Account
   function primaryAction(): ReactNode {
     if (signingIn) return <button className={button} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button>;
     if (signInAgain && profile) return <button className={button} disabled={disabled} onClick={() => void add(profile.id, accountId)}>Sign in again</button>;
-    if (archiveInsteadOfUse) return <button className={button} disabled={disabled} aria-disabled={archiving || undefined} aria-busy={archiving || undefined} onClick={archive}>Archive account</button>;
+    if (archiveInsteadOfUse) return <button className={button} disabled={disabled} aria-disabled={archive.busy || undefined} aria-busy={archive.busy || undefined} onClick={archive.run}>Archive account</button>;
     if (!profile) return <button className={button} disabled={disabled || unconfirmedCurrent} onClick={() => current ? void action("save").catch(() => {}) : void add(undefined, accountId)}>{current ? "Save account" : "Sign in"}</button>;
     if (current && !profile.pendingActivation) return null;
     return <button ref={useButton} className={button} disabled={disabled} onClick={() => profile.needsLogin ? void add(profile.id, accountId) : startSwitch(profile.id)}>{profile.needsLogin ? "Sign in" : "Use account"}</button>;
   }
-  const items: CardMenuItem[] = [];
+  const items: ActionMenuItem[] = [];
   if (profile) {
     items.push({ id: "category", label: "Edit category", disabled, panel: done => <CategoryPanel initial={profile.category ?? ""} disabled={disabled} onSave={category => action("category", profile.id, category)} done={done} /> });
     items.push({ id: "signInAgain", label: "Sign in again", disabled, run: () => void add(profile.id, accountId) });
+    if (current) items.push(confirmItem({
+      id: "removeLogin", label: "Remove saved login", question: `Remove the saved login for ${label}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled,
+      onConfirm: async done => { await action("remove", profile.id); done(); },
+    }));
   }
-  if (current && profile) items.push(confirm("removeLogin", "Remove saved login", `Remove the saved login for ${label}? This account stays signed in.`, "Confirm removal",
-    done => whileRemoving(() => action("remove", profile.id)).then(done)));
-  if (!current) items.push(archiveItem);
-  const danger = [current
-    ? confirm("signOut", "Sign out", "Sign out of this account? The provider may also revoke its saved sign-ins.", "Confirm sign out", async done => {
-      if (!nativeMatches || cachedAccountList(client, provider)?.nativeObservationId !== accountId) { done(); return; }
-      await whileRemoving(() => action("signOut"));
+  const danger = current ? [confirmItem({
+    id: "signOut", label: "Sign out", question: "Sign out of this account? The provider may also revoke its saved sign-ins.", confirmLabel: "Confirm sign out", disabled: disabled || !nativeMatches,
+    onConfirm: async done => {
+      if (nativeMatches && cachedAccountList(client, provider)?.nativeObservationId === accountId) await action("signOut");
       done();
-    }, !nativeMatches)
-    : confirm("remove", "Remove account", removeAccountQuestion(label), "Confirm removal", done => whileRemoving(() => removeAccount(profile?.id, onForget)).then(done))];
+    },
+  })] : [];
   return {
     items,
     danger,
     footer: <>
       {primaryAction()}
       {switchingAlongside
-        ? <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchingAlongside.clients} disabled={!!disabled}
+        ? <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchingAlongside.clients} disabled={disabled}
           onSwitch={() => { setClients(null); void action("useAlongsideClients", switchingAlongside.profile.id).catch(() => {}); }}
           onCancel={() => { setClients(null); useButton.current?.focus(); }} />
-        : footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}
+        : footer?.({ current, blocked: disabled, unconfirmedCurrent })}
     </>,
   };
-}
-
-function ConfirmPanel({ question, confirmLabel, disabled, onConfirm, onCancel }: {
-  question: string; confirmLabel: string; disabled: boolean; onConfirm: () => Promise<void>; onCancel: () => void;
-}) {
-  const [error, setError] = useState<string | null>(null);
-  async function confirm() {
-    setError(null);
-    try { await onConfirm(); }
-    catch (reason) { setError(parseInvokeError(reason).message); }
-  }
-  return <>
-    <div role="group" aria-label="Confirm account action" className="text-[12px]">
-      <p>{question}</p>
-      <div className="flex gap-2"><button className={button} disabled={disabled} onClick={() => void confirm()}>{confirmLabel}</button><button className={button} onClick={onCancel}>Cancel</button></div>
-    </div>
-    {error && <p role="alert" className="text-[12px] text-[var(--trip)]">{error}</p>}
-  </>;
 }
 
 function CategoryPanel({ initial, disabled, onSave, done }: { initial: string; disabled: boolean; onSave: (category: string) => Promise<void>; done: () => void }) {

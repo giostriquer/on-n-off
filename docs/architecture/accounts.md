@@ -456,9 +456,11 @@ absent date.
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude and Codex;
 each card owns its usage, subscription date, primary action and optional category. The card frame
 (`LimitCardFrame`) owns each card's ⋯ menu and always offers Check limits now; account management
-adds the saved-login items and the footer's primary action through `useAccountCardActions`. A
-provider without saved accounts (Muse) keeps the menu, and a remembered card there still offers
-Archive account and Remove account, which act on its usage history only. Saved identities
+adds the saved-login items and the footer's primary action through `useAccountCardActions`, and
+Limits adds Archive account and Remove account on every remembered card (`useHistoryActions`).
+Remove account removes a saved login first when there is one, as the archived list does. A
+provider without saved accounts (Muse) keeps the menu, and its remembered cards' Archive account
+and Remove account act on their usage history only. Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.
