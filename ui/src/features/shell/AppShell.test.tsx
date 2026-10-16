@@ -66,7 +66,6 @@ const session = {
   pickProjectFolder: vi.fn(),
   openProjectPath: vi.fn(),
   masterCut: vi.fn(),
-  pickFolder: vi.fn(),
   install: vi.fn(),
   confirmUninstall: vi.fn(),
 };

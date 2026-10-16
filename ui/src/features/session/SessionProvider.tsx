@@ -157,7 +157,6 @@ type SessionContextValue = {
   toggleMcp: (server: McpServerDto, enabled: boolean) => void;
   toggleLive: (row: LiveRow, enabled: boolean) => void;
   masterCut: (enabled: boolean) => Promise<void>;
-  pickFolder: () => Promise<string | null>;
   install: (source: string) => Promise<boolean>;
   installItems: (request: InstallItemsRequest) => Promise<InstallItemsResult | null>;
   installBusy: boolean;
@@ -702,8 +701,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [agentLabel, applyScopedTab, flags, note, scopeSuffix, withLock],
   );
 
-  const pickFolder = useCallback((): Promise<string | null> => api.pickFolder(), []);
-
   const install = useCallback(
     async (source: string): Promise<boolean> => {
       setInstallError(null);
@@ -891,7 +888,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       toggleMcp,
       toggleLive,
       masterCut,
-      pickFolder,
       install,
       installItems,
       installBusy,
@@ -943,7 +939,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       toggleMcp,
       toggleLive,
       masterCut,
-      pickFolder,
       install,
       installItems,
       installBusy,
