@@ -82,6 +82,28 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
 }
 
 #[test]
+fn a_backend_figure_that_keeps_failing_waits_one_two_four_then_sixteen_intervals() {
+    let interval = crate::limits_refresh::poll_interval();
+    for (failures, intervals) in [(1, 1), (2, 2), (3, 4), (5, 16)] {
+        let memo: PerAccount<u8> = PerAccount::new(None);
+        if failures > 1 {
+            memo.failed_before("a", failures - 1);
+        }
+        let (fail, _) = reads(None);
+        let start = Instant::now();
+        assert_eq!(memo.read_backed_off("a", &fail), None);
+        let end = Instant::now();
+        let (until, count) = memo.backoff_of("a").unwrap();
+        let wait = (interval * intervals).min(Duration::from_secs(3600));
+        assert_eq!(count, failures);
+        assert!(
+            until >= start + wait && until <= end + wait,
+            "{failures} failures wait {wait:?}"
+        );
+    }
+}
+
+#[test]
 fn each_failure_in_a_row_doubles_the_wait_up_to_sixteen_intervals_and_an_hour() {
     let minute = Duration::from_secs(60);
     for (count, intervals) in [(0, 1), (1, 1), (2, 2), (3, 4), (5, 16), (9, 16)] {

@@ -93,6 +93,35 @@ fn automatic_failures_back_off_for_every_consumer() {
 }
 
 #[test]
+fn a_native_read_that_keeps_failing_waits_two_four_eight_then_sixteen_intervals() {
+    let refreshed_at = Instant::now();
+    let second = Duration::from_secs(1);
+    for (interval, failures, wait) in [
+        (60, 1, 120),
+        (60, 2, 240),
+        (60, 3, 480),
+        (60, 5, 960),
+        (300, 5, 3600),
+    ] {
+        let (interval, wait) = (Duration::from_secs(interval), Duration::from_secs(wait));
+        assert!(
+            cache_is_fresh(
+                refreshed_at,
+                refreshed_at + wait - second,
+                interval,
+                failures,
+                false
+            ),
+            "{failures} failures at {interval:?}"
+        );
+        assert!(
+            !cache_is_fresh(refreshed_at, refreshed_at + wait, interval, failures, false),
+            "{failures} failures at {interval:?}"
+        );
+    }
+}
+
+#[test]
 fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
     let cache = Arc::new(Cache::new(Source::LimitsClaude));
     let calls = Arc::new(AtomicUsize::new(0));
