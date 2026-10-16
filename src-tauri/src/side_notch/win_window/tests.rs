@@ -452,3 +452,16 @@ fn a_notch_hidden_for_a_full_screen_app_or_by_itself_is_not_raised() {
     keep_on_top(overlay.0, false);
     assert!(is_above(&ordinary, &overlay), "raised while hidden");
 }
+
+#[test]
+fn the_screens_change_only_after_the_first_read() {
+    let mut machine = Machine::new();
+    assert!(
+        !machine.set_displays(vec![display("d1", false)]),
+        "the first read is what the host started with"
+    );
+    assert!(!machine.set_displays(vec![display("d1", false)]));
+    assert!(machine.set_displays(vec![display("d1", false), display("d2", false)]));
+    assert!(machine.set_displays(Vec::new()), "a read that failed");
+    assert!(machine.set_displays(vec![display("d1", true)]));
+}

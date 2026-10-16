@@ -38,6 +38,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum WinAction {
+    ScreensChanged,
     Refresh,
     OpenLimits,
     OpenPullRequests,
@@ -71,6 +72,7 @@ pub struct Machine {
     last_inside: Instant,
     suppressed: bool,
     dirty: bool,
+    displays_read: bool,
 }
 
 impl Default for Machine {
@@ -92,6 +94,7 @@ impl Machine {
             last_inside: Instant::now(),
             suppressed: false,
             dirty: true,
+            displays_read: false,
         }
     }
 
@@ -122,11 +125,14 @@ impl Machine {
         self.dirty = true;
     }
 
-    pub fn set_displays(&mut self, displays: Vec<Display>) {
-        if self.displays != displays {
-            self.displays = displays;
-            self.dirty = true;
+    pub fn set_displays(&mut self, displays: Vec<Display>) -> bool {
+        let first = !std::mem::replace(&mut self.displays_read, true);
+        if self.displays == displays {
+            return false;
         }
+        self.displays = displays;
+        self.dirty = true;
+        !first
     }
 
     pub fn set_suppressed(&mut self, suppressed: bool) {
@@ -459,14 +465,11 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                 }
                 if last_poll.elapsed() >= SCREEN_POLL {
                     last_poll = Instant::now();
-                    match super::win_displays::read() {
-                        Ok(displays) => {
-                            machine.set_displays(displays);
-                        }
-
-                        Err(_) => {
-                            machine.set_displays(Vec::new());
-                        }
+                    let displays = super::win_displays::read().unwrap_or_default();
+                    if machine.set_displays(displays)
+                        && action_tx.send(WinAction::ScreensChanged).is_err()
+                    {
+                        exit = true;
                     }
                     let own = HWND(hwnd as *mut _);
                     let fullscreen = fullscreen_foreground(&machine, own);

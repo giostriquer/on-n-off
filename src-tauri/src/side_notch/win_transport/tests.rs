@@ -55,6 +55,7 @@ fn the_windows_clicks_reach_the_host_and_its_own_actions_are_answered() {
     let (mut overlay, _lifetime, opened) = overlay();
     let screen = show(&mut overlay);
     for action in [
+        WinAction::ScreensChanged,
         WinAction::Refresh,
         WinAction::OpenLimits,
         WinAction::OpenPullRequests,
@@ -74,6 +75,7 @@ fn the_windows_clicks_reach_the_host_and_its_own_actions_are_answered() {
     assert_eq!(
         inbound,
         [
+            Inbound::Action(Action::ScreensChanged),
             Inbound::Action(Action::Refresh),
             Inbound::Action(Action::OpenLimits),
             Inbound::Action(Action::OpenPullRequests),

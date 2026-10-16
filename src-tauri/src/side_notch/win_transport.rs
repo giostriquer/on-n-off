@@ -82,6 +82,7 @@ impl Overlay {
 
     fn answer(&self, action: WinAction) -> Inbound {
         match action {
+            WinAction::ScreensChanged => Inbound::Action(Action::ScreensChanged),
             WinAction::Refresh => Inbound::Action(Action::Refresh),
             WinAction::OpenLimits => Inbound::Action(Action::OpenLimits),
             WinAction::OpenPullRequests => Inbound::Action(Action::OpenPullRequests),

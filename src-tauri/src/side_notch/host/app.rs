@@ -179,7 +179,6 @@ impl<S: Shell> App for Production<S> {
         crate::side_notch::config::revision()
     }
 
-    #[cfg(any(target_os = "macos", test))]
     fn reread(&self) -> NotchSnapshot {
         crate::side_notch::read()
     }

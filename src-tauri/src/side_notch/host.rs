@@ -26,7 +26,6 @@ pub(super) enum Action {
     OpenLimits,
     OpenPullRequests,
     SetShow(ShowMode),
-    #[cfg(any(target_os = "macos", test))]
     ScreensChanged,
 }
 
@@ -77,7 +76,6 @@ pub(super) trait App: Clone + Send + 'static {
     fn spawn(&self, read: impl FnOnce() + Send + 'static);
     fn open(&self, page: Page) -> Result<(), String>;
     fn settings_revision(&self) -> u64;
-    #[cfg(any(target_os = "macos", test))]
     fn reread(&self) -> NotchSnapshot;
     fn save(&self, settings: NotchSettings) -> Result<NotchSnapshot, String>;
     fn publish(&self, status: &NotchSnapshot);
@@ -308,7 +306,6 @@ impl<T: Transport, A: App> Host<T, A> {
                 }
                 self.delivery.mark_dirty();
             }
-            #[cfg(any(target_os = "macos", test))]
             Inbound::Action(Action::ScreensChanged) => {
                 let next = self.app.reread();
                 if self.current(&next) {
