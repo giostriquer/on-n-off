@@ -307,3 +307,5 @@ fn a_poll_refreshes_on_its_interval_forces_once_and_never_stays_loading_forever(
     );
     assert_eq!(poll.value, 1);
 }
+
+mod wire;
