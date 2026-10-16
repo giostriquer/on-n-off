@@ -1,26 +1,13 @@
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsStatus};
+use crate::json_line_session::Script;
 use serde_json::{json, Value};
-use std::collections::VecDeque;
 use std::path::PathBuf;
 
-struct FakeTransport {
-    received: VecDeque<Value>,
-    sent: Vec<Value>,
-}
-
-impl JsonLineTransport for FakeTransport {
-    fn send(&mut self, message: &Value) -> Result<(), TransportError> {
-        self.sent.push(message.clone());
-        Ok(())
-    }
-
-    fn receive(&mut self) -> Result<Value, TransportError> {
-        self.received.pop_front().ok_or_else(|| TransportError {
-            kind: QueryErrorKind::Other,
-            message: "no more serve messages".to_string(),
-        })
-    }
+fn query(script: &Script) -> Result<ServeSession, String> {
+    script
+        .session(SERVE)
+        .run(|session| query_serve(&data_home(), session))
 }
 
 fn data_home() -> PathBuf {
@@ -43,39 +30,36 @@ fn account(state: &str, label: Option<&str>) -> Value {
     result
 }
 
-fn happy_transport() -> FakeTransport {
-    FakeTransport {
-        received: VecDeque::from([
-            json!({"method": "session/listChanged", "params": {}}),
-            initialized(),
-            json!({"id": 2, "result": account("accountLogin", Some("You@Example.com"))}),
-            json!({"id": 3, "result": {"usage": {
-                "tier": "wonder",
-                "window": {"usedPercent": 42, "windowDurationMins": 300, "resetsAtMs": 1_760_000_000_000i64},
-                "weekly": {"usedPercent": 7, "resetsAtMs": 1_760_500_000_000i64},
-                "observedAtMs": 1_759_999_000_000i64
-            }}}),
-            json!({"id": 4, "result": account("accountLogin", Some("You@Example.com"))}),
-        ]),
-        sent: Vec::new(),
-    }
+fn happy_replies() -> Vec<Value> {
+    vec![
+        json!({"method": "session/listChanged", "params": {}}),
+        initialized(),
+        json!({"id": 2, "result": account("accountLogin", Some("You@Example.com"))}),
+        json!({"id": 3, "result": {"usage": {
+            "tier": "wonder",
+            "window": {"usedPercent": 42, "windowDurationMins": 300, "resetsAtMs": 1_760_000_000_000i64},
+            "weekly": {"usedPercent": 7, "resetsAtMs": 1_760_500_000_000i64},
+            "observedAtMs": 1_759_999_000_000i64
+        }}}),
+        json!({"id": 4, "result": account("accountLogin", Some("You@Example.com"))}),
+    ]
 }
 
 #[test]
 fn handshake_requests_the_experimental_api_and_reads_usage() {
-    let mut transport = happy_transport();
-    let session = query_serve(&data_home(), &mut transport).expect("query");
+    let script = Script::new(happy_replies());
+    let session = query(&script).expect("query");
     let parsed = normalize(session).expect("normalize");
 
     assert_eq!(
-        transport.sent[0],
+        script.sent()[0],
         json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
             "clientInfo": {"name": "on_n_off", "title": "on-n-off", "version": env!("CARGO_PKG_VERSION")},
             "capabilities": {"experimentalApi": true, "userInputDialogs": false}
         }})
     );
-    let methods: Vec<_> = transport
-        .sent
+    let sent = script.sent();
+    let methods: Vec<_> = sent
         .iter()
         .filter_map(|message| message.get("method").and_then(Value::as_str))
         .collect();
@@ -123,9 +107,9 @@ fn handshake_requests_the_experimental_api_and_reads_usage() {
 
 #[test]
 fn an_opaque_numeric_tier_is_not_a_plan_name() {
-    let mut transport = happy_transport();
-    transport.received[3]["result"]["usage"]["tier"] = json!("27681631238169137");
-    let session = query_serve(&data_home(), &mut transport).expect("query");
+    let mut replies = happy_replies();
+    replies[3]["result"]["usage"]["tier"] = json!("27681631238169137");
+    let session = query(&Script::new(replies)).expect("query");
     let parsed = normalize(session).expect("normalize");
     assert_eq!(parsed.reading.plan, None);
     assert_eq!(parsed.reading.windows.len(), 2, "windows still read");
@@ -133,28 +117,22 @@ fn an_opaque_numeric_tier_is_not_a_plan_name() {
 
 #[test]
 fn a_different_muse_home_fails_the_read() {
-    let mut transport = FakeTransport {
-        received: VecDeque::from([json!({"id": 1, "result": {
-            "museHome": "/somewhere/else/muse",
-            "experimentalApi": true
-        }})]),
-        sent: Vec::new(),
-    };
-    let error = query_serve(&data_home(), &mut transport).expect_err("home mismatch");
-    assert!(error.message.contains("expected"), "{error:?}");
+    let script = Script::new([json!({"id": 1, "result": {
+        "museHome": "/somewhere/else/muse",
+        "experimentalApi": true
+    }})]);
+    let error = query(&script).expect_err("home mismatch");
+    assert!(error.contains("expected"), "{error:?}");
 }
 
 #[test]
 fn a_host_without_the_experimental_api_fails_with_update_guidance() {
-    let mut transport = FakeTransport {
-        received: VecDeque::from([json!({"id": 1, "result": {
-            "museHome": "/fixture/.local/share/muse",
-            "experimentalApi": false
-        }})]),
-        sent: Vec::new(),
-    };
-    let error = query_serve(&data_home(), &mut transport).expect_err("no experimental api");
-    assert!(error.message.contains("Update Muse"), "{error:?}");
+    let script = Script::new([json!({"id": 1, "result": {
+        "museHome": "/fixture/.local/share/muse",
+        "experimentalApi": false
+    }})]);
+    let error = query(&script).expect_err("no experimental api");
+    assert!(error.contains("Update Muse"), "{error:?}");
 }
 
 #[test]
@@ -164,14 +142,11 @@ fn signed_out_and_api_key_states_map_to_their_cards() {
         ("apiKey", LimitsStatus::Unsupported, "API key"),
         ("envKey", LimitsStatus::Unsupported, "API key"),
     ] {
-        let mut transport = FakeTransport {
-            received: VecDeque::from([
-                initialized(),
-                json!({"id": 2, "result": account(state, None)}),
-            ]),
-            sent: Vec::new(),
-        };
-        let session = query_serve(&data_home(), &mut transport).expect("query");
+        let script = Script::new([
+            initialized(),
+            json!({"id": 2, "result": account(state, None)}),
+        ]);
+        let session = query(&script).expect("query");
         let card = finish_read(normalize(session));
         assert_eq!(card.status, status, "{state}");
         assert!(
@@ -185,16 +160,13 @@ fn signed_out_and_api_key_states_map_to_their_cards() {
 
 #[test]
 fn unobserved_usage_keeps_the_account_on_a_failed_card() {
-    let mut transport = FakeTransport {
-        received: VecDeque::from([
-            initialized(),
-            json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))}),
-            json!({"id": 3, "result": {}}),
-            json!({"id": 4, "result": account("accountLogin", Some("you@example.com"))}),
-        ]),
-        sent: Vec::new(),
-    };
-    let session = query_serve(&data_home(), &mut transport).expect("query");
+    let script = Script::new([
+        initialized(),
+        json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))}),
+        json!({"id": 3, "result": {}}),
+        json!({"id": 4, "result": account("accountLogin", Some("you@example.com"))}),
+    ]);
+    let session = query(&script).expect("query");
     let card = finish_read(normalize(session));
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(
@@ -212,27 +184,23 @@ fn unobserved_usage_keeps_the_account_on_a_failed_card() {
 
 #[test]
 fn an_account_change_during_the_read_fails() {
-    let mut transport = happy_transport();
-    let last = transport.received.len() - 1;
-    transport.received[last] =
-        json!({"id": 4, "result": account("accountLogin", Some("other@example.com"))});
-    let error = query_serve(&data_home(), &mut transport).expect_err("changed account");
-    assert!(error.message.contains("changed"), "{error:?}");
+    let mut replies = happy_replies();
+    let last = replies.len() - 1;
+    replies[last] = json!({"id": 4, "result": account("accountLogin", Some("other@example.com"))});
+    let error = query(&Script::new(replies)).expect_err("changed account");
+    assert!(error.contains("changed"), "{error:?}");
 }
 
 #[test]
 fn a_missing_usage_method_asks_for_an_update() {
-    let mut transport = FakeTransport {
-        received: VecDeque::from([
-            initialized(),
-            json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))}),
-            json!({"id": 3, "error": {"code": -32601, "message": "method not found"}}),
-        ]),
-        sent: Vec::new(),
-    };
-    let error = query_serve(&data_home(), &mut transport).expect_err("method missing");
-    assert!(error.message.contains("Update Muse"), "{error:?}");
-    assert!(error.message.contains("usage/read"), "{error:?}");
+    let script = Script::new([
+        initialized(),
+        json!({"id": 2, "result": account("accountLogin", Some("you@example.com"))}),
+        json!({"id": 3, "error": {"code": -32601, "message": "method not found"}}),
+    ]);
+    let error = query(&script).expect_err("method missing");
+    assert!(error.contains("Update Muse"), "{error:?}");
+    assert!(error.contains("usage/read"), "{error:?}");
 }
 
 fn serve(
@@ -240,36 +208,33 @@ fn serve(
     name: &str,
     timeout: std::time::Duration,
     line_limit: usize,
-) -> ProcessTransport {
+) -> Session {
     let root = crate::paths::scratch_dir(name);
-    let mut command = stub.cli(&root).command();
-    match ProcessTransport::spawn_command(&mut command, timeout, line_limit) {
-        Ok(transport) => transport,
+    match begin(SERVE.within(timeout, line_limit), stub.cli(&root).command()) {
+        Ok(session) => session,
         Err(error) => panic!("{error:?}"),
     }
 }
 
-fn read_failure(mut transport: impl JsonLineTransport) -> String {
-    let error = query_serve(&data_home(), &mut transport).unwrap_err();
-    let status = transport.finish();
-    classify_query_failure(error, status)
+fn read_failure(session: Session) -> String {
+    session
+        .run(|session| query_serve(&data_home(), session))
+        .unwrap_err()
 }
 
-fn scripted(received: Vec<Value>) -> FakeTransport {
-    FakeTransport {
-        received: received.into(),
-        sent: Vec::new(),
-    }
+fn scripted(replies: Vec<Value>) -> Session {
+    Script::new(replies).session(SERVE)
 }
 
 #[test]
 fn a_missing_muse_cli_reads_as_not_installed() {
     let root = crate::paths::scratch_dir("muse-serve-missing");
-    let mut command = std::process::Command::new(root.join("muse"));
+    let missing = root.join("muse");
 
-    let error =
-        ProcessTransport::spawn_command(&mut command, crate::cli_stub::ANSWER_DEADLINE, 1024).err();
-    let card = finish_read(Err(ServeFailure::NotInstalled));
+    let error = begin(SERVE, Command::new(&missing)).err();
+    let card = finish_read(read_with(&root, |_, _, _| {
+        begin(SERVE, Command::new(&missing))
+    }));
 
     assert_eq!(error, Some(ServeFailure::NotInstalled));
     assert_eq!(card.status, LimitsStatus::SignedOut);
@@ -281,19 +246,19 @@ fn a_missing_muse_cli_reads_as_not_installed() {
 
 #[test]
 fn a_muse_serve_that_never_answers_times_out_by_name() {
-    let transport = serve(
+    let session = serve(
         crate::cli_stub::CliStub::new("muse").sleep(5),
         "muse-serve-timeout-message",
         std::time::Duration::from_millis(100),
         1024,
     );
 
-    assert_eq!(read_failure(transport), "Muse serve timed out.");
+    assert_eq!(read_failure(session), "Muse serve timed out.");
 }
 
 #[test]
 fn an_oversized_muse_serve_line_is_named_with_its_limit() {
-    let transport = serve(
+    let session = serve(
         crate::cli_stub::CliStub::new("muse")
             .stdout(&"x".repeat(128))
             .sleep(1),
@@ -303,14 +268,14 @@ fn an_oversized_muse_serve_line_is_named_with_its_limit() {
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Muse serve output line exceeded 64 bytes."
     );
 }
 
 #[test]
 fn muse_serve_output_that_is_not_json_is_named() {
-    let transport = serve(
+    let session = serve(
         crate::cli_stub::CliStub::new("muse")
             .stdout("not-json")
             .sleep(1),
@@ -319,7 +284,7 @@ fn muse_serve_output_that_is_not_json_is_named() {
         1024,
     );
 
-    let message = read_failure(transport);
+    let message = read_failure(session);
 
     assert!(
         message.starts_with("Muse serve returned invalid JSON: "),
@@ -329,7 +294,7 @@ fn muse_serve_output_that_is_not_json_is_named() {
 
 #[test]
 fn a_muse_serve_that_closes_cleanly_before_answering_says_so() {
-    let transport = serve(
+    let session = serve(
         crate::cli_stub::CliStub::new("muse").sleep(1),
         "muse-serve-closed-message",
         crate::cli_stub::ANSWER_DEADLINE,
@@ -337,14 +302,14 @@ fn a_muse_serve_that_closes_cleanly_before_answering_says_so() {
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Muse serve closed before returning limits."
     );
 }
 
 #[test]
 fn a_muse_cli_that_exits_unsuccessfully_before_initializing_is_asked_to_update() {
-    let transport = serve(
+    let session = serve(
         crate::cli_stub::CliStub::new("muse").exit(2),
         "muse-serve-exit-message",
         crate::cli_stub::ANSWER_DEADLINE,
@@ -352,7 +317,7 @@ fn a_muse_cli_that_exits_unsuccessfully_before_initializing_is_asked_to_update()
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Muse CLI exited before `muse serve` initialized. This version may not support `muse serve`; update Muse Code, then refresh here."
     );
 }
@@ -417,24 +382,23 @@ fn muse_handshake_and_account_refusals_read_exactly() {
         }})])),
         "Update Muse: this version cannot report subscription usage to on-n-off."
     );
-    let mut changed = happy_transport();
-    let last = changed.received.len() - 1;
-    changed.received[last] =
-        json!({"id": 4, "result": account("accountLogin", Some("other@example.com"))});
+    let mut changed = happy_replies();
+    let last = changed.len() - 1;
+    changed[last] = json!({"id": 4, "result": account("accountLogin", Some("other@example.com"))});
     assert_eq!(
-        read_failure(changed),
+        read_failure(scripted(changed)),
         "The signed-in Muse account changed while its usage was read."
     );
 }
 
 #[test]
 fn a_muse_read_writes_these_exact_lines() {
-    let mut transport = happy_transport();
+    let script = Script::new(happy_replies());
 
-    query_serve(&data_home(), &mut transport).unwrap();
+    query(&script).unwrap();
 
-    let lines: Vec<String> = transport
-        .sent
+    let lines: Vec<String> = script
+        .sent()
         .iter()
         .map(|message| serde_json::to_string(message).unwrap())
         .collect();

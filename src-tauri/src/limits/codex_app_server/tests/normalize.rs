@@ -154,15 +154,12 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
             };
             write_identity("user-1", "workspace-1");
             let before = crate::accounts::codex_store::metadata(&codex_home).unwrap();
-            let mut transport = FakeTransport {
-                received: VecDeque::from([
-                    json!({"id":1,"result":{"codexHome":codex_home}}),
-                    json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":plan}}}),
-                    json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
-                ]),
-                sent: vec![],
-            };
-            let session = query_app_server(&codex_home, false, &mut transport).unwrap();
+            let script = Script::new([
+                json!({"id":1,"result":{"codexHome":codex_home}}),
+                json!({"id":2,"result":{"account":{"type":"chatgpt","email":"same@example.com","planType":plan}}}),
+                json!({"id":3,"result":{"rateLimits":{"primary":{"usedPercent":42,"windowDurationMins":10080}}}}),
+            ]);
+            let session = query(&script, &codex_home, false).unwrap();
             write_identity(user, workspace);
             assert!(
                 matches!(normalize_app_server(session, before), Err(AppServerFailure::Failed(message)) if message.contains("changed")),

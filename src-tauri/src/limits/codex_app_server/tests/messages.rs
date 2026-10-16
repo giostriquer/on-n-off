@@ -3,26 +3,25 @@ use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 use std::process::Command;
 use std::time::Duration;
 
-fn app_server(stub: CliStub, name: &str, timeout: Duration, line_limit: usize) -> ProcessTransport {
+fn app_server(stub: CliStub, name: &str, timeout: Duration, line_limit: usize) -> Session {
     let root = crate::paths::scratch_dir(name);
-    let mut command = stub.cli(&root).command();
-    match ProcessTransport::spawn_command(&mut command, timeout, line_limit) {
-        Ok(transport) => transport,
+    match begin(
+        APP_SERVER.within(timeout, line_limit),
+        stub.cli(&root).command(),
+    ) {
+        Ok(session) => session,
         Err(error) => panic!("{error}"),
     }
 }
 
-fn read_failure(mut transport: impl JsonLineTransport) -> String {
-    let error = query_app_server(Path::new("/fixture/.codex"), false, &mut transport).unwrap_err();
-    let status = transport.finish();
-    classify_query_failure(error, status)
+fn read_failure(session: Session) -> String {
+    session
+        .run(|session| query_app_server(Path::new("/fixture/.codex"), false, session))
+        .unwrap_err()
 }
 
-fn scripted(received: Vec<Value>) -> FakeTransport {
-    FakeTransport {
-        received: received.into(),
-        sent: Vec::new(),
-    }
+fn scripted(replies: Vec<Value>) -> Session {
+    Script::new(replies).session(APP_SERVER)
 }
 
 fn initialized() -> Value {
@@ -36,9 +35,7 @@ fn chatgpt() -> Value {
 #[test]
 fn a_missing_codex_cli_says_how_to_install_it() {
     let root = crate::paths::scratch_dir("codex-app-server-missing");
-    let mut command = Command::new(root.join("codex"));
-
-    let error = ProcessTransport::spawn_command(&mut command, ANSWER_DEADLINE, 1024).err();
+    let error = begin(APP_SERVER, Command::new(root.join("codex"))).err();
 
     assert_eq!(
         error.as_deref(),
@@ -48,19 +45,19 @@ fn a_missing_codex_cli_says_how_to_install_it() {
 
 #[test]
 fn a_codex_app_server_that_never_answers_times_out_by_name() {
-    let transport = app_server(
+    let session = app_server(
         CliStub::new("codex").sleep(5),
         "codex-app-server-timeout-message",
         Duration::from_millis(100),
         1024,
     );
 
-    assert_eq!(read_failure(transport), "Codex app-server timed out.");
+    assert_eq!(read_failure(session), "Codex app-server timed out.");
 }
 
 #[test]
 fn an_oversized_codex_app_server_line_is_named_with_its_limit() {
-    let transport = app_server(
+    let session = app_server(
         CliStub::new("codex").stdout(&"x".repeat(128)).sleep(1),
         "codex-app-server-line-message",
         ANSWER_DEADLINE,
@@ -68,21 +65,21 @@ fn an_oversized_codex_app_server_line_is_named_with_its_limit() {
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Codex app-server output line exceeded 64 bytes."
     );
 }
 
 #[test]
 fn codex_app_server_output_that_is_not_json_is_named() {
-    let transport = app_server(
+    let session = app_server(
         CliStub::new("codex").stdout("not-json").sleep(1),
         "codex-app-server-json-message",
         ANSWER_DEADLINE,
         1024,
     );
 
-    let message = read_failure(transport);
+    let message = read_failure(session);
 
     assert!(
         message.starts_with("Codex app-server returned invalid JSON: "),
@@ -92,7 +89,7 @@ fn codex_app_server_output_that_is_not_json_is_named() {
 
 #[test]
 fn a_codex_app_server_that_closes_cleanly_before_answering_says_so() {
-    let transport = app_server(
+    let session = app_server(
         CliStub::new("codex").sleep(1),
         "codex-app-server-closed-message",
         ANSWER_DEADLINE,
@@ -100,14 +97,14 @@ fn a_codex_app_server_that_closes_cleanly_before_answering_says_so() {
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Codex app-server closed before returning limits."
     );
 }
 
 #[test]
 fn a_codex_cli_that_exits_unsuccessfully_before_initializing_is_asked_to_update() {
-    let transport = app_server(
+    let session = app_server(
         CliStub::new("codex").exit(2),
         "codex-app-server-exit-message",
         ANSWER_DEADLINE,
@@ -115,29 +112,8 @@ fn a_codex_cli_that_exits_unsuccessfully_before_initializing_is_asked_to_update(
     );
 
     assert_eq!(
-        read_failure(transport),
+        read_failure(session),
         "Codex CLI exited before app-server initialized. This version may not support `codex app-server`; update Codex CLI, then refresh here."
-    );
-}
-
-#[test]
-fn a_closed_app_server_after_initializing_keeps_its_own_message_whatever_the_exit() {
-    let root = crate::paths::scratch_dir("codex-app-server-closed-late");
-    let status = CliStub::new("codex")
-        .exit(2)
-        .cli(&root)
-        .command()
-        .status()
-        .unwrap();
-    let error = QueryError {
-        stage: QueryStage::Account,
-        kind: QueryErrorKind::TransportClosed,
-        message: "Codex app-server closed before returning limits.".to_string(),
-    };
-
-    assert_eq!(
-        classify_query_failure(error, Some(status)),
-        "Codex app-server closed before returning limits."
     );
 }
 
@@ -192,7 +168,7 @@ fn a_cli_without_banked_resets_gets_the_whole_update_message() {
     let (outcome, _) = spend(
         "acct-1",
         |_| signed_in_as("acct-1"),
-        consume_transport(
+        consume_replies(
             chatgpt_account(),
             Some(json!({"id": 4, "error": {"code": -32601, "message": "Method not found"}})),
         ),
@@ -218,16 +194,16 @@ fn an_app_server_on_another_home_names_both_homes() {
 
 #[test]
 fn a_read_writes_these_exact_lines() {
-    let mut transport = scripted(vec![
+    let script = Script::new([
         initialized(),
         chatgpt(),
         json!({"id": 3, "result": {"rateLimits": {}}}),
     ]);
 
-    query_app_server(Path::new("/fixture/.codex"), true, &mut transport).unwrap();
+    query(&script, Path::new("/fixture/.codex"), true).unwrap();
 
-    let lines: Vec<String> = transport
-        .sent
+    let lines: Vec<String> = script
+        .sent()
         .iter()
         .map(|message| serde_json::to_string(message).unwrap())
         .collect();

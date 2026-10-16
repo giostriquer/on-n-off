@@ -21,6 +21,7 @@ mod hooks;
 mod http;
 mod install_source;
 mod item_install;
+mod json_line_session;
 mod limits;
 mod limits_monitor;
 mod limits_refresh;
