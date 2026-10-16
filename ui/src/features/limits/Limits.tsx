@@ -195,23 +195,25 @@ function CardHeader({ card, provider, title, subscription, menu }: { card?: Limi
   const status = card?.status;
   return (
     <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
-      <div className="flex items-center gap-2.5">
-        <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-[0.5px]" />
-        <div className="min-w-0 flex-1">
-          <div className="truncate text-[13px] font-semibold" title={title}>{title}</div>
+      <div className="flex items-start gap-2.5">
+        <span className="flex h-6 shrink-0 items-center">
+          <ProviderIcon provider={provider} className="size-3.5 translate-y-[0.5px]" />
+        </span>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2.5 gap-y-1">
+          <div className="max-w-full truncate text-[13px] leading-6 font-semibold" title={title}>{title}</div>
+          <div data-testid="account-tags" className="flex flex-wrap items-center gap-1.5 empty:hidden">
+            {subscription}
+            <SignInBadge signIn={card?.signIn ?? null} />
+            {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
+            {card?.plan ? (
+              <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
+                {card.plan}
+              </span>
+            ) : null}
+          </div>
         </div>
-        {card?.active && !card.headline && <ActiveAccountDot />}
+        {card?.active && !card.headline && <span className="flex h-6 shrink-0 items-center"><ActiveAccountDot /></span>}
         {menu}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-6 empty:hidden">
-        {subscription}
-        <SignInBadge signIn={card?.signIn ?? null} />
-        {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
-        {card?.plan ? (
-          <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
-            {card.plan}
-          </span>
-        ) : null}
       </div>
       {card?.identity.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}

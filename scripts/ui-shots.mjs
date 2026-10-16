@@ -201,6 +201,27 @@ async function runScene(browser, scene) {
             issues.push(`account header action overflows: ${button.getAttribute("aria-label") ?? button.textContent}`);
           }
         }
+        const tags = element.querySelector('[data-testid="account-tags"]');
+        if (tags && tags.children.length > 0) {
+          const name = title.getBoundingClientRect();
+          const range = document.createRange();
+          range.selectNodeContents(title);
+          const nameWidth = range.getBoundingClientRect().width;
+          const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
+          const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + parseFloat(getComputedStyle(tags).columnGap || "0") * (tagRects.length - 1);
+          const onNameRow = rect => rect.top < name.bottom && rect.bottom > name.top;
+          const trailing = [...element.querySelectorAll("button, [role='img']")]
+            .filter(node => !tags.contains(node))
+            .map(node => node.getBoundingClientRect())
+            .filter(rect => rect.width > 0 && rect.left >= name.left && onNameRow(rect));
+          const rowEnd = trailing.length > 0
+            ? Math.min(...trailing.map(rect => rect.left)) - 10
+            : bounds.right - parseFloat(getComputedStyle(element).paddingRight);
+          const fits = name.left + nameWidth + 10 + tagsWidth <= rowEnd + 0.5;
+          if (fits && !tagRects.every(onNameRow)) {
+            issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
+          }
+        }
         return issues;
       });
       problems.push(...issues);
