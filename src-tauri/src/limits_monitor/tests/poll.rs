@@ -643,3 +643,95 @@ fn the_commands_list_and_cancel_the_spends_the_running_monitor_schedules() {
     assert!(!cancel_reset_spend("acct-codex"));
     assert!(pending_reset_spends().is_empty());
 }
+
+#[test]
+fn a_poll_tells_the_limits_then_the_offers_then_what_came_of_its_spends() {
+    let alert = |automatic| crate::reset_alert::ResetAlert {
+        automatic,
+        ..crate::reset_alert::ResetAlert::default()
+    };
+    let mut monitor = Monitor::new(AppSettings {
+        limit_notifications: true,
+        reset_alerts: HashMap::from([
+            ("acct-b".to_string(), alert(true)),
+            ("acct-codex".to_string(), alert(false)),
+        ]),
+        ..AppSettings::default()
+    });
+    let claude = |used: f64, at: &str| {
+        observed_at(
+            snapshot(
+                AgentId::Claude,
+                "account-a",
+                "me@example.com",
+                used,
+                Some("2026-08-24T12:00:00Z"),
+            ),
+            at,
+        )
+    };
+    let codex_b = |used: f64, at: &str| {
+        let mut card = codex_with_a_reset(used, at);
+        card.account.as_mut().unwrap().id = "acct-b".into();
+        card
+    };
+    for (now, readings) in [
+        (
+            "2026-08-19T13:00:00Z",
+            vec![
+                claude(99.0, "2026-08-19T12:00:00Z"),
+                codex_b(95.0, "2026-08-19T12:00:00Z"),
+            ],
+        ),
+        (
+            "2026-08-19T13:00:00Z",
+            vec![
+                claude(99.0, "2026-08-19T12:10:00Z"),
+                codex_b(96.0, "2026-08-19T12:10:00Z"),
+            ],
+        ),
+        (
+            "2026-08-19T13:05:00Z",
+            vec![
+                claude(99.0, "2026-08-19T13:05:00Z"),
+                codex_with_a_reset(96.0, "2026-08-19T13:05:00Z"),
+            ],
+        ),
+    ] {
+        monitor.poll(now, readings).unwrap();
+    }
+    monitor.io.effects();
+
+    monitor
+        .poll(
+            "2026-08-19T13:11:00Z",
+            vec![
+                claude(100.0, "2026-08-19T13:11:00Z"),
+                codex_with_a_reset(97.0, "2026-08-19T13:11:00Z"),
+            ],
+        )
+        .unwrap();
+
+    assert_eq!(
+        monitor.io.effects(),
+        [
+            Effect::Read(
+                vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
+                Some(AgentId::Codex)
+            ),
+            Effect::Saved,
+            told(
+                "Claude limit reached",
+                "Weekly · all models reached 100% usage · me@example.com"
+            ),
+            told(
+                "Codex: a banked reset is available",
+                "you@example.com has 3% of its limit left and renews in 4d 22h. Open on-n-off to use a banked reset."
+            ),
+            told(
+                "Codex: banked reset not used",
+                "you@example.com no longer needs it, or is no longer signed in, so it was kept."
+            ),
+        ]
+    );
+}
