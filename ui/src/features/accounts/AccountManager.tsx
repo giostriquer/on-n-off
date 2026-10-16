@@ -5,8 +5,8 @@ import type { AccountAction } from "$lib/accountTypes";
 import type { AccountProvider } from "$lib/providers";
 import { parseInvokeError } from "$lib/error";
 import { accountChanged, accountListQuery } from "$lib/sharedReads/accounts";
+import { actionButton } from "@/components/actionButton";
 
-export const accountButton = "rounded-md border border-[var(--hair)] px-2.5 py-1.5 text-[11px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)] disabled:opacity-45 aria-disabled:opacity-45";
 function useController(provider: AccountProvider) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -91,11 +91,11 @@ export function AccountManager({ provider, children }: { provider: AccountProvid
   const controller = useAccountControllers()[provider];
   const { query, busy, error, action, cancel, loginTarget } = controller;
   return <Context.Provider value={controller}>
-    {(busy === "login" || busy === "cancelLogin") && !loginTarget && <div role="status" className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--mute)]">Finish signing in in your browser.<button className={accountButton} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button></div>}
+    {(busy === "login" || busy === "cancelLogin") && !loginTarget && <div role="status" className="flex flex-wrap items-center gap-2 text-[12px] text-[var(--mute)]">Finish signing in in your browser.<button className={actionButton} disabled={busy === "cancelLogin"} onClick={() => void cancel()}>{busy === "cancelLogin" ? "Canceling…" : "Cancel sign-in"}</button></div>}
     {query.isPending && <p role="status" className="m-0 text-[12px] text-[var(--mute)]">Loading accounts…</p>}
     {busy && busy !== "login" && busy !== "cancelLogin" && <p role="status" className="m-0 text-[12px] text-[var(--mute)]">Updating account…</p>}
-    {(error || query.error || query.data?.notice) && <div role="alert" className="flex items-center gap-2 text-[12px] text-[var(--trip)]"><span className="min-w-0 flex-1">{error ?? (query.error ? parseInvokeError(query.error).message : query.data?.notice)}</span>{query.error && <button className={`${accountButton} shrink-0 text-[var(--silkscreen)]`} aria-label="Retry account access" disabled={!!busy} onClick={() => void action("unlock").catch(() => {})}>Retry</button>}</div>}
-    {query.data?.recoveryRequired && <div className="rounded-md border border-[var(--hair)] p-3 text-[12px]"><p>An interrupted account change needs recovery.</p><button className={accountButton} disabled={!!busy} onClick={() => void action("recover").catch(() => {})}>Recover account</button></div>}
+    {(error || query.error || query.data?.notice) && <div role="alert" className="flex items-center gap-2 text-[12px] text-[var(--trip)]"><span className="min-w-0 flex-1">{error ?? (query.error ? parseInvokeError(query.error).message : query.data?.notice)}</span>{query.error && <button className={`${actionButton} shrink-0 text-[var(--silkscreen)]`} aria-label="Retry account access" disabled={!!busy} onClick={() => void action("unlock").catch(() => {})}>Retry</button>}</div>}
+    {query.data?.recoveryRequired && <div className="rounded-md border border-[var(--hair)] p-3 text-[12px]"><p>An interrupted account change needs recovery.</p><button className={actionButton} disabled={!!busy} onClick={() => void action("recover").catch(() => {})}>Recover account</button></div>}
     {children}
   </Context.Provider>;
 }

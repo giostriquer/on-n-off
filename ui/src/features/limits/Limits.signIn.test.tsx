@@ -30,7 +30,7 @@ function profile(overrides: Partial<SavedProfile>): SavedProfile {
 }
 
 function answer(claude: ProviderLimits[], profiles: SavedProfile[]) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : [okCodex()]));
+  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? [okCodex()] : []));
   readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
     profiles: provider === "claude" ? profiles : [], nativeAccount: null, recoveryRequired: false, notice: null,
   }));

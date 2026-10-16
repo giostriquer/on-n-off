@@ -4,7 +4,7 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatClock, formatResetIn } from "$lib/limitsFormat";
 import { pendingResetSpendsQuery, rereadPendingResetSpends } from "$lib/sharedReads/resetSpends";
-import { accountButton } from "@/features/accounts/AccountManager";
+import { actionButton } from "@/components/actionButton";
 
 export function AutomaticSpend({ accountId, now }: { accountId: string; now: number }) {
   const client = useQueryClient();
@@ -34,7 +34,7 @@ export function AutomaticSpend({ accountId, now }: { accountId: string; now: num
           <span className="text-[11px] text-[var(--mute)]">
             Using a banked reset at {formatClock(spend.dueAt)}{within ? ` · in ${within}` : ""}
           </span>
-          <button type="button" className={accountButton} disabled={busy} aria-label="Cancel the automatic banked reset" onClick={() => void cancel()}>
+          <button type="button" className={actionButton} disabled={busy} aria-label="Cancel the automatic banked reset" onClick={() => void cancel()}>
             Cancel
           </button>
         </>

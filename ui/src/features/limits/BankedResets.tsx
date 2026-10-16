@@ -3,7 +3,7 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
-import { accountButton } from "@/features/accounts/AccountManager";
+import { actionButton } from "@/components/actionButton";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
 import { latestObservedAt, unexpiredBankedResets, usageLeft } from "./limitPresentation";
@@ -91,7 +91,7 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   return (
     <>
       {offered ? (
-        <button type="button" className={accountButton} disabled={disabled || busy}
+        <button type="button" className={actionButton} disabled={disabled || busy}
           onClick={() => { if (!busy) setConfirming(true); }}>
           {busy ? "Using reset…" : "Use banked reset"}
         </button>

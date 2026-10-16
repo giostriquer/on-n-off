@@ -35,10 +35,12 @@ export function limitsQuery(provider: LimitsProvider, pollMinutes: LimitsPollMin
   });
 }
 
+export function checkLimitsNow(client: QueryClient, provider: LimitsProvider): Promise<ProviderLimits[]> {
+  return readForced(client, limitsKey(provider), (force) => api.readLimits(provider, force));
+}
+
 export async function refreshLimits(client: QueryClient): Promise<void> {
-  await Promise.allSettled(
-    LIMITS_PROVIDERS.map((provider) => readForced(client, limitsKey(provider), (force) => api.readLimits(provider, force))),
-  );
+  await Promise.allSettled(LIMITS_PROVIDERS.map((provider) => checkLimitsNow(client, provider)));
 }
 
 export async function refetchStaleLimits(client: QueryClient, pollMinutes: LimitsPollMinutes): Promise<void> {

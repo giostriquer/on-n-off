@@ -1,28 +1,26 @@
-import { AccountCardActions } from "@/features/accounts/AccountCardActions";
+import { useAccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
-import { useMemo, useRef, useState, type ReactNode, type RefCallback, type RefObject } from "react";
+import { useMemo, useRef, useState, type RefCallback, type RefObject } from "react";
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
+import type { ActionMenuItem } from "@/components/ActionMenu";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { ProviderIcon } from "$lib/ProviderIcon";
 import { markProfilesArchived } from "$lib/sharedReads/accounts";
 import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
 import { ArchivedAccounts } from "./ArchivedAccounts";
+import { useHistoryActions } from "./historyActions";
+import { ActiveAccountDot, LimitCardFrame } from "./LimitCardFrame";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
-import { AccountSubscriptionBadge } from "./SubscriptionBadge";
-import { SignInBadge } from "./SignInBadge";
 import { useLimitsProviders } from "./useLimitsProviders";
-import { useTagsBeside } from "./useTagsBeside";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { CodexAccountActions } from "./CodexAccountActions";
 import { ResetAlertForm, ResetAlertsContext } from "./resetAlerts";
-import { UsageStatusBadge } from "./UsageStatusBadge";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
 
@@ -134,9 +132,9 @@ function ProviderColumn({
     handOffCard(key, "remove");
   }
 
-  async function remove(account: CardAccount) {
-    if (manager) await manager.removeAccount(account.profile?.id, () => forget(account));
-    else await forget(account);
+  async function remove(account: CardAccount, forgetIt = () => forget(account)) {
+    if (manager) await manager.removeAccount(account.profile?.id, forgetIt);
+    else await forgetIt();
   }
 
   async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
@@ -156,15 +154,10 @@ function ProviderColumn({
 
   if (!column) {
     return (
-      <section
-        className="overflow-hidden rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
-        aria-label={`${name} limits`}
-        data-status="pending"
-      >
-        <CardHeader provider={provider} title={name} />
+      <LimitCardFrame provider={provider} card={null} now={now} checking={query.isFetching}>
         {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{query.isFetching ? "Checking limits…" : "No data yet."}</p>
-      </section>
+      </LimitCardFrame>
     );
   }
 
@@ -176,8 +169,10 @@ function ProviderColumn({
           card={card}
           now={now}
           error={index === 0 ? error : null}
-          onForget={(account) => forgetCard(card.key, account)}
+          checking={query.isFetching}
+          blocked={blocked}
           onArchive={(account) => archive(card.key, account)}
+          onRemove={(account) => remove(account, () => forgetCard(card.key, account))}
           menuButtonRef={(node) => {
             if (node) menus.current.set(card.key, node);
             else menus.current.delete(card.key);
@@ -185,43 +180,9 @@ function ProviderColumn({
         />
       ))}
       <ArchivedAccounts provider={provider} cards={column.archived} blocked={blocked}
-        onUnarchive={(account) => setArchived(account, false)} onRemove={remove} focusWhenEmpty={() => menu(visibleKeys[0])}
+        onUnarchive={(account) => setArchived(account, false)} onRemove={(account) => remove(account)} focusWhenEmpty={() => menu(visibleKeys[0])}
         disclosureRef={(node) => { archivedDisclosure.current = node; }} />
     </div>
-  );
-}
-
-function CardHeader({ card, provider, title, subscription, menu }: { card?: LimitCard; provider: AgentId; title: string; subscription?: ReactNode; menu?: ReactNode }) {
-  const updatedAt = card?.freshness.updatedAt;
-  const status = card?.status;
-  const { beside, line, name, tags: tagsRow } = useTagsBeside();
-  const tags = (
-    <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center gap-1.5 whitespace-nowrap empty:hidden ${beside ? "" : "mt-1 pl-6"}`}>
-      {subscription}
-      <SignInBadge signIn={card?.signIn ?? null} />
-      {status?.kind === "savedRefresh" && <UsageStatusBadge detail={status.detail} />}
-      {card?.plan ? (
-        <span className="rounded-md border border-[var(--hair)] px-1.5 py-0.5 type-badge uppercase">
-          {card.plan}
-        </span>
-      ) : null}
-    </div>
-  );
-  return (
-    <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
-      <div className="flex items-center gap-2.5">
-        <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-[0.5px]" />
-        <div ref={line} className="flex min-w-0 flex-1 items-center gap-2.5">
-          <div ref={name} className="min-w-0 truncate text-[13px] font-semibold" title={title}>{title}</div>
-          {beside && tags}
-        </div>
-        {card?.active && !card.headline && <ActiveAccountDot />}
-        {menu}
-      </div>
-      {!beside && tags}
-      {card?.identity.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
-      {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}
-    </header>
   );
 }
 
@@ -229,22 +190,43 @@ function AccountCard({
   card,
   now,
   error,
-  onForget,
+  checking,
+  blocked,
   onArchive,
+  onRemove,
   menuButtonRef,
 }: {
   card: LimitCard;
   now: number;
   error: string | null;
-  onForget: (account: CardAccount) => Promise<void>;
+  checking: boolean;
+  blocked: boolean;
   onArchive: (account: CardAccount) => Promise<void>;
+  onRemove: (account: CardAccount) => Promise<void>;
   menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
-  const { provider, identity, freshness, figures, account } = card;
-  const codexActions = account?.codexActions ?? null;
-  const subscription = <AccountSubscriptionBadge subscription={card.subscription} now={now} />;
-  const header = (menu: ReactNode) => <CardHeader card={card} provider={provider} title={identity.label} subscription={subscription} menu={menu} />;
-  const content = <>
+  const { provider, freshness, figures, account } = card;
+  const history = useHistoryActions(card, { blocked, onArchive, onRemove });
+  const resetActions = account?.resetActions ?? null;
+  const actions = useAccountCardActions(account && {
+    accountId: account.id,
+    label: account.name,
+    current: card.active,
+    profile: account.profile ?? undefined,
+    archive: history.archive,
+    blocked: history.removing,
+    archiveInsteadOfUse: card.archiveInsteadOfUse,
+    signInAgain: card.signInAgain,
+    footer: resetActions ? state => <CodexAccountActions entry={resetActions} label={account.name} now={now} state={state} /> : undefined,
+  });
+  const resetAlert: ActionMenuItem[] = account?.resetAlert ? [{
+    id: "resetAlert",
+    label: "Banked reset alert",
+    panel: done => <ResetAlertForm accountId={account.id} label={account.name} onDone={done} />,
+  }] : [];
+  return (
+    <LimitCardFrame provider={provider} card={card} now={now} checking={checking} menuButtonRef={menuButtonRef} footer={actions.footer}
+      items={[...actions.items, ...history.items, ...resetAlert]} danger={[...actions.danger, ...history.danger]}>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
       {card.status?.kind === "paused" ? (
@@ -272,30 +254,8 @@ function AccountCard({
       <CreditsRows figures={figures} provider={provider} now={now} />
       <BankedResetsRow resetCredits={figures.bankedResets} now={now} />
       <ResetOfferRow offer={figures.paidOffer} />
-  </>;
-  return (
-    <section
-      className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]"
-      aria-label={identity.ariaLabel}
-      data-status={freshness.readStatus}
-    >
-      {account ? <AccountCardActions accountId={account.id} label={account.name} current={card.active} profile={account.profile ?? undefined}
-        onForget={() => onForget(account)}
-        onArchive={() => onArchive(account)} archiveInsteadOfUse={card.archiveInsteadOfUse} signInAgain={card.signInAgain} menuButtonRef={menuButtonRef} header={header}
-        extraAction={provider === "codex" ? {
-          label: "Banked reset alert",
-          render: close => <ResetAlertForm accountId={account.id} label={account.name} onDone={close} />,
-        } : undefined}
-        footer={codexActions ? state => <CodexAccountActions entry={codexActions} label={account.name} now={now} state={state} /> : undefined}>
-        {content}
-      </AccountCardActions> : <>{header(null)}{content}</>}
-    </section>
+    </LimitCardFrame>
   );
-}
-
-function ActiveAccountDot() {
-  return <span role="img" aria-label="Active account" title="Active account"
-    className="size-[7px] shrink-0 rounded-full bg-[var(--live)] shadow-[0_0_8px_var(--live)]" />;
 }
 
 function HeadlineWindow({

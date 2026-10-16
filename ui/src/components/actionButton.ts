@@ -1,0 +1,1 @@
+export const actionButton = "rounded-md border border-[var(--hair)] px-2.5 py-1.5 text-[11px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)] disabled:opacity-45 aria-disabled:opacity-45";

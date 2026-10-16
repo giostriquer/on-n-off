@@ -1,11 +1,11 @@
 import { useId, useRef, useState, type RefCallback } from "react";
 import { ChevronRight } from "lucide-react";
-import { removeAccountQuestion } from "@/features/accounts/AccountCardActions";
-import { accountButton as button } from "@/features/accounts/AccountManager";
+import { actionButton as button } from "@/components/actionButton";
 import { parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/providers";
+import { removeAccountQuestion } from "./historyActions";
 import type { CardAccount, LimitCard } from "./limitCards";
 
 type RowAction = "unarchive" | "remove";

@@ -10,8 +10,9 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { AgentId } from "$lib/types";
-import { providerLabel } from "$lib/providers";
+import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
+import { cardTags, unhandledTag, type CardTag } from "./cardTags";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
 import { useLimitsProviders } from "./useLimitsProviders";
 
@@ -119,7 +120,7 @@ function PopoverProviderSection({
   query,
   now,
 }: {
-  provider: AgentId;
+  provider: LimitsProvider;
   query: UseQueryResult<ProviderLimits[]>;
   now: number;
 }) {
@@ -167,7 +168,7 @@ function PopoverProviderSection({
 }
 
 function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }) {
-  const { provider, identity, status, freshness } = card;
+  const { provider, identity, freshness } = card;
   const windows = card.headline ? [card.headline, ...card.rows] : card.rows;
 
   return (
@@ -179,16 +180,7 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
       <header className="mb-1.5 min-w-0">
         <div className="flex min-w-0 items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{identity.label}</span>
-          {status?.kind === "savedRefresh" ? <UsageStatusBadge detail={status.detail} /> : status?.kind === "remembered" ? (
-            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
-              Remembered account
-            </span>
-          ) : status?.kind === "paused" ? (
-            <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">
-              Refresh paused
-            </span>
-          ) : null}
-          {card.plan ? <span className="shrink-0 type-badge text-[var(--mute)] uppercase">{card.plan}</span> : null}
+          {cardTags(card).map(tag => <PopoverTag key={tag.kind} tag={tag} />)}
         </div>
         {freshness.updatedAt ? <p className="mt-0.5 mb-0 text-[10px] text-[var(--mute)] tabular-nums">Latest observation {freshness.updatedAt}</p> : null}
       </header>
@@ -210,6 +202,18 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
       ) : null}
     </article>
   );
+}
+
+function PopoverTag({ tag }: { tag: CardTag }) {
+  switch (tag.kind) {
+    case "term":
+    case "signIn": return null;
+    case "usageStatus": return <UsageStatusBadge detail={tag.detail} />;
+    case "remembered": return <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">Remembered account</span>;
+    case "paused": return <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">Refresh paused</span>;
+    case "plan": return <span className="shrink-0 type-badge text-[var(--mute)] uppercase">{tag.text}</span>;
+    default: return unhandledTag(tag);
+  }
 }
 
 function PopoverWindow({ window, provider }: { window: CardWindow; provider: AgentId }) {
