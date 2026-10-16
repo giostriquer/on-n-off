@@ -57,7 +57,7 @@ pub(super) fn fetch(url: &str, token: &AccessToken) -> Option<MintResponse> {
 }
 
 pub(super) fn normalize(
-    email: &str,
+    email: Option<String>,
     response: &MintResponse,
 ) -> Option<Result<Parsed, ServeFailure>> {
     if response.require_payment {
@@ -89,7 +89,7 @@ pub(super) fn normalize(
         .filter(|name| name.chars().any(char::is_alphabetic))
         .map(str::to_string);
     Some(Ok(Parsed {
-        account: Some(account_dto(Some(email.to_string()))),
+        account: Some(account_dto(email)),
         reading: Reading {
             plan,
             windows,

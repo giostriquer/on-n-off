@@ -1,6 +1,6 @@
 use super::*;
 use crate::accounts::model::AccessToken;
-use crate::accounts::muse_store::MuseAuth;
+use crate::accounts::muse_store::MuseLogin;
 use crate::dto::LimitWindowDto;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::json_line_session::Script;
@@ -418,11 +418,11 @@ fn a_muse_read_writes_these_exact_lines() {
     );
 }
 
-fn signed_in(email: Option<&str>) -> MuseAuth {
-    MuseAuth {
+fn signed_in(email: Option<&str>) -> Option<MuseLogin> {
+    Some(MuseLogin {
         email: email.map(str::to_string),
         token: Some(AccessToken::new("device-token")),
-    }
+    })
 }
 
 fn mint_body() -> Value {
@@ -443,7 +443,7 @@ fn mint_response(body: Value) -> mint::MintResponse {
 }
 
 fn normalized(body: Value) -> Option<Result<Parsed, ServeFailure>> {
-    mint::normalize("You@Example.com", &mint_response(body))
+    mint::normalize(Some("You@Example.com".to_string()), &mint_response(body))
 }
 
 fn mint_reading(body: Value) -> Parsed {
@@ -587,7 +587,7 @@ fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
         captured.head
     );
     assert_eq!(captured.body, "{}");
-    assert!(mint::normalize("you@example.com", &response).is_some());
+    assert!(mint::normalize(None, &response).is_some());
 }
 
 #[test]
@@ -656,7 +656,7 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
     let no_login = read_current(
         &root,
         serve_read(&root),
-        |_| MuseAuth::default(),
+        |_| None,
         |_| panic!("no login means no mint"),
     );
     assert_eq!(serve_windows(no_login), 2);
@@ -664,9 +664,11 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
     let expired = read_current(
         &root,
         serve_read(&root),
-        |_| MuseAuth {
-            email: Some("you@example.com".to_string()),
-            token: None,
+        |_| {
+            Some(MuseLogin {
+                email: Some("you@example.com".to_string()),
+                token: None,
+            })
         },
         |_| panic!("no token means no mint"),
     );
@@ -723,13 +725,33 @@ fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
 }
 
 #[test]
-fn a_login_without_an_email_never_mints() {
-    let root = crate::paths::scratch_dir("muse-identity-no-email");
+fn a_login_without_an_email_is_the_default_account_on_both_paths() {
+    let root = crate::paths::scratch_dir("muse-identity-default");
+    let minted = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(None),
+        |_| Some(mint_response(mint_body())),
+    )
+    .expect("mint reading")
+    .account
+    .expect("account");
+    let fallback = read_current(&root, serve_read(&root), |_| signed_in(None), |_| None)
+        .expect("serve fallback")
+        .account
+        .expect("account");
+    assert_eq!(minted.id, super::super::DEFAULT_ACCOUNT);
+    assert_eq!(fallback, minted);
+}
+
+#[test]
+fn the_serve_label_names_the_account_only_without_an_auth_login() {
+    let root = crate::paths::scratch_dir("muse-identity-serve-label");
     let read = read_current(
         &root,
         serve_read(&root),
-        |_| signed_in(None),
-        |_| panic!("a login without an email must not mint"),
+        |_| None,
+        |_| panic!("no login means no mint"),
     )
     .expect("serve read");
     let account = read.account.expect("account");
