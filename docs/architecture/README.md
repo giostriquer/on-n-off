@@ -160,30 +160,55 @@ provider's own client:
   holds the Codex activity lease. The card always asks first, and above 5% of the current limit
   left, or the lower share the account's banked reset alert names (`resetSpendLimit`), or with
   no telling how much is left, it warns before the spend rather than refusing it. An automatic
-  spend is held to its alert's share (`ResetAlert::spend_limit`): it reads the limit again in the
-  same app-server session and refuses above it, or when it cannot tell
-  (`codex_app_server::spend_allowed`). A shared forced read follows every attempt that got past
-  that lease, a failed one included, since a request that timed out may still have reached Codex;
-  and the card reuses one idempotency key until Codex gives a definite answer, so a retry cannot
-  spend a second reset.
+  spend is held to its alert's share (`ResetSpend::Automatic`, carrying the `SpendShare` only an
+  alert gives): it reads the limit again in the same app-server session and refuses above it, or
+  when it cannot tell (`SpendShare::allows`). A shared forced read follows every attempt that got
+  past that lease, a failed one included, since a request that timed out may still have reached
+  Codex; and the card reuses one idempotency key until Codex gives a definite answer, so a retry
+  cannot spend a second reset.
 
-  A **banked reset alert** (`settings::ResetAlert`, turned on from a Codex card's menu and listed in
-  Settings) notifies, or uses the reset automatically. `limits_monitor` polls while any alert is on,
-  reading Codex alone when limit notifications are off (`watched_providers`), and
-  `limits_monitor/reset_alerts.rs` offers the reset when two polls in a row, each a newer reading of
-  the signed-in account in the same weekly cycle, find it at the alert's share or below, with its
-  weekly window at least the alert's hours from renewing and a banked reset that has not lapsed. It
-  offers once per weekly cycle, which a spent reset starts anew, and keeps its state in the
-  monitor's own file. An automatic alert's offer (`limits_monitor/auto_spend.rs`) is a notification
-  that the reset will be used in ten minutes, scheduled only once the offer is saved. The monitor
-  wakes then, reads Codex afresh, and spends it through the same
-  `limits_refresh::consume_codex_reset_credit` a click uses only if that read still finds the
-  signed-in account low in the same cycle; a read that fails leaves it waiting, and one found more
-  than fifteen minutes late, as after sleep, is kept. It says what came of it either way. Until
-  then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
+  A **banked reset alert** (turned on from a Codex card's menu and listed in Settings) notifies,
+  or uses the reset automatically. One module, `reset_alert.rs`, owns the rule end to end and does
+  no I/O: the alert as the settings keep it (`ResetAlert`), its defaults and the bounds the
+  settings clamp applies (`keep_within_bounds`), how much of the limit is left (the fullest weekly
+  or session window), when a reset is worth using, once per weekly cycle, when a waiting spend
+  falls due, the share an automatic spend is held to, and the wording of every notification.
+  Given a poll's readings, the alerts, the monitor's saved state and the time, `reset_alert::plan`
+  returns what to do: the poll's offers, which once the state is saved tell the alerts that only
+  notify and schedule the automatic ones (`Offered::commit`), and the waiting spends that fell
+  due, each to spend at its alert's share or to keep with the notice that says why.
+
+  It offers the reset when two polls in a row, each a newer reading of the signed-in account in
+  the same weekly cycle, find it at the alert's share or below, with its weekly window at least
+  the alert's hours from renewing and a banked reset that has not lapsed. It offers once per weekly
+  cycle, which a spent reset starts anew. A cycle is the weekly window's reset time, and two within
+  two seconds of each other are the same cycle: Codex reports that time to the second, the same
+  window's time can differ by a second or two from one response to the next, and a remembered
+  window can spell the same instant differently, all of which an exact match took for a new week.
+  The tolerance is the one the Codex sessions merge matches a window by
+  (`limits::same_reset_instant`), and the saved cycle stays the string Codex sent; one that does
+  not read as a time is another cycle. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
+  time comes the reset is used only if a fresh read still finds the signed-in account low in the
+  same cycle; a read that fails leaves it waiting, and one found more than fifteen minutes late,
+  as after sleep, is kept. A spend that fails is not tried again.
+
+  `limits_monitor` is the loop that does the I/O around the rule (`poll_once`, over a small `Io`
+  trait its tests fake). It polls while any alert is on, reading Codex alone when limit
+  notifications are off (`watched_providers`) and reading it afresh when a spend is due. It saves
+  its state, in its own file, before it tells anyone or schedules anything, and rolls the state
+  back when the save fails, so the offer is made again. It spends through the same
+  `limits_refresh::consume_codex_reset_credit` a click uses and says what came of it either way.
+  Until then the account's card shows the waiting spend with a Cancel (`pending_reset_spends`,
   `cancel_reset_spend`, announced as the `limits:reset-spends` shared read), and a reset used by
-  hand clears it. A waiting spend lives in memory only, apart from the monitor's saved state, so
-  quitting on-n-off cancels it, and a spend that fails is not tried again.
+  hand clears it (`spend_reset_by_hand`). A waiting spend lives in memory only, apart from the
+  monitor's saved state, so quitting on-n-off cancels it.
+
+  The UI restates the rule's numbers in `ui/src/lib/appSettings.ts`: the 5% cap, a new alert, the
+  form's bounds, the ten-minute delay and an alert's share. `ui/src/lib/resetAlertRule.test.ts`
+  checks them against `src-tauri/src/reset_alert/fixtures/rule.json`, which a Rust test keeps
+  equal to what the rule does. The card's own "how much is left" (`usageLeft`,
+  `limitPresentation.ts`) counts a window past its reset as 0% used, because a reading ages on
+  screen; the rule judges live readings and does not.
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
 is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the
@@ -406,7 +431,7 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
-| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id (`settings.rs`); offered by `limits_monitor/reset_alerts.rs`, and spent by `limits_monitor/auto_spend.rs` when `automatic`; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the spend rule both sides keep is `ResetAlert::spend_limit` and `resetSpendLimit` (`ui/src/lib/appSettings.ts`) |
+| Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id; the rule (its bounds, offers once a weekly cycle, waiting spends and the share a spend is held to) is `reset_alert.rs`, whose `plan` `limits_monitor.rs` performs; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the numbers the UI restates (`ui/src/lib/appSettings.ts`, `resetSpendLimit` among them) are checked against `src-tauri/src/reset_alert/fixtures/rule.json` |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects) |
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |

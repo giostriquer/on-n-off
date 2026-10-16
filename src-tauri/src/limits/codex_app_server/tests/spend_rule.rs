@@ -90,9 +90,13 @@ fn a_reset_is_never_spent_automatically_while_more_than_the_allowed_share_is_lef
 fn an_accounts_lower_share_is_the_one_kept() {
     let (outcome, script) = spend_as(
         "acct-1",
-        ResetSpend::Automatic {
-            max_left_percent: 3,
-        },
+        ResetSpend::Automatic(
+            ResetAlert {
+                max_left_percent: 3,
+                ..ResetAlert::default()
+            }
+            .spend_share(),
+        ),
         |_| signed_in_as("acct-1"),
         consume_replies_at(
             chatgpt_account(),

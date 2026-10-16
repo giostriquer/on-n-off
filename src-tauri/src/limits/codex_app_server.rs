@@ -4,13 +4,13 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::codex::ResetSpend;
 use super::Parsed;
 use crate::accounts::codex_store::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{AgentId, ResetCreditOutcome};
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
+use crate::reset_alert::ResetSpend;
 
 const APP_SERVER: Peer = Peer::jsonrpc_lite(
     "Codex app-server",
@@ -121,9 +121,10 @@ fn spend_in_session(
     identity(codex_home)
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(Failure::new)?;
-    if let ResetSpend::Automatic { max_left_percent } = how {
+    if let ResetSpend::Automatic(share) = how {
         let rate_limits = read_rate_limits(conversation)?;
-        spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
+        share
+            .allows(&super::codex::parse_codex(&rate_limits))
             .map_err(Failure::new)?;
     }
     let response: ConsumeResetCreditResponse = conversation.request(
@@ -134,19 +135,6 @@ fn spend_in_session(
             ),
     )?;
     Ok(response.outcome)
-}
-
-fn spend_allowed(reading: &crate::dto::Reading, max_left_percent: u8) -> Result<(), String> {
-    let left = reading.limit_left_percent().ok_or(
-        "on-n-off can't tell how much of the Codex limit is left, so it won't spend a reset.",
-    )?;
-    if left <= f64::from(max_left_percent) {
-        return Ok(());
-    }
-    Err(format!(
-        "A banked reset can be used once {max_left_percent}% or less of the current limit is left, and {}% is left.",
-        left.round()
-    ))
 }
 
 fn reset_target_matches(current: Option<(String, Value)>, account_id: &str) -> Result<(), String> {

@@ -267,7 +267,7 @@ where
 pub fn consume_codex_reset_credit(
     account_id: &str,
     idempotency_key: &str,
-    how: crate::limits::ResetSpend,
+    how: crate::reset_alert::ResetSpend,
 ) -> Result<ResetCreditOutcome, String> {
     spend_then_refresh(
         idempotency_key,
