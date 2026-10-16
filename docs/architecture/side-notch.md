@@ -52,7 +52,7 @@ Things that are easy to get wrong:
   retrying on macOS, an action the transport carried out on Windows.
 - **The host's rules are tested on every OS** through a fake transport and a fake `App`
   (`host/tests/`), the seam that stands for the reads, the settings store and the windows it opens.
-  `host/tests/wire.rs` pins the exact bytes the helper receives (the golden message, under
+  `host/tests/wire.rs` pins the exact bytes the helper receives (the golden messages, under
   [Protocol 7](#protocol-7)); `model/frame/tests.rs` what each cell shows; `transport/tests.rs`
   the pipe's acks, waits and frame numbers; `host/app/tests.rs` that `Production` follows the
   shared reads' own revisions and intervals; `win_transport/tests.rs`, on Windows only, the
@@ -70,19 +70,25 @@ drew only the cells that had been read into the first slots of a rail sized for 
   cell when it is on. A provider without a current-account reading, not read yet or read without
   one, keeps its slot as a checking cell: no reading, a dash, and "Checking usage…" in its
   popover. The pull request cell is checking until its first read ("Checking pull requests…").
-  So the rail is always as long as its cells, and the helper never derives its cells from the
-  settings.
-- **A provider cell**: its reading (from `NotchProvider::current`, below), its sessions, a notice
-  (the reading's message, else "Usage unavailable.", when the read is not `ok`) and, when that
-  reading still has windows or a workspace share, the amber "Refresh paused. Last observed values
-  below." A reading that is `ok` says nothing above its windows, even without any.
+  The rail is as long as the frame's cells on both notches: the Windows painter and the helper
+  size it from the cells they were sent, and `save` and the host's reads from
+  `frame::cell_count`, which counts the same slots `frame::rail` fills. The helper decodes no
+  provider list or pull request settings at all.
+- **A provider cell**: its reading (from `NotchProvider::current`, below: meter data only, the
+  windows and what the rings name), its sessions, a notice (the reading's message, else "Usage
+  unavailable.", when the read is not `ok`) and, when that reading still has windows or a
+  workspace share, the amber "Refresh paused. Last observed values below." A reading that is `ok`
+  says nothing above its windows, even without any. The read's status and message never reach the
+  drawers: the notice and the paused line are what they say.
 - **The pull request cell**: whether the read is readable (`ok`, or stale), the hint as its notice
   when the read is not `ok` (amber over rows it still shows, muted when it shows none), and, only
   when readable, the lists in their own order with their titles, at most 25 rows each and only rows
   on github.com. The ring has one segment per pull request across the lists, at most 24, a passing
-  pull request with merge conflicts marked as such, and its figure is the count of distinct pull
-  requests. The attention counts the macOS cell speaks (conflicts, failing CI, changes requested,
-  ready to merge) count each pull request once too.
+  pull request with merge conflicts marked as such, and its figure (`label`) is the count of
+  distinct pull requests once the read is readable, a dash until then. The attention counts the
+  macOS cell speaks (conflicts, failing CI, changes requested, ready to merge) count each pull
+  request once too.
+
 - **Each row's badges** (Draft, Approved, Changes requested, Conflicts, Queued, Auto-merge, Ready to
   merge, Behind base, Blocked) and **its tag**, each a label and a tone. A tone names an ink, never
   a colour: muted, green, red, amber, work, personal; each drawer keeps its own inks for them.
@@ -114,8 +120,10 @@ What stays with each drawer is what depends on the clock, since they redraw betw
 window's percent now, its reset note, a session's age, the percent under a provider's ring), and
 what is only style: provider names and marks, the inks of each tone, list titles and tags set in
 capitals, the CI dot's colour, "Nothing open." and "N of M". The review request copied from a row is
-still worded by each drawer. Accessibility strings stay in the helper, built from the decided
-fields.
+still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
+(`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided
+fields alone: a cell not read yet is "updating", one without a headline says its notice, and the
+paused line adds "refresh paused, last observed".
 
 A drawer never decides what a cell says. A new badge, notice or rule goes in `model/frame.rs` and
 reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the
@@ -155,27 +163,31 @@ flowchart LR
 The helper receives the frame as one line: `version` 7, `sequence`, `snapshot` (the
 settings and displays), `cells` in rail order and `actionError`. Each cell has a `kind`:
 
-- `provider`: `provider`, `reading` (absent while checking: `status`, `message`, `windows`,
-  `headlineWindowId`, `innerRing`, `workspaceCredits`), `notice`, `paused` (each a `text` and a
-  `tone`, absent when there is none) and `sessions`.
-- `pullRequests`: `reading` (absent while checking: `readable`, `count`, `segments` of `ci` and
-  `passingWithConflicts`, `attention`, `lists` of `id`, `title`, `total` and `items`, each row with
-  its `badges` and optional `tag`, each a `label` and a `tone`) and `notice`.
+- `provider`: `provider`, `reading` (absent while checking: `windows`, `headlineWindowId`,
+  `innerRing`, `workspaceCredits`), `notice`, `paused` (each a `text` and a `tone`, absent when
+  there is none) and `sessions`.
+- `pullRequests`: `label`, `reading` (absent while checking: `readable`, `count`, `segments` of `ci`
+  and `passingWithConflicts`, `attention`, `lists` of `id`, `title`, `total` and `items`, each row
+  with its `badges` and optional `tag`, each a `label` and a `tone`) and `notice`.
+
+The snapshot's settings still carry the provider list and the pull request settings, for the app;
+the helper reads only `enabled`, `displayId`, `edge`, `size`, `show` and `popoverStyle`.
 
 The helper refuses another version, a message naming a window it did not send, two cells with the
-same id, more than 24 segments or 25 rows a list, a row off github.com, and, while the notch is on,
-cells that do not fill the rail its settings lay out. It skips a cell whose provider it does not
-know, and drops that provider from the settings it decodes, rather than refusing the whole message:
-the helper ships inside the bundle, so this only matters between builds, but one unknown provider
-used to blank the notch. An unknown tone draws muted; an unknown CI state draws as no checks.
+same id, more than 24 segments or 25 rows a list, and a row off github.com. It skips a cell whose
+provider it does not know rather than refusing the whole message, and its rail is one cell shorter
+for it: the helper ships inside the bundle, so this only matters between builds, but one unknown
+provider used to blank the notch. An unknown tone draws muted; an unknown CI state draws as no
+checks.
 
-One message is the contract both sides check:
+Two messages are the contract both sides check:
 `macos/SideNotch/Tests/NotchCoreTests/host-message.json`. `host/tests/wire.rs` drives the host
-through a representative frame (a read provider, a paused one, a checking one, a stale pull request
-read with a pull request in two lists) and asserts that the encoder's bytes are that file, key for
-key; `NotchCoreChecks` decodes the same file and asserts every decided field. A field renamed or
-dropped on one side fails that side's check. To change the protocol, change the encoder and the
-Swift models, regenerate the file from the encoder, and update both assertions.
+through its first frame, where every cell is checking, and a frame after every read (a read
+provider, a paused one, one with no current account, a stale pull request read with a pull request
+in two lists and a passing one in conflict), and asserts that the encoder's bytes are that file's,
+key for key; `NotchCoreChecks` decodes the same file and asserts every decided field. A field
+renamed or dropped on one side fails that side's check. To change the protocol, change the encoder
+and the Swift models, regenerate the file from the encoder, and update both assertions.
 
 Things that are easy to get wrong:
 
@@ -188,7 +200,8 @@ Things that are easy to get wrong:
   `side_notch/model.rs` (Rust), so Rust can reason about it without calling into AppKit. They
   mirror each other function for function: `railLayout` is `rail_metrics`, `RailLayout.length` is
   `RailMetrics::length`, `notchRailFrame` is `layout`, `railCellFrames` is `rail_cell_frames`,
-  `notchPillFrame` is `pill_frame`, and `selectedDisplay` and `pixelAligned` keep their names.
+  `notchPillFrame` is `pill_frame`, and `selectedDisplay` and `pixelAligned` keep their names. The
+  frames take the rail's cell count rather than counting the settings' providers.
   Both round every measurement to the display's pixel grid before adding them up, so a rail is
   exactly as long as its cells, their spacing and two ears, and lands on whole device pixels.
   The helper draws from the Swift copy. Rust's copy decides whether the rail has room (`save` and

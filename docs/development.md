@@ -34,7 +34,7 @@ locates the subsystems. Module doc-comments explain their implementation.
   Change the shape and change all three, each of which has a test pinning it.
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
-  change the model, the Swift models and the golden message `host-message.json` together
+  change the model, the Swift models and the golden messages `host-message.json` together
   ([why](architecture/side-notch.md#what-each-cell-shows-is-decided-once)).
 - The side notch rail's sizes and frames: `rail_metrics` and the frames built from it in
   `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
