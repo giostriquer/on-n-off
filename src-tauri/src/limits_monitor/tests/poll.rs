@@ -5,7 +5,7 @@ use crate::settings::AppSettings;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Effect {
-    Read(Vec<(AgentId, bool)>),
+    Read(Vec<AgentId>, Option<AgentId>),
     Saved,
     Spent(String, SpendShare),
     Told(String, String),
@@ -44,8 +44,14 @@ impl Fake {
 }
 
 impl Io for Fake {
-    async fn read(&self, reads: Vec<(AgentId, bool)>) -> Result<Vec<ProviderLimitsDto>, String> {
-        self.log.borrow_mut().push(Effect::Read(reads));
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<ProviderLimitsDto>, String> {
+        self.log
+            .borrow_mut()
+            .push(Effect::Read(providers.to_vec(), fresh));
         if self.read_fails.get() {
             return Err("provider worker failed: cancelled".to_string());
         }
@@ -150,7 +156,7 @@ fn an_automatic_offer_is_told_and_waits_only_once_the_state_is_saved() {
         .unwrap();
     assert_eq!(
         monitor.io.effects(),
-        [Effect::Read(vec![(AgentId::Codex, false)]), Effect::Saved]
+        [Effect::Read(vec![AgentId::Codex], None), Effect::Saved]
     );
 
     monitor.io.save_fails.set(true);
@@ -162,7 +168,7 @@ fn an_automatic_offer_is_told_and_waits_only_once_the_state_is_saved() {
     assert_eq!(unsaved, Err("could not save state: disk full".to_string()));
     assert_eq!(
         monitor.io.effects(),
-        [Effect::Read(vec![(AgentId::Codex, false)])]
+        [Effect::Read(vec![AgentId::Codex], None)]
     );
     assert!(listed(&monitor).is_empty());
 
@@ -177,7 +183,7 @@ fn an_automatic_offer_is_told_and_waits_only_once_the_state_is_saved() {
     assert_eq!(
         monitor.io.effects(),
         [
-            Effect::Read(vec![(AgentId::Codex, false)]),
+            Effect::Read(vec![AgentId::Codex], None),
             Effect::Saved,
             told(
                 "Codex: using a banked reset in 10 minutes",
@@ -219,11 +225,7 @@ fn a_notify_only_offer_is_told_after_the_limits_and_nothing_waits() {
     assert_eq!(
         monitor.io.effects(),
         [
-            Effect::Read(vec![
-                (AgentId::Claude, false),
-                (AgentId::Codex, false),
-                (AgentId::Muse, false)
-            ]),
+            Effect::Read(vec![AgentId::Claude, AgentId::Codex, AgentId::Muse], None),
             Effect::Saved,
             told("Codex limit reached", "Weekly · all models reached 100% usage · you@example.com"),
             told(
@@ -293,19 +295,14 @@ fn a_spend_falling_due_reads_codex_afresh_and_nothing_else() {
 
     assert_eq!(
         before_due[0],
-        Effect::Read(vec![
-            (AgentId::Claude, false),
-            (AgentId::Codex, false),
-            (AgentId::Muse, false)
-        ])
+        Effect::Read(vec![AgentId::Claude, AgentId::Codex, AgentId::Muse], None)
     );
     assert_eq!(
         monitor.io.effects()[0],
-        Effect::Read(vec![
-            (AgentId::Claude, false),
-            (AgentId::Codex, true),
-            (AgentId::Muse, false)
-        ])
+        Effect::Read(
+            vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
+            Some(AgentId::Codex)
+        )
     );
 }
 
@@ -324,7 +321,7 @@ fn a_spend_still_needed_is_made_at_its_alerts_share_and_told_even_when_the_save_
     assert_eq!(
         monitor.io.effects(),
         [
-            Effect::Read(vec![(AgentId::Codex, true)]),
+            Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex)),
             Effect::Spent("acct-codex".to_string(), monitor.share()),
             told(
                 "Codex: banked reset used",
@@ -383,7 +380,7 @@ fn a_spend_no_longer_needed_is_kept_and_told() {
     assert_eq!(
         monitor.io.effects(),
         [
-            Effect::Read(vec![(AgentId::Codex, true)]),
+            Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex)),
             Effect::Saved,
             told(
                 "Codex: banked reset not used",
@@ -405,7 +402,7 @@ fn a_read_that_fails_decides_nothing_and_the_spend_keeps_waiting() {
     assert_eq!(failed, Err("provider worker failed: cancelled".to_string()));
     assert_eq!(
         monitor.io.effects(),
-        [Effect::Read(vec![(AgentId::Codex, true)])]
+        [Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex))]
     );
     assert_eq!(listed(&monitor).len(), 1);
 }
@@ -496,7 +493,7 @@ fn an_offer_is_not_made_again_after_a_restart() {
 
     assert_eq!(
         restarted.io.effects(),
-        [Effect::Read(vec![(AgentId::Codex, false)]), Effect::Saved]
+        [Effect::Read(vec![AgentId::Codex], None), Effect::Saved]
     );
     let _ = fs::remove_dir_all(root);
 }

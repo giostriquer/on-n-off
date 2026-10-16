@@ -130,7 +130,11 @@ pub fn spend_reset_by_hand(
 }
 
 trait Io {
-    async fn read(&self, reads: Vec<(AgentId, bool)>) -> Result<Vec<ProviderLimitsDto>, String>;
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<ProviderLimitsDto>, String>;
     async fn save(&self, state: &MonitorState) -> Result<(), String>;
     async fn spend(
         &self,
@@ -147,10 +151,15 @@ struct App {
 }
 
 impl Io for App {
-    async fn read(&self, reads: Vec<(AgentId, bool)>) -> Result<Vec<ProviderLimitsDto>, String> {
-        let tasks: Vec<_> = reads
-            .into_iter()
-            .map(|(provider, force)| {
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<ProviderLimitsDto>, String> {
+        let tasks: Vec<_> = providers
+            .iter()
+            .map(|&provider| {
+                let force = fresh == Some(provider);
                 async_runtime::spawn_blocking(move || {
                     crate::limits_refresh::read_limits(provider, force)
                 })
@@ -285,14 +294,12 @@ async fn poll_once(
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
-    now: DateTime<Utc>,
+    polled_at: DateTime<Utc>,
 ) -> Result<(), String> {
-    let fresh_codex = waiting.read(|waiting| waiting.any_due(now));
-    let reads = watched
-        .iter()
-        .map(|&provider| (provider, fresh_codex && provider == AgentId::Codex))
-        .collect();
-    let readings = io.read(reads).await?;
+    let fresh = waiting
+        .read(|waiting| waiting.any_due(polled_at))
+        .then_some(AgentId::Codex);
+    let readings = io.read(watched, fresh).await?;
     let previous = state.clone();
     let mut notices = limit_notices(state, &readings, settings);
     let Plan { offered, due } = waiting.change(|waiting| {
@@ -301,7 +308,7 @@ async fn poll_once(
             waiting,
             &readings,
             &settings.reset_alerts,
-            now,
+            polled_at,
         )
     });
     let saved = io.save(state).await;
