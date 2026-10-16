@@ -130,7 +130,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
         (1..=26).filter(|number| *number != 7).collect::<Vec<_>>(),
         "rows that do not live on github.com never render, and a list stops at 25"
     );
-    assert_eq!(crate::side_notch::host::frame::MAX_PULL_REQUESTS, 25);
+    assert_eq!(crate::side_notch::model::frame::MAX_PULL_REQUESTS, 25);
     assert!(cell.lists[1].items.is_empty());
 
     let mut review_only = snapshot();

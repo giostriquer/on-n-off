@@ -1,6 +1,6 @@
 use super::*;
-use crate::side_notch::host::frame::RailData;
 use crate::side_notch::host::{Inbound, Link};
+use crate::side_notch::model::frame::RailData;
 use crate::side_notch::model::{NotchSettings, ShowMode};
 use std::sync::atomic::Ordering;
 

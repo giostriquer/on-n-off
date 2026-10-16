@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::GithubStatus;
-use crate::side_notch::host::frame::PrListData;
+use crate::side_notch::model::frame::PrListData;
 use crate::side_notch::model::GithubList;
 
 #[test]

@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
 
-use super::host::frame::RailData;
 use super::host::{self, Action, Inbound, Link, Transport, STOPPED};
+use super::model::frame::RailData;
 use super::model::NotchSnapshot;
 use super::win_window::{WinAction, WindowMsg};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};

@@ -1,7 +1,7 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
-use crate::side_notch::host::frame::{CellData, ProviderData};
+use crate::side_notch::model::frame::{CellData, ProviderData};
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::win_paint::R;
 use std::time::Duration;

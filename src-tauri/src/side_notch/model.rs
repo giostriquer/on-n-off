@@ -6,6 +6,9 @@ use crate::dto::{
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub mod frame;
+
 pub const RAIL_ORDER: [AgentId; 5] = [
     AgentId::Claude,
     AgentId::Codex,

@@ -1,3 +1,4 @@
+use super::model::frame::{self, CellData, ProviderData, RailData};
 use super::model::{layout, NotchProvider, NotchSettings, NotchSnapshot, ShowMode, RAIL_ORDER};
 use super::sessions::LiveSession;
 use crate::dto::{AgentId, GithubPrsDto, ProviderLimitsDto};
@@ -8,9 +9,6 @@ use std::{
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod app;
-pub mod frame;
-
-use frame::{CellData, ProviderData, RailData};
 
 pub(super) const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
 

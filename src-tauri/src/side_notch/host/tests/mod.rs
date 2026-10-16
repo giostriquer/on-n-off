@@ -1,6 +1,6 @@
-use super::frame::{PrCellData, PrRowData};
 use super::*;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::side_notch::model::frame::{PrCellData, PrRowData};
 use crate::side_notch::model::Display;
 use crate::side_notch::sessions::SessionStatus;
 use std::collections::HashMap;

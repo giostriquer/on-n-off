@@ -1,5 +1,5 @@
+use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ReviewDecision};
-use crate::side_notch::model::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
 

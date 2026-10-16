@@ -1,4 +1,4 @@
-use super::host::frame::{CellData, PrCellData, ProviderData, RailData};
+use super::model::frame::{CellData, PrCellData, ProviderData, RailData};
 use super::model::{workspace_share_wording, InnerRing, NotchProvider, NotchSnapshot, ShowMode};
 use super::sessions::LiveSession;
 use crate::dto::{AgentId, LimitWindowDto, LimitsStatus};
