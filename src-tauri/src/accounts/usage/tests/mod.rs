@@ -284,45 +284,49 @@ fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
 }
 
 #[test]
-fn a_saved_poll_that_keeps_failing_waits_two_four_eight_then_sixteen_intervals() {
-    let interval = crate::limits_refresh::poll_interval();
-    let failed = || AttemptOutcome::failed("failed", false, Duration::ZERO);
+fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry_after() {
+    let failed = |retry| AttemptOutcome::failed("failed", false, Duration::from_secs(retry));
     let answered = AttemptOutcome {
         error: None,
         rejected: false,
         retry: Duration::ZERO,
     };
-    for (before, outcome, failures, intervals) in [
-        (0, failed(), 1, 2),
-        (1, failed(), 2, 4),
-        (2, failed(), 3, 8),
-        (4, failed(), 5, 16),
-        (3, answered, 0, 1),
-    ] {
-        let attempts = Mutex::default();
-        let previous = Attempt {
-            fingerprint: "login".into(),
-            next: Instant::now(),
-            failures: before,
-            error: Some("failed".into()),
-            rejected: false,
-        };
-        let start = Instant::now();
-        hold_back(
-            &attempts,
-            "key".into(),
-            "login".into(),
-            (before > 0).then_some(&previous),
-            outcome,
-        );
-        let end = Instant::now();
-        let recorded = attempts.lock().unwrap()["key"].clone();
-        let wait = (interval * intervals).min(Duration::from_secs(3600));
-        assert_eq!(recorded.failures, failures);
-        assert!(
-            recorded.next >= start + wait && recorded.next <= end + wait,
-            "{failures} failures wait {wait:?}"
-        );
+    for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
+        let backoff = |failures| crate::limits_refresh::failure_backoff(interval, failures);
+        for (before, outcome, failures, wait) in [
+            (0, failed(0), 1, backoff(1)),
+            (1, failed(0), 2, backoff(2)),
+            (2, failed(0), 3, backoff(3)),
+            (4, failed(0), 5, backoff(5)),
+            (3, answered.clone(), 0, backoff(0)),
+            (0, failed(30), 1, backoff(1)),
+            (0, failed(7200), 1, Duration::from_secs(7200)),
+        ] {
+            let attempts = Mutex::default();
+            let previous = Attempt {
+                fingerprint: "login".into(),
+                next: Instant::now(),
+                failures: before,
+                error: Some("failed".into()),
+                rejected: false,
+            };
+            let start = Instant::now();
+            hold_back(
+                &attempts,
+                "key".into(),
+                "login".into(),
+                (before > 0).then_some(&previous),
+                outcome,
+                interval,
+            );
+            let end = Instant::now();
+            let recorded = attempts.lock().unwrap()["key"].clone();
+            assert_eq!(recorded.failures, failures);
+            assert!(
+                recorded.next >= start + wait && recorded.next <= end + wait,
+                "{failures} failures at {interval:?} wait {wait:?}"
+            );
+        }
     }
 }
 

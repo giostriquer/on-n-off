@@ -1,5 +1,8 @@
 use super::*;
+use crate::limits_refresh::failure_backoff;
 use std::cell::Cell;
+
+const INTERVAL: Duration = Duration::from_secs(60);
 
 impl<T: Clone> PerAccount<T> {
     fn failed_before(&self, account: &str, count: u32) {
@@ -31,11 +34,11 @@ fn reads(answer: Option<u8>) -> (impl Fn() -> Option<u8>, std::rc::Rc<Cell<u32>>
 fn an_answer_stands_for_its_time_and_is_asked_again_after() {
     let memo: PerAccount<u8> = PerAccount::new(Some(Duration::from_millis(80)));
     let (read, asked) = reads(Some(7));
-    assert_eq!(memo.read_backed_off("a", &read), Some(7));
-    assert_eq!(memo.read_backed_off("a", &read), Some(7));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(7));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(7));
     assert_eq!(asked.get(), 1, "the standing answer is served, not re-read");
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(memo.read_backed_off("a", &read), Some(7));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(7));
     assert_eq!(asked.get(), 2, "an answer past its time is read again");
 }
 
@@ -43,8 +46,8 @@ fn an_answer_stands_for_its_time_and_is_asked_again_after() {
 fn without_a_standing_time_every_read_asks() {
     let memo: PerAccount<u8> = PerAccount::new(None);
     let (read, asked) = reads(Some(1));
-    assert_eq!(memo.read_backed_off("a", &read), Some(1));
-    assert_eq!(memo.read_backed_off("a", &read), Some(1));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(1));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(1));
     assert_eq!(asked.get(), 2);
     assert_eq!(memo.backoff_of("a"), None);
 }
@@ -53,68 +56,54 @@ fn without_a_standing_time_every_read_asks() {
 fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it() {
     let memo: PerAccount<u8> = PerAccount::new(None);
     let (fail, asked) = reads(None);
-    assert_eq!(memo.read_backed_off("a", &fail), None);
-    assert_eq!(memo.read_backed_off("a", &fail), None);
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &fail), None);
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &fail), None);
     assert_eq!(asked.get(), 1, "held back within the wait");
     let (_, count) = memo.backoff_of("a").unwrap();
     assert_eq!(count, 1);
 
     memo.failed_before("a", 2);
     let before = Instant::now();
-    assert_eq!(memo.read_backed_off("a", &fail), None);
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &fail), None);
     let after = Instant::now();
     let (until, count) = memo.backoff_of("a").unwrap();
     assert_eq!(count, 3, "another failure once the wait ran out counts on");
-    let wait = backoff_delay(3, crate::limits_refresh::poll_interval());
+    let wait = failure_backoff(INTERVAL, 3);
     assert!(
         until >= before + wait && until <= after + wait,
         "and waits the longer delay from then"
     );
 
     let (read, _) = reads(Some(9));
-    assert_eq!(memo.read_backed_off("b", &read), Some(9));
+    assert_eq!(memo.read_backed_off("b", INTERVAL, &read), Some(9));
 
     memo.failed_before("a", 3);
-    assert_eq!(memo.read_backed_off("a", &read), Some(9));
+    assert_eq!(memo.read_backed_off("a", INTERVAL, &read), Some(9));
     assert_eq!(memo.backoff_of("a"), None, "a success clears the backoff");
     memo.forget("a");
     assert_eq!(memo.backoff_of("a"), None);
 }
 
 #[test]
-fn a_backend_figure_that_keeps_failing_waits_two_four_eight_then_sixteen_intervals() {
-    let interval = crate::limits_refresh::poll_interval();
-    for (failures, intervals) in [(1, 2), (2, 4), (3, 8), (5, 16)] {
-        let memo: PerAccount<u8> = PerAccount::new(None);
-        if failures > 1 {
-            memo.failed_before("a", failures - 1);
+fn a_backend_figure_that_keeps_failing_waits_the_limits_failure_backoff_at_the_interval_it_is_given(
+) {
+    for interval in [INTERVAL, Duration::from_secs(300)] {
+        for failures in [1, 2, 3, 5] {
+            let memo: PerAccount<u8> = PerAccount::new(None);
+            if failures > 1 {
+                memo.failed_before("a", failures - 1);
+            }
+            let (fail, _) = reads(None);
+            let start = Instant::now();
+            assert_eq!(memo.read_backed_off("a", interval, &fail), None);
+            let end = Instant::now();
+            let (until, count) = memo.backoff_of("a").unwrap();
+            let wait = failure_backoff(interval, failures);
+            assert_eq!(count, failures);
+            assert!(
+                until >= start + wait && until <= end + wait,
+                "{failures} failures at {interval:?} wait {wait:?}"
+            );
         }
-        let (fail, _) = reads(None);
-        let start = Instant::now();
-        assert_eq!(memo.read_backed_off("a", &fail), None);
-        let end = Instant::now();
-        let (until, count) = memo.backoff_of("a").unwrap();
-        let wait = (interval * intervals).min(Duration::from_secs(3600));
-        assert_eq!(count, failures);
-        assert!(
-            until >= start + wait && until <= end + wait,
-            "{failures} failures wait {wait:?}"
-        );
     }
-}
-
-#[test]
-fn each_failure_in_a_row_doubles_the_wait_up_to_sixteen_intervals_and_an_hour() {
-    let minute = Duration::from_secs(60);
-    for (count, intervals) in [(0, 1), (1, 2), (2, 4), (3, 8), (4, 16), (5, 16), (9, 16)] {
-        assert_eq!(backoff_delay(count, minute), minute * intervals, "{count}");
-    }
-    assert_eq!(
-        backoff_delay(1, Duration::from_secs(7200)),
-        Duration::from_secs(3600)
-    );
-    assert_eq!(
-        backoff_delay(3, Duration::from_secs(1000)),
-        Duration::from_secs(3600)
-    );
 }

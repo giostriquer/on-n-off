@@ -121,9 +121,11 @@ pub(super) fn read_backed_off(
     url: &str,
     now: DateTime<Utc>,
 ) -> Option<LimitsCreditsSpentDto> {
-    MEMO.read_backed_off(&access.observation_key, || {
-        read(&access.token, &access.workspace_id, url, now)
-    })
+    MEMO.read_backed_off(
+        &access.observation_key,
+        crate::limits_refresh::poll_interval(),
+        || read(&access.token, &access.workspace_id, url, now),
+    )
 }
 
 #[cfg(test)]

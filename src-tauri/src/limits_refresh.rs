@@ -65,6 +65,10 @@ pub(crate) fn check_interval(default: Duration) -> Duration {
     default.min(CHECK_INTERVAL)
 }
 
+pub(crate) fn failure_backoff(interval: Duration, failures: u32) -> Duration {
+    crate::monitor::backoff(interval, failures, MAX_FAILURE_BACKOFF)
+}
+
 fn active_interval(entries: &[ProviderLimitsDto], default: Duration) -> Duration {
     let used = entries
         .iter()
@@ -422,7 +426,7 @@ fn cache_is_fresh(
     consecutive_failures: u32,
     force: bool,
 ) -> bool {
-    let interval = crate::monitor::backoff(interval, consecutive_failures, MAX_FAILURE_BACKOFF);
+    let interval = failure_backoff(interval, consecutive_failures);
     !force && now.saturating_duration_since(refreshed_at) < interval
 }
 
