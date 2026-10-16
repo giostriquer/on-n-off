@@ -593,3 +593,38 @@ fn a_reset_used_by_hand_is_spent_by_hand_and_ends_the_waiting_spend_only_once_it
     assert_eq!(take_announced(), [Source::ResetSpends]);
     assert_eq!(asked.into_inner(), [ResetSpend::ByHand; 4]);
 }
+
+#[test]
+fn the_commands_list_and_cancel_the_spends_the_running_monitor_schedules() {
+    let waiting: &Queue = &WAITING;
+    waiting.change(Waiting::clear);
+    let io = Fake::new();
+    let mut state = MonitorState::default();
+    let settings = automatic_only();
+    for (used, observed_at) in [
+        (95.0, "2026-08-19T12:00:00Z"),
+        (96.0, "2026-08-19T12:10:00Z"),
+    ] {
+        io.reads(vec![codex_with_a_reset(used, observed_at)]);
+        tauri::async_runtime::block_on(poll_once(
+            &io,
+            waiting,
+            &mut state,
+            &settings,
+            watched_providers(&settings),
+            at("2026-08-19T13:00:00Z"),
+        ))
+        .unwrap();
+    }
+
+    assert_eq!(
+        pending_reset_spends(),
+        [crate::dto::PendingResetSpendDto {
+            account_id: "acct-codex".into(),
+            due_at: "2026-08-19T13:10:30Z".into(),
+        }]
+    );
+    assert!(cancel_reset_spend("acct-codex"));
+    assert!(!cancel_reset_spend("acct-codex"));
+    assert!(pending_reset_spends().is_empty());
+}
