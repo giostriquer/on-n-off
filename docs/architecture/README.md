@@ -347,22 +347,27 @@ requires it, Codex omits it), and what to say when the CLI exits before it answe
   answering or writes an unbounded line fails the read rather than hanging it or filling memory.
   Its stderr is drained to nowhere from spawn and never reaches a message, since a provider's
   diagnostics may be sensitive.
-- **Requests are numbered by the reader.** The handshake is request 1 (`initialize` with
-  on-n-off's `clientInfo`, the reader's check of the answer, then the `initialized`
-  notification), and the reader numbers the rest, so a Codex spend by hand still sends its consume
-  as request 4 though it skips the limit read. A request waits for the answer with its id and
-  skips everything else the CLI says.
-- **An early exit is an old CLI.** A pipe that closes before `initialize` is answered, from a CLI
-  that then exits unsuccessfully, is a CLI without the subcommand, and the card asks for an update.
-  Every other failure keeps its own message, and a failure the reader decided on
-  (`Failure::rejected`: a different home, an account that changed mid-read, a spend refused) is
-  shown as the reader wrote it.
+- **Every session opens with its handshake.** `Session::run` sends request 1 (`initialize` with
+  on-n-off's `clientInfo`), hands the answer to the reader's check, sends the `initialized`
+  notification, and only then gives the reader a `Conversation`, the one thing that can send a
+  request. The reader numbers its own requests from 2, so a Codex spend by hand still sends its
+  consume as request 4 though it skips the limit read. A request waits for the answer with its id
+  and skips everything else the CLI says.
+- **An early exit is an old CLI.** A pipe that closes during `initialize`, from a CLI that then
+  exits unsuccessfully, is a CLI without the subcommand, and the card asks for an update. That
+  includes a request written after the CLI is gone: each line is encoded first and written whole,
+  so a broken pipe reads as closed rather than as a failure to encode. Every other failure keeps
+  its own message, and a failure the reader decided on (`Failure::new`: a different home, an
+  account that changed mid-read, a spend refused) is shown as the reader wrote it.
 - **Ending a session** closes stdin and waits for the child to exit until the deadline. A child
   still running then is killed and its drainers are left behind, so a descendant still holding a
   pipe cannot hold the read. A session dropped without ending kills its child too.
 
 Tests drive a reader through `json_line_session::Script`, which replays scripted answers and
-records what was sent and received, and the real child through `cli_stub.rs` stubs.
+records what was sent and received, and the real child through `cli_stub.rs` stubs. A stub that
+answers waits for the request line first (`CliStub::awaits_line`) instead of sleeping, so a slow
+host cannot let it exit before the request is written and turn the failure under test into a
+broken pipe.
 
 ## Where the state lives
 
