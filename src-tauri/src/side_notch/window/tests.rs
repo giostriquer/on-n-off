@@ -172,7 +172,7 @@ fn pull_requests_keep_only_the_selected_lists_capped_with_row_fields() {
         serde_json::json!({
             "id": format!("node-{number}"), "number": number, "title": format!("Fix #{number}"),
             "url": format!("https://github.com/octo/tools/pull/{number}"), "repo": "octo/tools",
-            "author": "giovanne", "isDraft": false, "reviewDecision": "APPROVED", "ci": "success",
+            "author": "octocat", "isDraft": false, "reviewDecision": "APPROVED", "ci": "success",
             "headRef": "fix", "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z",
             "mergeKind": "ready"
         })
