@@ -764,6 +764,29 @@ describe("archiving", () => {
     await waitFor(() => expect(readLimits.mock.calls.slice(reads)).toEqual([["codex", false]]));
   });
 
+  it("unarchives an account in the Muse column, which has no account manager, and hands focus to the next archived row", async () => {
+    const weekly = { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 30, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW };
+    const archived = new Set(["muse-old", "muse-spare"]);
+    const muse = (id: string, label: string, currentAccount = false): ProviderLimits =>
+      ({ provider: "muse", status: "ok", account: { id, label }, currentAccount, plan: "wonder", windows: [weekly], archived: archived.has(id) });
+    readLimits.mockImplementation(async (provider: AgentId) => provider === "muse"
+      ? [muse("muse-now", "now@muse.example", true), muse("muse-old", "old@muse.example"), muse("muse-spare", "spare@muse.example")]
+      : provider === "claude" ? [okClaude()] : [okCodex()]);
+    setLimitsArchived.mockImplementation(async (_provider: AgentId, ids: string[]) => { for (const id of ids) archived.delete(id); });
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "Archived (2)" }));
+    const unarchive = screen.getByRole("button", { name: "Unarchive old@muse.example" });
+    unarchive.focus();
+
+    fireEvent.click(unarchive);
+
+    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("muse", ["muse-old"], false));
+    expect(await screen.findByRole("region", { name: "Muse limits · old@muse.example" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Archived (1)" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Unarchive spare@muse.example" })).toHaveFocus());
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
   it("removes an archived account as Remove account does: the saved login, then its history first", async () => {
     const profile = { id: "saved", observationId: "profile:user-team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
     let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true }),
