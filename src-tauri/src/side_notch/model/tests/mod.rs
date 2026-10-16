@@ -280,13 +280,9 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     let fresh = NotchSettings::default();
     assert_eq!(
         fresh.providers,
-        RAIL_ORDER
-            .into_iter()
-            .filter(|id| id.facts().on_default_notch)
-            .collect::<Vec<_>>(),
+        crate::provider_catalogue::WITH_LIMITS,
         "the ones with quotas to draw"
     );
-    assert!(fresh.providers.iter().all(|id| id.facts().limits_reader));
     let chosen = NotchSettings {
         providers: RAIL_ORDER.to_vec(),
         ..NotchSettings::default()

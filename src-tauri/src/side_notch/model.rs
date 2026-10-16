@@ -171,10 +171,7 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            providers: RAIL_ORDER
-                .into_iter()
-                .filter(|id| id.facts().on_default_notch)
-                .collect(),
+            providers: crate::provider_catalogue::WITH_LIMITS.to_vec(),
             pull_requests: NotchPullRequests::default(),
             popover_style: NotchStyle::default(),
         }

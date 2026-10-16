@@ -23,8 +23,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Claude",
                     binary: "claude",
                     binary_aliases: &[],
-                    rail_rank: 0,
-                    on_default_notch: true,
                     limits_reader: true,
                     usage: Some(UsageProvider::Claude),
                     saved_accounts: true,
@@ -37,8 +35,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Codex",
                     binary: "codex",
                     binary_aliases: &[],
-                    rail_rank: 1,
-                    on_default_notch: true,
                     limits_reader: true,
                     usage: Some(UsageProvider::Codex),
                     saved_accounts: true,
@@ -51,8 +47,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Antigravity",
                     binary: "agy",
                     binary_aliases: &[],
-                    rail_rank: 3,
-                    on_default_notch: false,
                     limits_reader: false,
                     usage: None,
                     saved_accounts: false,
@@ -65,8 +59,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Cursor",
                     binary: "agent",
                     binary_aliases: &["cursor-agent"],
-                    rail_rank: 4,
-                    on_default_notch: false,
                     limits_reader: false,
                     usage: None,
                     saved_accounts: false,
@@ -79,8 +71,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Muse",
                     binary: "muse",
                     binary_aliases: &[],
-                    rail_rank: 2,
-                    on_default_notch: true,
                     limits_reader: true,
                     usage: Some(UsageProvider::Muse),
                     saved_accounts: false,
@@ -176,9 +166,6 @@ fn the_rail_leads_with_the_providers_that_have_limits_to_draw() {
             AgentId::Cursor,
         ]
     );
-    for (rank, id) in RAIL_ORDER.into_iter().enumerate() {
-        assert_eq!(id.facts().rail_rank, rank, "{id:?}");
-    }
 }
 
 #[test]

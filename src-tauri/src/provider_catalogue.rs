@@ -9,8 +9,6 @@ pub struct ProviderFacts {
     pub display_name: &'static str,
     pub binary: &'static str,
     pub binary_aliases: &'static [&'static str],
-    pub rail_rank: usize,
-    pub on_default_notch: bool,
     pub limits_reader: bool,
     pub usage: Option<UsageProvider>,
     pub saved_accounts: bool,
@@ -32,8 +30,6 @@ impl AgentId {
                 display_name: "Claude",
                 binary: "claude",
                 binary_aliases: &[],
-                rail_rank: 0,
-                on_default_notch: true,
                 limits_reader: true,
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
@@ -43,8 +39,6 @@ impl AgentId {
                 display_name: "Codex",
                 binary: "codex",
                 binary_aliases: &[],
-                rail_rank: 1,
-                on_default_notch: true,
                 limits_reader: true,
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
@@ -54,8 +48,6 @@ impl AgentId {
                 display_name: "Antigravity",
                 binary: "agy",
                 binary_aliases: &[],
-                rail_rank: 3,
-                on_default_notch: false,
                 limits_reader: false,
                 usage: None,
                 saved_accounts: false,
@@ -65,8 +57,6 @@ impl AgentId {
                 display_name: "Cursor",
                 binary: "agent",
                 binary_aliases: &["cursor-agent"],
-                rail_rank: 4,
-                on_default_notch: false,
                 limits_reader: false,
                 usage: None,
                 saved_accounts: false,
@@ -76,8 +66,6 @@ impl AgentId {
                 display_name: "Muse",
                 binary: "muse",
                 binary_aliases: &[],
-                rail_rank: 2,
-                on_default_notch: true,
                 limits_reader: true,
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: false,
@@ -114,28 +102,39 @@ impl AgentId {
     }
 }
 
-pub const RAIL_ORDER: [AgentId; AgentId::ALL.len()] = rail_order();
+pub const RAIL_ORDER: [AgentId; AgentId::ALL.len()] = [
+    AgentId::Claude,
+    AgentId::Codex,
+    AgentId::Muse,
+    AgentId::Antigravity,
+    AgentId::Cursor,
+];
+
+const _: () = assert!(
+    lists_every_provider(&RAIL_ORDER),
+    "the rail lists every provider once"
+);
 
 pub const WITH_LIMITS: [AgentId; Fact::LimitsReader.count()] = Fact::LimitsReader.providers();
 
 pub const WITH_SAVED_ACCOUNTS: [AgentId; Fact::SavedAccounts.count()] =
     Fact::SavedAccounts.providers();
 
-const fn rail_order() -> [AgentId; AgentId::ALL.len()] {
-    let mut order = AgentId::ALL;
-    let mut taken = [false; AgentId::ALL.len()];
+const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;
     while i < AgentId::ALL.len() {
-        let rank = AgentId::ALL[i].facts().rail_rank;
-        assert!(
-            rank < taken.len() && !taken[rank],
-            "every provider needs its own rail rank below the provider count"
-        );
-        taken[rank] = true;
-        order[rank] = AgentId::ALL[i];
+        let mut listed = false;
+        let mut j = 0;
+        while j < order.len() {
+            listed |= order[j] as u8 == AgentId::ALL[i] as u8;
+            j += 1;
+        }
+        if !listed {
+            return false;
+        }
         i += 1;
     }
-    order
+    true
 }
 
 #[derive(Clone, Copy)]
