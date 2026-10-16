@@ -41,12 +41,17 @@ export function cachedAccountList(client: QueryClient, provider: AccountProvider
   return client.getQueryData<AccountsReading>(accountListKey(provider));
 }
 
-export function updateAccountList(
+export function markProfilesArchived(
   client: QueryClient,
   provider: AccountProvider,
-  update: (reading: AccountsReading) => AccountsReading,
+  observationIds: readonly string[],
+  archived: boolean,
 ): void {
-  client.setQueryData<AccountsReading>(accountListKey(provider), (reading) => reading && update(reading));
+  client.setQueryData<AccountsReading>(accountListKey(provider), (reading) => reading && {
+    ...reading,
+    profiles: reading.profiles.map((profile) =>
+      observationIds.includes(profile.observationId) ? { ...profile, archived } : profile),
+  });
 }
 
 export function rereadAccountListsAndPreference(client: QueryClient): Promise<void> {

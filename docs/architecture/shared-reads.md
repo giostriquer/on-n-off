@@ -111,7 +111,7 @@ query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpend
 `accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`) and call its operations
 (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`, `refreshGithubPrs`,
 `rereadPendingResetSpends`, `rereadAccountListsAndPreference`, `accountChanged`,
-`cachedAccountList`, `updateAccountList`); they never write a key. Each module also exports its source's entry for the
+`cachedAccountList`, `markProfilesArchived`); they never write a key. Each module also exports its source's entry for the
 announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
 table from those entries alone. A key changed in one place is therefore changed in both. The
 modules import no React and no query observer: the table and the shell's Refresh are in the

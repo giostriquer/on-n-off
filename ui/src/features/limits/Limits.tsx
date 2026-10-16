@@ -9,7 +9,7 @@ import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { updateAccountList } from "$lib/sharedReads/accounts";
+import { markProfilesArchived } from "$lib/sharedReads/accounts";
 import { updateLimits, type LimitsProvider } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
@@ -150,10 +150,7 @@ function ProviderColumn({
     }
     updateLimits(queryClient, provider, (entries) => entries.map((entry) =>
       !entry.currentAccount && entry.account && ids.includes(entry.account.id) ? { ...entry, archived } : entry));
-    if (provider !== "muse") updateAccountList(queryClient, provider, (reading) => ({
-      ...reading,
-      profiles: reading.profiles.map((profile) => ids.includes(profile.observationId) ? { ...profile, archived } : profile),
-    }));
+    if (manager) markProfilesArchived(queryClient, manager.provider, ids, archived);
   }
 
   if (!column) {
