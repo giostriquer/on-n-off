@@ -1,3 +1,4 @@
+use super::model::frame::{self, RailData};
 use super::model::{layout, NotchProvider, NotchSettings, NotchSnapshot, ShowMode, RAIL_ORDER};
 use super::sessions::LiveSession;
 use crate::dto::{AgentId, GithubPrsDto, ProviderLimitsDto};
@@ -8,9 +9,6 @@ use std::{
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub mod app;
-pub mod frame;
-
-use frame::{CellData, ProviderData, RailData};
 
 pub(super) const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
 
@@ -337,7 +335,12 @@ impl<T: Transport, A: App> Host<T, A> {
 
     fn visible(&self) -> bool {
         self.snapshot.error.is_none()
-            && layout(&self.snapshot.settings, &self.snapshot.displays).is_some()
+            && layout(
+                &self.snapshot.settings,
+                &self.snapshot.displays,
+                frame::cell_count(&self.snapshot.settings),
+            )
+            .is_some()
     }
 
     fn start_reads(&mut self, now: Instant) {
@@ -404,37 +407,16 @@ impl<T: Transport, A: App> Host<T, A> {
     }
 
     fn rail(&self) -> RailData {
-        RailData {
-            settings: self.snapshot.settings.clone(),
-            cells: self.cells(),
-            action_error: self.action_error.clone(),
-        }
-    }
-
-    fn cells(&self) -> Vec<CellData> {
-        let selected = self.snapshot.settings.rail_providers();
-        let mut cells: Vec<CellData> = RAIL_ORDER
-            .iter()
-            .enumerate()
-            .filter(|(_, agent)| selected.contains(agent))
-            .filter_map(|(index, _)| {
-                self.providers[index].value.as_ref().map(|entry| {
-                    CellData::Provider(ProviderData {
-                        cell: entry.clone(),
-                        sessions: self.sessions.value[index].clone(),
-                    })
-                })
-            })
-            .collect();
-        if self.snapshot.settings.pull_requests.enabled {
-            if let Some(dto) = &self.pulls.value {
-                cells.push(CellData::PullRequests(frame::pr_cell(
-                    dto,
-                    &self.snapshot.settings.pull_requests.selected_lists(),
-                )));
-            }
-        }
-        cells
+        frame::rail(
+            &self.snapshot.settings,
+            RAIL_ORDER
+                .into_iter()
+                .zip(&self.providers)
+                .zip(&self.sessions.value)
+                .map(|((agent, poll), sessions)| (agent, poll.value.clone(), sessions.clone())),
+            self.pulls.value.as_ref(),
+            self.action_error.clone(),
+        )
     }
 }
 

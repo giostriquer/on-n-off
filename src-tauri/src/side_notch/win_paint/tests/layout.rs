@@ -75,25 +75,35 @@ fn the_popover_places_inward_from_the_edge_and_clamps_to_the_work_area() {
 fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
-    let planned = plan(&settings(), &displays, &data(cells), Hover::default()).expect("fits");
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(cells.clone()),
+        Hover::default(),
+    )
+    .expect("fits");
     assert_eq!(planned.cells.len(), 1);
     assert_eq!(planned.window.w, 76.0);
     assert!(planned.pill.is_none());
     assert!(planned.popover.is_none());
+    assert!(
+        plan(&settings(), &displays, &data(Vec::new()), Hover::default()).is_none(),
+        "a frame without cells has no rail"
+    );
 
     let mut mirrored_display = display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0);
     mirrored_display.mirrored = true;
     let mirrored = vec![mirrored_display];
-    assert!(plan(&settings(), &mirrored, &data(Vec::new()), Hover::default()).is_none());
-
-    let off_screen = vec![display("other", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     assert!(plan(
         &settings(),
-        &off_screen,
-        &data(Vec::new()),
+        &mirrored,
+        &data(cells.clone()),
         Hover::default()
     )
     .is_none());
+
+    let off_screen = vec![display("other", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    assert!(plan(&settings(), &off_screen, &data(cells), Hover::default()).is_none());
 }
 #[test]
 fn the_popover_unions_with_the_rail_and_places_zones() {
@@ -151,30 +161,10 @@ fn the_popover_unions_with_the_rail_and_places_zones() {
 #[test]
 fn pull_request_popovers_carry_open_copy_and_footer_zones() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let row = PrRowData {
-        id: "node-1".into(),
-        number: 7,
-        title: "Fix the flaky resize test on Windows".into(),
-        url: "https://github.com/octo/tools/pull/7".into(),
-        repo: "octo/tools".into(),
-        author: "octocat".into(),
-        is_draft: false,
-        review_decision: Some(ReviewDecision::Approved),
-        ci: CiState::Success,
-        merge_kind: Some(MergeKind::Ready),
-        updated_at: "2026-09-01T10:00:00Z".into(),
-        context: None,
-    };
-    let cells = vec![CellData::PullRequests(PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 2,
-            items: vec![row],
-        }],
-    })];
+    let mut row = pr(7, "Fix the flaky resize test on Windows", "octo/tools");
+    row["reviewDecision"] = "APPROVED".into();
+    row["mergeKind"] = "ready".into();
+    let cells = vec![pulls_read("ok", None, 2, vec![row])];
     let planned = plan(
         &settings(),
         &displays,
@@ -263,34 +253,12 @@ fn the_popover_tail_points_at_its_own_cell() {
 }
 #[test]
 fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
-    let pulls = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 1,
-            items: vec![PrRowData {
-                id: "n1".into(),
-                number: 7,
-                title: "Fix the flaky resize test on Windows".into(),
-                url: "https://github.com/o/r/pull/7".into(),
-                repo: "o/r".into(),
-                author: "octocat".into(),
-                is_draft: false,
-                review_decision: None,
-                ci: CiState::Success,
-                merge_kind: None,
-                updated_at: "2026-09-01T10:00:00Z".into(),
-                context: None,
-            }],
-        }],
-    };
+    let pulls = pulls(vec![pr(7, "Fix the flaky resize test on Windows", "o/r")]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![
         CellData::Provider(session_only(AgentId::Claude, 42.0)),
         CellData::Provider(session_only(AgentId::Codex, 42.0)),
-        CellData::PullRequests(pulls),
+        pulls,
     ];
     let last = cells.len() - 1;
     let planned = plan(

@@ -1,6 +1,6 @@
-use super::frame::{PrCellData, PrRowData};
 use super::*;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::side_notch::model::frame::{CellData, PrCell};
 use crate::side_notch::model::Display;
 use crate::side_notch::sessions::SessionStatus;
 use std::collections::HashMap;
@@ -392,10 +392,10 @@ fn providers(frame: &RailData) -> Vec<(AgentId, f64)> {
         .cells
         .iter()
         .filter_map(|cell| match cell {
-            CellData::Provider(provider) => Some((
-                provider.cell.provider,
-                provider.cell.windows[0].used_percent,
-            )),
+            CellData::Provider(provider) => provider
+                .reading
+                .as_ref()
+                .map(|reading| (provider.provider, reading.windows[0].used_percent)),
             CellData::PullRequests(_) => None,
         })
         .collect()

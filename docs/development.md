@@ -63,6 +63,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
   Change the shape and change all three, each of which has a test pinning it.
+- What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
+  badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
+  change the model, the Swift models and the golden messages `host-message.json` together
+  ([why](architecture/side-notch.md#what-each-cell-shows-is-decided-once)).
 - The side notch rail's sizes and frames: `rail_metrics` and the frames built from it in
   `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
   the Windows painter; change a measurement in both files and in the fixture both checks read,

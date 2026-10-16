@@ -109,34 +109,17 @@ fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
 }
 #[test]
 fn unreadable_pull_requests_keep_their_rows_hidden() {
-    let pulls = PrCellData {
-        status: GithubStatus::GhNotLoggedIn,
-        hint: Some("Sign in with the GitHub CLI.".into()),
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 1,
-            items: vec![PrRowData {
-                id: "n1".into(),
-                number: 1,
-                title: "A stale row from the snapshot".into(),
-                url: "https://github.com/o/r/pull/1".into(),
-                repo: "o/r".into(),
-                author: "octocat".into(),
-                is_draft: false,
-                review_decision: None,
-                ci: CiState::Success,
-                merge_kind: None,
-                updated_at: "2026-09-01T10:00:00Z".into(),
-                context: None,
-            }],
-        }],
-    };
+    let pulls = pulls_read(
+        "ghNotLoggedIn",
+        Some("Sign in with the GitHub CLI."),
+        1,
+        vec![pr(1, "A stale row from the snapshot", "o/r")],
+    );
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
         &settings(),
         &displays,
-        &data(vec![CellData::PullRequests(pulls)]),
+        &data(vec![pulls]),
         Hover {
             active: Some(0),
             ..Hover::default()
@@ -144,6 +127,10 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
+    assert!(
+        inks(&planned).contains(&("Sign in with the GitHub CLI.".to_string(), MUTED_INK)),
+        "an unreadable read shows its hint, muted"
+    );
     assert!(
         !popover.entries.iter().any(
             |(item, _)| matches!(item, PopItem::Text { text, .. } if text.contains("stale row"))
@@ -188,34 +175,16 @@ fn a_long_session_name_is_ellipsized_not_chopped() {
 }
 #[test]
 fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
-    let pulls = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 1,
-            items: vec![PrRowData {
-                id: "n1".into(),
-                number: 1,
-                title: "Fix the flaky resize test number 1 on Windows builds".into(),
-                url: "https://github.com/o/r/pull/1".into(),
-                repo: "o/r".into(),
-                author: "octocat".into(),
-                is_draft: false,
-                review_decision: None,
-                ci: CiState::Success,
-                merge_kind: None,
-                updated_at: "2026-09-01T10:00:00Z".into(),
-                context: None,
-            }],
-        }],
-    };
+    let pulls = pulls(vec![pr(
+        1,
+        "Fix the flaky resize test number 1 on Windows builds",
+        "o/r",
+    )]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
         &settings(),
         &displays,
-        &data(vec![CellData::PullRequests(pulls)]),
+        &data(vec![pulls]),
         Hover {
             active: Some(0),
             ..Hover::default()
@@ -245,29 +214,9 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
 
 #[test]
 fn the_popover_keeps_the_mac_weight_of_every_run() {
-    let pulls = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 1,
-            items: vec![PrRowData {
-                id: "n1".into(),
-                number: 7,
-                title: "Fix the flaky resize test on Windows".into(),
-                url: "https://github.com/o/r/pull/7".into(),
-                repo: "o/r".into(),
-                author: "octocat".into(),
-                is_draft: true,
-                review_decision: None,
-                ci: CiState::Success,
-                merge_kind: None,
-                updated_at: "2026-09-01T10:00:00Z".into(),
-                context: None,
-            }],
-        }],
-    };
+    let mut draft = pr(7, "Fix the flaky resize test on Windows", "o/r");
+    draft["isDraft"] = true.into();
+    let pulls = pulls(vec![draft]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let mut claude = claude_with(vec![window(
         "w",
@@ -283,7 +232,7 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         status: crate::side_notch::sessions::SessionStatus::Working,
         last_active_at: "2026-09-03T10:00:00Z".into(),
     }];
-    let cells = vec![CellData::Provider(claude), CellData::PullRequests(pulls)];
+    let cells = vec![CellData::Provider(claude), pulls];
     let medium = [
         "50% Used",
         "working",
@@ -337,57 +286,6 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
     );
 }
 
-#[test]
-fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
-    for ci in [
-        CiState::None,
-        CiState::Pending,
-        CiState::Success,
-        CiState::Failure,
-        CiState::Error,
-    ] {
-        for merge_kind in [
-            None,
-            Some(MergeKind::Conflicts),
-            Some(MergeKind::Ready),
-            Some(MergeKind::Behind),
-            Some(MergeKind::Blocked),
-        ] {
-            let content = cell_content(&CellData::PullRequests(PrCellData {
-                status: GithubStatus::Ok,
-                hint: None,
-                stale: false,
-                lists: vec![PrListData {
-                    id: GithubList::Mine,
-                    total: 1,
-                    items: vec![PrRowData {
-                        id: "fixture".into(),
-                        number: 1,
-                        title: "Fixture".into(),
-                        url: "https://github.com/o/r/pull/1".into(),
-                        repo: "o/r".into(),
-                        author: "octocat".into(),
-                        is_draft: false,
-                        review_decision: None,
-                        ci,
-                        merge_kind,
-                        updated_at: "2026-09-01T10:00:00Z".into(),
-                        context: None,
-                    }],
-                }],
-            }));
-            let CellContent::PullRequests { segments, .. } = content else {
-                panic!("PR cell")
-            };
-            assert_eq!(segments[0].ci, ci);
-            assert_eq!(
-                segments[0].passing_with_conflicts,
-                ci == CiState::Success && merge_kind == Some(MergeKind::Conflicts)
-            );
-        }
-    }
-}
-
 fn share(
     used: &str,
     used_percent: f64,
@@ -403,7 +301,7 @@ fn share(
     }
 }
 
-fn popover_texts(provider: ProviderData) -> Vec<String> {
+fn popover_texts(provider: ProviderCell) -> Vec<String> {
     let (planned, _) = popover_render(provider);
     let popover = planned.popover.expect("the popover is open");
     popover
@@ -416,7 +314,7 @@ fn popover_texts(provider: ProviderData) -> Vec<String> {
         .collect()
 }
 
-fn inner_ring(provider: ProviderData) -> Option<(InnerRing, QuotaView, (Color, Color))> {
+fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, QuotaView, (Color, Color))> {
     match cell_content(&CellData::Provider(provider)) {
         CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
             let colors = inner_ring_colors(&ring);
@@ -557,11 +455,67 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     paused.message = Some("Refresh failed.".into());
     paused.reading.windows.clear();
 
-    let texts = popover_texts(projected(paused));
+    let (planned, _) = popover_render(projected(paused));
+    let inks = inks(&planned);
     assert!(
-        texts.contains(&"Refresh paused. Last observed values below.".to_string()),
-        "{texts:?}"
+        inks.contains(&("Refresh failed.".to_string(), MUTED_INK)),
+        "{inks:?}"
     );
+    assert!(
+        inks.contains(&(
+            "Refresh paused. Last observed values below.".to_string(),
+            WARN_AMBER
+        )),
+        "{inks:?}"
+    );
+}
+
+fn inks(planned: &Plan) -> Vec<(String, Color)> {
+    planned
+        .popover
+        .as_ref()
+        .expect("the popover is open")
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, color, .. } => Some((text.clone(), *color)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn each_badge_wears_the_ink_of_its_tone() {
+    let mut drafted = pr(1, "Fix one", "o/r");
+    drafted["isDraft"] = true.into();
+    drafted["mergeKind"] = "behind".into();
+    let mut rejected = pr(2, "Fix two", "o/r");
+    rejected["reviewDecision"] = "CHANGES_REQUESTED".into();
+    let mut approved = pr(3, "Fix three", "o/r");
+    approved["reviewDecision"] = "APPROVED".into();
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![pulls(vec![drafted, rejected, approved])]),
+        Hover {
+            active: Some(0),
+            ..Hover::default()
+        },
+    )
+    .expect("fits");
+    let inks = inks(&planned);
+    for badge in [
+        ("Draft", MUTED_INK),
+        ("Behind base", WARN_AMBER),
+        ("Changes requested", TRIP_RED),
+        ("Approved", LIVE_GREEN),
+    ] {
+        assert!(
+            inks.contains(&(badge.0.to_string(), badge.1)),
+            "{badge:?} in {inks:?}"
+        );
+    }
 }
 
 #[test]
@@ -601,21 +555,10 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
 const WORK: Color = [96, 165, 250, 255];
 const PERSONAL: Color = [192, 132, 252, 255];
 
-fn pr_row(number: u64, repo: &str, context: Option<PrContext>) -> PrRowData {
-    PrRowData {
-        id: format!("n{number}"),
-        number,
-        title: format!("Fix #{number}"),
-        url: format!("https://github.com/{repo}/pull/{number}"),
-        repo: repo.into(),
-        author: "octocat".into(),
-        is_draft: false,
-        review_decision: None,
-        ci: CiState::Success,
-        merge_kind: None,
-        updated_at: "2026-09-01T10:00:00Z".into(),
-        context,
-    }
+fn pr_row(number: u64, repo: &str, in_organization: Option<bool>) -> serde_json::Value {
+    let mut row = pr(number, &format!("Fix #{number}"), repo);
+    row["inOrganization"] = serde_json::to_value(in_organization).unwrap();
+    row
 }
 
 fn longest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
@@ -659,30 +602,21 @@ fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -
 
 #[test]
 fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon() {
-    let pulls = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 4,
-            items: vec![
-                pr_row(1, "acme/webapp", Some(PrContext::Work)),
-                pr_row(2, "octocat/dotfiles", Some(PrContext::Personal)),
-                pr_row(3, "acme/webapp", None),
-                pr_row(
-                    1234,
-                    "octocat/a-repository-name-long-enough-to-run-into-the-ci-dot",
-                    Some(PrContext::Personal),
-                ),
-            ],
-        }],
-    };
+    let pulls = pulls(vec![
+        pr_row(1, "acme/webapp", Some(true)),
+        pr_row(2, "octocat/dotfiles", Some(false)),
+        pr_row(3, "acme/webapp", None),
+        pr_row(
+            1234,
+            "octocat/a-repository-name-long-enough-to-run-into-the-ci-dot",
+            Some(false),
+        ),
+    ]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
         &settings(),
         &displays,
-        &data(vec![CellData::PullRequests(pulls)]),
+        &data(vec![pulls]),
         Hover {
             active: Some(0),
             ..Hover::default()
@@ -801,4 +735,113 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
         "the copy icons are painted in their row's ink: {painted:?}"
     );
     assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
+}
+
+#[test]
+fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
+    let selected = NotchSettings {
+        providers: vec![AgentId::Claude, AgentId::Codex],
+        ..settings()
+    };
+    let claude = NotchProvider::current(vec![signed_in(
+        AgentId::Claude,
+        vec![window(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            41.0,
+        )],
+    )]);
+    let data = frame::rail(
+        &selected,
+        [(AgentId::Claude, claude, Vec::new())],
+        None,
+        None,
+    );
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let rail = plan(&selected, &displays, &data, Hover::default()).expect("fits");
+    let labels: Vec<String> = rail
+        .cells
+        .iter()
+        .map(|cell| match &cell.content {
+            CellContent::Provider { label, .. } => label.clone(),
+            CellContent::PullRequests { label, segments } => {
+                assert!(
+                    segments.is_empty(),
+                    "nothing about the pull requests is known yet"
+                );
+                label.clone()
+            }
+        })
+        .collect();
+    assert_eq!(
+        labels,
+        ["41%", "—", "—"],
+        "Codex and the pull requests keep their slots until they are read"
+    );
+    for (index, checking) in [(1, "Checking usage…"), (2, "Checking pull requests…")] {
+        let planned = plan(
+            &selected,
+            &displays,
+            &data,
+            Hover {
+                active: Some(index),
+                ..Hover::default()
+            },
+        )
+        .expect("fits");
+        let texts: Vec<String> = planned
+            .popover
+            .expect("the popover is open")
+            .entries
+            .into_iter()
+            .filter_map(|(item, _)| match item {
+                PopItem::Text { text, .. } => Some(text),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.contains(&checking.to_string()), "{texts:?}");
+    }
+}
+
+#[test]
+fn a_read_pull_request_cell_draws_the_figure_and_segments_the_model_decided() {
+    let mut conflicted = pr(1, "Fix the first thing", "o/r");
+    conflicted["mergeKind"] = "conflicts".into();
+    let mut failing = pr(2, "Fix the second thing", "o/r");
+    failing["ci"] = "failure".into();
+    let cell = pulls(vec![conflicted, failing]);
+    let CellData::PullRequests(decided) = &cell else {
+        panic!("a pull request cell");
+    };
+    let segments = decided.reading.as_ref().expect("read").segments.clone();
+    assert_eq!(
+        segments,
+        [
+            PrSegment {
+                ci: CiState::Success,
+                passing_with_conflicts: true
+            },
+            PrSegment {
+                ci: CiState::Failure,
+                passing_with_conflicts: false
+            },
+        ]
+    );
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![cell.clone()]),
+        Hover::default(),
+    )
+    .expect("fits");
+    assert_eq!(
+        planned.cells[0].content,
+        CellContent::PullRequests {
+            label: "2".into(),
+            segments
+        },
+        "the ring draws the frame's own figure and segments"
+    );
 }

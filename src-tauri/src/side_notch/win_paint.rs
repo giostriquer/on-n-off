@@ -6,14 +6,12 @@ mod text;
 use super::model::{
     layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display,
     workspace_share_note, workspace_share_renewed, workspace_share_window, workspace_share_wording,
-    Edge, GithubList, InnerRing, Layout, NotchSettings, PrContext, RailMetrics, ShowMode,
+    Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode,
 };
-use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
-};
+use crate::dto::{AgentId, CiState, LimitWindowDto};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-use super::host::frame::{CellData, PrRowData, RailData};
+use super::model::frame::{CellData, PrSegment, RailData, Tone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -100,14 +98,6 @@ pub struct Hover {
     pub cap_hovered: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Badge {
-    Muted,
-    Green,
-    Red,
-    Amber,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum CellContent {
     Provider {
@@ -117,16 +107,9 @@ pub enum CellContent {
         label: String,
     },
     PullRequests {
-        segments: Vec<PrRingSegment>,
-        count: u64,
-        readable: bool,
+        label: String,
+        segments: Vec<PrSegment>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PrRingSegment {
-    ci: CiState,
-    passing_with_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -256,48 +239,18 @@ fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
     }
 }
 
-fn list_title(list: GithubList) -> &'static str {
-    match list {
-        GithubList::Mine => "Mine",
-        GithubList::ReviewRequested => "Review requested",
-        GithubList::Assigned => "Assigned",
-    }
-}
-
-fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
-    let mut badges = Vec::new();
-    if row.is_draft {
-        badges.push(("Draft".into(), Badge::Muted));
-    }
-    match row.review_decision {
-        Some(ReviewDecision::Approved) => badges.push(("Approved".into(), Badge::Green)),
-        Some(ReviewDecision::ChangesRequested) => {
-            badges.push(("Changes requested".into(), Badge::Red))
-        }
-        _ => {}
-    }
-    match row.merge_kind {
-        Some(MergeKind::Conflicts) => badges.push(("Conflicts".into(), Badge::Red)),
-        Some(MergeKind::Queued) => badges.push(("Queued".into(), Badge::Green)),
-        Some(MergeKind::AutoMerge) => badges.push(("Auto-merge".into(), Badge::Muted)),
-        Some(MergeKind::Ready) => badges.push(("Ready to merge".into(), Badge::Green)),
-        Some(MergeKind::Behind) => badges.push(("Behind base".into(), Badge::Amber)),
-        Some(MergeKind::Blocked) => badges.push(("Blocked".into(), Badge::Amber)),
-        None => {}
-    }
-    badges
-}
-
 fn cell_content(data: &CellData) -> CellContent {
     match data {
         CellData::Provider(provider) => {
-            let headline = provider.cell.headline().map(quota_view);
+            let reading = provider.reading.as_ref();
+            let headline = reading
+                .and_then(|reading| reading.headline())
+                .map(quota_view);
             CellContent::Provider {
-                provider: provider.cell.provider,
+                provider: provider.provider,
                 headline,
-                inner: provider
-                    .cell
-                    .inner_window()
+                inner: reading
+                    .and_then(|reading| reading.inner_window())
                     .map(|(ring, window)| (ring.clone(), quota_view(&window))),
                 label: headline
                     .and_then(|quota| quota.percent)
@@ -305,31 +258,14 @@ fn cell_content(data: &CellData) -> CellContent {
                     .unwrap_or_else(|| "—".into()),
             }
         }
-        CellData::PullRequests(pulls) => {
-            let readable = pulls.status == GithubStatus::Ok || pulls.stale;
-            let rows: Vec<&PrRowData> = pulls.lists.iter().flat_map(|list| &list.items).collect();
-            let mut seen = std::collections::BTreeSet::new();
-            let count = rows
-                .iter()
-                .filter(|row| seen.insert(row.id.as_str()))
-                .count() as u64;
-            CellContent::PullRequests {
-                segments: if readable {
-                    rows.iter()
-                        .take(24)
-                        .map(|row| PrRingSegment {
-                            ci: row.ci,
-                            passing_with_conflicts: row.ci == CiState::Success
-                                && row.merge_kind == Some(MergeKind::Conflicts),
-                        })
-                        .collect()
-                } else {
-                    Default::default()
-                },
-                count,
-                readable,
-            }
-        }
+        CellData::PullRequests(cell) => CellContent::PullRequests {
+            label: cell.label.clone(),
+            segments: cell
+                .reading
+                .as_ref()
+                .map(|pulls| pulls.segments.clone())
+                .unwrap_or_default(),
+        },
     }
 }
 
@@ -339,7 +275,7 @@ pub fn plan(
     data: &RailData,
     hover: Hover,
 ) -> Option<Plan> {
-    let rail = R::from(layout(settings, displays)?);
+    let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
     let edge = settings.edge;
     let display_scale = display.scale;
@@ -433,7 +369,7 @@ pub fn plan(
         None => rail,
     };
     let pill = if collapsed {
-        pill_frame(settings, displays).map(R::from)
+        pill_frame(settings, displays, data.cells.len()).map(R::from)
     } else {
         None
     };
@@ -531,7 +467,7 @@ fn popover_entries(
         CellData::Provider(provider) => {
             entries.push((
                 PopItem::Mark {
-                    kind: MarkKind::Provider(provider.cell.provider),
+                    kind: MarkKind::Provider(provider.provider),
                     size: v(13.0),
                 },
                 R::new(x, y + header_lift, v(13.0), v(13.0)),
@@ -542,7 +478,7 @@ fn popover_entries(
                 y,
                 inner_w - v(13.0) - v(7.0),
                 line_h(13.0, TextWeight::Semibold),
-                format!("{} Usage", provider.cell.provider.display_name()),
+                format!("{} Usage", provider.provider.display_name()),
                 v(13.0),
                 TextWeight::Semibold,
                 [255, 255, 255, 255],
@@ -550,14 +486,10 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            if provider.cell.status != LimitsStatus::Ok {
-                let message = provider
-                    .cell
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Usage unavailable.".into());
+            let reading = provider.reading.as_ref();
+            if let Some(notice) = &provider.notice {
                 for line in wrap_lines(
-                    &message,
+                    &notice.text,
                     inner_w,
                     v(11.0),
                     TextWeight::Regular,
@@ -573,40 +505,26 @@ fn popover_entries(
                         line,
                         v(11.0),
                         TextWeight::Regular,
-                        MUTED_INK,
+                        tone_color(notice.tone),
                         false,
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
-                if !provider.cell.windows.is_empty() || provider.cell.workspace_credits.is_some() {
-                    text_entry(
-                        &mut entries,
-                        x,
-                        y,
-                        inner_w,
-                        line_h(10.0, TextWeight::Regular),
-                        "Refresh paused. Last observed values below.".into(),
-                        v(10.0),
-                        TextWeight::Regular,
-                        WARN_AMBER,
-                        false,
-                    );
-                    y += line_h(10.0, TextWeight::Regular) + v(4.0);
-                }
-            } else if provider.cell.windows.is_empty() && provider.cell.message.is_none() {
+            }
+            if let Some(paused) = &provider.paused {
                 text_entry(
                     &mut entries,
                     x,
                     y,
                     inner_w,
-                    line_h(11.0, TextWeight::Regular),
-                    "Checking usage…".into(),
-                    v(11.0),
+                    line_h(10.0, TextWeight::Regular),
+                    paused.text.clone(),
+                    v(10.0),
                     TextWeight::Regular,
-                    MUTED_INK,
+                    tone_color(paused.tone),
                     false,
                 );
-                y += line_h(11.0, TextWeight::Regular);
+                y += line_h(10.0, TextWeight::Regular) + v(4.0);
             }
 
             struct Block {
@@ -616,9 +534,9 @@ fn popover_entries(
                 detail: Option<String>,
             }
             let now = chrono::Utc::now();
-            let mut blocks: Vec<Block> = provider
-                .cell
-                .windows
+            let mut blocks: Vec<Block> = reading
+                .map(|reading| reading.windows.as_slice())
+                .unwrap_or_default()
                 .iter()
                 .map(|window| Block {
                     label: window.label.clone(),
@@ -627,7 +545,7 @@ fn popover_entries(
                     detail: None,
                 })
                 .collect();
-            if let Some(share) = &provider.cell.workspace_credits {
+            if let Some(share) = reading.and_then(|reading| reading.workspace_credits.as_ref()) {
                 let window = workspace_share_window(share);
                 let wording = workspace_share_wording(share);
                 blocks.push(Block {
@@ -687,7 +605,7 @@ fn popover_entries(
                 entries.push((
                     PopItem::Bar {
                         percent: block.percent,
-                        color: meter_color(block.percent, provider_color(provider.cell.provider)),
+                        color: meter_color(block.percent, provider_color(provider.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
@@ -756,7 +674,7 @@ fn popover_entries(
                         v(10.5),
                         TextWeight::Medium,
                         if working {
-                            provider_color(provider.cell.provider)
+                            provider_color(provider.provider)
                         } else {
                             MUTED_INK
                         },
@@ -792,7 +710,7 @@ fn popover_entries(
                 y += spacing - v(8.0);
             }
         }
-        CellData::PullRequests(pulls) => {
+        CellData::PullRequests(cell) => {
             entries.push((
                 PopItem::Mark {
                     kind: MarkKind::PullRequests,
@@ -814,11 +732,9 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            let readable = pulls.status == GithubStatus::Ok || pulls.stale;
-            if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
-                let color = if readable { WARN_AMBER } else { MUTED_INK };
+            if let Some(notice) = &cell.notice {
                 for line in wrap_lines(
-                    pulls.hint.as_deref().unwrap_or(""),
+                    &notice.text,
                     inner_w,
                     v(11.0),
                     TextWeight::Regular,
@@ -834,21 +750,21 @@ fn popover_entries(
                         line,
                         v(11.0),
                         TextWeight::Regular,
-                        color,
+                        tone_color(notice.tone),
                         false,
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
                 y += v(4.0);
             }
-            for list in pulls.lists.iter().filter(|_| readable) {
+            for list in cell.reading.iter().flat_map(|pulls| &pulls.lists) {
                 text_entry(
                     &mut entries,
                     x,
                     y,
                     inner_w,
                     line_h(9.5, TextWeight::Semibold),
-                    list_title(list.id).to_uppercase(),
+                    list.title.to_uppercase(),
                     v(9.5),
                     TextWeight::Semibold,
                     MUTED_INK,
@@ -887,7 +803,9 @@ fn popover_entries(
                     y += line_h(10.5, TextWeight::Regular) + v(6.0);
                 }
                 for row in &list.items {
-                    let context = row.context.map(context_tag);
+                    let tag = row
+                        .tag
+                        .map(|tag| (tag.label.to_uppercase(), tone_color(tag.tone)));
                     let title_size = v(11.0);
                     let copy_w = v(20.0);
                     let lines = wrap_lines(
@@ -917,7 +835,7 @@ fn popover_entries(
                         if line_index == 0 {
                             entries.push((
                                 PopItem::CopyIcon {
-                                    color: context.map_or(MUTED_INK, |(_, ink)| ink),
+                                    color: tag.as_ref().map_or(MUTED_INK, |(_, ink)| *ink),
                                 },
                                 R::new(x + inner_w - copy_w, y, copy_w, copy_h),
                             ));
@@ -935,7 +853,7 @@ fn popover_entries(
                     let repo_size = v(10.0);
                     let mut line_x = x;
                     let badge_limit = x + inner_w - v(7.0) - v(10.0);
-                    if let Some((tag, ink)) = context {
+                    if let Some((label, ink)) = &tag {
                         let tag_size = v(9.5);
                         text_entry(
                             &mut entries,
@@ -943,14 +861,14 @@ fn popover_entries(
                             y,
                             inner_w,
                             line_h(9.5, TextWeight::Semibold),
-                            tag.into(),
+                            label.clone(),
                             tag_size,
                             TextWeight::Semibold,
-                            ink,
+                            *ink,
                             false,
                         );
                         line_x +=
-                            measure_weight(tag, tag_size, TextWeight::Semibold, display_scale)
+                            measure_weight(label, tag_size, TextWeight::Semibold, display_scale)
                                 + v(5.0);
                     }
                     let repo = ellipsize(
@@ -973,10 +891,14 @@ fn popover_entries(
                         false,
                     );
                     line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
-                    for (badge, color) in row_badges(row) {
+                    for badge in &row.badges {
                         let badge_size = v(9.5);
-                        let badge_w =
-                            measure_weight(&badge, badge_size, TextWeight::Medium, display_scale);
+                        let badge_w = measure_weight(
+                            badge.label,
+                            badge_size,
+                            TextWeight::Medium,
+                            display_scale,
+                        );
                         if line_x + badge_w > badge_limit {
                             break;
                         }
@@ -986,10 +908,10 @@ fn popover_entries(
                             y,
                             inner_w,
                             line_h(9.5, TextWeight::Medium),
-                            badge.clone(),
+                            badge.label.into(),
                             badge_size,
                             TextWeight::Medium,
-                            badge_color(color),
+                            tone_color(badge.tone),
                             false,
                         );
                         line_x += badge_w + v(6.0);
@@ -1009,7 +931,7 @@ fn popover_entries(
                         inner_w,
                         y + line_h(10.0, TextWeight::Regular) - row_top,
                     );
-                    if let Some((_, ink)) = context {
+                    if let Some((_, ink)) = tag {
                         entries.push((
                             PopItem::Stripe { color: ink },
                             R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
@@ -1206,10 +1128,14 @@ const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 const WORK_BLUE: Color = [96, 165, 250, 255];
 const PERSONAL_VIOLET: Color = [192, 132, 252, 255];
 
-fn context_tag(context: PrContext) -> (&'static str, Color) {
-    match context {
-        PrContext::Work => ("WORK", WORK_BLUE),
-        PrContext::Personal => ("PERSONAL", PERSONAL_VIOLET),
+fn tone_color(tone: Tone) -> Color {
+    match tone {
+        Tone::Muted => MUTED_INK,
+        Tone::Green => LIVE_GREEN,
+        Tone::Red => TRIP_RED,
+        Tone::Amber => WARN_AMBER,
+        Tone::Work => WORK_BLUE,
+        Tone::Personal => PERSONAL_VIOLET,
     }
 }
 
@@ -1237,15 +1163,6 @@ fn ci_color(ci: CiState) -> Color {
         CiState::Failure | CiState::Error => TRIP_RED,
         CiState::Pending => WARN_AMBER,
         CiState::None => UNREADABLE_INK,
-    }
-}
-
-fn badge_color(badge: Badge) -> Color {
-    match badge {
-        Badge::Muted => MUTED_INK,
-        Badge::Green => LIVE_GREEN,
-        Badge::Red => TRIP_RED,
-        Badge::Amber => WARN_AMBER,
     }
 }
 
@@ -1639,12 +1556,8 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
             marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
             (label.clone(), if headline.is_some() { 2.0 } else { 0.0 })
         }
-        CellContent::PullRequests {
-            segments,
-            count,
-            readable,
-        } => {
-            if *readable && !segments.is_empty() {
+        CellContent::PullRequests { label, segments } => {
+            if !segments.is_empty() {
                 let span = 360.0 / segments.len() as f32;
                 let gap_deg = if segments.len() > 1 {
                     0.025 * 360.0
@@ -1667,14 +1580,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                 }
             }
             marks::pull_request(glyph_rect, 1.6 * scale, [255, 255, 255, 255], pixmap);
-            (
-                if *readable {
-                    count.to_string()
-                } else {
-                    "—".into()
-                },
-                0.0,
-            )
+            (label.clone(), 0.0)
         }
     };
 

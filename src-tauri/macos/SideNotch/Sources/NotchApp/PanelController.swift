@@ -76,11 +76,10 @@ func popoverPlacement(
   let margin = pixelAligned(popoverMargin * rail.settings.size.scale, displayScale: rail.display.scale)
   let maxHeight = min(metrics.value(560), CGFloat(rail.display.workHeight - 2 * margin))
   let content: PopoverContent
-  switch cell {
-  case .provider(let id):
-    content = .provider(id, message.providers.first { $0.provider == id })
-  case .pullRequests:
-    content = .pullRequests(message.pullRequests)
+  switch message.cells.first(where: { $0.id == cell }) {
+  case .provider(let provider)?: content = .provider(provider)
+  case .pullRequests(let pulls)?: content = .pullRequests(pulls)
+  case nil: return nil
   }
   func model(tailAt: CGFloat) -> PopoverModel {
     PopoverModel(
@@ -211,6 +210,7 @@ final class PanelController: NSObject, NSWindowDelegate {
     guard next.sequence > lastSequence else { return }
     lastSequence = next.sequence
     let previous = message?.snapshot.settings
+    let previousCells = message?.cells.map(\.id)
     message = next
     now = Date()
     let moved =
@@ -218,7 +218,7 @@ final class PanelController: NSObject, NSWindowDelegate {
       || previous?.edge != next.snapshot.settings.edge
       || previous?.size != next.snapshot.settings.size
       || previous?.show != next.snapshot.settings.show
-      || previous?.railCells != next.snapshot.settings.railCells
+      || previousCells != next.cells.map(\.id)
     if moved {
       pinned = nil
       hovered = nil
@@ -237,7 +237,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   private func relayout() {
     rail = message.flatMap { message in
       message.snapshot.error == nil
-        ? RailModel(settings: message.snapshot.settings, displays: Screens.read()) : nil
+        ? RailModel(
+          settings: message.snapshot.settings, cells: message.cells, displays: Screens.read())
+        : nil
     }
     updateFrames()
   }
@@ -398,9 +400,7 @@ final class PanelController: NSObject, NSWindowDelegate {
       return
     }
     railHost.rootView = NotchRailView(
-      model: rail,
-      entries: Dictionary(uniqueKeysWithValues: message.providers.map { ($0.provider, $0) }),
-      pullRequests: message.pullRequests, now: now, active: activeCell,
+      model: rail, cells: message.cells, now: now, active: activeCell,
       capHovered: capHovered, action: { [weak self] id in self?.toggle(id) },
       toggleShow: { [weak self] in self?.toggleShow() })
   }
@@ -446,7 +446,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   }
 
   private func updateFrames() {
-    guard let rail = rail, let pill = notchPillFrame(settings: rail.settings, displays: [rail.display])
+    guard let rail = rail,
+      let pill = notchPillFrame(
+        settings: rail.settings, displays: [rail.display], count: rail.cellIds.count)
     else {
       pinned = nil
       hovered = nil

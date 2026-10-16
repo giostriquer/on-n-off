@@ -110,13 +110,12 @@ fn pinned_pull_requests() -> GithubPrsDto {
     let mut offsite = pr(3, "acme/webapp");
     offsite["url"] = "http://example.com/pull/3".into();
     let mut unread = pr(4, "acme/api");
-    unread["ci"] = "pending".into();
     unread["mergeKind"] = "conflicts".into();
     serde_json::from_value(serde_json::json!({
-        "status": "ok", "hint": "Showing the pull requests read at 10:00.", "stale": true,
+        "status": "rateLimited", "hint": "Showing the pull requests read at 10:00.", "stale": true,
         "scope": ["org:acme"],
         "mine": {"total": 3, "items": [work, personal, offsite]},
-        "reviewRequested": {"total": 1, "items": [unread]},
+        "reviewRequested": {"total": 2, "items": [unread, work.clone()]},
         "assigned": {"total": 1, "items": [pr(5, "acme/webapp")]}
     }))
     .unwrap()
@@ -124,50 +123,10 @@ fn pinned_pull_requests() -> GithubPrsDto {
 
 const PINNED_ACTION_ERROR: &str = "Cannot open the Limits window.";
 
-const PINNED_FRAME: &str = concat!(
-    r#"{"version":6,"sequence":1,"snapshot":{"revision":0,"supported":true,"#,
-    r#""liquidGlass":true,"settings":{"enabled":true,"displayId":"display-a","edge":"left","#,
-    r#""size":"large","show":"onHover","providers":["muse","codex","claude"],"#,
-    r#""pullRequests":{"enabled":true,"lists":["reviewRequested","mine"]},"#,
-    r#""popoverStyle":"solid"},"displays":[{"id":"display-a","name":"Built-in Display","#,
-    r#""x":0.0,"y":0.0,"width":1512.0,"height":982.0,"workY":33.0,"workHeight":949.0,"#,
-    r#""scale":2.0,"mirrored":false}],"error":null},"providers":[{"provider":"claude","#,
-    r#""status":"ok","currentAccount":true,"message":null,"windows":[{"id":"weekly_all","#,
-    r#""label":"Weekly · all models","kind":"weekly","usedPercent":41.5,"#,
-    r#""resetsAt":"2026-09-05T08:00:00Z","windowSeconds":604800,"#,
-    r#""observedAt":"2026-09-01T10:00:00Z"},{"id":"session","label":"5 hour · all models","#,
-    r#""kind":"session","usedPercent":12.0,"resetsAt":"2026-09-01T13:00:00Z","#,
-    r#""observedAt":"2026-09-01T10:00:00Z"},{"id":"weekly_scoped:Fable","#,
-    r#""label":"Weekly · Fable","kind":"model","usedPercent":63.0,"#,
-    r#""observedAt":"2026-09-01T10:00:00Z"}],"headlineWindowId":"weekly_all","#,
-    r#""innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"#,
-    r#""sessions":[{"id":"claude-1","name":"webapp-1a","place":"Terminal","#,
-    r#""project":"webapp","status":"working","lastActiveAt":"2026-09-01T09:58:00Z"},"#,
-    r#"{"id":"claude-2","name":"webapp-2b","place":"Terminal","project":"webapp","#,
-    r#""status":"idle","lastActiveAt":"2026-09-01T09:58:00Z"}]},{"provider":"codex","#,
-    r#""status":"failed","currentAccount":true,"message":"Codex did not answer.","#,
-    r#""windows":[{"id":"weekly","label":"Weekly","kind":"weekly","usedPercent":22.0,"#,
-    r#""resetsAt":"2026-09-04T00:00:00Z","observedAt":"2026-09-01T09:30:00Z"}],"#,
-    r#""headlineWindowId":"weekly","innerRing":{"kind":"workspaceShare"},"#,
-    r#""workspaceCredits":{"usedPercent":32.0,"resetsAt":"2026-10-01T12:00:00+00:00","#,
-    r#""left":"16,999.5 of 25,000 left","renewed":"25,000 of 25,000 left"},"sessions":[]}],"#,
-    r#""pullRequests":{"status":"ok","hint":"Showing the pull requests read at 10:00.","#,
-    r#""stale":true,"lists":[{"id":"mine","total":3,"items":[{"id":"node-1","number":1,"#,
-    r#""title":"Fix #1","url":"https://github.com/acme/webapp/pull/1","repo":"acme/webapp","#,
-    r#""author":"octocat","isDraft":false,"reviewDecision":"APPROVED","ci":"success","#,
-    r#""mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z","context":"work"},"#,
-    r#"{"id":"node-2","number":2,"title":"Fix #2","#,
-    r#""url":"https://github.com/octocat/dotfiles/pull/2","repo":"octocat/dotfiles","#,
-    r#""author":"octocat","isDraft":true,"reviewDecision":"CHANGES_REQUESTED","#,
-    r#""ci":"failure","updatedAt":"2026-09-01T10:00:00Z","context":"personal"}]},"#,
-    r#"{"id":"reviewRequested","total":1,"items":[{"id":"node-4","number":4,"#,
-    r#""title":"Fix #4","url":"https://github.com/acme/api/pull/4","repo":"acme/api","#,
-    r#""author":"octocat","isDraft":false,"ci":"pending","mergeKind":"conflicts","#,
-    r#""updatedAt":"2026-09-01T10:00:00Z"}]}]},"#,
-    r#""actionError":"Cannot open the Limits window."}"#,
-);
+const GOLDEN: &str =
+    include_str!("../../../../macos/SideNotch/Tests/NotchCoreTests/host-message.json");
 
-fn sent() -> String {
+fn sent() -> Vec<String> {
     let app = FakeApp::default();
     for agent in RAIL_ORDER {
         app.world().limits.insert(agent, pinned_limits(agent));
@@ -175,17 +134,46 @@ fn sent() -> String {
     }
     app.world().pull_requests = Some(pinned_pull_requests());
     app.world().open_error = Some(PINNED_ACTION_ERROR.into());
-    let mut rig = Rig::new(app, pinned_snapshot());
+    app.world().hold = true;
+    let mut rig = Rig::new(app.clone(), pinned_snapshot());
     rig.tick(Duration::ZERO);
+    app.world().hold = false;
+    app.release();
     rig.act(Inbound::Action(Action::OpenLimits));
     let wire = rig.wire.wire();
-    let snapshot = wire.snapshots.last().expect("a frame was sent");
-    let frame = wire.frames.last().expect("a frame was sent");
-    String::from_utf8(crate::side_notch::protocol::encode(1, snapshot, frame).unwrap()).unwrap()
+    let first = (&wire.snapshots[0], &wire.frames[0]);
+    let last = (
+        wire.snapshots.last().expect("a frame was sent"),
+        wire.frames.last().expect("a frame was sent"),
+    );
+    [first, last]
+        .into_iter()
+        .zip(1..)
+        .map(|((snapshot, frame), sequence)| {
+            String::from_utf8(
+                crate::side_notch::protocol::encode(sequence, snapshot, frame).unwrap(),
+            )
+            .unwrap()
+        })
+        .collect()
 }
 
 #[test]
-fn the_helper_receives_exactly_these_protocol_6_bytes() {
-    assert_eq!(PROTOCOL_VERSION, 6);
-    assert_eq!(sent(), PINNED_FRAME);
+fn the_helper_receives_exactly_the_golden_protocol_7_messages() {
+    assert_eq!(PROTOCOL_VERSION, 7);
+    let golden: Vec<serde_json::Value> = serde_json::from_str(GOLDEN).expect("the golden messages");
+    assert_eq!(
+        sent(),
+        golden
+            .iter()
+            .map(|message| serde_json::to_string(message).unwrap())
+            .collect::<Vec<_>>(),
+        "the encoder's bytes, key for key, are the first frame and a frame after every read, \
+         the golden messages NotchCoreChecks decodes"
+    );
+    assert_eq!(
+        serde_json::to_string_pretty(&golden).unwrap() + "\n",
+        GOLDEN,
+        "the golden file stays pretty-printed"
+    );
 }

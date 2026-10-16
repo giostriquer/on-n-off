@@ -157,6 +157,30 @@ fn nothing_is_read_while_the_rail_has_nowhere_to_go() {
 }
 
 #[test]
+fn reads_start_only_once_the_whole_rail_fits_its_display() {
+    let mut short = snapshot();
+    short.displays[0].work_height = 300.0;
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::new(app.clone(), short.clone());
+    rig.tick(Duration::ZERO);
+    rig.tick(Duration::from_millis(100));
+    assert!(
+        app.take_asked().is_empty(),
+        "four cells need 396 pt and the display has 300"
+    );
+
+    short.settings.providers = vec![AgentId::Claude];
+    short.settings.pull_requests.enabled = false;
+    rig.host.desire(short);
+    rig.tick(Duration::from_millis(100));
+    assert!(
+        app.limits_asked()
+            .contains(&Asked::Limits(AgentId::Claude, false)),
+        "one cell needs 153 pt and fits"
+    );
+}
+
+#[test]
 fn a_limits_read_another_surface_replaced_reaches_the_notch_without_waiting() {
     let app = app_with(&[(AgentId::Claude, 10.0)]);
     app.world().limits_revisions.insert(AgentId::Claude, 7);
@@ -227,8 +251,12 @@ fn a_pull_request_read_another_surface_replaced_reaches_the_notch_without_waitin
     );
     rig.tick(Duration::from_millis(100));
     let frame = rig.last_frame();
-    let Some(CellData::PullRequests(cell)) = frame.cells.last() else {
-        panic!("a pull request cell");
+    let Some(CellData::PullRequests(PrCell {
+        reading: Some(cell),
+        ..
+    })) = frame.cells.last()
+    else {
+        panic!("a pull request cell that was read");
     };
     assert_eq!(cell.lists[0].items.len(), 1);
     rig.tick(Duration::from_secs(1));

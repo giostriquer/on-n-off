@@ -205,6 +205,10 @@ adapter assumes today (change the adapter and this file together).
    (`src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift`).
 4. Every write through `ConfigIo`; a regression test with a temp home (`paths::scratch_dir`) before the change.
 5. Document the layout here, and mark what is verified vs assumed.
+6. For the side notch: give it its slot in `RAIL_ORDER` (step 1), which alone sets the rail's
+   order. The macOS helper needs a `ProviderId` case, a mark, an ink and a name, but no
+   case-order edit: it draws the cells in the order the host sends them, and skips a provider it
+   does not know.
 
 Subscription dates share a per-account UI cache that account changes invalidate. The read is local: the
 ID token of the signed-in login or of the saved profile, decoded in process, with no request of its own.

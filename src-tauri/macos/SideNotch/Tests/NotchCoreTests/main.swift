@@ -13,21 +13,11 @@ final class NotchTests {
       id: id, label: label, kind: kind, usedPercent: percent, resetsAt: reset,
       observedAt: "2026-08-31T12:00:00Z")
   }
-  func provider(
-    _ name: ProviderId = .claude, windows: [Quota], status: String = "ok", current: Bool = true,
-    headline: String? = nil, inner: InnerRing? = nil
-  ) -> Provider {
-    Provider(
-      provider: name, status: status, currentAccount: current, message: nil,
-      windows: windows, headlineWindowId: headline, innerRing: inner)
+  func reading(windows: [Quota], headline: String? = nil, inner: InnerRing? = nil) -> Reading {
+    Reading(windows: windows, headlineWindowId: headline, innerRing: inner)
   }
-  func rail(
-    _ displayId: String, edge: Edge = .right, size: NotchSize = .standard,
-    providers: [ProviderId] = railProviderOrder, pullRequests: Bool = false
-  ) -> Settings {
-    Settings(
-      enabled: true, displayId: displayId, edge: edge, size: size, providers: providers,
-      pullRequests: PullRequestSettings(enabled: pullRequests, lists: [.mine]))
+  func rail(_ displayId: String, edge: Edge = .right, size: NotchSize = .standard) -> Settings {
+    Settings(enabled: true, displayId: displayId, edge: edge, size: size)
   }
   func display(_ id: String, x: Double = 0, mirrored: Bool = false, scale: Double = 2) -> Display
   {
@@ -41,7 +31,7 @@ final class NotchTests {
       let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
       return (dr * dr + dg * dg + db * db).squareRoot()
     }
-    for base in railProviderOrder.map(providerInk) + [fableInk, creditsInk] {
+    for base in ProviderId.allCases.map(providerInk) + [fableInk, creditsInk] {
       var previous = Double.infinity
       for step in 0...100 {
         let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
@@ -63,7 +53,7 @@ final class NotchTests {
 
   func testTheRingsShowTheWindowsTheHostNamed() {
     let fable = quota("model", 58, label: "Weekly · Fable", id: "weekly_scoped:Fable")
-    let entry = provider(
+    let entry = reading(
       windows: [
         quota("session", 73, label: "5 hour · all models", id: "session"),
         quota("weekly", 41, id: "weekly_all"),
@@ -73,7 +63,7 @@ final class NotchTests {
     expectEqual(entry.headline?.usedPercent, 41)
     expectEqual(entry.inner, InnerQuota.fable(fable))
     expectEqual(entry.inner?.quota.usedPercent, 58)
-    let unnamed = provider(windows: [quota("weekly", 41)])
+    let unnamed = reading(windows: [quota("weekly", 41)])
     expectNil(unnamed.headline)
     expectNil(unnamed.inner)
   }
@@ -92,8 +82,7 @@ final class NotchTests {
   }
 
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
-    let entry = Provider(
-      provider: .codex, status: "ok", currentAccount: true, message: nil,
+    let entry = Reading(
       windows: [quota("weekly", 31, label: "Weekly · all models", id: "primary")],
       headlineWindowId: "primary", innerRing: .workspaceShare, workspaceCredits: credits(32))
     expectEqual(entry.headline?.usedPercent, 31)
@@ -118,26 +107,8 @@ final class NotchTests {
     expectEqual(renewed.note(at: now), "Reset \(localDate("2026-06-15T12:00:00Z"))")
   }
 
-  func testAPausedAccountWithOnlyAShareStillHasObservedValues() {
-    let share = Provider(
-      provider: .codex, status: "failed", currentAccount: true, message: "Paused",
-      windows: [], workspaceCredits: credits(32))
-    expectEqual(share.hasObservedValues, true)
-    expectEqual(provider(.codex, windows: [quota("weekly", 31)], status: "failed").hasObservedValues, true)
-    expectEqual(provider(.codex, windows: [], status: "failed").hasObservedValues, false)
-  }
-
-  func testAPausedRingSaysItsReadingIsTheLastObserved() {
-    let weekly = [quota("weekly", 46)]
-    for status in ["failed", "signedOut", "unauthenticated", "unsupported"] {
-      expectEqual(provider(windows: weekly, status: status, headline: "weekly").ringIsLastObserved, true)
-    }
-    expectEqual(provider(windows: weekly, status: "ok", headline: "weekly").ringIsLastObserved, false)
-    expectEqual(provider(windows: weekly, status: "failed").ringIsLastObserved, false)
-  }
-
   func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
-    let entry = provider(windows: [
+    let entry = reading(windows: [
       quota("weekly", 41),
       quota("model", 58, label: "Weekly · Fable", reset: "2026-01-01T00:00:00Z"),
     ])
@@ -174,33 +145,6 @@ final class NotchTests {
     expectEqual(session(0).isWorking, false)
   }
 
-  func testTheRailOrdersItsProvidersAndCountsThePullRequestCell() {
-    let two = rail("main", providers: [.cursor, .claude, .claude])
-    expectEqual(two.railProviders, [.claude, .cursor])
-    let defaults = Settings(enabled: true, displayId: "main")
-    expectEqual(defaults.railProviders, [.claude, .codex, .muse, .antigravity, .cursor])
-    expectEqual(defaults.pullRequests.enabled, true)
-    expectEqual(defaults.railCells.count, 6)
-    expectEqual(defaults.railCells.last, RailCell.pullRequests)
-    expectEqual(
-      PullRequestSettings(enabled: true, lists: [.assigned, .mine, .assigned]).selectedLists,
-      [.mine, .assigned])
-  }
-
-  func testTheRailCountsThePullRequestCellAndEachProviderOnce() {
-    let displays = [display("main")]
-    let cases: [(Settings, Int, Double)] = [
-      (rail("main", providers: [], pullRequests: true), 1, 73 + 80),
-      (rail("main", pullRequests: true), 6, 6 * 73 + 5 * 8 + 80),
-      (rail("main", providers: [.cursor, .claude, .claude]), 2, 234),
-    ]
-    for (settings, cells, height) in cases {
-      expectEqual(settings.railCells.count, cells)
-      expectEqual(
-        notchRailFrame(settings: settings, displays: displays).map { Double($0.height) }, height)
-    }
-  }
-
   func testRailFramesAndPillsMatchTheSharedCases() throws {
     let fixture = try RailFixture.load()
     expectEqual(fixture.rails.isEmpty, false)
@@ -216,14 +160,14 @@ final class NotchTests {
           mirrored: screen.mirrored ?? false)
       }
       let settings = Settings(
-        enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size,
-        providers: Array(railProviderOrder.prefix(entry.cells ?? railProviderOrder.count)),
-        pullRequests: PullRequestSettings(enabled: false, lists: [.mine]))
+        enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size)
+      let count = entry.cells ?? ProviderId.allCases.count
       expectPixels(
-        notchRailFrame(settings: settings, displays: displays).map(pixels), entry.rail,
-        scale: entry.scale, "rail case \(index)")
+        notchRailFrame(settings: settings, displays: displays, count: count).map(pixels),
+        entry.rail, scale: entry.scale, "rail case \(index)")
       expectPixels(
-        notchPillFrame(settings: settings, displays: displays).map(pixels), entry.pill,
+        notchPillFrame(settings: settings, displays: displays, count: count).map(pixels),
+        entry.pill,
         scale: entry.scale, "pill case \(index)")
     }
   }
@@ -261,24 +205,16 @@ final class NotchTests {
     }
   }
 
-  func testSettingsDecodeTheHostDocumentAndRejectUnknownProviders() throws {
+  func testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads() throws {
     let document = try JSONDecoder().decode(
       Settings.self,
       from: Data(
-        #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex","codex"],"pullRequests":{"enabled":true,"lists":["mine","assigned"]},"popoverStyle":"solid"}"#
+        #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex","gemini"],"pullRequests":{"enabled":true,"lists":["mine","starred"]},"popoverStyle":"solid"}"#
           .utf8))
-    expectEqual(document.pullRequests.selectedLists, [.mine, .assigned])
     expectEqual(document.show, ShowMode.onHover)
     expectEqual(document.edge, Edge.top)
     expectEqual(document.size, NotchSize.compact)
-    expectEqual(document.railProviders, [.codex])
     expectEqual(document.popoverStyle, NotchStyle.solid)
-    expectThrows(
-      try JSONDecoder().decode(
-        Settings.self,
-        from: Data(
-          #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["gemini"],"pullRequests":{"enabled":false,"lists":[]},"popoverStyle":"glass"}"#
-            .utf8)))
     expectThrows(
       try JSONDecoder().decode(
         Settings.self, from: Data(#"{"enabled":true,"displayId":"main","edge":"right"}"#.utf8)))
@@ -287,7 +223,7 @@ final class NotchTests {
         try JSONDecoder().decode(
           Settings.self,
           from: Data(
-            (#"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex"],"pullRequests":{"enabled":true,"lists":["mine"]}"#
+            (#"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover""#
               + style + "}").utf8)))
     }
   }
@@ -306,7 +242,7 @@ final class NotchTests {
       bar.inset + bar.cellLength + bar.cellSpacing)
     expectEqual(cells[0].minY, layout.length(count: 4) - cells[3].maxY)
 
-    let railFrame = notchRailFrame(settings: rail("main"), displays: [main])!
+    let railFrame = notchRailFrame(settings: rail("main"), displays: [main], count: 4)!
     let cell = cells[0].offsetBy(dx: railFrame.minX, dy: railFrame.minY)
     let size = CGSize(width: 300, height: 420)
     let frame = popoverFrame(cell: cell, edge: .right, size: size, display: main, scale: 1)
@@ -324,42 +260,49 @@ final class NotchTests {
     expectEqual(clampedBottom.maxY, 33 + 1084 - 8)
   }
 
+  let message =
+    #"{"version":7,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"cells":[]}"#
+
+  func withCells(_ cells: String) -> String {
+    message.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(cells)]")
+  }
+
+  func providerCell(_ message: HostMessage, _ index: Int = 0) -> ProviderCell? {
+    guard message.cells.indices.contains(index), case .provider(let cell) = message.cells[index]
+    else { return nil }
+    return cell
+  }
+
+  func pullRequestCell(_ message: HostMessage) -> PullRequestCell? {
+    for cell in message.cells { if case .pullRequests(let pulls) = cell { return pulls } }
+    return nil
+  }
+
   func testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions() throws {
-    let valid =
-      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
-    expectEqual(try HostMessage.decode(Data(valid.utf8)).sequence, 1)
-    for older in ["1", "2", "3", "4", "5"] {
+    expectEqual(try HostMessage.decode(Data(message.utf8)).sequence, 1)
+    for older in ["1", "2", "3", "4", "5", "6"] {
       expectThrows(
         try HostMessage.decode(
-          Data(valid.replacingOccurrences(of: "\"version\":6", with: "\"version\":\(older)").utf8)))
+          Data(message.replacingOccurrences(of: "\"version\":7", with: "\"version\":\(older)").utf8)))
     }
     expectThrows(
-      try HostMessage.decode(Data((valid + String(repeating: " ", count: 262_144)).utf8)))
-    let invalid = valid.replacingOccurrences(
-      of: "\"providers\":[]",
-      with:
-        #""providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}],"sessions":[]}]"#
+      try HostMessage.decode(Data((message + String(repeating: " ", count: 262_144)).utf8)))
+    let invalid = withCells(
+      #"{"kind":"provider","provider":"claude","reading":{"windows":[{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}]},"sessions":[]}"#
     )
     expectThrows(try HostMessage.decode(Data(invalid.utf8)))
-    let unknownProvider = valid.replacingOccurrences(
-      of: "\"providers\":[]",
-      with: #""providers":[{"provider":"gemini","status":"ok","currentAccount":true,"windows":[],"sessions":[]}]"#)
-    expectThrows(try HostMessage.decode(Data(unknownProvider.utf8)))
-    let withSessions = valid.replacingOccurrences(
-      of: "\"providers\":[]",
-      with:
-        #""providers":[{"provider":"cursor","status":"unsupported","currentAccount":true,"windows":[],"sessions":[{"id":"1","name":"repo-1a","place":"Terminal","project":"repo","status":"working","lastActiveAt":"2026-09-01T10:00:00Z"}]}]"#
+    let withSessions = withCells(
+      #"{"kind":"provider","provider":"cursor","reading":{"windows":[]},"sessions":[{"id":"1","name":"repo-1a","place":"Terminal","project":"repo","status":"working","lastActiveAt":"2026-09-01T10:00:00Z"}]}"#
     )
     let decoded = try HostMessage.decode(Data(withSessions.utf8))
-    expectEqual(decoded.providers[0].sessions.first?.isWorking, true)
-    expectNil(decoded.providers[0].workspaceCredits)
-    let withCredits = valid.replacingOccurrences(
-      of: "\"providers\":[]",
-      with:
-        #""providers":[{"provider":"codex","status":"ok","currentAccount":true,"windows":[],"innerRing":{"kind":"workspaceShare"},"sessions":[],"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}}]"#
+    expectEqual(providerCell(decoded)?.sessions.first?.isWorking, true)
+    expectNil(providerCell(decoded)?.reading?.workspaceCredits)
+    let withCredits = withCells(
+      #"{"kind":"provider","provider":"codex","reading":{"windows":[],"innerRing":{"kind":"workspaceShare"},"workspaceCredits":{"usedPercent":32,"resetsAt":"2027-02-01T12:00:00+00:00","left":"17,000 of 25,000 left","renewed":"25,000 of 25,000 left"}},"sessions":[]}"#
     )
     expectEqual(
-      try HostMessage.decode(Data(withCredits.utf8)).providers[0].inner?.quota.percent(at: now), 32)
+      providerCell(try HostMessage.decode(Data(withCredits.utf8)))?.reading?.inner?.quota.percent(
+        at: now), 32)
     expectThrows(
       try HostMessage.decode(
         Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8)))
@@ -371,14 +314,38 @@ final class NotchTests {
       of: "\"sessions\":[", with: "\"sessions\":[" + String(repeating: oneSession + ",", count: maxSessions))
     expectThrows(try HostMessage.decode(Data(tooMany.utf8)))
     expectEqual(maxSessions, 12)
+    expectThrows(try HostMessage.decode(Data(withCells(#"{"kind":"weather"}"#).utf8)))
+  }
+
+  func testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal() throws {
+    let rail =
+      message.replacingOccurrences(of: "\"enabled\":false", with: "\"enabled\":true")
+      .replacingOccurrences(of: "\"providers\":[\"claude\"]", with: "\"providers\":[\"gemini\",\"claude\"]")
+      .replacingOccurrences(of: "\"pullRequests\":{\"enabled\":true", with: "\"pullRequests\":{\"enabled\":false")
+    let claude = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]}"#
+    let gemini = #"{"kind":"provider","provider":"gemini","reading":{"windows":[]},"sessions":[]}"#
+    let decoded = try HostMessage.decode(
+      Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(gemini),\(claude)]").utf8))
+    expectEqual(decoded.cells.map(\.id), [RailCell.provider(.claude)])
+    expectEqual(providerCell(decoded)?.notice, Notice(text: "Checking usage…", tone: .muted))
+    let muse = claude.replacingOccurrences(of: "\"provider\":\"claude\"", with: "\"provider\":\"muse\"")
+    let reordered = try HostMessage.decode(
+      Data(
+        rail.replacingOccurrences(of: "[\"gemini\",\"claude\"]", with: "[\"claude\",\"muse\"]")
+          .replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(muse),\(claude)]").utf8))
+    expectEqual(reordered.cells.map(\.id), [RailCell.provider(.muse), .provider(.claude)])
+    expectThrows(
+      try HostMessage.decode(
+        Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(claude),\(claude)]").utf8)))
   }
 
   func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
-    let valid =
-      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"sessions":[]}]}"#
-    let entry = try HostMessage.decode(Data(valid.utf8)).providers[0]
-    expectEqual(entry.headline?.usedPercent, 7)
-    expectEqual(entry.inner?.quota.usedPercent, 13)
+    let valid = withCells(
+      #"{"kind":"provider","provider":"claude","reading":{"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"}},"sessions":[]}"#
+    )
+    let entry = providerCell(try HostMessage.decode(Data(valid.utf8)))?.reading
+    expectEqual(entry?.headline?.usedPercent, 7)
+    expectEqual(entry?.inner?.quota.usedPercent, 13)
     for dangling in [
       valid.replacingOccurrences(
         of: "\"headlineWindowId\":\"weekly_all\"", with: "\"headlineWindowId\":\"session\""),
@@ -393,64 +360,200 @@ final class NotchTests {
     }
   }
 
-  func testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows() throws {
-    let valid =
-      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
+  func testPullRequestsValidateLinksListsSegmentsAndCaps() throws {
     let pull =
-      #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"octocat","isDraft":false,"reviewDecision":"APPROVED","ci":"success","mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z"}"#
-    let withPulls = valid.replacingOccurrences(
-      of: "\"providers\":[]}",
-      with: "\"providers\":[],\"pullRequests\":{\"status\":\"ok\",\"hint\":null,\"stale\":false,\"lists\":[{\"id\":\"mine\",\"total\":1,\"items\":[\(pull)]},{\"id\":\"assigned\",\"total\":1,\"items\":[\(pull)]}]}}")
+      #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"octocat","ci":"success","updatedAt":"2026-09-01T10:00:00Z","badges":[{"label":"Ready to merge","tone":"green"}]}"#
+    let segment = #"{"ci":"success","passingWithConflicts":false}"#
+    let withPulls = withCells(
+      #"{"kind":"pullRequests","label":"1","reading":{"readable":true,"count":1,"segments":["# + segment
+        + #"],"attention":{"conflicts":0,"failing":0,"changesRequested":0,"ready":1},"lists":[{"id":"mine","title":"Mine","total":1,"items":["#
+        + pull + #"]},{"id":"assigned","title":"Assigned","total":1,"items":["# + pull + "]}]}}")
     let decoded = try HostMessage.decode(Data(withPulls.utf8))
-    expectEqual(decoded.pullRequests?.count, 1)
-    expectEqual(decoded.pullRequests?.ready, 1)
-    expectEqual(decoded.pullRequests?.lists.first?.items.first?.link?.host, "github.com")
-    expectEqual(decoded.pullRequests?.lists.first?.items.first?.ci, CiState.success)
-    expectEqual(decoded.pullRequests?.lists.first?.items.first?.reviewDecision, ReviewDecision.approved)
-    let newer = withPulls.replacingOccurrences(of: "\"ci\":\"success\"", with: "\"ci\":\"skipped\"")
-      .replacingOccurrences(of: "\"mergeKind\":\"ready\"", with: "\"mergeKind\":\"frozen\"")
-    let lenient = try HostMessage.decode(Data(newer.utf8))
-    expectEqual(lenient.pullRequests?.lists.first?.items.first?.ci, CiState.unknown)
-    expectEqual(lenient.pullRequests?.lists.first?.items.first?.mergeKind, MergeKind.unknown)
-    expectEqual(lenient.pullRequests?.ready, 0)
+    let pulls = pullRequestCell(decoded)?.reading
+    expectEqual(pulls?.count, 1)
+    expectEqual(pulls?.attention.ready, 1)
+    expectEqual(pulls?.segments, [Segment(ci: .success, passingWithConflicts: false)])
+    expectEqual(pulls?.lists.map(\.title), ["Mine", "Assigned"])
+    expectEqual(pulls?.lists.first?.items.first?.link?.host, "github.com")
+    expectEqual(pulls?.lists.first?.items.first?.ci, CiState.success)
+    let newer = withPulls.replacingOccurrences(of: "\"ci\":\"success\",\"updatedAt\"", with: "\"ci\":\"skipped\",\"updatedAt\"")
+    expectEqual(
+      pullRequestCell(try HostMessage.decode(Data(newer.utf8)))?.reading?.lists.first?.items.first?.ci,
+      CiState.unknown)
     let offsite = withPulls.replacingOccurrences(
       of: "https://github.com/octo/tools/pull/42", with: "http://example.com/pull/42")
     expectThrows(try HostMessage.decode(Data(offsite.utf8)))
     let duplicateLists = withPulls.replacingOccurrences(
-      of: "\"lists\":[", with: "\"lists\":[{\"id\":\"mine\",\"total\":0,\"items\":[]},")
+      of: "\"lists\":[", with: "\"lists\":[{\"id\":\"mine\",\"title\":\"Mine\",\"total\":0,\"items\":[]},")
     expectThrows(try HostMessage.decode(Data(duplicateLists.utf8)))
+    let tooManySegments = withPulls.replacingOccurrences(
+      of: "\"segments\":[", with: "\"segments\":[" + String(repeating: segment + ",", count: maxRingSegments))
+    expectThrows(try HostMessage.decode(Data(tooManySegments.utf8)))
     expectEqual(maxPullRequests, 25)
+    expectEqual(maxRingSegments, 24)
   }
 
-  func testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSaysNeither() throws {
-    let message: (String) -> String = { pulls in
-      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[],"pullRequests":{"status":"ok","hint":null,"stale":false,"lists":[{"id":"mine","total":4,"items":["#
-        + pulls + "]}]}}"
+  func testRowsCarryTheirTagAndBadgesInTheTonesTheHostChose() throws {
+    let pull: (Int, String) -> String = { number, extra in
+      #"{"id":"node-\#(number)","number":\#(number),"title":"Fix","url":"https://github.com/acme/webapp/pull/\#(number)","repo":"acme/webapp","author":"octocat","ci":"success","updatedAt":"","badges":[]\#(extra)}"#
     }
-    let pull: (Int, String) -> String = { number, context in
-      #"{"id":"node-\#(number)","number":\#(number),"title":"Fix","url":"https://github.com/acme/webapp/pull/\#(number)","repo":"acme/webapp","author":"octocat","isDraft":false,"ci":"success","updatedAt":""\#(context)}"#
-    }
-    let rows = try HostMessage.decode(
-      Data(
-        message(
-          [
-            pull(1, #","context":"work""#), pull(2, #","context":"personal""#),
-            pull(3, #","context":"client""#), pull(4, ""),
-          ].joined(separator: ",")
-        ).utf8)
-    ).pullRequests?.lists.first?.items
-    expectEqual(rows?.map(\.context), [.work, .personal, .unknown, nil])
+    let rows = pullRequestCell(
+      try HostMessage.decode(
+        Data(
+          withCells(
+            #"{"kind":"pullRequests","label":"4","reading":{"readable":true,"count":4,"segments":[],"attention":{"conflicts":0,"failing":0,"changesRequested":0,"ready":0},"lists":[{"id":"mine","title":"Mine","total":4,"items":["#
+              + [
+                pull(1, #","tag":{"label":"Work","tone":"work"}"#),
+                pull(2, #","tag":{"label":"Personal","tone":"personal"}"#),
+                pull(3, #","tag":{"label":"Client","tone":"client"}"#), pull(4, ""),
+              ].joined(separator: ",") + "]}]}}"
+          ).utf8))
+    )?.reading?.lists.first?.items
+    expectEqual(
+      rows?.map(\.tag),
+      [
+        Badge(label: "Work", tone: .work), Badge(label: "Personal", tone: .personal),
+        Badge(label: "Client", tone: .muted), nil,
+      ])
+    expectEqual(rows?.allSatisfy(\.badges.isEmpty), true)
   }
 
-  func testConflictBandRequiresPassingCIAndMergeConflicts() {
-    let states: [CiState] = [.none, .pending, .success, .failure, .error, .unknown]
-    let kinds: [MergeKind?] = [nil, .conflicts, .queued, .autoMerge, .ready, .behind, .blocked, .unknown]
-    for ci in states {
-      for kind in kinds {
-        let row = PullRequest(id: "fixture", number: 1, title: "Fixture", url: "https://github.com/o/r/pull/1", repo: "o/r", author: "fixture", isDraft: false, reviewDecision: nil, ci: ci, mergeKind: kind, updatedAt: "")
-        expectEqual(row.passingWithConflicts, ci == .success && kind == .conflicts)
-      }
+  func goldenMessages() throws -> [HostMessage] {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .appendingPathComponent("host-message.json")
+    let messages = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [Any] ?? []
+    return try messages.map { try HostMessage.decode(JSONSerialization.data(withJSONObject: $0)) }
+  }
+
+  func testTheGoldenMessagesDecodeToTheCellsTheHostDecided() throws {
+    let messages = try goldenMessages()
+    expectEqual(messages.map(\.sequence), [1, 2])
+    expectEqual(messages.map(\.version), [protocolVersion, protocolVersion])
+    let first = messages[0]
+    expectEqual(
+      first.cells.map(\.id),
+      [.provider(.claude), .provider(.codex), .provider(.muse), .pullRequests])
+    for index in 0..<3 {
+      expectNil(providerCell(first, index)?.reading)
+      expectEqual(providerCell(first, index)?.notice, Notice(text: "Checking usage…", tone: .muted))
     }
+    expectNil(pullRequestCell(first)?.reading)
+    expectEqual(pullRequestCell(first)?.label, "—")
+    expectEqual(
+      pullRequestCell(first)?.notice, Notice(text: "Checking pull requests…", tone: .muted))
+    expectNil(first.actionError)
+
+    let golden = messages[1]
+    expectEqual(golden.actionError, "Cannot open the Limits window.")
+    expectEqual(
+      golden.cells.map(\.id),
+      [.provider(.claude), .provider(.codex), .provider(.muse), .pullRequests])
+
+    let claude = providerCell(golden, 0)
+    expectEqual(claude?.reading?.headline?.usedPercent, 41.5)
+    expectEqual(claude?.reading?.inner, InnerQuota.fable(claude!.reading!.windows[2]))
+    expectNil(claude?.notice)
+    expectEqual(claude?.sessions.map(\.isWorking), [true, false])
+
+    let codex = providerCell(golden, 1)
+    expectEqual(codex?.notice, Notice(text: "Codex did not answer.", tone: .muted))
+    expectEqual(
+      codex?.paused, Notice(text: "Refresh paused. Last observed values below.", tone: .amber))
+    expectEqual(codex?.reading?.workspaceCredits?.left, "16,999.5 of 25,000 left")
+    expectEqual(codex?.reading?.inner?.quota.usedPercent, 32)
+
+    let muse = providerCell(golden, 2)
+    expectNil(muse?.reading)
+    expectEqual(muse?.notice, Notice(text: "Checking usage…", tone: .muted))
+    expectEqual(muse?.sessions.count, 1)
+
+    let pulls = pullRequestCell(golden)
+    expectEqual(pulls?.label, "3")
+    expectEqual(
+      pulls?.notice, Notice(text: "Showing the pull requests read at 10:00.", tone: .amber))
+    let reading = pulls?.reading
+    expectEqual(reading?.readable, true)
+    expectEqual(reading?.count, 3)
+    expectEqual(
+      reading?.segments,
+      [
+        Segment(ci: .success, passingWithConflicts: false),
+        Segment(ci: .failure, passingWithConflicts: false),
+        Segment(ci: .success, passingWithConflicts: true),
+      ])
+    expectEqual(reading?.attention, Attention(conflicts: 1, failing: 1, changesRequested: 1, ready: 1))
+    expectEqual(reading?.lists.map(\.title), ["Mine", "Review requested"])
+    let mine = reading?.lists.first?.items
+    expectEqual(
+      mine?.first?.badges,
+      [Badge(label: "Approved", tone: .green), Badge(label: "Ready to merge", tone: .green)])
+    expectEqual(mine?.map(\.tag), [Badge(label: "Work", tone: .work), Badge(label: "Personal", tone: .personal)])
+    expectEqual(
+      mine?.last?.badges,
+      [Badge(label: "Draft", tone: .muted), Badge(label: "Changes requested", tone: .red)])
+    let review = reading?.lists.last?.items
+    expectEqual(review?.map(\.id), ["node-4", "node-1"])
+    expectEqual(review?.first?.badges, [Badge(label: "Conflicts", tone: .red)])
+    expectNil(review?.first?.tag)
+  }
+
+  func testVoiceOverSpeaksEachCellFromWhatTheHostDecided() {
+    let weekly = quota("weekly", 46, id: "weekly")
+    let fable = quota("model", 100, label: "Weekly · Fable", id: "fable")
+    expectEqual(ProviderCell(provider: .claude, reading: nil).spoken(name: "Claude", at: now), "Claude, updating")
+    expectEqual(
+      ProviderCell(
+        provider: .claude,
+        reading: reading(windows: [weekly, fable], headline: "weekly", inner: .fable(windowId: "fable"))
+      ).spoken(name: "Claude", at: now),
+      "Claude, weekly, 46% used, Fable weekly, 100% used, limit reached")
+    expectEqual(
+      ProviderCell(
+        provider: .codex, reading: reading(windows: [quota("weekly", 100)], headline: "weekly")
+      ).spoken(name: "Codex", at: now),
+      "Codex, weekly, 100% used, limit reached")
+    expectEqual(
+      ProviderCell(
+        provider: .claude, reading: reading(windows: [weekly], headline: "weekly"),
+        notice: Notice(text: "Claude Code reported no usage.", tone: .muted),
+        paused: Notice(text: "Refresh paused. Last observed values below.", tone: .amber)
+      ).spoken(name: "Claude", at: now),
+      "Claude, weekly, 46% used, refresh paused, last observed")
+    expectEqual(
+      ProviderCell(
+        provider: .cursor,
+        reading: Reading(windows: []),
+        notice: Notice(text: "Cursor has no subscription limits to show.", tone: .muted)
+      ).spoken(name: "Cursor", at: now),
+      "Cursor, Cursor has no subscription limits to show.")
+    expectEqual(
+      ProviderCell(
+        provider: .codex, reading: reading(windows: []),
+        notice: Notice(text: "Usage unavailable.", tone: .muted)
+      ).spoken(name: "Codex", at: now),
+      "Codex, Usage unavailable.")
+    expectEqual(
+      ProviderCell(
+        provider: .muse,
+        reading: Reading(windows: [])
+      ).spoken(name: "Muse", at: now),
+      "Muse, unavailable")
+
+    let attention = Attention(conflicts: 1, failing: 2, changesRequested: 0, ready: 1)
+    expectEqual(PullRequestCell(label: "—", reading: nil).spoken, "Pull requests, updating")
+    expectEqual(
+      PullRequestCell(
+        label: "—",
+        reading: PullRequestReading(
+          readable: false, count: 0, segments: [],
+          attention: Attention(conflicts: 0, failing: 0, changesRequested: 0, ready: 0), lists: []),
+        notice: Notice(text: "Sign in with the GitHub CLI.", tone: .muted)
+      ).spoken, "Pull requests, Sign in with the GitHub CLI.")
+    expectEqual(
+      PullRequestCell(
+        label: "3",
+        reading: PullRequestReading(readable: true, count: 3, segments: [], attention: attention, lists: [])
+      ).spoken, "Pull requests, 3 open, 1 with merge conflicts, 2 failing CI, 1 ready to merge")
   }
 
   func testReviewRequestsLinkTheTitleAndEscapeMarkup() {
@@ -466,14 +569,14 @@ final class NotchTests {
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
     let cases: [(ClientAction, [String: Any])] = [
-      (.ready, ["version": 6, "type": "ready"]),
-      (.ack(sequence: 42), ["version": 6, "type": "ack", "sequence": 42]),
-      (.screensChanged, ["version": 6, "type": "screensChanged"]),
-      (.refresh, ["version": 6, "type": "refresh"]),
-      (.openLimits, ["version": 6, "type": "openLimits"]),
-      (.openPullRequests, ["version": 6, "type": "openPullRequests"]),
-      (.setShow(.onHover), ["version": 6, "type": "setShow", "show": "onHover"]),
-      (.setShow(.always), ["version": 6, "type": "setShow", "show": "always"]),
+      (.ready, ["version": 7, "type": "ready"]),
+      (.ack(sequence: 42), ["version": 7, "type": "ack", "sequence": 42]),
+      (.screensChanged, ["version": 7, "type": "screensChanged"]),
+      (.refresh, ["version": 7, "type": "refresh"]),
+      (.openLimits, ["version": 7, "type": "openLimits"]),
+      (.openPullRequests, ["version": 7, "type": "openPullRequests"]),
+      (.setShow(.onHover), ["version": 7, "type": "setShow", "show": "onHover"]),
+      (.setShow(.always), ["version": 7, "type": "setShow", "show": "always"]),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)
@@ -573,22 +676,20 @@ checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
 checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
 checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
-checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
-checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
-checks.testTheRailOrdersItsProvidersAndCountsThePullRequestCell()
-checks.testTheRailCountsThePullRequestCellAndEachProviderOnce()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
 try checks.testRailMetricsMatchTheSharedCases()
-try checks.testSettingsDecodeTheHostDocumentAndRejectUnknownProviders()
+try checks.testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
+try checks.testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
-try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
-try checks.testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSaysNeither()
-checks.testConflictBandRequiresPassingCIAndMergeConflicts()
+try checks.testPullRequestsValidateLinksListsSegmentsAndCaps()
+try checks.testRowsCarryTheirTagAndBadgesInTheTonesTheHostChose()
+try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
+checks.testVoiceOverSpeaksEachCellFromWhatTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("21 native check groups; \(failures) failures")
+print("19 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

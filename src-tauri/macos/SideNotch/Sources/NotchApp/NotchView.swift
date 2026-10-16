@@ -54,23 +54,24 @@ func providerName(_ id: ProviderId) -> String {
 
 struct RailModel {
   let settings: NotchCore.Settings
+  let cellIds: [RailCell]
   let display: Display
   let frame: CGRect
   let layout: RailLayout
   let metrics: NotchMetrics
 
-  init?(settings: NotchCore.Settings, displays: [Display]) {
+  init?(settings: NotchCore.Settings, cells: [Cell], displays: [Display]) {
     guard let display = selectedDisplay(settings: settings, displays: displays),
-      let frame = notchRailFrame(settings: settings, displays: displays)
+      let frame = notchRailFrame(settings: settings, displays: displays, count: cells.count)
     else { return nil }
     self.settings = settings
+    cellIds = cells.map(\.id)
     self.display = display
     self.frame = frame
     layout = railLayout(size: settings.size, displayScale: display.scale, edge: settings.edge)
     metrics = NotchMetrics(scale: CGFloat(settings.size.scale), backingScale: CGFloat(display.scale))
   }
 
-  var cellIds: [RailCell] { settings.railCells }
   var edge: NotchCore.Edge { settings.edge }
 
   var cells: [CGRect] { railCellFrames(edge: edge, layout: layout, count: cellIds.count) }
@@ -104,8 +105,7 @@ struct RailModel {
 
 struct NotchRailView: View {
   let model: RailModel
-  let entries: [ProviderId: Provider]
-  let pullRequests: PullRequests?
+  let cells: [Cell]
   let now: Date
   let active: RailCell?
   let capHovered: Bool
@@ -120,11 +120,11 @@ struct NotchRailView: View {
         style: model.settings.popoverStyle, solidBorder: EmptyView())
       if model.edge.isVertical {
         VStack(spacing: CGFloat(layout.cellSpacing)) {
-          ForEach(model.cellIds, id: \.self) { cell($0) }
+          ForEach(cells, id: \.id) { cell($0) }
         }
       } else {
         HStack(spacing: CGFloat(layout.cellSpacing)) {
-          ForEach(model.cellIds, id: \.self) { cell($0) }
+          ForEach(cells, id: \.id) { cell($0) }
         }
       }
     }
@@ -134,22 +134,23 @@ struct NotchRailView: View {
     .preferredColorScheme(.dark)
   }
 
-  @ViewBuilder private func cell(_ id: RailCell) -> some View {
+  @ViewBuilder private func cell(_ cell: Cell) -> some View {
     let layout = model.layout
     let vertical = model.edge.isVertical
     let size = CGSize(
       width: CGFloat(vertical ? layout.thickness : layout.cellLength),
       height: CGFloat(vertical ? layout.cellLength : layout.thickness))
-    switch id {
+    let id = cell.id
+    switch cell {
     case .provider(let provider):
       MeterCell(
-        id: provider, entry: entries[provider], now: now, active: active == id, layout: layout,
+        cell: provider, now: now, active: active == id, layout: layout,
         metrics: model.metrics, action: { action(id) }
       )
       .frame(width: size.width, height: size.height)
-    case .pullRequests:
-      PullRequestCell(
-        pulls: pullRequests, active: active == id, layout: layout, metrics: model.metrics,
+    case .pullRequests(let pulls):
+      PullRequestRailCell(
+        cell: pulls, active: active == id, layout: layout, metrics: model.metrics,
         action: { action(id) }
       )
       .frame(width: size.width, height: size.height)
@@ -197,40 +198,26 @@ private struct RailCellChrome<Ring: View, Glyph: View>: View {
 }
 
 private struct MeterCell: View {
-  let id: ProviderId
-  let entry: Provider?
+  let cell: ProviderCell
   let now: Date
   let active: Bool
   let layout: RailLayout
   let metrics: NotchMetrics
   let action: () -> Void
+  private var id: ProviderId { cell.provider }
+  private var entry: Reading? { cell.reading }
   private var headline: Quota? { entry?.headline }
-  private var inner: (quota: Quota, name: String, ink: Ink, track: Color)? {
+  private var inner: (quota: Quota, ink: Ink, track: Color)? {
     switch entry?.inner {
     case .fable(let quota)?:
-      return (quota, "Fable weekly", fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
+      return (quota, fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
     case .workspaceShare(let quota)?:
-      return (
-        quota, "workspace credits", creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)
-      )
+      return (quota, creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255))
     case nil:
       return nil
     }
   }
-  private var period: String {
-    headline.map { _ in "weekly" } ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
-  }
-  private var description: String {
-    let name = providerName(id)
-    guard let headline = headline else { return "\(name), \(period)" }
-    let reached = headline.isReached(at: now) ? ", limit reached" : ""
-    let innerDescription = inner.map {
-      ", \($0.name), \($0.quota.text(at: now)) used"
-        + ($0.quota.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
-    let paused = entry?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
-    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription + paused
-  }
+  private var description: String { cell.spoken(name: providerName(id), at: now) }
 
   var body: some View {
     RailCellChrome(
@@ -259,34 +246,18 @@ private struct MeterCell: View {
   }
 }
 
-let maxRingSegments = 24
-
-private struct PullRequestCell: View {
-  let pulls: PullRequests?
+private struct PullRequestRailCell: View {
+  let cell: PullRequestCell
   let active: Bool
   let layout: RailLayout
   let metrics: NotchMetrics
   let action: () -> Void
-  private var readable: Bool { pulls?.readable == true }
-  private var segments: [PullRequest] {
-    guard let pulls = pulls, readable else { return [] }
-    return Array(pulls.rows.prefix(maxRingSegments))
-  }
-  private var description: String {
-    guard let pulls = pulls else { return "Pull requests, updating" }
-    guard readable else { return "Pull requests, \(pulls.hint ?? "unavailable")" }
-    var attention: [String] = []
-    let conflicts = pulls.rows.filter { $0.mergeKind == .conflicts }.count
-    if conflicts > 0 { attention.append("\(conflicts) with merge conflicts") }
-    if pulls.failing > 0 { attention.append("\(pulls.failing) failing CI") }
-    if pulls.changesRequested > 0 { attention.append("\(pulls.changesRequested) with changes requested") }
-    if pulls.ready > 0 { attention.append("\(pulls.ready) ready to merge") }
-    return (["Pull requests, \(pulls.count) open"] + attention).joined(separator: ", ")
-  }
+  private var segments: [Segment] { cell.reading?.segments ?? [] }
+  private var description: String { cell.spoken }
 
   var body: some View {
     RailCellChrome(
-      layout: layout, metrics: metrics, label: readable ? "\(pulls?.count ?? 0)" : "—",
+      layout: layout, metrics: metrics, label: cell.label,
       labelOffset: 0, description: description, active: active, action: action,
       ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
@@ -296,7 +267,7 @@ private struct PullRequestCell: View {
 }
 
 struct SegmentedRing: View {
-  let segments: [PullRequest]
+  let segments: [Segment]
   let lineWidth: CGFloat
   var body: some View {
     let count = segments.count

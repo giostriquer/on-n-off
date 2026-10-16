@@ -11,7 +11,7 @@ fn the_painted_rail_ends_one_ear_past_its_last_cell() {
                     edge,
                     ..settings()
                 };
-                let cells = (0..current.cell_count())
+                let cells = (0..crate::side_notch::model::frame::cell_count(&current))
                     .map(|_| CellData::Provider(session_only(AgentId::Claude, 40.0)))
                     .collect();
                 let rail_data = RailData {

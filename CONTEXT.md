@@ -101,6 +101,13 @@ organization, owned by one or a private fork of one's repository, and personal w
 owns it. A pull request read before GitHub reported this has neither.
 _Avoid_: scope, workspace
 
+### Side notch
+
+**Rail cell**:
+One slot of the side notch's rail: a selected provider's rings, or the pull request ring, in rail
+order. A cell whose provider or pull requests have not been read yet keeps its slot and is checking.
+_Avoid_: tile, entry
+
 ### Usage
 
 **Transcript source**:

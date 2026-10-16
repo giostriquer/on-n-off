@@ -1,7 +1,10 @@
 use super::*;
-use crate::dto::{LimitWindowKind, LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading};
-use crate::side_notch::host::frame::{PrCellData, PrListData, ProviderData};
-use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
+use crate::dto::{
+    GithubPrsDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+    Reading,
+};
+use crate::side_notch::model::frame::{self, ProviderCell};
+use crate::side_notch::model::{Display, NotchProvider, NotchPullRequests, NotchSettings};
 use crate::side_notch::sessions::LiveSession;
 
 mod content;
@@ -33,11 +36,62 @@ fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsD
         },
     )
 }
-fn projected(card: ProviderLimitsDto) -> ProviderData {
-    ProviderData {
-        cell: NotchProvider::current(vec![card]).expect("a signed-in account"),
-        sessions: Vec::new(),
+fn decided(
+    settings: NotchSettings,
+    reads: Vec<(AgentId, Option<NotchProvider>, Vec<LiveSession>)>,
+    pulls: Option<&GithubPrsDto>,
+) -> CellData {
+    frame::rail(&settings, reads, pulls, None)
+        .cells
+        .pop()
+        .expect("the model decided a cell")
+}
+fn projected(card: ProviderLimitsDto) -> ProviderCell {
+    let provider = card.provider;
+    let reading = NotchProvider::current(vec![card]).expect("a signed-in account");
+    let only = NotchSettings {
+        providers: vec![provider],
+        pull_requests: NotchPullRequests {
+            enabled: false,
+            ..NotchPullRequests::default()
+        },
+        ..settings()
+    };
+    match decided(only, vec![(provider, Some(reading), Vec::new())], None) {
+        CellData::Provider(cell) => cell,
+        CellData::PullRequests(_) => panic!("a provider cell"),
     }
+}
+fn pr(number: u64, title: &str, repo: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": format!("n{number}"), "number": number, "title": title,
+        "url": format!("https://github.com/{repo}/pull/{number}"), "repo": repo,
+        "author": "octocat", "isDraft": false, "ci": "success", "headRef": "fix",
+        "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z"
+    })
+}
+fn pulls_read(
+    status: &str,
+    hint: Option<&str>,
+    total: usize,
+    rows: Vec<serde_json::Value>,
+) -> CellData {
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": status, "hint": hint, "stale": false, "scope": [],
+        "mine": {"total": total, "items": rows},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .expect("a pull request read");
+    let only = NotchSettings {
+        providers: Vec::new(),
+        ..settings()
+    };
+    decided(only, Vec::new(), Some(&dto))
+}
+fn pulls(rows: Vec<serde_json::Value>) -> CellData {
+    let total = rows.len();
+    pulls_read("ok", None, total, rows)
 }
 fn session_window(percent: f64) -> LimitWindowDto {
     LimitWindowDto {
@@ -50,7 +104,7 @@ fn session_window(percent: f64) -> LimitWindowDto {
         observed_at: "2026-09-01T10:00:00Z".into(),
     }
 }
-fn session_only(provider: AgentId, percent: f64) -> ProviderData {
+fn session_only(provider: AgentId, percent: f64) -> ProviderCell {
     projected(signed_in(provider, vec![session_window(percent)]))
 }
 fn settings() -> NotchSettings {
@@ -78,7 +132,7 @@ fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWi
         observed_at: "2026-09-01T10:00:00Z".into(),
     }
 }
-fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderData {
+fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderCell {
     projected(signed_in(AgentId::Claude, windows))
 }
 fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
@@ -97,10 +151,10 @@ fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
         },
     )
 }
-fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderData {
+fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderCell {
     projected(codex_member_card(share))
 }
-fn popover_render(provider: ProviderData) -> (Plan, tiny_skia::Pixmap) {
+fn popover_render(provider: ProviderCell) -> (Plan, tiny_skia::Pixmap) {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
         &settings(),

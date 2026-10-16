@@ -1,7 +1,7 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
-use crate::side_notch::host::frame::{CellData, ProviderData};
+use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::win_paint::R;
 use std::time::Duration;
@@ -31,30 +31,29 @@ fn settings(show: ShowMode) -> NotchSettings {
 }
 
 fn data(show: ShowMode) -> RailData {
-    RailData {
-        settings: settings(show),
-        cells: vec![CellData::Provider(ProviderData {
-            cell: NotchProvider::current(vec![crate::limits::signed_in_card(
-                AgentId::Claude,
-                "acct",
-                Reading {
-                    windows: vec![LimitWindowDto {
-                        id: "w".into(),
-                        label: "Current session".into(),
-                        kind: LimitWindowKind::Session,
-                        used_percent: 10.0,
-                        resets_at: None,
-                        window_seconds: None,
-                        observed_at: "2026-09-01T10:00:00Z".into(),
-                    }],
-                    ..Reading::default()
-                },
-            )])
-            .expect("a signed-in account"),
-            sessions: Vec::new(),
-        })],
-        action_error: None,
-    }
+    let claude = NotchProvider::current(vec![crate::limits::signed_in_card(
+        AgentId::Claude,
+        "acct",
+        Reading {
+            windows: vec![LimitWindowDto {
+                id: "w".into(),
+                label: "Current session".into(),
+                kind: LimitWindowKind::Session,
+                used_percent: 10.0,
+                resets_at: None,
+                window_seconds: None,
+                observed_at: "2026-09-01T10:00:00Z".into(),
+            }],
+            ..Reading::default()
+        },
+    )])
+    .expect("a signed-in account");
+    frame::rail(
+        &settings(show),
+        [(AgentId::Claude, Some(claude), Vec::new())],
+        None,
+        None,
+    )
 }
 
 fn cell_rect(machine: &Machine) -> R {

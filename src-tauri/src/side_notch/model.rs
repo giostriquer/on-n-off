@@ -6,6 +6,9 @@ use crate::dto::{
 };
 use serde::{Deserialize, Serialize};
 
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub mod frame;
+
 pub use crate::provider_catalogue::RAIL_ORDER;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -108,8 +111,7 @@ impl NotchPullRequests {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrContext {
     Work,
     Personal,
@@ -168,11 +170,6 @@ impl NotchSettings {
             .into_iter()
             .filter(|agent| self.providers.contains(agent))
             .collect()
-    }
-
-    #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub fn cell_count(&self) -> usize {
-        self.rail_providers().len() + usize::from(self.pull_requests.enabled)
     }
 }
 
@@ -292,19 +289,15 @@ pub fn selected_display<'a>(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
-    if !settings.enabled {
-        return None;
-    }
-    let count = settings.cell_count();
-    if count == 0 {
+pub fn layout(settings: &NotchSettings, displays: &[Display], cells: usize) -> Option<Layout> {
+    if !settings.enabled || cells == 0 {
         return None;
     }
     let display = selected_display(settings, displays)?;
     let metrics = rail_metrics(settings.size, display.scale, settings.edge);
     let vertical = settings.edge.is_vertical();
     let thickness = metrics.thickness;
-    let length = metrics.length(count);
+    let length = metrics.length(cells);
     let aligned = |value: f64| pixel_aligned(value, display.scale);
     if vertical {
         if length > display.work_height {
@@ -361,8 +354,8 @@ pub fn rail_cell_frames(edge: Edge, metrics: &RailMetrics, count: usize) -> Vec<
 }
 
 #[cfg(any(target_os = "windows", test))]
-pub fn pill_frame(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
-    let rail = layout(settings, displays)?;
+pub fn pill_frame(settings: &NotchSettings, displays: &[Display], cells: usize) -> Option<Layout> {
+    let rail = layout(settings, displays, cells)?;
     let display = selected_display(settings, displays)?;
     let value = |points: f64| pixel_aligned(points * settings.size.scale(), display.scale);
     let thickness = value(6.0);
@@ -410,7 +403,6 @@ pub fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
-    pub provider: AgentId,
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
@@ -442,7 +434,6 @@ impl NotchProvider {
             .map(|window| window.id.clone());
         let inner_ring = inner_ring(card.provider, &windows, workspace_credits.as_ref());
         Some(Self {
-            provider: card.provider,
             status: card.status,
             message: card.message,
             windows,

@@ -51,41 +51,19 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
 }
 
 #[test]
-fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
-    let displays = [display("main", 0.0, 2.0)];
-    for (providers, pull_requests, cells, height) in [
-        (vec![], true, 1, 73.0 + 80.0),
-        (RAIL_ORDER.to_vec(), true, 6, 6.0 * 73.0 + 5.0 * 8.0 + 80.0),
-        (
-            vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude],
-            false,
-            2,
-            234.0,
-        ),
-    ] {
-        let mut current = settings("main", Edge::Right);
-        current.providers = providers;
-        current.pull_requests.enabled = pull_requests;
-        let case = format!("{:?} with the cell {pull_requests}", current.providers);
-        assert_eq!(current.cell_count(), cells, "{case}");
-        assert_eq!(
-            layout(&current, &displays).map(|rail| rail.height),
-            Some(height),
-            "{case}"
-        );
-    }
-}
-
-#[test]
 fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let defaults = NotchSettings::default();
     assert!(defaults.pull_requests.enabled);
     assert_eq!(defaults.pull_requests.lists, [GithubList::Mine]);
-    assert_eq!(defaults.cell_count(), 4, "three providers plus the cell");
+    assert_eq!(
+        frame::cell_count(&defaults),
+        4,
+        "three providers plus the cell"
+    );
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
     assert_eq!(
-        legacy.cell_count(),
+        frame::cell_count(&legacy),
         6,
         "older documents gain the cell and keep their providers"
     );
@@ -100,7 +78,9 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     );
     let displays = [display("main", 0.0, 1.0)];
     assert_eq!(
-        layout(&current, &displays).unwrap().height,
+        layout(&current, &displays, frame::cell_count(&current))
+            .unwrap()
+            .height,
         rail_metrics(NotchSize::Standard, 1.0, Edge::Right).length(6)
     );
     let json = serde_json::to_value(&current).unwrap();
