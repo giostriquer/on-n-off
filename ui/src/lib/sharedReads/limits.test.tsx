@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
-import { act, renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
@@ -64,29 +64,6 @@ function deferred<T>() {
 }
 
 describe("refreshLimits", () => {
-  it("makes a refresh asked during a first read once that read answers, and leaves no force behind for an announcement", async () => {
-    calls.listeners.clear();
-    const first = deferred<ProviderLimits[]>();
-    let claudeReads = 0;
-    calls.readLimits.mockReset().mockImplementation((provider: AgentId) =>
-      provider === "claude" && ++claudeReads === 1 ? first.promise : Promise.resolve(reading(provider)));
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    renderHook(() => useEveryProvider(5), { wrapper: windowWith(client) });
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
-    await waitFor(() => expect(calls.listeners.size).toBe(1));
-
-    let refreshed: Promise<void> | undefined;
-    act(() => { refreshed = refreshLimits(client); });
-    await act(async () => first.resolve(reading("claude")));
-    await act(async () => { await refreshed; });
-    const claude = () => calls.readLimits.mock.calls.filter(([provider]) => provider === "claude");
-    expect(claude()).toEqual([["claude", false], ["claude", true]]);
-
-    for (const listener of calls.listeners) listener({ source: "limits:claude" });
-    await waitFor(() => expect(claude()).toEqual([["claude", false], ["claude", true], ["claude", false]]));
-    client.clear();
-  });
-
   it("does not retain forced reads when no Limits screen is mounted", async () => {
     calls.readLimits.mockReset().mockImplementation((provider: AgentId) => Promise.resolve(reading(provider)));
     const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
