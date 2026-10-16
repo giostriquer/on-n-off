@@ -23,7 +23,7 @@ pub(crate) struct MuseLogin {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Storage {
+enum Storage {
     Inline,
     Keychain,
 }
