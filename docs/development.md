@@ -26,6 +26,11 @@ locates the subsystems. Module doc-comments explain their implementation.
   read, and answer an announcement unforced — either one broken makes it a loop
   ([why](architecture/shared-reads.md)).
 - `item_install/` never shells out to a provider CLI.
+- The banked reset alert rule: `reset_alert.rs`, which does no I/O; `limits_monitor.rs` only
+  performs the plan it returns, through an `Io` trait its tests fake. A number the UI restates
+  from the rule (`ui/src/lib/appSettings.ts`) is checked against `reset_alert/fixtures/rule.json`
+  by `ui/src/lib/resetAlertRule.test.ts`, and a Rust test keeps the fixture equal to the rule, so a
+  change to one side fails until the other follows.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
