@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::side_notch::host::ProviderData;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::win_paint::R;
 use std::time::Duration;
@@ -32,7 +33,7 @@ fn settings(show: ShowMode) -> NotchSettings {
 fn data(show: ShowMode) -> RailData {
     RailData {
         settings: settings(show),
-        cells: vec![win_paint::CellData::Provider(win_paint::ProviderData {
+        cells: vec![win_paint::CellData::Provider(ProviderData {
             cell: NotchProvider::current(vec![crate::limits::signed_in_card(
                 AgentId::Claude,
                 "acct",

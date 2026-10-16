@@ -14,18 +14,20 @@ mod transport;
 #[cfg(target_os = "macos")]
 mod window;
 
+#[cfg(any(target_os = "windows", test))]
+mod host;
 #[cfg(target_os = "windows")]
 mod win_displays;
 #[cfg(target_os = "windows")]
-mod win_host;
-#[cfg(target_os = "windows")]
 mod win_paint;
+#[cfg(target_os = "windows")]
+mod win_transport;
 #[cfg(target_os = "windows")]
 mod win_window;
 
-pub use model::{NotchSettings, NotchSnapshot};
 #[cfg(target_os = "windows")]
-pub use win_host::{add_runtime_error, setup, shutdown};
+pub use host::{add_runtime_error, setup, shutdown};
+pub use model::{NotchSettings, NotchSnapshot};
 #[cfg(target_os = "macos")]
 pub use window::{add_runtime_error, setup, shutdown};
 
@@ -152,7 +154,7 @@ pub fn apply(app: &tauri::AppHandle, snapshot: NotchSnapshot) -> Result<(), Stri
     }
     #[cfg(target_os = "windows")]
     {
-        win_host::sync(app, snapshot)
+        host::sync(app, snapshot)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {

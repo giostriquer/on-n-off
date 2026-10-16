@@ -1,6 +1,8 @@
 use super::*;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
-use crate::side_notch::model::{Display, NotchSettings, ShowMode, RAIL_ORDER};
+use crate::side_notch::host::{PrCellData, PrListData, ProviderData};
+use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
+use crate::side_notch::sessions::LiveSession;
 
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
     Display {
