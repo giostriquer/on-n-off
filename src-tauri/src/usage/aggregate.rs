@@ -69,8 +69,16 @@ struct Usage<'a> {
     reported_cost_usd: Option<f64>,
 }
 
+#[derive(PartialEq, Eq, Hash)]
+struct BucketKey {
+    day: String,
+    hour_start: Option<String>,
+    provider: UsageProvider,
+    model: String,
+}
+
 pub struct UsageAggregator {
-    buckets: HashMap<String, MutableBucket>,
+    buckets: HashMap<BucketKey, MutableBucket>,
     zone: Tz,
     hourly: Option<(i64, i64)>,
     options: AggregateOptions,
@@ -101,7 +109,7 @@ impl UsageAggregator {
         })
     }
 
-    fn bucket_key(&self, at_ms: i64, provider: UsageProvider, model: &str) -> Option<String> {
+    fn bucket_key(&self, at_ms: i64, provider: UsageProvider, model: &str) -> Option<BucketKey> {
         if let Some((since, until)) = self.hourly {
             if at_ms < since || at_ms >= until {
                 return None;
@@ -121,13 +129,12 @@ impl UsageAggregator {
             ms_to_iso(since + offset)
         });
 
-        Some(format!(
-            "{}\0{}\0{}\0{}",
+        Some(BucketKey {
             day,
-            hour_start.as_deref().unwrap_or(""),
-            provider.as_str(),
-            model
-        ))
+            hour_start,
+            provider,
+            model: model.to_string(),
+        })
     }
 
     pub fn add(&mut self, record: &UsageRecord) -> bool {
@@ -205,23 +212,12 @@ impl UsageAggregator {
     pub fn finish(self) -> AggregateResult {
         let mut buckets = Vec::with_capacity(self.buckets.len());
         for (key, bucket) in self.buckets {
-            let mut parts = key.split('\0');
-            let day = parts.next().unwrap_or("").to_string();
-            let hour = parts.next().unwrap_or("");
-            let Some(provider) = parts.next().and_then(UsageProvider::from_key) else {
-                continue;
-            };
-            let model = parts.next().unwrap_or("").to_string();
             let cost_source = resolve_cost_source(&bucket);
             buckets.push(UsageBucket {
-                day,
-                hour_start: if hour.is_empty() {
-                    None
-                } else {
-                    Some(hour.to_string())
-                },
-                provider,
-                model,
+                day: key.day,
+                hour_start: key.hour_start,
+                provider: key.provider,
+                model: key.model,
                 totals: bucket.totals,
                 cost_usd: bucket.cost_usd,
                 cache_savings_usd: bucket.cache_savings_usd,
@@ -232,21 +228,18 @@ impl UsageAggregator {
             });
         }
         buckets.sort_by(|a, b| {
-            a.day
-                .cmp(&b.day)
-                .then(a.hour_start.cmp(&b.hour_start))
-                .then(provider_ord(a.provider).cmp(&provider_ord(b.provider)))
-                .then(a.model.cmp(&b.model))
+            (&a.day, &a.hour_start, a.provider, &a.model).cmp(&(
+                &b.day,
+                &b.hour_start,
+                b.provider,
+                &b.model,
+            ))
         });
         AggregateResult {
             buckets,
             out_of_window: self.out_of_window,
         }
     }
-}
-
-fn provider_ord(provider: UsageProvider) -> Option<usize> {
-    UsageProvider::all().position(|listed| listed == provider)
 }
 
 fn resolve_cost_source(bucket: &MutableBucket) -> CostSource {

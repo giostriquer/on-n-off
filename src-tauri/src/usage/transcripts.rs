@@ -6,7 +6,9 @@ use crate::dto::AgentId;
 
 pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 3;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum UsageProvider {
     Claude,

@@ -213,7 +213,11 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
         }
     }
     let declared: Vec<UsageProvider> = declared_variants();
-    assert_eq!(declared.len(), UsageProvider::all().count(), "{declared:?}");
+    assert_eq!(
+        declared,
+        UsageProvider::all().collect::<Vec<_>>(),
+        "Usage lists its providers in tab order, the order they are declared and sort in"
+    );
     for usage in declared {
         assert_eq!(usage.agent().facts().usage, Some(usage), "{usage:?}");
     }

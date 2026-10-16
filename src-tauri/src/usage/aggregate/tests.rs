@@ -103,19 +103,6 @@ fn august_by_day() -> UsageAggregator {
 }
 
 #[test]
-fn a_bucket_for_a_provider_usage_does_not_know_is_left_out_rather_than_counted_as_claude() {
-    let mut agg = august_by_day();
-    agg.add(&record(|r| r.provider = UsageProvider::Codex));
-    let (key, bucket) = agg.buckets.drain().next().unwrap();
-    agg.buckets
-        .insert(key.replace("\0codex\0", "\0acme\0"), bucket);
-
-    let result = agg.finish();
-
-    assert_eq!(result.buckets, []);
-}
-
-#[test]
 fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
     let result = aggregate(
         &[
