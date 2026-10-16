@@ -1,4 +1,4 @@
-use super::{GithubList, NotchProvider, NotchSettings, PrContext};
+use super::{repo_label, GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
     AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitsStatus, MergeKind,
     ReviewDecision,
@@ -285,19 +285,22 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
                 id,
                 title: list_title(id),
                 total,
-                items: items.into_iter().map(pr_row).collect(),
+                items: items
+                    .into_iter()
+                    .map(|pr| pr_row(pr, dto.data.viewer.as_deref()))
+                    .collect(),
             })
             .collect(),
     }
 }
 
-fn pr_row(pr: &GithubPrDto) -> PrRow {
+fn pr_row(pr: &GithubPrDto, viewer: Option<&str>) -> PrRow {
     PrRow {
         id: pr.id.clone(),
         number: pr.number,
         title: pr.title.clone(),
         url: pr.url.clone(),
-        repo: pr.repo.clone(),
+        repo: repo_label(pr, viewer),
         author: pr.author.clone(),
         ci: pr.ci,
         updated_at: pr.updated_at.clone(),

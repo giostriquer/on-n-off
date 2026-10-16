@@ -167,6 +167,37 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
 }
 
 #[test]
+fn the_viewers_own_personal_repository_is_named_without_its_owner() {
+    let row = |number: u64, repo: &str, in_organization: bool| {
+        let mut row = pr(number);
+        row["repo"] = repo.into();
+        row["url"] = format!("https://github.com/{repo}/pull/{number}").into();
+        row["inOrganization"] = in_organization.into();
+        row
+    };
+    let mut dto = prs(vec![
+        row(1, "acme/webapp", true),
+        row(2, "octocat/dotfiles", false),
+        row(3, "alice/dotfiles", false),
+    ]);
+    dto.data.viewer = Some("octocat".into());
+    let frame = rail(
+        &settings(vec![GithubList::Mine]),
+        unread(),
+        Some(&dto),
+        None,
+    );
+    assert_eq!(
+        pr_cell(&frame).lists[0]
+            .items
+            .iter()
+            .map(|row| row.repo.as_str())
+            .collect::<Vec<_>>(),
+        ["acme/webapp", "dotfiles", "alice/dotfiles"]
+    );
+}
+
+#[test]
 fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
     let displays = [Display {
         id: "main".into(),

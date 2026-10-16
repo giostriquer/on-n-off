@@ -369,3 +369,45 @@ fn an_organizations_pull_request_is_work_and_a_users_is_personal() {
         "a pull request read before GitHub reported its owner is neither"
     );
 }
+
+#[test]
+fn the_viewers_own_personal_repository_is_named_without_its_owner() {
+    let pr = |repo: &str, in_organization: serde_json::Value| -> crate::dto::GithubPrDto {
+        serde_json::from_value(serde_json::json!({
+            "id": "node-1", "number": 1, "title": "Fix", "url": format!("https://github.com/{repo}/pull/1"),
+            "repo": repo, "author": "octocat", "isDraft": false, "ci": "success",
+            "headRef": "fix", "baseRef": "main", "updatedAt": "", "inOrganization": in_organization
+        }))
+        .unwrap()
+    };
+    let personal = pr("octocat/dotfiles", false.into());
+    assert_eq!(repo_label(&personal, Some("octocat")), "dotfiles");
+    assert_eq!(
+        repo_label(&personal, Some("OctoCat")),
+        "dotfiles",
+        "GitHub logins ignore case"
+    );
+    assert_eq!(
+        repo_label(&pr("alice/dotfiles", false.into()), Some("octocat")),
+        "alice/dotfiles",
+        "someone else's personal repository keeps its owner"
+    );
+    assert_eq!(
+        repo_label(&pr("octocat/webapp", true.into()), Some("octocat")),
+        "octocat/webapp",
+        "the viewer's fork of an organization's repository is work and keeps its owner"
+    );
+    assert_eq!(
+        repo_label(
+            &pr("octocat/dotfiles", serde_json::Value::Null),
+            Some("octocat")
+        ),
+        "octocat/dotfiles",
+        "an unread owner keeps the full name"
+    );
+    assert_eq!(
+        repo_label(&personal, None),
+        "octocat/dotfiles",
+        "without the viewer's login the owner stays"
+    );
+}

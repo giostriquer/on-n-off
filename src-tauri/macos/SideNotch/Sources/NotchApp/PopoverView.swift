@@ -342,7 +342,7 @@ private struct PullRequestRow: View {
   let metrics: NotchMetrics
   @State private var copied = false
 
-  private var tag: (name: String, ink: Color)? {
+  private var context: (name: String, ink: Color)? {
     pull.tag.map { ($0.label.lowercased(), toneColor($0.tone)) }
   }
 
@@ -367,31 +367,27 @@ private struct PullRequestRow: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(
-          [pull.title, tag?.name, "\(pull.repo) number \(pull.number)"].compactMap { $0 }
+          [pull.title, context?.name, "\(pull.repo) number \(pull.number)"].compactMap { $0 }
             .joined(separator: ", "))
         .accessibilityHint("Opens the pull request on GitHub.")
         Button(action: copy) {
           Image(systemName: copied ? "checkmark" : "doc.on.doc")
             .font(metrics.font(11, weight: .medium))
-            .foregroundColor(copied ? liveGreen : tag?.ink ?? mutedInk)
+            .foregroundColor(copied ? liveGreen : context?.ink ?? mutedInk)
             .frame(width: metrics.value(20), height: metrics.value(16))
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(
-          copied ? "Copied" : tag.map { "Copy a \($0.name) review request" } ?? "Copy a review request")
+          copied ? "Copied" : context.map { "Copy a \($0.name) review request" } ?? "Copy a review request")
         .accessibilityHint("Copies “review please” with the pull request linked, ready for Slack.")
         .help(
-          tag.map { "Copy “review please: <title>” for a \($0.name) channel" }
+          context.map { "Copy “review please: <title>” for a \($0.name) channel" }
             ?? "Copy “review please: <title>” with the title linked")
       }
       HStack(alignment: .center, spacing: metrics.value(8)) {
         Button(action: { Actions.open(pull) }) {
           HStack(spacing: metrics.value(5)) {
-            if let tag = tag {
-              Text(tag.name.uppercased()).font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
-                .foregroundColor(tag.ink).lineLimit(1).fixedSize()
-            }
             Text("\(pull.repo) #\(pull.number)").font(metrics.font(10).monospacedDigit())
               .foregroundColor(mutedInk).lineLimit(1)
             ForEach(Array(pull.badges.enumerated()), id: \.offset) { _, badge in
@@ -419,8 +415,8 @@ private struct PullRequestRow: View {
     }
     .overlay(
       Group {
-        if let tag = tag {
-          Capsule().fill(tag.ink).frame(width: metrics.value(2))
+        if let context = context {
+          Capsule().fill(context.ink).frame(width: metrics.value(2))
             .offset(x: -metrics.value(8))
             .accessibilityHidden(true)
         }
@@ -439,7 +435,7 @@ private struct PullRequestRow: View {
 
 let liveGreen = Color(red: 74 / 255, green: 200 / 255, blue: 120 / 255)
 let workBlue = Color(red: 96 / 255, green: 165 / 255, blue: 250 / 255)
-let personalViolet = Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)
+let personalLavender = Color(red: 170 / 255, green: 155 / 255, blue: 215 / 255)
 
 func toneColor(_ tone: Tone) -> Color {
   switch tone {
@@ -448,7 +444,7 @@ func toneColor(_ tone: Tone) -> Color {
   case .red: return tripRed
   case .amber: return warnAmber
   case .work: return workBlue
-  case .personal: return personalViolet
+  case .personal: return personalLavender
   }
 }
 
