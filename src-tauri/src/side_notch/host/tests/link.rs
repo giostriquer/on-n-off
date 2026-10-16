@@ -186,6 +186,7 @@ fn a_surface_that_cannot_open_says_why_and_nothing_is_read() {
 fn turning_the_notch_off_closes_the_surface_and_clears_the_error() {
     let app = app_with(&[(AgentId::Claude, 10.0)]);
     let mut rig = Rig::started(app.clone());
+    assert!(rig.host.enabled());
     rig.wire.wire().fail_receive = Some(STOPPED.into());
     rig.tick(Duration::from_millis(100));
     rig.tick(Duration::from_millis(100));
