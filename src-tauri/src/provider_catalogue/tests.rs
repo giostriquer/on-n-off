@@ -230,3 +230,49 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
     }
     assert_eq!(UsageProvider::from_key("gemini"), None);
 }
+
+#[test]
+fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
+    let keys = |ids: &[AgentId]| ids.iter().map(|id| id.key()).collect::<Vec<_>>();
+    let keyed = |ids: &[AgentId]| {
+        ids.iter()
+            .map(|id| (id.key().to_string(), serde_json::Value::Bool(true)))
+            .collect::<serde_json::Map<_, _>>()
+    };
+    let providers: serde_json::Map<String, serde_json::Value> = AgentId::ALL
+        .into_iter()
+        .map(|id| {
+            let facts = id.facts();
+            (
+                facts.key.to_string(),
+                serde_json::json!({
+                    "displayName": facts.display_name,
+                    "binary": facts.binary,
+                    "binaryAliases": facts.binary_aliases,
+                    "limitsReader": facts.limits_reader,
+                    "usage": facts.usage,
+                    "savedAccounts": facts.saved_accounts,
+                }),
+            )
+        })
+        .collect();
+    assert_eq!(
+        providers.len(),
+        AgentId::ALL.len(),
+        "two providers sharing a key would be one provider to the UI"
+    );
+    let written = serde_json::json!({
+        "tabOrder": keys(&AgentId::ALL),
+        "railOrder": keys(&RAIL_ORDER),
+        "notchDefault": keys(&crate::side_notch::model::NotchSettings::default().providers),
+        "withLimits": keyed(&WITH_LIMITS),
+        "withSavedAccounts": keyed(&WITH_SAVED_ACCOUNTS),
+        "providers": providers,
+    });
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(include_str!("fixtures/providers.json")).unwrap(),
+        "src-tauri/src/provider_catalogue/fixtures/providers.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
+    );
+}

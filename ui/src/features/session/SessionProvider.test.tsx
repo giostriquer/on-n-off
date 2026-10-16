@@ -159,6 +159,7 @@ function SessionProbe() {
       <span data-testid="expanded-plugins">{[...session.expandedIds].join(",")}</span>
       <span data-testid="project-derivations">{projectDerivation.current.count}</span>
       <span data-testid="scope-label">{session.currentScopeLabel}</span>
+      <span data-testid="cli-line">{session.cliLine}</span>
       <input
         aria-label="Session filter"
         value={session.currentTab.filter}
@@ -223,6 +224,39 @@ describe("SessionProvider startup", () => {
     await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
     expect(state.refreshOrder[0]).toBe("claude");
     expect(localStorage.getItem(AGENT_KEY)).toBe("claude");
+  });
+
+  it.each([
+    ["claude", "claude"],
+    ["codex", "codex"],
+    ["antigravity", "antigravity"],
+    ["cursor", "cursor"],
+    ["muse", "muse"],
+    ["gemini", "claude"],
+    ["Codex", "claude"],
+  ])("boots a remembered %s tab on %s", async (remembered, opened) => {
+    localStorage.setItem(AGENT_KEY, remembered);
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
+    expect(state.refreshOrder[0]).toBe(opened);
+    expect(screen.getByTestId("selected-provider")).toHaveTextContent(opened);
+  });
+
+  it("names the selected provider and its home once its CLI is found", async () => {
+    localStorage.setItem(AGENT_KEY, "claude");
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(screen.getByTestId("cli-line")).toHaveTextContent("claude · ~/.claude"));
+    expect(screen.getByTestId("cli-line").textContent).toBe("claude · ~/.claude");
   });
 
   it("finishes the selected provider before starting background providers", async () => {

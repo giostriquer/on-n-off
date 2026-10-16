@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { agentRoot, configMcpCount, mcpConfigPath } from "$lib/catalog";
+import { configMcpCount } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
+import { providerBinary, providerPaths, providerToggles } from "$lib/providers";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import type { AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
 type AgentConfigProps = {
   agent: AgentInfo;
@@ -17,68 +18,6 @@ type AgentConfigProps = {
   onSelectScope?: (path: string | null) => void;
   onPickFolder?: () => void;
 };
-
-function skillsValue(id: AgentId, rootPath: string): string {
-  switch (id) {
-    case "claude":
-      return `${rootPath}/plugins · user skills`;
-    case "antigravity":
-      return `${rootPath}/antigravity-cli/skills · .agents/skills`;
-    case "codex":
-      return `${rootPath}/skills · ~/.agents/skills`;
-    case "cursor":
-      return `${rootPath}/skills · .cursor/skills`;
-    case "muse":
-      return "~/.config/muse/skills · ~/.agents/skills";
-  }
-}
-
-function pluginToggleValue(id: AgentId): string {
-  switch (id) {
-    case "claude":
-      return "claude plugin enable/disable";
-    case "antigravity":
-      return "agy plugin enable/disable";
-    case "codex":
-      return "file patch · [plugins.*.enabled]";
-    case "cursor":
-      return "not implemented yet";
-    case "muse":
-      return "muse plugins enable/disable";
-  }
-}
-
-function mcpToggleValue(id: AgentId): string {
-  switch (id) {
-    case "claude":
-      return "file patch · ~/.claude.json disabled";
-    case "antigravity":
-      return "file patch · mcpServers.*.disabled";
-    case "codex":
-      return "file patch · [mcp_servers.*.enabled]";
-    case "cursor":
-      return "managed in Cursor · read-only here";
-    case "muse":
-      return "managed in Muse · read-only here";
-  }
-}
-
-function pluginsDirValue(id: AgentId, rootPath: string): string {
-  return id === "antigravity"
-    ? `${rootPath}/config/plugins · antigravity-cli/plugins`
-    : `${rootPath}/plugins`;
-}
-
-function cliBinaryName(id: AgentId): string {
-  switch (id) {
-    case "antigravity":
-      return "agy";
-    case "cursor":
-      return "agent";
-    default:
-      return id;
-  }
-}
 
 function Status({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -147,7 +86,8 @@ export function AgentConfig({
   onPickFolder,
 }: AgentConfigProps) {
   const [query, setQuery] = useState("");
-  const root = agentRoot(agent.id);
+  const paths = providerPaths(agent.id);
+  const toggles = providerToggles(agent.id);
   const pluginCount = tab?.plugins.length ?? 0;
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
@@ -160,31 +100,31 @@ export function AgentConfig({
   const pathRows = [
     {
       label: "CLI binary",
-      value: cliBinaryName(agent.id),
+      value: providerBinary(agent.id),
       state: agent.cliOk ? "FOUND" : "MISSING",
       ok: agent.cliOk,
     },
     {
       label: "Global config",
-      value: `${root}/`,
+      value: `${paths.home}/`,
       state: agent.cliOk ? "REACHABLE" : "UNKNOWN",
       ok: agent.cliOk,
     },
     {
       label: "Plugins dir",
-      value: pluginsDirValue(agent.id, root),
+      value: paths.pluginDirs,
       state: `${pluginCount} FOUND`,
       ok: true,
     },
     {
       label: "Skills",
-      value: skillsValue(agent.id, root),
+      value: paths.skillDirs,
       state: `${skillCount} SCANNED`,
       ok: true,
     },
     {
       label: "MCP config",
-      value: mcpConfigPath(agent.id),
+      value: paths.mcpConfig,
       state: tab ? `${mcpCount} FOUND` : "NOT READ",
       ok: Boolean(tab),
     },
@@ -282,7 +222,7 @@ export function AgentConfig({
             <div className="text-[10px] font-semibold tracking-[0.04em] text-[var(--mute)] uppercase">Active scope</div>
             <div className="mt-1 truncate text-[13px] font-semibold">{selected?.label ?? "All projects"}</div>
             <div className="mt-1 truncate font-mono text-[11px] text-[var(--mute)]">
-              {selected?.path ?? `${root}/ · global source of truth`}
+              {selected?.path ?? `${paths.home}/ · global source of truth`}
             </div>
           </div>
           <div className="rounded-md border border-[var(--hair)] bg-[var(--well)] px-3 py-2.5">
@@ -327,7 +267,7 @@ export function AgentConfig({
           onClick={() => onSelectScope?.(null)}
         >
           <span className="truncate text-[13px] font-semibold">All projects</span>
-          <span className="truncate font-mono text-[12px] text-[var(--mute)]">{root}/</span>
+          <span className="truncate font-mono text-[12px] text-[var(--mute)]">{paths.home}/</span>
           <span className="font-mono text-[11px] text-[var(--mute)]">—</span>
           <span className="font-mono text-right text-[12px]">
             {projects.reduce((n, p) => n + (p.skillCount ?? 0), 0)}
@@ -396,8 +336,8 @@ export function AgentConfig({
               detail={agent.installFolder ? "supported" : "not on this CLI"}
               ok={agent.installFolder}
             />
-            <Capability label="Plugin toggle" detail={pluginToggleValue(agent.id)} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={agent.id !== "cursor" && agent.id !== "muse"} />
+            <Capability label="Plugin toggle" detail={toggles.plugin} ok={agent.pluginToggle} />
+            <Capability label="MCP toggle" detail={toggles.mcp.detail} ok={toggles.mcp.toggle} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 

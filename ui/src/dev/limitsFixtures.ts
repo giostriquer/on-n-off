@@ -1,5 +1,6 @@
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import { hasLimits, isAgentId, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 
@@ -307,8 +308,6 @@ function paidThrough(accountId: string): SubscriptionDate {
   };
 }
 
-type LimitsProvider = Extract<AgentId, "claude" | "codex" | "muse">;
-
 export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
@@ -346,7 +345,7 @@ const OK = { claude: () => CLAUDE, codex: () => CODEX, muse: () => MUSE };
 
 export function limitsScenario(name: string) {
   const chosen: LimitsScenario = Object.hasOwn(LIMITS_SCENARIOS, name) ? LIMITS_SCENARIOS[name]() : {};
-  const provider = (agent: unknown) => (agent === "claude" || agent === "codex" || agent === "muse" ? agent : null);
+  const provider = (agent: unknown) => (isAgentId(agent) && hasLimits(agent) ? agent : null);
   const archived: Record<LimitsProvider, Set<string>> = { claude: new Set(chosen.archived?.claude), codex: new Set(chosen.archived?.codex), muse: new Set(chosen.archived?.muse) };
   const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };
   const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };

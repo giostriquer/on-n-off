@@ -186,20 +186,23 @@ adapter assumes today (change the adapter and this file together).
    also puts it on a fresh notch), which `UsageProvider` reads its transcripts (if any) and
    whether it offers saved accounts. Insert it into `RAIL_ORDER`, the side notch's order, which
    does not compile until it names every provider. Every Rust provider list is drawn from these;
-   extend the catalogue's table test with the row.
+   extend the catalogue's table test with the row, and copy the document
+   `the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps` prints into
+   `src-tauri/src/provider_catalogue/fixtures/providers.json`.
 2. Home in `paths.rs`. Adapter behind `AgentAdapter`; resolve the CLI via
    `cli_locate::resolve_provider_cli`. A fact the row turns on needs its behaviour too, where
    the compiler already asks for an arm: a Limits reader (`limits::limits_reader`, its read
    lock, `limits_refresh::cache_for`), a `UsageProvider` variant with its parser and transcript
    directories, an `accounts::Adapter`. The agreement tests over `AgentId::ALL` fail while a
    fact and its behaviour disagree.
-3. The UI and the notch helper keep their own lists, which nothing checks against the catalogue:
-   `ALL_AGENTS` (`ui/src/lib/appSettings.ts`), `NOTCH_PROVIDER_ORDER` (`ui/src/lib/notchTypes.ts`),
-   `PROVIDERS` (`ui/src/lib/usageMerge.ts`), the providers `refreshLimits` reads
-   (`ui/src/features/limits/useLimitsProviders.ts`), the Add account menu
-   (`ui/src/features/accounts/AddAccount.tsx`), and Swift's `ProviderId`
-   (`src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift`). Add the provider to each that its
-   facts call for.
+3. The UI keeps no provider list of its own: `ui/src/lib/providers.ts` derives its tabs, orders,
+   names, commands and which screens a provider has from that fixture. Add the `AgentId` member
+   (`ui/src/lib/types.ts`), which `providersContract.test.ts` holds equal to the fixture's keys, then
+   the rows `tsc` asks for: the provider's colours, toggles and display paths in `providers.ts`,
+   its icon in `ProviderIcon.tsx`, and, for a provider with Limits or saved accounts, the records
+   keyed by `LimitsProvider` or `AccountProvider`, which the fixture's `withLimits` and
+   `withSavedAccounts` widen to it. The notch helper still keeps its own list, Swift's `ProviderId`
+   (`src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift`).
 4. Every write through `ConfigIo`; a regression test with a temp home (`paths::scratch_dir`) before the change.
 5. Document the layout here, and mark what is verified vs assumed.
 

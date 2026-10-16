@@ -1,0 +1,74 @@
+{
+  "tabOrder": [
+    "claude",
+    "codex",
+    "antigravity",
+    "cursor",
+    "muse"
+  ],
+  "railOrder": [
+    "claude",
+    "codex",
+    "muse",
+    "antigravity",
+    "cursor"
+  ],
+  "notchDefault": [
+    "claude",
+    "codex",
+    "muse"
+  ],
+  "withLimits": {
+    "claude": true,
+    "codex": true,
+    "muse": true
+  },
+  "withSavedAccounts": {
+    "claude": true,
+    "codex": true
+  },
+  "providers": {
+    "claude": {
+      "displayName": "Claude",
+      "binary": "claude",
+      "binaryAliases": [],
+      "limitsReader": true,
+      "usage": "claude",
+      "savedAccounts": true
+    },
+    "codex": {
+      "displayName": "Codex",
+      "binary": "codex",
+      "binaryAliases": [],
+      "limitsReader": true,
+      "usage": "codex",
+      "savedAccounts": true
+    },
+    "antigravity": {
+      "displayName": "Antigravity",
+      "binary": "agy",
+      "binaryAliases": [],
+      "limitsReader": false,
+      "usage": null,
+      "savedAccounts": false
+    },
+    "cursor": {
+      "displayName": "Cursor",
+      "binary": "agent",
+      "binaryAliases": [
+        "cursor-agent"
+      ],
+      "limitsReader": false,
+      "usage": null,
+      "savedAccounts": false
+    },
+    "muse": {
+      "displayName": "Muse",
+      "binary": "muse",
+      "binaryAliases": [],
+      "limitsReader": true,
+      "usage": "muse",
+      "savedAccounts": false
+    }
+  }
+}

@@ -148,6 +148,17 @@ describe("marketplaceSelection", () => {
     );
   });
 
+  it.each([
+    ["claude", "~/.claude/skills", "/home/me/app/.claude/skills"],
+    ["codex", "~/.codex/skills", "/home/me/app/.codex/skills"],
+    ["antigravity", "~/.gemini/antigravity-cli/skills", "/home/me/app/.agents/skills"],
+    ["cursor", "~/.cursor/skills", "/home/me/app/.cursor/skills"],
+    ["muse", "~/.config/muse/skills", "/home/me/app/.agents/skills"],
+  ] as const)("previews where %s keeps a skill installed for the user or for a project", (provider, user, project) => {
+    expect(previewPath(provider, { kind: "global" })).toBe(user);
+    expect(previewPath(provider, { kind: "project", projectPath: "/home/me/app/" })).toBe(project);
+  });
+
   it("closes over high-confidence dependencies transitively and records who required what", () => {
     expect(depKey(needs("verify", "skills/verify"))).toBe(K("verify"));
     const closure = requiredClosure(deps, [K("router")]);

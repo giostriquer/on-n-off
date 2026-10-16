@@ -10,7 +10,7 @@ import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { AgentId } from "$lib/types";
-import { providerLabel } from "$lib/usageMerge";
+import { providerLabel } from "$lib/providers";
 import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
 import { useLimitsProviders } from "./useLimitsProviders";

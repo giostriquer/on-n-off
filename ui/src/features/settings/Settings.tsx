@@ -9,6 +9,7 @@ import { TraySettingsCard } from "./TraySettingsCard";
 import { UsageHistoryCard } from "@/features/usage/UsageHistoryCard";
 import { FOCUS_RING } from "$lib/a11y";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { providerBinary } from "$lib/providers";
 import { RESET_AUTO_SPEND_DELAY_MINUTES, visibleAgentIds, withResetAlert } from "$lib/appSettings";
 import { notificationPermissionProblem } from "$lib/notificationPermission";
 import type { AppSettingsChange } from "$lib/appSettingsDocument";
@@ -43,14 +44,6 @@ const GITHUB_POLL_OPTIONS: [GithubPollSeconds, string][] = [
   [120, "2 minutes"],
   [300, "5 minutes"],
 ];
-
-const BINARY_NAME: Record<AgentId, string> = {
-  claude: "claude",
-  codex: "codex",
-  antigravity: "agy",
-  cursor: "agent",
-  muse: "muse",
-};
 
 export function Settings({
   agents,
@@ -402,7 +395,7 @@ function ProviderCard({
       as="article"
       title={agent.displayName}
       icon={<ProviderIcon provider={agent.id} className="mt-0.5 size-5 shrink-0" />}
-      meta={`${cliOk ? "CLI found" : "CLI missing"} · ${report?.homePath ?? BINARY_NAME[agent.id]}`}
+      meta={`${cliOk ? "CLI found" : "CLI missing"} · ${report?.homePath ?? providerBinary(agent.id)}`}
       control={
         <>
           <span
@@ -429,7 +422,7 @@ function ProviderCard({
         <input
           className="min-w-0 flex-1 rounded-md border border-[var(--hair)] bg-[var(--well)] px-2 py-1 font-mono text-[12px] text-[var(--silkscreen)] placeholder:text-[var(--mute)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[var(--fill)]"
           value={draft}
-          placeholder={BINARY_NAME[agent.id]}
+          placeholder={providerBinary(agent.id)}
           spellCheck={false}
           onChange={(event) => setDraft(event.target.value)}
           onBlur={() => {

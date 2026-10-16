@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { formatTokens, formatUsd, makeWindow } from "./usageFormat";
-import { foldModelsByDay, foldUsage, isUnpriced, PROVIDERS, providerLabel, usagePricingNote } from "./usageMerge";
+import { USAGE_PROVIDERS } from "./providers";
+import { foldModelsByDay, foldUsage, isUnpriced, usagePricingNote } from "./usageMerge";
 import { buildChartSeries, toChartRows } from "./usageChart";
 import type { UsageSummary } from "./usageTypes";
 
@@ -129,11 +130,6 @@ describe("foldUsage", () => {
     expect(foldUsage(summary({ buckets: [] })).sessions).toBe(1);
   });
 
-  it("labels providers for display", () => {
-    expect(providerLabel("claude")).toBe("Claude");
-    expect(providerLabel("codex")).toBe("Codex");
-  });
-
   it("keeps each model's and provider's unpriced records", () => {
     const base = summary();
     const folded = foldUsage(summary({ buckets: [...base.buckets, unpricedBucket("codex-auto-review", 3, 3)] }));
@@ -239,7 +235,7 @@ describe("buildChartSeries", () => {
       hourly: false,
     });
     const rows = toChartRows(series);
-    expect(rows.length).toBe(series.columns.length * PROVIDERS.length);
+    expect(rows.length).toBe(series.columns.length * USAGE_PROVIDERS.length);
     expect(rows.some((row) => row.provider === "claude" && row.value > 0)).toBe(true);
   });
 });

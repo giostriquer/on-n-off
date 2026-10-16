@@ -398,7 +398,7 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
-| `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every Rust provider list is drawn from it; the UI's and the Swift helper's are still kept by hand. See below. |
+| `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every Rust and UI provider list is drawn from it; the Swift helper's is still kept by hand. See below. |
 
 ### Provider catalogue
 
@@ -423,12 +423,45 @@ when a fact and that code disagree.
 
 The notch's provider default has two values, kept as found: `NotchSettings::default()` shows the
 providers with a Limits reader (`WITH_LIMITS`: Claude, Codex, Muse), while a stored notch document
-with no `providers` field shows every provider in rail order.
+with no `providers` field shows every provider in rail order. The UI's `defaultNotchSettings()` is a
+test and dev-mock helper, not a placeholder the app shows, and keeps every provider in rail order.
 
-The UI (`ui/src/lib/appSettings.ts`, `notchTypes.ts`, `usageMerge.ts`,
-`features/limits/useLimitsProviders.ts`, `features/accounts/AddAccount.tsx`) and the notch helper
-(`ProviderId` in `NotchCore/Models.swift`) keep their own provider lists, which no test compares
-with the catalogue; `PROVIDERS.md` lists them under "When adding a provider".
+#### In the UI
+
+The UI knows the catalogue through a fixture Rust writes:
+`src-tauri/src/provider_catalogue/fixtures/providers.json` holds the tab order, the rail order, the
+notch default, the providers with Limits and with saved accounts as maps keyed by provider
+(`withLimits`, `withSavedAccounts`) and, by key, each row's name, binary and aliases, Limits reader,
+Usage provider and saved accounts. A Rust test builds that document from `AgentId::ALL`, `facts()`,
+`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS` and `NotchSettings::default()` and asserts the
+file equals it. `ui/src/lib/providers.ts` imports the
+file at build time and is the one place the UI learns a provider fact: `PROVIDER_IDS` (tabs),
+`RAIL_ORDER`, `LIMITS_PROVIDERS`, `ACCOUNT_PROVIDERS`, `USAGE_PROVIDERS`, `providerLabel`,
+`providerBinary`, `providerNames`, `providerRecord` and the guards `isAgentId`, `hasLimits` and
+`hasSavedAccounts`. Every screen's provider list, the Limits columns, the Add account menu, the
+remembered tab, the mock's agent list and the Usage and Overview sentences that name the providers
+whose transcripts were looked for come from these. The Hooks screen's "Claude and Codex only" is
+still written out, because which providers read hooks is `readsHooks` on `AgentInfo`, a run-time
+fact.
+
+The providers are keyed by their key in the fixture, so `tsc` can compare its keys with the
+`AgentId` union (`ui/src/lib/providersContract.test.ts`); orders are arrays, because JSON object
+order is not something either side's equality checks. JSON booleans reach `tsc` as `boolean`, so the
+narrow unions come from keys too: `LimitsProvider` is `keyof` the fixture's `withLimits` and
+`AccountProvider` of its `withSavedAccounts`, and `hasLimits` and `hasSavedAccounts` look a provider
+up in the same maps. A provider that gains or loses Limits in Rust changes those unions, so every
+record keyed by one (the Limits shared-read table, the dev mock's limits state) stops compiling
+until it agrees. Facts Rust does not own are
+`Record<AgentId, …>` tables in the same module, so a provider without a row does not compile: its
+bar, icon and chart colours; how its plugins and MCP servers are switched (`providerToggles`, whose
+MCP row is either a toggle or read-only with the notice the MCP screen shows, and decides Agent
+Config's YES or NO); and the display paths Agent Config, the scope bar and the install sheet print
+(`providerPaths`). The icons themselves stay in `ProviderIcon.tsx`, an
+exhaustive table too, because their SVG paths belong in the screens' chunks and the module is in
+the initial bundle. The display paths are the UI's description of where each provider keeps
+things; they are not resolved, so a Muse home moved by `XDG_*`, or Muse's Windows folders, still
+print as the macOS defaults. The notch helper (`ProviderId` in `NotchCore/Models.swift`) keeps its
+own list; `PROVIDERS.md` names it under "When adding a provider".
 
 ### JSON-line sessions
 
@@ -495,7 +528,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
-| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; the UI and Swift lists are outside it |
+| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Provider.headline` |

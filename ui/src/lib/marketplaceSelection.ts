@@ -1,4 +1,4 @@
-import { agentRoot } from "./catalog";
+import { providerPaths } from "./providers";
 import type {
   AgentId,
   ItemDependency,
@@ -247,22 +247,7 @@ export function targetsFor(providers: readonly AgentId[], scope: ItemScope): Ite
 }
 
 export function previewPath(provider: AgentId, scope: ItemScope): string {
-  if (scope.kind === "project") {
-    const base = scope.projectPath.replace(/[\\/]+$/, "");
-    switch (provider) {
-      case "claude":
-        return `${base}/.claude/skills`;
-      case "codex":
-        return `${base}/.codex/skills`;
-      case "antigravity":
-        return `${base}/.agents/skills`;
-      case "cursor":
-        return `${base}/.cursor/skills`;
-      case "muse":
-        return `${base}/.agents/skills`;
-    }
-  }
-  if (provider === "antigravity") return "~/.gemini/antigravity-cli/skills";
-  if (provider === "muse") return "~/.config/muse/skills";
-  return `${agentRoot(provider)}/skills`;
+  const paths = providerPaths(provider);
+  if (scope.kind === "global") return paths.userSkills;
+  return `${scope.projectPath.replace(/[\\/]+$/, "")}/${paths.projectSkills}`;
 }

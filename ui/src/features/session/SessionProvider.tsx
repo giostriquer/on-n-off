@@ -10,7 +10,6 @@ import {
 } from "react";
 import * as api from "$lib/api";
 import {
-  agentRoot,
   emptyTabDto,
   type LiveRow,
   type Screen,
@@ -18,14 +17,14 @@ import {
 import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
-import { ALL_AGENTS, visibleAgentIds } from "$lib/appSettings";
+import { visibleAgentIds } from "$lib/appSettings";
+import { PROVIDER_IDS, isAgentId, providerPaths, providerRecord } from "$lib/providers";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { FilteredTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
 import { markStartup } from "$lib/startupTiming";
 import {
   LOCKED_AGENTS,
-  emptyAgentRecord,
   emptyTab,
   mergeEnrichedPluginMetadata,
   openIds,
@@ -75,10 +74,7 @@ export function pathToScreen(pathname: string): Screen {
 
 function readAgent(): AgentId {
   const value = localStorage.getItem(AGENT_KEY);
-  if (value === "codex" || value === "antigravity" || value === "cursor" || value === "muse") {
-    return value;
-  }
-  return "claude";
+  return isAgentId(value) ? value : PROVIDER_IDS[0];
 }
 
 export function readScreen(): Screen {
@@ -106,7 +102,7 @@ function readScope(agentId: AgentId): string | null {
 }
 
 function emptyTabs(): Record<AgentId, TabState> {
-  return emptyAgentRecord(emptyTab);
+  return providerRecord(emptyTab);
 }
 
 type SessionContextValue = {
@@ -214,17 +210,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [installError, setInstallError] = useState<string | null>(null);
   const [installBusy, setInstallBusy] = useState(false);
   const [uninstallTarget, setUninstallTarget] = useState<PluginDto | null>(null);
-  const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>(() => emptyAgentRecord(() => []));
+  const [projects, setProjects] = useState<Record<AgentId, ProjectDto[]>>(() => providerRecord(() => []));
   const [extraProjects, setExtraProjects] = useState<Record<AgentId, ProjectDto[]>>(() =>
-    emptyAgentRecord(() => []),
+    providerRecord(() => []),
   );
-  const [selectedScope, setSelectedScope] = useState<Record<AgentId, string | null>>({
-    claude: readScope("claude"),
-    codex: readScope("codex"),
-    antigravity: readScope("antigravity"),
-    cursor: readScope("cursor"),
-    muse: readScope("muse"),
-  });
+  const [selectedScope, setSelectedScope] = useState<Record<AgentId, string | null>>(() => providerRecord(readScope));
 
   const tabsRef = useRef(tabs);
   const agentsRef = useRef(agents);
@@ -232,10 +222,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const selectedScopeRef = useRef(selectedScope);
   const projectsRef = useRef(projects);
   const extraProjectsRef = useRef(extraProjects);
-  const inFlightRef = useRef<Record<AgentId, boolean>>(emptyAgentRecord(() => false));
-  const loadGenerationRef = useRef<Record<AgentId, number>>(emptyAgentRecord(() => 0));
-  const pendingLoadRef = useRef<Record<AgentId, boolean | null>>(emptyAgentRecord(() => null));
-  const loadLoopRef = useRef<Record<AgentId, boolean>>(emptyAgentRecord(() => false));
+  const inFlightRef = useRef<Record<AgentId, boolean>>(providerRecord(() => false));
+  const loadGenerationRef = useRef<Record<AgentId, number>>(providerRecord(() => 0));
+  const pendingLoadRef = useRef<Record<AgentId, boolean | null>>(providerRecord(() => null));
+  const loadLoopRef = useRef<Record<AgentId, boolean>>(providerRecord(() => false));
   const loadTabRef = useRef<(agentId: AgentId, probe?: boolean) => Promise<void>>(async () => {});
   const bootStartedRef = useRef(false);
 
@@ -506,7 +496,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       await loadTab(primary);
       markStartup("selected-local-ready");
       setInitialProviderReady(true);
-      const background = ALL_AGENTS.filter((id) => id !== primary);
+      const background = PROVIDER_IDS.filter((id) => id !== primary);
       markStartup("background-providers-start");
       void Promise.all(background.map((id) => loadTab(id)));
     })();
@@ -822,7 +812,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { counts, drift, allOn } = catalogInventory;
   const live = catalogFilterView.live;
   const cliLine = currentAgent.cliOk
-    ? `${currentAgent.id} · ${agentRoot(currentAgent.id)}`
+    ? `${currentAgent.id} · ${providerPaths(currentAgent.id).home}`
     : `${currentAgent.id} · offline`;
   const masterNote = allOn
     ? `everything live on ${currentAgent.displayName}`
