@@ -135,8 +135,7 @@ function accountHeaderIssues(element) {
   if (!tags) return { measured: false, issues };
   const name = title.getBoundingClientRect();
   const middle = rect => (rect.top + rect.bottom) / 2;
-  const icon = title.parentElement.parentElement.firstElementChild;
-  const controls = [icon, ...element.querySelectorAll("button, [role='img']")]
+  const controls = [...element.querySelectorAll("button, [role='img']")]
     .filter(node => !tags.contains(node) && node.getBoundingClientRect().width > 0);
   for (const control of controls) {
     if (Math.abs(middle(control.getBoundingClientRect()) - middle(name)) > 2) {
@@ -151,13 +150,17 @@ function accountHeaderIssues(element) {
     const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
     const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + gap(tags) * (tagRects.length - 1);
     const line = title.parentElement;
-    const fits = name.left + nameWidth + gap(line) + tagsWidth <= line.getBoundingClientRect().right + 0.5;
+    const fits = name.left + nameWidth + gap(line) + tagsWidth <= line.getBoundingClientRect().right - 1;
     const inline = tagRects.every(rect => rect.top < name.bottom && rect.bottom > name.top);
     if (fits && !inline) {
       issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
     }
     if (inline && title.scrollWidth > title.clientWidth + 0.5) {
       issues.push(`account tags beside the name truncate it: ${title.textContent}`);
+    }
+    const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
+    if (!inline && tags.getBoundingClientRect().right < contentRight - 1) {
+      issues.push(`account tags on their own row stop short of the header's edge: ${title.textContent}`);
     }
   }
   return { measured: true, issues };
