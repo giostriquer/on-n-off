@@ -124,9 +124,11 @@ pub fn cancel_reset_spend(account_id: &str) -> bool {
 
 pub fn spend_reset_by_hand(
     account_id: &str,
-    spend: impl FnOnce(ResetSpend) -> Result<ResetCreditOutcome, String>,
+    idempotency_key: &str,
 ) -> Result<ResetCreditOutcome, String> {
-    WAITING.spend_by_hand(account_id, spend)
+    WAITING.spend_by_hand(account_id, |how| {
+        crate::limits_refresh::consume_codex_reset_credit(account_id, idempotency_key, how)
+    })
 }
 
 trait Io {
