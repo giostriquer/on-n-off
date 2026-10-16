@@ -211,9 +211,9 @@ Things that are easy to get wrong:
   `macos/SideNotch/Tests/NotchCoreTests/rail-cases.json`, which `NotchCoreChecks` and
   `model/tests/rail.rs` both read: each case is a list of displays (the one named `main` is
   selected), a size, an edge and a cell count, and the rail and pill it gets in device pixels, or
-  `null` where the rail hides; the metrics rows give every measurement of a right-edge rail. To
-  change a measurement, edit both files and the fixture. A change on one side only fails that
-  side's check.
+  `null` where the rail hides; the metrics rows give every measurement of a right-edge rail and
+  the first two cells on the right and top edges. To change a measurement, edit both files and
+  the fixture. A change on one side only fails that side's check.
   Popovers are not in `model.rs`: the Windows painter places them with its own copy of
   `popoverFrame` (`popover_frame`) and lays out what is in them itself.
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No

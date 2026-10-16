@@ -1,5 +1,6 @@
 use super::*;
 use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
+use crate::side_notch::model::{layout, Display, Edge, RAIL_ORDER};
 use crate::side_notch::sessions::SessionStatus;
 
 fn pr(number: u64) -> serde_json::Value {
@@ -163,6 +164,50 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
         rows.iter().all(|row| row.badges.is_empty()),
         "no review decision or merge state recorded on these rows"
     );
+}
+
+#[test]
+fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
+    let displays = [Display {
+        id: "main".into(),
+        name: "Same monitor name".into(),
+        x: 0.0,
+        y: 0.0,
+        width: 1728.0,
+        height: 1117.0,
+        work_y: 33.0,
+        work_height: 1084.0,
+        scale: 2.0,
+        mirrored: false,
+    }];
+    for (providers, pull_requests, cells, height) in [
+        (vec![], true, 1, 73.0 + 80.0),
+        (RAIL_ORDER.to_vec(), true, 6, 6.0 * 73.0 + 5.0 * 8.0 + 80.0),
+        (
+            vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude],
+            false,
+            2,
+            234.0,
+        ),
+    ] {
+        let mut current = NotchSettings {
+            enabled: true,
+            display_id: Some("main".into()),
+            edge: Edge::Right,
+            providers,
+            ..settings(vec![GithubList::Mine])
+        };
+        current.pull_requests.enabled = pull_requests;
+        let case = format!("{:?} with the cell {pull_requests}", current.providers);
+        let frame = rail(&current, unread(), None, None);
+        assert_eq!(frame.cells.len(), cells, "{case}");
+        assert_eq!(cell_count(&current), cells, "{case}");
+        assert_eq!(
+            layout(&current, &displays, frame.cells.len()).map(|rail| rail.height),
+            Some(height),
+            "{case}"
+        );
+    }
 }
 
 #[test]

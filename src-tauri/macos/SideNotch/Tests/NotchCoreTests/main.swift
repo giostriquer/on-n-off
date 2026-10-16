@@ -190,6 +190,18 @@ final class NotchTests {
         ], scale: entry.scale, "\(entry.size) at \(entry.scale)x")
       let across = railLayout(size: entry.size, displayScale: entry.scale, edge: .top)
       expectEqual([across.thickness, across.cellLength], [layout.cellLength, layout.thickness])
+      for (edge, cells) in [(Edge.right, entry.rightCells), (.top, entry.topCells)] {
+        expectEqual(cells.isEmpty, false)
+        let frames = railCellFrames(
+          edge: edge, layout: railLayout(size: entry.size, displayScale: entry.scale, edge: edge),
+          count: cells.count)
+        expectEqual(frames.count, cells.count)
+        for (index, (frame, cell)) in zip(frames, cells).enumerated() {
+          expectPixels(
+            pixels(frame), cell, scale: entry.scale,
+            "\(edge) cell \(index) of \(entry.size) at \(entry.scale)x")
+        }
+      }
     }
   }
 
@@ -595,6 +607,7 @@ struct RailFixture: Decodable {
     let size: NotchSize
     let thickness, cellLength, cellSpacing, inset, cellPadding, contentSpacing, iconSlot: Double
     let labelHeight, ringStroke, innerRingStroke, innerRingInset, glyphSize: Double
+    let rightCells, topCells: [[Double]]
   }
   let workArea: WorkArea
   let rails: [Rail]
