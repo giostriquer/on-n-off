@@ -169,6 +169,26 @@ fn the_rail_leads_with_the_providers_that_have_limits_to_draw() {
 }
 
 #[test]
+fn a_rail_order_counts_only_when_it_names_every_provider() {
+    assert!(lists_every_provider(&RAIL_ORDER));
+    assert!(lists_every_provider(&AgentId::ALL));
+    assert!(!lists_every_provider(&[
+        AgentId::Claude,
+        AgentId::Claude,
+        AgentId::Muse,
+        AgentId::Antigravity,
+        AgentId::Cursor,
+    ]));
+    assert!(!lists_every_provider(&[
+        AgentId::Codex,
+        AgentId::Codex,
+        AgentId::Muse,
+        AgentId::Antigravity,
+        AgentId::Claude,
+    ]));
+}
+
+#[test]
 fn each_fact_list_holds_exactly_the_providers_with_that_fact_in_tab_order() {
     let with = |fact: fn(&ProviderFacts) -> bool| -> Vec<AgentId> {
         AgentId::ALL
