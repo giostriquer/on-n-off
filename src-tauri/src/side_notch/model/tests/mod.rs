@@ -1,6 +1,7 @@
 use super::*;
 
 mod projection;
+mod rail;
 
 fn display(id: &str, x: f64, scale: f64) -> Display {
     Display {
