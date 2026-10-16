@@ -1,4 +1,5 @@
 use super::*;
+use crate::side_notch::model::NotchSize;
 
 #[test]
 fn values_snap_to_the_display_pixel_grid() {
@@ -6,6 +7,46 @@ fn values_snap_to_the_display_pixel_grid() {
         value(10.25, 1.0, 1.0),
         10.0,
         "1x displays snap to whole pixels"
+    );
+    assert_eq!(
+        value(76.0, 0.875, 1.5),
+        100.0 / 1.5,
+        "a compact cell on a 1.5x display is 100 px wide"
+    );
+}
+#[test]
+fn a_compact_popover_on_the_top_edge_is_a_scaled_card_with_its_tail_below() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.5)];
+    let current = NotchSettings {
+        size: NotchSize::Compact,
+        edge: Edge::Top,
+        ..settings()
+    };
+    let rail_data = RailData {
+        settings: current.clone(),
+        cells: vec![CellData::Provider(session_only(AgentId::Claude, 42.0))],
+        action_error: None,
+    };
+    let planned = plan(
+        &current,
+        &displays,
+        &rail_data,
+        Hover {
+            active: Some(0),
+            ..Hover::default()
+        },
+    )
+    .expect("fits");
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    assert_eq!(popover.card.w, 238.0, "272 pt at compact");
+    assert_eq!(
+        popover.rect.w, popover.card.w,
+        "the tail is not beside the card"
+    );
+    assert_eq!(
+        popover.rect.h,
+        popover.card.h + 11.0 / 1.5,
+        "the 8 pt tail at compact is 11 px on a 1.5x display"
     );
 }
 #[test]
