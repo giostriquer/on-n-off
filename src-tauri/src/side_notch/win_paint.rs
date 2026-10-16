@@ -13,7 +13,7 @@ use crate::dto::{
 };
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-pub use super::host::{CellData, PrRowData, RailData};
+use super::host::frame::{CellData, PrRowData, RailData};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {

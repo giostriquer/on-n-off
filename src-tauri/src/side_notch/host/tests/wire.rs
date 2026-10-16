@@ -1,5 +1,5 @@
 use super::*;
-use crate::side_notch::model::{Edge, NotchPullRequests, NotchSize, NotchStyle};
+use crate::side_notch::model::{Edge, GithubList, NotchPullRequests, NotchSize, NotchStyle};
 use crate::side_notch::protocol::PROTOCOL_VERSION;
 
 fn pinned_snapshot() -> NotchSnapshot {

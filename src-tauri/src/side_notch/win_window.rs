@@ -1,7 +1,8 @@
 #![allow(unsafe_code)]
 
+use super::host::frame::RailData;
 use super::model::{NotchSettings, ShowMode};
-use super::win_paint::{self, Hover, Plan, RailData};
+use super::win_paint::{self, Hover, Plan};
 use crate::side_notch::model::Display;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::{
@@ -317,7 +318,7 @@ impl Machine {
                     let footer = match cell {
                         Some(index) => {
                             match self.data.as_ref().and_then(|data| data.cells.get(index)) {
-                                Some(super::win_paint::CellData::PullRequests(_)) => {
+                                Some(super::host::frame::CellData::PullRequests(_)) => {
                                     WinAction::OpenPullRequests
                                 }
                                 _ => WinAction::OpenLimits,

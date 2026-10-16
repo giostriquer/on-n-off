@@ -1,80 +1,22 @@
-use super::model::{
-    layout, GithubList, NotchProvider, NotchSettings, NotchSnapshot, PrContext, ShowMode,
-    RAIL_ORDER,
-};
+use super::model::{layout, NotchProvider, NotchSettings, NotchSnapshot, ShowMode, RAIL_ORDER};
 use super::sessions::LiveSession;
-use crate::dto::{
-    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ProviderLimitsDto,
-    ReviewDecision,
-};
+use crate::dto::{AgentId, GithubPrsDto, ProviderLimitsDto};
 use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-use std::{
-    sync::{Arc, Condvar, Mutex},
-    thread,
-};
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-use tauri::{AppHandle, Emitter, Manager};
+pub mod app;
+pub mod frame;
+
+use frame::{CellData, ProviderData, RailData};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const SESSIONS_INTERVAL: Duration = Duration::from_secs(10);
 const READ_DEADLINE: Duration = Duration::from_secs(60);
 const PROVIDER_COUNT: usize = RAIL_ORDER.len();
 const READ_SLOTS: usize = PROVIDER_COUNT + 2;
-pub const MAX_PULL_REQUESTS: usize = 25;
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct RailData {
-    pub settings: NotchSettings,
-    pub cells: Vec<CellData>,
-    pub action_error: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum CellData {
-    Provider(ProviderData),
-    PullRequests(PrCellData),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ProviderData {
-    pub cell: NotchProvider,
-    pub sessions: Vec<LiveSession>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrCellData {
-    pub status: GithubStatus,
-    pub hint: Option<String>,
-    pub stale: bool,
-    pub lists: Vec<PrListData>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrListData {
-    pub id: GithubList,
-    pub total: u64,
-    pub items: Vec<PrRowData>,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct PrRowData {
-    pub id: String,
-    pub number: u64,
-    pub title: String,
-    pub url: String,
-    pub repo: String,
-    pub author: String,
-    pub is_draft: bool,
-    pub review_decision: Option<ReviewDecision>,
-    pub ci: CiState,
-    pub merge_kind: Option<MergeKind>,
-    pub updated_at: String,
-    pub context: Option<PrContext>,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Action {
@@ -506,7 +448,7 @@ impl<T: Transport, A: App> Host<T, A> {
             .collect();
         if self.snapshot.settings.pull_requests.enabled {
             if let Some(dto) = &self.pulls.value {
-                cells.push(CellData::PullRequests(pr_cell(
+                cells.push(CellData::PullRequests(frame::pr_cell(
                     dto,
                     &self.snapshot.settings.pull_requests.selected_lists(),
                 )));
@@ -529,254 +471,10 @@ fn read_sessions(app: &impl App, selected: &[AgentId]) -> Vec<Vec<LiveSession>> 
         .collect()
 }
 
-fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
-    PrCellData {
-        status: dto.status,
-        hint: dto.hint.clone(),
-        stale: dto.stale,
-        lists: selected
-            .iter()
-            .map(|list| {
-                let source = match list {
-                    GithubList::Mine => &dto.data.mine,
-                    GithubList::ReviewRequested => &dto.data.review_requested,
-                    GithubList::Assigned => &dto.data.assigned,
-                };
-                PrListData {
-                    id: *list,
-                    total: source.total,
-                    items: source
-                        .items
-                        .iter()
-                        .filter_map(pr_row)
-                        .take(MAX_PULL_REQUESTS)
-                        .collect(),
-                }
-            })
-            .collect(),
-    }
-}
-
-fn pr_row(pr: &GithubPrDto) -> Option<PrRowData> {
-    if !pr.url.starts_with("https://github.com/") {
-        return None;
-    }
-    Some(PrRowData {
-        id: pr.id.clone(),
-        number: pr.number,
-        title: pr.title.clone(),
-        url: pr.url.clone(),
-        repo: pr.repo.clone(),
-        author: pr.author.clone(),
-        is_draft: pr.is_draft,
-        review_decision: pr.review_decision,
-        ci: pr.ci,
-        merge_kind: pr.merge_kind,
-        updated_at: pr.updated_at.clone(),
-        context: PrContext::of(pr),
-    })
-}
-
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) trait Lifetime: Send + Sync {
     fn stopped(&self) -> bool;
     fn shutdown(&self);
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-struct Controller {
-    desired: Mutex<Option<NotchSnapshot>>,
-    wake: Condvar,
-    error: Mutex<Option<String>>,
-    lifetime: Arc<dyn Lifetime>,
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl Controller {
-    fn wait(&self, timeout: Option<Duration>) {
-        let desired = self
-            .desired
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if desired.is_some() {
-            return;
-        }
-        match timeout {
-            Some(timeout) => {
-                drop(self.wake.wait_timeout(desired, timeout));
-            }
-            None => {
-                drop(self.wake.wait(desired));
-            }
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn setup(app: &mut tauri::App) {
-    #[cfg(target_os = "macos")]
-    let (transport, lifetime) = super::transport::Pipe::new();
-    #[cfg(target_os = "windows")]
-    let (transport, lifetime) = super::win_transport::Overlay::new(app.handle().clone());
-    let controller = Arc::new(Controller {
-        desired: Mutex::new(None),
-        wake: Condvar::new(),
-        error: Mutex::new(None),
-        lifetime,
-    });
-    app.manage(controller.clone());
-    let app = app.handle().clone();
-    thread::Builder::new()
-        .name("side-notch-host".into())
-        .spawn(move || supervise(app, &controller, transport))
-        .expect("spawn the side notch supervisor");
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn shutdown(app: &AppHandle) {
-    let controller = app.state::<Arc<Controller>>();
-    controller.lifetime.shutdown();
-    controller.wake.notify_all();
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn sync(app: &AppHandle, snapshot: NotchSnapshot) -> Result<(), String> {
-    if snapshot.revision != super::config::revision() {
-        return Ok(());
-    }
-    let controller = app.state::<Arc<Controller>>();
-    *controller
-        .desired
-        .lock()
-        .map_err(|_| "Native notch state unavailable.")? = Some(snapshot);
-    controller.wake.notify_one();
-    Ok(())
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
-    if let Ok(error) = app.state::<Arc<Controller>>().error.lock() {
-        if snapshot.error.is_none() {
-            snapshot.error = error.clone();
-        }
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport) {
-    let mut host = Host::new(app, transport, initial_snapshot(), Instant::now());
-    while !controller.lifetime.stopped() {
-        if let Ok(mut desired) = controller.desired.lock() {
-            if let Some(next) = desired.take() {
-                host.desire(next);
-            }
-        }
-        host.tick(Instant::now());
-        if let Ok(mut error) = controller.error.lock() {
-            *error = host.runtime_error();
-        }
-        controller.wait(host.enabled().then_some(Duration::from_millis(100)));
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-fn initial_snapshot() -> NotchSnapshot {
-    let revision = super::config::revision();
-    match super::config::read() {
-        Ok(settings) if settings.enabled => super::read(),
-        Ok(settings) => NotchSnapshot {
-            revision,
-            supported: true,
-            liquid_glass: super::liquid_glass(),
-            settings,
-            displays: Vec::new(),
-            error: None,
-        },
-        Err(error) => NotchSnapshot {
-            revision,
-            supported: true,
-            liquid_glass: super::liquid_glass(),
-            settings: Default::default(),
-            displays: Vec::new(),
-            error: Some(error),
-        },
-    }
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct Changed {
-    snapshot: NotchSnapshot,
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows"))]
-impl App for AppHandle {
-    fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
-        crate::limits_refresh::read_limits_revisioned(agent, force)
-    }
-
-    fn limits_revision(&self, agent: AgentId) -> u64 {
-        crate::limits_refresh::revision(agent)
-    }
-
-    fn limits_interval(&self) -> Duration {
-        crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
-    }
-
-    fn read_pull_requests(&self, force: bool) -> (GithubPrsDto, u64) {
-        crate::github::read_prs_revisioned(force)
-    }
-
-    fn pull_requests_revision(&self) -> u64 {
-        crate::github::revision()
-    }
-
-    fn pull_requests_interval(&self) -> Duration {
-        Duration::from_secs(u64::from(
-            crate::settings::load_settings().github_poll_seconds,
-        ))
-    }
-
-    fn read_sessions(&self, agent: AgentId) -> Vec<LiveSession> {
-        crate::paths::user_home()
-            .map(|home| super::sessions::read(agent, &home, chrono::Utc::now()))
-            .unwrap_or_default()
-    }
-
-    fn spawn(&self, read: impl FnOnce() + Send + 'static) {
-        thread::spawn(read);
-    }
-
-    fn open(&self, page: Page) -> Result<(), String> {
-        match page {
-            Page::Limits => crate::tray::open_limits_window(self),
-            Page::PullRequests => crate::tray::open_github_window(self),
-        }
-    }
-
-    fn settings_revision(&self) -> u64 {
-        super::config::revision()
-    }
-
-    #[cfg(any(target_os = "macos", test))]
-    fn reread(&self) -> NotchSnapshot {
-        super::read()
-    }
-
-    fn save(&self, settings: NotchSettings) -> Result<NotchSnapshot, String> {
-        super::save(settings)
-    }
-
-    fn publish(&self, status: &NotchSnapshot) {
-        let _ = Emitter::emit(
-            self,
-            "side-notch-changed",
-            Changed {
-                snapshot: status.clone(),
-            },
-        );
-    }
 }
 
 #[cfg(test)]

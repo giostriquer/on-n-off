@@ -24,7 +24,7 @@ mod win_transport;
 mod win_window;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub use host::{add_runtime_error, setup, shutdown};
+pub use host::app::{add_runtime_error, setup, shutdown};
 pub use model::{NotchSettings, NotchSnapshot};
 
 pub fn read() -> NotchSnapshot {
@@ -146,7 +146,7 @@ pub fn save(settings: NotchSettings) -> Result<NotchSnapshot, String> {
 pub fn apply(app: &tauri::AppHandle, snapshot: NotchSnapshot) -> Result<(), String> {
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     {
-        host::sync(app, snapshot)
+        host::app::sync(app, snapshot)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {

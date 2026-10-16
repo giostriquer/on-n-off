@@ -1,4 +1,5 @@
-use super::host::{self, Inbound, Link, RailData, Transport};
+use super::host::frame::RailData;
+use super::host::{self, Inbound, Link, Transport};
 use super::model::NotchSnapshot;
 use super::protocol::{decode_event, encode, Action, MAX_MESSAGE};
 use std::{

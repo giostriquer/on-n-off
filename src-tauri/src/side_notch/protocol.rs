@@ -1,4 +1,4 @@
-use super::host::{CellData, PrCellData, PrListData, PrRowData, ProviderData, RailData};
+use super::host::frame::{CellData, PrCellData, PrListData, PrRowData, ProviderData, RailData};
 use super::model::{
     workspace_share_wording, GithubList, InnerRing, NotchProvider, NotchSnapshot, PrContext,
     ShowMode,
