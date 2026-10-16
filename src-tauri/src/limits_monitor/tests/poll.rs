@@ -330,7 +330,13 @@ fn a_spend_still_needed_is_made_at_its_alerts_share_and_told_even_when_the_save_
         ]
     );
     assert!(listed(&monitor).is_empty());
-    assert!(!monitor.io.keys.borrow()[0].is_empty());
+    let keys = monitor.io.keys.borrow();
+    assert_eq!(keys.len(), 1);
+    assert!(
+        uuid::Uuid::parse_str(&keys[0]).is_ok(),
+        "spent under {:?}",
+        keys[0]
+    );
 }
 
 #[test]

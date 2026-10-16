@@ -52,13 +52,14 @@ fn an_offer_is_spent_ten_minutes_later_under_its_own_key() {
     let waiting = scheduled();
     let spend = &waiting.0["acct"];
 
-    assert_eq!(spend.account_id, "acct");
+    assert_eq!(spend.account_id(), "acct");
     assert_eq!(spend.cycle, at(RENEWS));
     assert_eq!(spend.due_at, minutes_after_now(10));
-    assert!(!spend.idempotency_key.is_empty());
+    assert_eq!(spend.idempotency_key(), spend.idempotency_key);
+    assert!(uuid::Uuid::parse_str(spend.idempotency_key()).is_ok());
     assert_ne!(
-        spend.idempotency_key,
-        scheduled().0["acct"].idempotency_key,
+        spend.idempotency_key(),
+        scheduled().0["acct"].idempotency_key(),
         "two spends share a key"
     );
 }
