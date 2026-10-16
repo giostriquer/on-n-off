@@ -10,38 +10,6 @@ pub enum AgentId {
     Muse,
 }
 
-impl AgentId {
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Claude => "Claude",
-            Self::Codex => "Codex",
-            Self::Antigravity => "Antigravity",
-            Self::Cursor => "Cursor",
-            Self::Muse => "Muse",
-        }
-    }
-
-    pub fn key(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Antigravity => "antigravity",
-            Self::Cursor => "cursor",
-            Self::Muse => "muse",
-        }
-    }
-
-    pub fn binary_name(self) -> &'static str {
-        match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Antigravity => "agy",
-            Self::Cursor => "agent",
-            Self::Muse => "muse",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ErrorKind {

@@ -33,6 +33,7 @@ mod plugin_files;
 mod plugin_meta;
 mod process;
 mod project;
+mod provider_catalogue;
 mod read_revision;
 mod scanner;
 mod settings;

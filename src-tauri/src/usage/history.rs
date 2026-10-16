@@ -7,9 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::cache_io::atomic_write;
 use super::reader::MTIME_SLACK_MS;
-use super::transcripts::{
-    TokenTotals, UsageProvider, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION,
-};
+use super::transcripts::{TokenTotals, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::provider_catalogue::UsageProvider;
 
 pub const USAGE_HISTORY_VERSION: u32 = 1;
 

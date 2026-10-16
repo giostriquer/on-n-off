@@ -130,10 +130,10 @@ pub fn forget_snapshot(
 }
 
 fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
-    let _provider_guard = match agent {
-        AgentId::Claude | AgentId::Codex | AgentId::Muse => Some(provider_read_guard(agent)),
-        AgentId::Antigravity | AgentId::Cursor => None,
-    };
+    let _provider_guard = agent
+        .facts()
+        .limits_reader
+        .then(|| provider_read_guard(agent));
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);

@@ -189,16 +189,47 @@ fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
 }
 
 #[test]
-fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
-    assert_eq!(AgentId::Cursor.binary_name(), "agent");
-    assert_eq!(agent_for_binary("agent"), Some(AgentId::Cursor));
-    assert_eq!(agent_for_binary("cursor-agent"), Some(AgentId::Cursor));
-    assert_eq!(agent_for_binary("cursor-agent.cmd"), Some(AgentId::Cursor));
+fn a_saved_document_names_every_provider_by_its_lowercase_key_in_tab_order() {
+    let home = crate::paths::scratch_dir("settings-provider-keys");
+    save_under(
+        &home,
+        AppSettings {
+            hidden_agents: vec![
+                AgentId::Muse,
+                AgentId::Cursor,
+                AgentId::Antigravity,
+                AgentId::Codex,
+            ],
+            binary_paths: HashMap::from([
+                (AgentId::Claude, "/opt/acme/bin/claude".to_string()),
+                (AgentId::Codex, "/opt/acme/bin/codex".to_string()),
+                (AgentId::Antigravity, "/opt/acme/bin/agy".to_string()),
+                (AgentId::Cursor, "/opt/acme/bin/agent".to_string()),
+                (AgentId::Muse, "/opt/acme/bin/muse".to_string()),
+            ]),
+            ..AppSettings::default()
+        },
+    )
+    .unwrap();
+
+    let saved: Value =
+        serde_json::from_str(&fs::read_to_string(crate::paths::settings_path_for(&home)).unwrap())
+            .unwrap();
     assert_eq!(
-        agent_for_binary("cursor"),
-        None,
-        "the editor launcher is not the CLI"
+        saved["hiddenAgents"],
+        serde_json::json!(["codex", "antigravity", "cursor", "muse"])
     );
+    assert_eq!(
+        saved["binaryPaths"],
+        serde_json::json!({
+            "claude": "/opt/acme/bin/claude",
+            "codex": "/opt/acme/bin/codex",
+            "antigravity": "/opt/acme/bin/agy",
+            "cursor": "/opt/acme/bin/agent",
+            "muse": "/opt/acme/bin/muse",
+        })
+    );
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]
@@ -213,13 +244,7 @@ fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
 #[test]
 fn refuses_hiding_every_provider() {
     let err = refused_save(AppSettings {
-        hidden_agents: vec![
-            AgentId::Claude,
-            AgentId::Codex,
-            AgentId::Antigravity,
-            AgentId::Cursor,
-            AgentId::Muse,
-        ],
+        hidden_agents: AgentId::ALL.to_vec(),
         ..AppSettings::default()
     });
     assert!(
@@ -227,6 +252,27 @@ fn refuses_hiding_every_provider() {
         "{}",
         err.message
     );
+}
+
+#[test]
+fn any_one_provider_left_visible_is_enough_to_save() {
+    let home = crate::paths::scratch_dir("settings-one-visible");
+    for visible in AgentId::ALL {
+        let hidden: Vec<AgentId> = AgentId::ALL
+            .into_iter()
+            .filter(|id| *id != visible)
+            .collect();
+        let saved = save_under(
+            &home,
+            AppSettings {
+                hidden_agents: hidden.clone(),
+                ..AppSettings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.hidden_agents, hidden, "{visible:?} left visible");
+    }
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]

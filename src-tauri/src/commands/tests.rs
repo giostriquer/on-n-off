@@ -1,0 +1,13 @@
+use super::*;
+
+#[test]
+fn an_adapter_offers_saved_accounts_exactly_when_the_catalogue_says_so() {
+    let state = AppState::production();
+    for id in AgentId::ALL {
+        assert_eq!(
+            state.adapter(id).supports_accounts(),
+            id.facts().saved_accounts,
+            "{id:?}"
+        );
+    }
+}
