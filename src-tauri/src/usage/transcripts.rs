@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 
+use crate::dto::AgentId;
+
 pub const USAGE_TRANSCRIPT_PARSER_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
@@ -13,12 +15,24 @@ pub enum UsageProvider {
 }
 
 impl UsageProvider {
-    pub fn as_str(self) -> &'static str {
+    pub fn agent(self) -> AgentId {
         match self {
-            Self::Claude => "claude",
-            Self::Codex => "codex",
-            Self::Muse => "muse",
+            Self::Claude => AgentId::Claude,
+            Self::Codex => AgentId::Codex,
+            Self::Muse => AgentId::Muse,
         }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.agent().key()
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        AgentId::from_key(key)?.facts().usage
+    }
+
+    pub fn all() -> impl Iterator<Item = Self> {
+        AgentId::ALL.into_iter().filter_map(|id| id.facts().usage)
     }
 }
 

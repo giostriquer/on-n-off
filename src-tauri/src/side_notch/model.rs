@@ -23,13 +23,7 @@ pub const CELL_SPACING: f64 = 8.0;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub const RAIL_INSET: f64 = 40.0;
 
-pub const RAIL_ORDER: [AgentId; 5] = [
-    AgentId::Claude,
-    AgentId::Codex,
-    AgentId::Muse,
-    AgentId::Antigravity,
-    AgentId::Cursor,
-];
+pub use crate::provider_catalogue::RAIL_ORDER;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -177,7 +171,10 @@ impl Default for NotchSettings {
             edge: Edge::default(),
             size: NotchSize::default(),
             show: ShowMode::default(),
-            providers: vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
+            providers: RAIL_ORDER
+                .into_iter()
+                .filter(|id| id.facts().on_default_notch)
+                .collect(),
             pull_requests: NotchPullRequests::default(),
             popover_style: NotchStyle::default(),
         }

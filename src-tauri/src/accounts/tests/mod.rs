@@ -14,6 +14,13 @@ fn account_actions_map_to_their_activation() {
     assert_eq!(Activation::from_action("signOut"), None);
 }
 
+#[test]
+fn saved_accounts_have_an_adapter_exactly_where_the_catalogue_offers_them() {
+    for id in AgentId::ALL {
+        assert_eq!(adapter(id).is_ok(), id.facts().saved_accounts, "{id:?}");
+    }
+}
+
 mod archiving;
 mod fixture;
 mod homes;

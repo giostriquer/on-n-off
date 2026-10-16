@@ -96,16 +96,7 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
         AgentId::Codex,
         AgentId::Claude,
     ];
-    assert_eq!(
-        selected.rail_providers(),
-        [
-            AgentId::Claude,
-            AgentId::Codex,
-            AgentId::Muse,
-            AgentId::Antigravity,
-            AgentId::Cursor,
-        ]
-    );
+    assert_eq!(selected.rail_providers(), RAIL_ORDER);
 }
 
 #[test]
@@ -289,16 +280,20 @@ fn a_fresh_notch_only_rails_the_providers_with_limits_to_show() {
     let fresh = NotchSettings::default();
     assert_eq!(
         fresh.providers,
-        vec![AgentId::Claude, AgentId::Codex, AgentId::Muse],
-        "the three with quotas to draw"
+        RAIL_ORDER
+            .into_iter()
+            .filter(|id| id.facts().on_default_notch)
+            .collect::<Vec<_>>(),
+        "the ones with quotas to draw"
     );
+    assert!(fresh.providers.iter().all(|id| id.facts().limits_reader));
     let chosen = NotchSettings {
         providers: RAIL_ORDER.to_vec(),
         ..NotchSettings::default()
     };
     assert_eq!(
-        chosen.rail_providers().len(),
-        5,
+        chosen.rail_providers(),
+        RAIL_ORDER,
         "an explicit choice stands"
     );
 }

@@ -45,9 +45,32 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
 }
 
 #[test]
+fn every_provider_with_a_limits_reader_reads_under_its_own_lock() {
+    for (i, a) in crate::provider_catalogue::WITH_LIMITS
+        .into_iter()
+        .enumerate()
+    {
+        for b in crate::provider_catalogue::WITH_LIMITS
+            .into_iter()
+            .skip(i + 1)
+        {
+            assert!(
+                !std::ptr::eq(provider_read_lock(a), provider_read_lock(b)),
+                "{a:?} and {b:?} share a lock"
+            );
+        }
+    }
+}
+
+#[test]
 fn providers_without_a_subscription_are_unsupported() {
     let home = scratch_dir("limits-unsupported");
-    for provider in [AgentId::Cursor, AgentId::Antigravity] {
+    let unsupported: Vec<AgentId> = AgentId::ALL
+        .into_iter()
+        .filter(|id| !id.facts().limits_reader)
+        .collect();
+    assert!(!unsupported.is_empty());
+    for provider in unsupported {
         let dtos = read_limits_at(provider, false, &home);
         assert_eq!(dtos.len(), 1);
         assert_eq!(dtos[0].provider, provider);

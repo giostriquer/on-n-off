@@ -135,11 +135,7 @@ fn encode_scan_cache(cache: &ScanCache) -> Value {
             SerializedFile {
                 s: entry.size,
                 m: entry.mtime_ms,
-                p: match entry.provider {
-                    UsageProvider::Claude => "claude".into(),
-                    UsageProvider::Codex => "codex".into(),
-                    UsageProvider::Muse => "muse".into(),
-                },
+                p: entry.provider.as_str().into(),
                 r: rows,
             },
         );
@@ -169,11 +165,8 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
     }
 
     for (path, entry) in root.files {
-        let provider = match entry.p.as_str() {
-            "claude" => UsageProvider::Claude,
-            "codex" => UsageProvider::Codex,
-            "muse" => UsageProvider::Muse,
-            _ => continue,
+        let Some(provider) = UsageProvider::from_key(&entry.p) else {
+            continue;
         };
         let mut records = Vec::new();
         let mut corrupt = false;

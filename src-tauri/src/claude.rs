@@ -98,7 +98,7 @@ impl ClaudeAdapter {
             claude_json,
             io: ConfigIo::production(),
             write: Mutex::new(()),
-            cli: AgentCli::new("claude"),
+            cli: AgentCli::new(AgentId::Claude.binary_name()),
         }
     }
 

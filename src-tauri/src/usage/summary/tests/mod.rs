@@ -1,6 +1,6 @@
 use super::test_support::*;
 use super::*;
-use crate::dto::{UsageCostSource, UsagePricingStatus, UsageSourceStatus};
+use crate::dto::{AgentId, UsageCostSource, UsagePricingStatus, UsageSourceStatus};
 use crate::paths::scratch_dir;
 use crate::usage::pricing;
 use crate::usage::sources::{

@@ -169,7 +169,7 @@ pub struct FilesRead {
 
 pub struct SeenSources {
     source_index: PathBuf,
-    source_roots: [(UsageProvider, Vec<SourceRoot>); 3],
+    source_roots: Vec<(UsageProvider, Vec<SourceRoot>)>,
     snapshot: SourceSnapshot,
 }
 
@@ -199,28 +199,27 @@ impl SeenSources {
     }
 }
 
-fn source_roots_for(home: &Path) -> [(UsageProvider, Vec<SourceRoot>); 3] {
-    [
-        (
-            UsageProvider::Claude,
-            vec![resolve_claude_transcript_dir(home)],
-        ),
-        (
-            UsageProvider::Codex,
-            vec![
-                resolve_codex_transcript_dir(home),
-                resolve_codex_archive_dir(home),
-            ],
-        ),
-        (UsageProvider::Muse, vec![resolve_muse_transcript_dir(home)]),
-    ]
-    .map(|(provider, paths)| {
-        let roots: Vec<SourceRoot> = paths
-            .into_iter()
-            .map(|path| SourceRoot { provider, path })
-            .collect();
-        (provider, roots)
-    })
+fn source_roots_for(home: &Path) -> Vec<(UsageProvider, Vec<SourceRoot>)> {
+    UsageProvider::all()
+        .map(|provider| {
+            let roots: Vec<SourceRoot> = transcript_dirs(provider, home)
+                .into_iter()
+                .map(|path| SourceRoot { provider, path })
+                .collect();
+            (provider, roots)
+        })
+        .collect()
+}
+
+fn transcript_dirs(provider: UsageProvider, home: &Path) -> Vec<PathBuf> {
+    match provider {
+        UsageProvider::Claude => vec![resolve_claude_transcript_dir(home)],
+        UsageProvider::Codex => vec![
+            resolve_codex_transcript_dir(home),
+            resolve_codex_archive_dir(home),
+        ],
+        UsageProvider::Muse => vec![resolve_muse_transcript_dir(home)],
+    }
 }
 
 fn all_roots(source_roots: &[(UsageProvider, Vec<SourceRoot>)]) -> Vec<SourceRoot> {

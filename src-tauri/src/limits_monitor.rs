@@ -9,7 +9,6 @@ use crate::notifications::Sound;
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
-const MONITORED_PROVIDERS: [AgentId; 3] = [AgentId::Claude, AgentId::Codex, AgentId::Muse];
 
 pub struct LimitsMonitor;
 
@@ -137,7 +136,7 @@ fn next_wake(
 
 fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [AgentId] {
     if settings.limit_notifications {
-        &MONITORED_PROVIDERS
+        &crate::provider_catalogue::WITH_LIMITS
     } else if !settings.reset_alerts.is_empty() {
         &[AgentId::Codex]
     } else {

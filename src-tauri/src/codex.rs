@@ -100,7 +100,7 @@ impl CodexAdapter {
             agents_skills: agents_skills_root().unwrap_or_else(|_| PathBuf::new()),
             io: ConfigIo::production(),
             write: Mutex::new(()),
-            cli: AgentCli::new("codex"),
+            cli: AgentCli::new(AgentId::Codex.binary_name()),
         }
     }
 

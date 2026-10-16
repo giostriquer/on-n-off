@@ -208,11 +208,8 @@ impl UsageAggregator {
             let mut parts = key.split('\0');
             let day = parts.next().unwrap_or("").to_string();
             let hour = parts.next().unwrap_or("");
-            let provider = match parts.next().unwrap_or("") {
-                "claude" => UsageProvider::Claude,
-                "codex" => UsageProvider::Codex,
-                "muse" => UsageProvider::Muse,
-                _ => continue,
+            let Some(provider) = parts.next().and_then(UsageProvider::from_key) else {
+                continue;
             };
             let model = parts.next().unwrap_or("").to_string();
             let cost_source = resolve_cost_source(&bucket);
@@ -248,12 +245,8 @@ impl UsageAggregator {
     }
 }
 
-fn provider_ord(provider: UsageProvider) -> u8 {
-    match provider {
-        UsageProvider::Claude => 0,
-        UsageProvider::Codex => 1,
-        UsageProvider::Muse => 2,
-    }
+fn provider_ord(provider: UsageProvider) -> Option<usize> {
+    UsageProvider::all().position(|listed| listed == provider)
 }
 
 fn resolve_cost_source(bucket: &MutableBucket) -> CostSource {

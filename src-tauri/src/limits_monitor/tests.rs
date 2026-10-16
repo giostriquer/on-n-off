@@ -507,11 +507,11 @@ fn the_monitor_reads_only_what_its_settings_watch() {
     assert_eq!(watched_providers(&settings(false, true)), &[AgentId::Codex]);
     assert_eq!(
         watched_providers(&settings(true, false)),
-        &[AgentId::Claude, AgentId::Codex, AgentId::Muse]
+        crate::provider_catalogue::WITH_LIMITS
     );
     assert_eq!(
         watched_providers(&settings(true, true)),
-        &[AgentId::Claude, AgentId::Codex, AgentId::Muse]
+        crate::provider_catalogue::WITH_LIMITS
     );
 }
 

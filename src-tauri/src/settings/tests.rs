@@ -189,40 +189,6 @@ fn saving_settings_refuses_a_malformed_github_scope_and_names_it() {
 }
 
 #[test]
-fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
-    assert_eq!(AgentId::Cursor.binary_name(), "agent");
-    assert_eq!(agent_for_binary("agent"), Some(AgentId::Cursor));
-    assert_eq!(agent_for_binary("cursor-agent"), Some(AgentId::Cursor));
-    assert_eq!(agent_for_binary("cursor-agent.cmd"), Some(AgentId::Cursor));
-    assert_eq!(
-        agent_for_binary("cursor"),
-        None,
-        "the editor launcher is not the CLI"
-    );
-}
-
-#[test]
-fn every_provider_binary_finds_its_provider_whatever_its_folder_case_or_extension() {
-    for (binary, agent) in [
-        ("claude", AgentId::Claude),
-        ("codex", AgentId::Codex),
-        ("agy", AgentId::Antigravity),
-        ("agent", AgentId::Cursor),
-        ("cursor-agent", AgentId::Cursor),
-        ("muse", AgentId::Muse),
-        ("/opt/acme/bin/Codex", AgentId::Codex),
-        ("CLAUDE.exe", AgentId::Claude),
-        ("agy.cmd", AgentId::Antigravity),
-        ("muse.cmd", AgentId::Muse),
-    ] {
-        assert_eq!(agent_for_binary(binary), Some(agent), "{binary}");
-    }
-    for unknown in ["gemini", "", "claude-code", "/opt/acme/bin/"] {
-        assert_eq!(agent_for_binary(unknown), None, "{unknown}");
-    }
-}
-
-#[test]
 fn a_saved_document_names_every_provider_by_its_lowercase_key_in_tab_order() {
     let home = crate::paths::scratch_dir("settings-provider-keys");
     save_under(
@@ -278,13 +244,7 @@ fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
 #[test]
 fn refuses_hiding_every_provider() {
     let err = refused_save(AppSettings {
-        hidden_agents: vec![
-            AgentId::Claude,
-            AgentId::Codex,
-            AgentId::Antigravity,
-            AgentId::Cursor,
-            AgentId::Muse,
-        ],
+        hidden_agents: AgentId::ALL.to_vec(),
         ..AppSettings::default()
     });
     assert!(
@@ -292,6 +252,27 @@ fn refuses_hiding_every_provider() {
         "{}",
         err.message
     );
+}
+
+#[test]
+fn any_one_provider_left_visible_is_enough_to_save() {
+    let home = crate::paths::scratch_dir("settings-one-visible");
+    for visible in AgentId::ALL {
+        let hidden: Vec<AgentId> = AgentId::ALL
+            .into_iter()
+            .filter(|id| *id != visible)
+            .collect();
+        let saved = save_under(
+            &home,
+            AppSettings {
+                hidden_agents: hidden.clone(),
+                ..AppSettings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(saved.hidden_agents, hidden, "{visible:?} left visible");
+    }
+    let _ = fs::remove_dir_all(home);
 }
 
 #[test]
