@@ -1,5 +1,6 @@
 use super::*;
 
+mod notch_core;
 mod projection;
 mod rail;
 
@@ -60,16 +61,6 @@ fn follows_the_selected_uuid_across_reordering_and_mixed_scales() {
 }
 
 #[test]
-fn never_falls_back_to_another_display_when_the_selection_is_missing_or_mirrored() {
-    let mut current = settings("missing", Edge::Left);
-    let mut displays = vec![display("other", 0.0, 1.0)];
-    assert_eq!(layout(&current, &displays), None);
-    current.display_id = Some("other".into());
-    displays[0].mirrored = true;
-    assert_eq!(layout(&current, &displays), None);
-}
-
-#[test]
 fn top_and_bottom_edges_center_a_horizontal_rail_inside_the_work_area() {
     let displays = [display("main", 100.0, 2.0)];
     let top = layout(&settings("main", Edge::Top), &displays).unwrap();
@@ -110,17 +101,6 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
 }
 
 #[test]
-fn the_rail_shrinks_with_fewer_providers_and_hides_without_any() {
-    let displays = [display("main", 0.0, 1.0)];
-    let mut current = settings("main", Edge::Right);
-    current.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude];
-    assert_eq!(current.rail_providers(), [AgentId::Claude, AgentId::Cursor]);
-    assert_eq!(layout(&current, &displays).unwrap().height, 234.0);
-    current.providers.clear();
-    assert_eq!(layout(&current, &displays), None);
-}
-
-#[test]
 fn a_rail_that_does_not_fit_stays_hidden_instead_of_overflowing() {
     let mut small = display("small", 0.0, 1.0);
     small.work_height = 300.0;
@@ -158,19 +138,11 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let displays = [display("main", 0.0, 1.0)];
     assert_eq!(
         layout(&current, &displays).unwrap().height,
-        rail_length(6, CELL_HEIGHT)
+        rail_metrics(NotchSize::Standard, 1.0, Edge::Right).length(6)
     );
     let json = serde_json::to_value(&current).unwrap();
     assert_eq!(json["pullRequests"]["enabled"], true);
     assert_eq!(json["pullRequests"]["lists"][0], "assigned");
-}
-
-#[test]
-fn remains_hidden_until_explicitly_enabled() {
-    assert_eq!(
-        layout(&NotchSettings::default(), &[display("main", 0.0, 1.0)]),
-        None
-    );
 }
 
 #[test]
@@ -228,22 +200,6 @@ fn the_snapshot_reports_liquid_glass_for_the_running_macos() {
     let version = String::from_utf8(output.stdout).unwrap();
     let major: isize = version.trim().split('.').next().unwrap().parse().unwrap();
     assert_eq!(super::super::liquid_glass(), liquid_glass_on(major));
-}
-
-#[test]
-fn presets_scale_the_whole_rail() {
-    let displays = [display("main", 0.0, 1.0)];
-    for (size, scale) in [
-        (NotchSize::Compact, 0.875),
-        (NotchSize::Standard, 1.0),
-        (NotchSize::Large, 1.125),
-    ] {
-        let mut current = settings("main", Edge::Right);
-        current.size = size;
-        let rail = layout(&current, &displays).unwrap();
-        assert_eq!(rail.width, CELL_WIDTH * scale);
-        assert_eq!(rail.height, rail_length(5, CELL_HEIGHT) * scale);
-    }
 }
 
 #[test]

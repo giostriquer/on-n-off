@@ -6,23 +6,6 @@ use crate::dto::{
 };
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_WIDTH: f64 = 76.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_HEIGHT: f64 = ICON_SLOT + CONTENT_SPACING + LABEL_HEIGHT + 2.0 * CELL_PADDING;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const ICON_SLOT: f64 = 46.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const CONTENT_SPACING: f64 = 3.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const LABEL_HEIGHT: f64 = 22.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const CELL_PADDING: f64 = 1.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_SPACING: f64 = 8.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const RAIL_INSET: f64 = 40.0;
-
 pub const RAIL_ORDER: [AgentId; 5] = [
     AgentId::Claude,
     AgentId::Codex,
@@ -234,10 +217,39 @@ pub struct Layout {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub fn rail_length(count: usize, cell: f64) -> f64 {
-    let count = count as f64;
-    count * cell + (count - 1.0).max(0.0) * CELL_SPACING + 2.0 * RAIL_INSET
+pub struct RailMetrics {
+    pub thickness: f64,
+    pub cell_length: f64,
+    pub cell_spacing: f64,
+    pub inset: f64,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl RailMetrics {
+    pub fn length(&self, count: usize) -> f64 {
+        let count = count as f64;
+        count * self.cell_length + (count - 1.0).max(0.0) * self.cell_spacing + 2.0 * self.inset
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn rail_metrics(size: NotchSize, display_scale: f64, edge: Edge) -> RailMetrics {
+    let value = |points: f64| pixel_aligned(points * size.scale(), display_scale);
+    let cell_padding = value(1.0);
+    let content_spacing = value(3.0);
+    let icon_slot = value(46.0);
+    let label_height = value(22.0);
+    let cell_width = value(76.0);
+    let cell_height = icon_slot + label_height + content_spacing + 2.0 * cell_padding;
+    let vertical = edge.is_vertical();
+    RailMetrics {
+        thickness: if vertical { cell_width } else { cell_height },
+        cell_length: if vertical { cell_height } else { cell_width },
+        cell_spacing: value(8.0),
+        inset: value(40.0),
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -255,10 +267,10 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
     if matches.next().is_some() || display.mirrored {
         return None;
     }
-    let scale = settings.size.scale();
+    let metrics = rail_metrics(settings.size, display.scale, settings.edge);
     let vertical = settings.edge.is_vertical();
-    let thickness = if vertical { CELL_WIDTH } else { CELL_HEIGHT } * scale;
-    let length = rail_length(count, if vertical { CELL_HEIGHT } else { CELL_WIDTH }) * scale;
+    let thickness = metrics.thickness;
+    let length = metrics.length(count);
     let aligned = |value: f64| pixel_aligned(value, display.scale);
     if vertical {
         if length > display.work_height {
