@@ -1,7 +1,7 @@
 #[cfg(not(test))]
 use std::env;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::dto::AdapterError;
 
@@ -215,6 +215,30 @@ pub fn newest_dir(parent: &std::path::Path) -> Option<PathBuf> {
             .and_then(|meta| meta.modified())
             .ok()
     })
+}
+
+pub(crate) fn equivalent(left: &Path, right: &Path) -> bool {
+    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    values_are_equivalent(&left, &right)
+}
+
+#[cfg(windows)]
+fn values_are_equivalent(left: &Path, right: &Path) -> bool {
+    left.to_string_lossy()
+        .trim_start_matches(r"\\?\")
+        .replace('\\', "/")
+        .eq_ignore_ascii_case(
+            &right
+                .to_string_lossy()
+                .trim_start_matches(r"\\?\")
+                .replace('\\', "/"),
+        )
+}
+
+#[cfg(not(windows))]
+fn values_are_equivalent(left: &Path, right: &Path) -> bool {
+    left == right
 }
 
 #[cfg(test)]

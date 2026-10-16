@@ -18,13 +18,29 @@ numbers left both screens on their last answer.
 
 ## The mechanism
 
-Limits consumers check the shared cache at least every five minutes while polling is enabled.
+Limits consumers check the shared cache at least every five minutes while polling is enabled
+(`limits_refresh::check_interval`; the WebViews restate it as `LIMITS_CHECK_MINUTES`, which
+`ui/src/features/limits/limitsCadence.test.ts` holds to `src-tauri/src/limits_refresh/fixtures/cadence.json`,
+a fixture a Rust test keeps equal to `check_interval`). The poll setting is 5, 10, 15 or 30
+minutes, so that check is every five minutes today.
 The cache keeps separate deadlines for the native account and saved profiles. Only a successful
 active account reading whose fullest quota window is at least 90% and below 100% used shortens
 its next read to five minutes (or the configured interval, if shorter). At 100%, or below 90%
 after a reset, that account returns to the configured interval. Saved profiles keep their own
-configured cadence, and native failures keep their provider's backoff without delaying the other
-provider. Extra native reads retain saved cards and announce the replacement as usual.
+configured cadence. Extra native reads retain saved cards and announce the replacement as usual.
+
+A read that fails waits the Limits **failure backoff** before it is made again
+(`limits_refresh::failure_backoff`): its interval doubled for each failure in a row, at most
+sixteen intervals and never more than an hour; a success starts the count over. Each read keeps
+its own count and passes its own interval: a provider's native read (the cache's freshness,
+`cache_is_fresh`) and each saved profile's poll (`accounts/usage.rs`, which also waits out a
+Retry-After that is longer) count the failure they just had, so the first one waits two intervals.
+Each Codex backend figure, per account (`limits/backend_memo.rs`), counts only the failures before
+its latest one, as it was specified when it was added: it waits one interval after its first
+failure in a row, half what the other reads wait at each later step, until both reach sixteen
+intervals or the hour. So a failing native read never delays the other provider, and a failing
+figure never delays the usage read it rides on. A forced read bypasses the native
+backoff but not a saved profile's after a failure, nor a backend figure's.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll
@@ -41,7 +57,7 @@ flowchart TB
 
     subgraph push["Push — WebViews"]
         ev["shared-read-changed"]
-        hook["useSharedRead<br/><i>invalidates that source's query</i>"]
+        hook["SharedReads, one per window<br/><i>invalidates that source's queries</i>"]
     end
 
     cache -->|"read lock-free,<br/>every 100ms tick"| notch
@@ -88,8 +104,9 @@ sequenceDiagram
 **2. Answer an announcement unforced.**
 
 `force` bypasses the cache and belongs to a person pressing refresh. A forced answer would call
-the provider, replace the read, and announce again — without end. Both `useSharedRead` and the
-notch's poll are tested for this.
+the provider, replace the read, and announce again — without end. Every UI source's answer
+(`ui/src/lib/sharedReads/announcements.test.tsx`), the forced read's own function after it has run
+(`ui/src/lib/sharedReads/forcedRead.test.tsx`) and the notch's poll are tested for this.
 
 ## The asymmetry worth knowing
 
@@ -103,3 +120,50 @@ The two caches behave differently on failure, and it is deliberate:
   `api.github.com` for the request the reader was just told it could not make.
 
 A new shared read must decide which of those it is before it decides whether to announce.
+
+## In the UI
+
+Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the three
+`limits:<provider>` sources), `githubPrs.ts`, `resetSpends.ts` and `accounts.ts`. A source module
+is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
+query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
+`accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`) and call its operations
+(`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`, `refreshGithubPrs`,
+`rereadPendingResetSpends`, `rereadAccountListsAndPreference`, `accountChanged`,
+`cachedAccountList`, `markProfilesArchived`); they never write a key. Each module also exports its source's entry for the
+announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
+table from those entries alone. A key changed in one place is therefore changed in both. The
+modules import no React and no query observer: the table and the shell's Refresh are in the
+initial bundle, and TanStack's observer stays in the screens' chunks.
+
+- **One listener per window.** `<SharedReads />` sits inside the main window's and the popover's
+  `QueryClientProvider`, and nothing else listens for `shared-read-changed`. It only invalidates:
+  a query a screen shows reads again once, through its own unforced query function, however many
+  surfaces show it, and one no screen shows is marked stale, so the next screen to show it reads
+  it again rather than drawing the copy from before the announcement until its stale time passes.
+- **One forced read.** `readForced` (`sharedReads/forcedRead.ts`) waits out a read of the key
+  already in flight, so a refresh asked during it is not answered by it, then fetches once with
+  `force = true` through a query function that disarms itself after its first call. TanStack
+  keeps the last function it fetched with for the query's later refetches, an announcement's
+  included; disarmed, that function reads unforced. The forced fetch passes `staleTime: 0`, or the
+  main window's 30-second default would answer it from the cache. A screen showing the query puts
+  its own unforced function back when it next renders, which can hide one that never disarmed, so
+  `forcedRead.test.tsx` also checks the disarm with no screen showing the read, on each window's
+  own query client (`ui/src/lib/queryClients.ts`). The shell's Refresh and the popover's are
+  `refreshLimits`, every limits source forced; the Pull requests screen's is `refreshGithubPrs`.
+  A forced read is tried once and not retried.
+- **Accounts has no forced read.** Its announcement covers two key families, the account lists
+  with the remembering preference (`["accounts", …]`) and the Codex subscription dates
+  (`["subscription", "codex", …]`). An account change in the window (`accountChanged`) re-reads
+  both and that provider's limits; the shell's Refresh and the remembering toggle re-read the
+  lists and the preference, not the subscription dates (`rereadAccountListsAndPreference`).
+- **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not
+  the screen, decides which accounts are due, including an active account close to its limit.
+
+Rust and the UI agree on the wire through `src-tauri/src/read_revision/fixtures/shared-reads.json`:
+the event name and, by source, the exact payload `announce` sends. `read_revision/tests.rs`
+asserts Rust writes exactly that for every `Source`, and `ui/src/lib/sharedReadsContract.test.ts`
+asserts that `SharedReadSource`, `SharedReadChanged` and the announcement table have exactly the
+fixture's sources (at the type level, so `bun run check` fails) and that `onSharedReadChanged`
+listens to its event. A new source is a `Source` variant, its fixture entry, a `SharedReadSource`
+member and its module's table entry; the tests fail until all four agree.

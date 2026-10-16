@@ -72,6 +72,33 @@ fn the_signed_in_workspace_card_is_asked_with_its_logins_access_token() {
     );
 }
 
+#[test]
+fn a_figure_that_failed_is_not_asked_again_on_the_next_read() {
+    let key = account("held-back");
+    let refused = crate::http::refused_url();
+    let mut card = Parsed::for_card(Some(&key), Some("business"));
+    backend_figures(
+        &mut card,
+        access(&key).as_ref(),
+        urls(&refused, &refused),
+        now(),
+    );
+    assert_eq!(card.reading.credits_spent, None);
+    assert_eq!(card.reading.subscription, None);
+
+    let spending = Endpoint::new(false, "");
+    let term = Endpoint::new(false, "");
+    let mut card = Parsed::for_card(Some(&key), Some("business"));
+    backend_figures(
+        &mut card,
+        access(&key).as_ref(),
+        urls(spending.url(), term.url()),
+        now(),
+    );
+    spending.check("what was spent, after a failure");
+    term.check("the term, after a failure");
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Handed {
     Own,

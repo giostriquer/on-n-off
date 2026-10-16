@@ -9,7 +9,7 @@ use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::dto::{
-    AdapterError, AgentId, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
+    AdapterError, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
     UsageSourceStatus, UsageSummaryDto, UsageSummaryInput, UsageTokenTotalsDto,
 };
 use crate::paths::user_home;
@@ -22,7 +22,7 @@ use super::history::{history_fingerprint, history_path_for, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
 use super::sources::{lock_usage_files, Sources};
 use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
-use super::transcripts::UsageProvider as Provider;
+use crate::provider_catalogue::UsageProvider as Provider;
 
 const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
@@ -67,14 +67,6 @@ fn parse_iso_ms(value: &str) -> Option<i64> {
     DateTime::parse_from_rfc3339(value)
         .ok()
         .map(|dt| dt.timestamp_millis())
-}
-
-fn provider_agent(provider: Provider) -> AgentId {
-    match provider {
-        Provider::Claude => AgentId::Claude,
-        Provider::Codex => AgentId::Codex,
-        Provider::Muse => AgentId::Muse,
-    }
 }
 
 fn cost_source_dto(source: CostSource) -> UsageCostSource {
@@ -122,7 +114,7 @@ fn bucket_to_dto(bucket: UsageBucket) -> UsageBucketDto {
     UsageBucketDto {
         day: bucket.day,
         hour_start: bucket.hour_start,
-        provider: provider_agent(bucket.provider),
+        provider: bucket.provider.agent(),
         model: bucket.model,
         totals: UsageTokenTotalsDto {
             uncached_input_tokens: bucket.totals.uncached_input_tokens,
@@ -142,7 +134,7 @@ fn bucket_to_dto(bucket: UsageBucket) -> UsageBucketDto {
 
 fn missing_source(provider: Provider, dir: &Path) -> UsageSourceDto {
     UsageSourceDto {
-        provider: provider_agent(provider),
+        provider: provider.agent(),
         status: UsageSourceStatus::Missing,
         scanned_files: 0,
         skipped_files: 0,
@@ -280,7 +272,7 @@ fn read_summary_from(
         }
         let files = source_read.files_read(source.provider);
         sources.push(UsageSourceDto {
-            provider: provider_agent(source.provider),
+            provider: source.provider.agent(),
             status: UsageSourceStatus::Ok,
             scanned_files: files.scanned,
             skipped_files: files.skipped,

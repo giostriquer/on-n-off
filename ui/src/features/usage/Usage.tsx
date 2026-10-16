@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
-import { PROVIDERS, foldModelsByDay, foldUsage, providerLabel, usagePricingNote } from "$lib/usageMerge";
+import { USAGE_PROVIDERS, providerColor, providerLabel, providerNames } from "$lib/providers";
+import { foldModelsByDay, foldUsage, usagePricingNote } from "$lib/usageMerge";
 import { UsageCost } from "./UsageCost";
 import {
   formatCount,
@@ -17,7 +18,6 @@ import {
 import type { UsageMetric } from "$lib/usageTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { Segmented } from "@/components/Segmented";
-import { providerColor } from "$lib/providerStyle";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
 import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
 
@@ -80,7 +80,7 @@ export function Usage() {
   const tokensPerActiveDay = folded.activeDays === 0 ? 0 : folded.totalTokens / folded.activeDays;
   const cacheMultiple = folded.costUsd > 0 ? folded.cacheSavingsUsd / folded.costUsd : 0;
 
-  const providers = PROVIDERS.map((provider) => {
+  const providers = USAGE_PROVIDERS.map((provider) => {
     const row = folded.providers.find((item) => item.provider === provider);
     return (
       row ?? {
@@ -182,7 +182,7 @@ export function Usage() {
       ) : bothMissing ? (
         <>
           {error ? <p className="text-[13px] text-[var(--trip)]">{error}</p> : null}
-          <p className="text-[13px] text-[var(--mute)]">No Claude, Codex or Muse session transcripts found on this machine.</p>
+          <p className="text-[13px] text-[var(--mute)]">No {providerNames(USAGE_PROVIDERS)} session transcripts found on this machine.</p>
         </>
       ) : summary ? (
         <>

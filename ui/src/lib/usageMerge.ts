@@ -1,3 +1,4 @@
+import { providerRecord } from "./providers";
 import type { AgentId } from "./types";
 import type { UsageBucket, UsageSummary } from "./usageTypes";
 
@@ -58,16 +59,8 @@ export type FoldedUsage = {
   hourly: readonly PeriodTotals[];
 };
 
-const PROVIDERS: AgentId[] = ["claude", "codex", "muse"];
-
 function emptyByProvider(): Record<AgentId, PeriodProviderSlice> {
-  return {
-    claude: { costUsd: 0, totalTokens: 0 },
-    codex: { costUsd: 0, totalTokens: 0 },
-    antigravity: { costUsd: 0, totalTokens: 0 },
-    cursor: { costUsd: 0, totalTokens: 0 },
-    muse: { costUsd: 0, totalTokens: 0 },
-  };
+  return providerRecord(() => ({ costUsd: 0, totalTokens: 0 }));
 }
 
 function bucketTokens(bucket: UsageBucket): number {
@@ -254,20 +247,3 @@ export function usagePricingNote(summary: UsageSummary | null, folded: FoldedUsa
   if (unpriced === 0) return "if billed at full API rate";
   return `if billed at full API rate · ${unpriced === 1 ? "1 model has" : `${unpriced} models have`} no price yet`;
 }
-
-export function providerLabel(provider: AgentId): string {
-  switch (provider) {
-    case "claude":
-      return "Claude";
-    case "codex":
-      return "Codex";
-    case "antigravity":
-      return "Antigravity";
-    case "cursor":
-      return "Cursor";
-    case "muse":
-      return "Muse";
-  }
-}
-
-export { PROVIDERS };

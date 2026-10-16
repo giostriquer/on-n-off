@@ -163,6 +163,9 @@ describe("OverviewUsageCard", () => {
     );
 
     await waitFor(() => expect(screen.getAllByRole("link", { name: "Open usage" })).toHaveLength(2));
+    expect(screen.getByText(/No Claude, Codex or Muse session transcripts found on this machine\./).textContent).toBe(
+      "No Claude, Codex or Muse session transcripts found on this machine. Open usage",
+    );
     const links = screen.getAllByRole("link", { name: "Open usage" });
     fireEvent.mouseEnter(links[1]!);
     fireEvent.focus(links[1]!);

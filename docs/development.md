@@ -12,11 +12,28 @@ locates the subsystems. Module doc-comments explain their implementation.
   (`accounts::Adapter`, implemented in `accounts/claude.rs` and `accounts/codex.rs` over
   `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
   through `supports_accounts`.
-- UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
+- A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
+  from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. In the UI
+  it comes from `ui/src/lib/providers.ts`, which derives it from the catalogue fixture Rust asserts
+  it writes. What only the UI states about a provider (its colours, the paths Agent Config, the
+  scope bar and the install sheet print, how its plugins and MCP servers are switched and the
+  notice where they cannot be) is a `Record<AgentId, …>` row in that module, so a provider without
+  one does not compile. Only the notch helper still keeps its own list; `PROVIDERS.md` names it.
+- UI → Rust: `$lib/api`. Feature components never invoke Tauri directly; only `ui/src/lib/api.ts`
+  and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
+  `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.
+- App settings: read and change them through `useAppSettings()` (`ui/src/lib/useAppSettings.tsx`),
+  with `patch`, never by saving a spread of a rendered copy, and change a list or map field with an
+  updater over the latest document ([why](architecture/README.md#app-settings)). A new setting goes in `AppSettings` in
+  `settings.rs` with a serde default, in `every_setting_away_from_its_default` and the fixtures
+  under `src-tauri/src/settings/fixtures/`, then in the TypeScript `AppSettings` and
+  `DEFAULT_APP_SETTINGS`; the contract tests on each side fail until both have it.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.
-- Child processes: `process.rs`. Drain stdout and stderr concurrently from the start, or a full
-  pipe deadlocks.
+- Child processes: `process.rs` for a command run to its exit; `json_line_session.rs` for a CLI
+  kept running and spoken to in line-delimited JSON-RPC (Codex app-server, Muse serve), whose
+  readers keep only their command, methods and normalisation. Drain stdout and stderr concurrently
+  from the start, or a full pipe deadlocks.
 - File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
   leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
@@ -25,8 +42,22 @@ locates the subsystems. Module doc-comments explain their implementation.
   window), never in a second loop ([why](architecture/side-notch.md#one-host-two-transports)).
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop
-  ([why](architecture/shared-reads.md)).
+  ([why](architecture/shared-reads.md)). In the UI, read it through its source module in
+  `ui/src/lib/sharedReads/`, never through a query key of your own, and force it only with that
+  module's refresh. A new source needs the four changes
+  [the guide lists](architecture/shared-reads.md#in-the-ui).
 - `item_install/` never shells out to a provider CLI.
+- The banked reset alert rule: `reset_alert.rs`, which does no I/O; `limits_monitor.rs` only
+  performs the plan it returns, through an `Io` trait its tests fake. A number the UI restates
+  from the rule (`ui/src/lib/appSettings.ts`) is checked against `reset_alert/fixtures/rule.json`
+  by `ui/src/lib/resetAlertRule.test.ts`, and a Rust test keeps the fixture equal to the rule, so a
+  change to one side fails until the other follows.
+- How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
+  (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
+  keeps its own failure count and passes its own interval; it never restates the formula. The UI's
+  `LIMITS_CHECK_MINUTES` (`ui/src/lib/sharedReads/limits.ts`) is checked against
+  `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
+  keeps the fixture equal to `check_interval`.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
@@ -73,6 +104,7 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   directory a plain `mod tests;` resolves against, so it pins
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
+  `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's

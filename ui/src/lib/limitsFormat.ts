@@ -1,4 +1,4 @@
-import { providerColor } from "./providerStyle";
+import { providerColor } from "./providers";
 import type { AgentId } from "./types";
 
 const MINUTE_MS = 60_000;

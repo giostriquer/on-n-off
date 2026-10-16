@@ -10,7 +10,9 @@ import {
   readScreen,
   useAgentSession,
 } from "./SessionProvider";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import { AppSettingsProvider } from "$lib/useAppSettings";
+import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
+import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
 
 const state = vi.hoisted(() => ({
   refreshOrder: [] as AgentId[],
@@ -117,13 +119,9 @@ const CLAUDE_TAB: AgentTabDto = {
   mcpServers: [],
 };
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () => Promise.resolve({ hiddenAgents: state.hiddenAgents, binaryPaths: {} }),
+  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
   listAgents: () => Promise.resolve(AGENTS),
   listProjects: (agentId: AgentId) => Promise.resolve(state.projectResults[agentId] ?? []),
   listLocalPlugins: (agentId: AgentId) => {
@@ -161,6 +159,7 @@ function SessionProbe() {
       <span data-testid="expanded-plugins">{[...session.expandedIds].join(",")}</span>
       <span data-testid="project-derivations">{projectDerivation.current.count}</span>
       <span data-testid="scope-label">{session.currentScopeLabel}</span>
+      <span data-testid="cli-line">{session.cliLine}</span>
       <input
         aria-label="Session filter"
         value={session.currentTab.filter}
@@ -219,6 +218,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(screen.getByTestId("selected-provider")).toHaveTextContent("claude"));
     await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
@@ -226,12 +226,47 @@ describe("SessionProvider startup", () => {
     expect(localStorage.getItem(AGENT_KEY)).toBe("claude");
   });
 
+  it.each([
+    ["claude", "claude"],
+    ["codex", "codex"],
+    ["antigravity", "antigravity"],
+    ["cursor", "cursor"],
+    ["muse", "muse"],
+    ["gemini", "claude"],
+    ["Codex", "claude"],
+  ])("boots a remembered %s tab on %s", async (remembered, opened) => {
+    localStorage.setItem(AGENT_KEY, remembered);
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
+    expect(state.refreshOrder[0]).toBe(opened);
+    expect(screen.getByTestId("selected-provider")).toHaveTextContent(opened);
+  });
+
+  it("names the selected provider and its home once its CLI is found", async () => {
+    localStorage.setItem(AGENT_KEY, "claude");
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(screen.getByTestId("cli-line")).toHaveTextContent("claude · ~/.claude"));
+    expect(screen.getByTestId("cli-line").textContent).toBe("claude · ~/.claude");
+  });
+
   it("finishes the selected provider before starting background providers", async () => {
     render(
       <StrictMode>
-        <SessionProvider>
-          <span>session</span>
-        </SessionProvider>
+        <AppSettingsProvider>
+          <SessionProvider>
+            <span>session</span>
+          </SessionProvider>
+        </AppSettingsProvider>
       </StrictMode>,
     );
 
@@ -249,6 +284,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
@@ -278,6 +314,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);
@@ -303,6 +340,7 @@ describe("SessionProvider startup", () => {
       <SessionProvider>
         <SessionProbe />
       </SessionProvider>,
+      { wrapper: AppSettingsProvider },
     );
     await waitFor(() => expect(state.resolveSelected).not.toBeNull());
     state.resolveSelected?.(CODEX_TAB);

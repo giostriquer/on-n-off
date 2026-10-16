@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import { displayError, parseInvokeError } from "$lib/error";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { markStartup } from "$lib/startupTiming";
-import { foldUsage, providerLabel, usagePricingNote } from "$lib/usageMerge";
+import { USAGE_PROVIDERS, providerLabel, providerNames } from "$lib/providers";
+import { foldUsage, usagePricingNote } from "$lib/usageMerge";
 import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } from "$lib/usageFormat";
 import { UsageCost } from "./UsageCost";
 import type { UsageMetric } from "$lib/usageTypes";
@@ -75,7 +76,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
         <p className="px-3.5 py-4 text-[13px] text-[var(--trip)]">{error}</p>
       ) : bothMissing ? (
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">
-          No Claude, Codex or Muse session transcripts found on this machine.{" "}
+          No {providerNames(USAGE_PROVIDERS)} session transcripts found on this machine.{" "}
           <OpenUsageLink className="text-[var(--silkscreen)] underline-offset-2 hover:underline" />
         </p>
       ) : (

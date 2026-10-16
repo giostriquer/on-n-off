@@ -235,3 +235,42 @@ fn muse_xdg_accepts_only_absolute_native_overrides() {
         None
     );
 }
+
+#[test]
+fn equivalent_paths_name_the_same_directory() {
+    let root = scratch_dir("paths-equivalent");
+    let real = root.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+
+    assert!(equivalent(&real, &root.join("real")));
+    assert!(equivalent(&root.join("real").join(".."), &root));
+    assert!(!equivalent(&real, &root.join("other")));
+    assert!(equivalent(
+        Path::new("/fixture/missing/.codex"),
+        Path::new("/fixture/missing/.codex")
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_symlink_is_equivalent_to_the_directory_it_resolves_to() {
+    let root = scratch_dir("paths-equivalent-link");
+    let real = root.join("real");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, root.join("alias")).unwrap();
+
+    assert!(equivalent(&root.join("alias"), &real));
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_paths_compare_without_case_separators_or_the_verbatim_prefix() {
+    assert!(values_are_equivalent(
+        Path::new(r"C:\Users\Me\.codex"),
+        Path::new("c:/users/me/.codex")
+    ));
+    assert!(values_are_equivalent(
+        Path::new(r"\\?\C:\Users\Me\.codex"),
+        Path::new(r"C:\Users\Me\.codex")
+    ));
+}

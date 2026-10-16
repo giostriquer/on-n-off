@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { scopeConfigPath } from "$lib/catalog";
+import { providerPaths } from "$lib/providers";
 import { looksLikeFolderPath, projectLabel, sameProjectPath } from "$lib/project";
 import type { AgentId, ProjectDto } from "$lib/types";
 import "./ScopeBar.css";
@@ -38,7 +38,7 @@ export function ScopeBar({
     ? (projects.find((project) => sameProjectPath(project.path, selectedPath)) ?? null)
     : null;
   const title = selected?.label ?? "All projects";
-  const pathLine = selected?.path ?? scopeConfigPath(agentId);
+  const pathLine = selected?.path ?? providerPaths(agentId).scopeConfig;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -162,8 +162,8 @@ export function ScopeBar({
                       <span className="scope-row-name">All projects</span>
                       <span className="scope-badge">GLOBAL</span>
                     </span>
-                    <span className="scope-row-path" title={scopeConfigPath(agentId)}>
-                      {scopeConfigPath(agentId)}
+                    <span className="scope-row-path" title={providerPaths(agentId).scopeConfig}>
+                      {providerPaths(agentId).scopeConfig}
                     </span>
                   </span>
                   <span className="scope-row-stats">{globalItems} global items</span>
