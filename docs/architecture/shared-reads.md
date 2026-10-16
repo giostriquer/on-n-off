@@ -38,7 +38,7 @@ flowchart TB
 
     subgraph push["Push — WebViews"]
         ev["shared-read-changed"]
-        hook["useSharedRead<br/><i>invalidates that source's query</i>"]
+        hook["SharedReads, one per window<br/><i>invalidates that source's queries</i>"]
     end
 
     cache -->|"read lock-free,<br/>every 100ms tick"| notch
@@ -85,8 +85,9 @@ sequenceDiagram
 **2. Answer an announcement unforced.**
 
 `force` bypasses the cache and belongs to a person pressing refresh. A forced answer would call
-the provider, replace the read, and announce again — without end. Both `useSharedRead` and the
-notch's poll are tested for this.
+the provider, replace the read, and announce again — without end. Every UI source's answer
+(`ui/src/lib/sharedReads/announcements.test.tsx`, after a forced read) and the notch's poll are
+tested for this.
 
 ## The asymmetry worth knowing
 
@@ -100,3 +101,46 @@ The two caches behave differently on failure, and it is deliberate:
   `api.github.com` for the request the reader was just told it could not make.
 
 A new shared read must decide which of those it is before it decides whether to announce.
+
+## In the UI
+
+Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the three
+`limits:<provider>` sources), `githubPrs.ts`, `resetSpends.ts` and `accounts.ts`. A source module
+is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
+query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
+`accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`) and call its operations
+(`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`, `refreshGithubPrs`,
+`rereadPendingResetSpends`, `rereadAccountLists`, `accountChanged`, `cachedAccountList`,
+`updateAccountList`); they never write a key. Each module also exports its source's entry for the
+announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
+table from those entries alone. A key changed in one place is therefore changed in both. The
+modules import no React and no query observer: the table and the shell's Refresh are in the
+initial bundle, and TanStack's observer stays in the screens' chunks.
+
+- **One listener per window.** `<SharedReads />` sits inside the main window's and the popover's
+  `QueryClientProvider`, and nothing else listens for `shared-read-changed`. It only invalidates:
+  a query a screen shows reads again once, through its own unforced query function, however many
+  surfaces show it, and one no screen shows is marked stale, so the next screen to show it reads
+  it again rather than drawing the copy from before the announcement until its stale time passes.
+- **One forced read.** `readForced` (`sharedReads/forcedRead.ts`) waits out a read of the key
+  already in flight, so a refresh asked during it is not answered by it, then fetches once with
+  `force = true` through a query function that disarms itself after its first call. TanStack
+  keeps the last function it fetched with for the query's later refetches, an announcement's
+  included; disarmed, that function reads unforced. The shell's Refresh and the popover's are
+  `refreshLimits`, every limits source forced; the Pull requests screen's is `refreshGithubPrs`.
+  A forced read is tried once and not retried.
+- **Accounts has no forced read.** Its announcement covers two key families, the account lists
+  with the remembering preference (`["accounts", …]`) and the Codex subscription dates
+  (`["subscription", "codex", …]`). An account change in the window (`accountChanged`) re-reads
+  both and that provider's limits; the shell's Refresh and the remembering toggle re-read the
+  lists only (`rereadAccountLists`).
+- **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not
+  the screen, decides which accounts are due, including an active account close to its limit.
+
+Rust and the UI agree on the wire through `src-tauri/src/read_revision/fixtures/shared-reads.json`:
+the event name and, by source, the exact payload `announce` sends. `read_revision/tests.rs`
+asserts Rust writes exactly that for every `Source`, and `ui/src/lib/sharedReadsContract.test.ts`
+asserts that `SharedReadSource`, `SharedReadChanged` and the announcement table have exactly the
+fixture's sources (at the type level, so `bun run check` fails) and that `onSharedReadChanged`
+listens to its event. A new source is a `Source` variant, its fixture entry, a `SharedReadSource`
+member and its module's table entry; the tests fail until all four agree.
