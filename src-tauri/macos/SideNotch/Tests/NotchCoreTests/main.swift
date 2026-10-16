@@ -509,6 +509,11 @@ final class NotchTests {
       "Claude, weekly, 46% used, Fable weekly, 100% used, limit reached")
     expectEqual(
       ProviderCell(
+        provider: .codex, reading: reading(windows: [quota("weekly", 100)], headline: "weekly")
+      ).spoken(name: "Codex", at: now),
+      "Codex, weekly, 100% used, limit reached")
+    expectEqual(
+      ProviderCell(
         provider: .claude, reading: reading(windows: [weekly], headline: "weekly"),
         notice: Notice(text: "Claude Code reported no usage.", tone: .muted),
         paused: Notice(text: "Refresh paused. Last observed values below.", tone: .amber)
