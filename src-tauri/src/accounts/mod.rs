@@ -4,7 +4,6 @@ pub(crate) mod vault;
 mod store;
 #[cfg(test)]
 pub(crate) use store::lease_timeout_override::set as override_lease_timeout;
-pub use store::Categories;
 pub(crate) mod usage;
 mod usage_renew;
 
@@ -49,6 +48,11 @@ pub struct ProfileDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     sign_in_ends_at: Option<String>,
 }
+#[derive(Default, Serialize)]
+#[serde(transparent)]
+pub struct CategoriesDto(
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+);
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountsDto {
@@ -268,17 +272,14 @@ pub fn unlock() -> Result<(), String> {
 pub fn save_current(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.save_current(provider)
 }
-pub fn set_category(id: &str, category: &str) -> Result<(), String> {
-    Accounts::live()?.set_category(id, category)
-}
-pub fn categories() -> Result<store::Categories, String> {
+pub fn categories() -> Result<CategoriesDto, String> {
     Accounts::live()?.categories()
 }
 pub fn set_account_category(
     provider: AgentId,
     account_id: &str,
     category: &str,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     Accounts::live()?.set_account_category(provider, account_id, category)
 }
 pub fn forget_categories(provider: AgentId, account_ids: &[String]) -> Result<(), String> {
@@ -338,7 +339,7 @@ impl Accounts {
             .is_some_and(|profile| profile.identity.provider == provider);
         let archived = crate::limits::archived(home, provider);
         let categories = db
-            .categories
+            .categories()
             .get(provider.key())
             .cloned()
             .unwrap_or_default();
@@ -413,11 +414,12 @@ impl Accounts {
         Ok(())
     }
 
-    fn categories(&self) -> Result<store::Categories, String> {
+    fn categories(&self) -> Result<CategoriesDto, String> {
         if !store::Store::vault_exists(&self.home) {
-            return Ok(store::Categories::new());
+            return Ok(CategoriesDto::default());
         }
-        Ok(store::Store::open_existing(&self.home)?.load()?.categories)
+        let db = store::Store::open_existing(&self.home)?.load()?;
+        Ok(CategoriesDto(db.categories().clone()))
     }
 
     fn set_account_category(
@@ -425,12 +427,13 @@ impl Accounts {
         provider: AgentId,
         account_id: &str,
         category: &str,
-    ) -> Result<(), String> {
-        store::Store::open(&self.home, true)?.change(store::ChangeKind::Metadata, |db| {
-            db.set_account_category(provider, account_id, category)
-        })?;
+    ) -> Result<Option<String>, String> {
+        let stored = store::Store::open(&self.home, true)?
+            .change(store::ChangeKind::Metadata, |db| {
+                db.set_account_category(provider, account_id, category)
+            })?;
         self.notify.accounts();
-        Ok(())
+        Ok(stored)
     }
 
     fn forget_categories(&self, provider: AgentId, account_ids: &[String]) -> Result<(), String> {
@@ -444,14 +447,6 @@ impl Accounts {
         if changed {
             self.notify.accounts();
         }
-        Ok(())
-    }
-
-    fn set_category(&self, id: &str, category: &str) -> Result<(), String> {
-        store::Store::open(&self.home, false)?.change(store::ChangeKind::Metadata, |db| {
-            db.set_category(id, category)
-        })?;
-        self.notify.accounts();
         Ok(())
     }
 

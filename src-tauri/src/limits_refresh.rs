@@ -191,15 +191,17 @@ pub fn forget_snapshot(
     agent: AgentId,
     account_id: &str,
     expected_email: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let Some(cache) = cache_for(agent) else {
         return crate::limits::forget_snapshot(agent, account_id, expected_email);
     };
+    let mut forgotten = Vec::new();
     let reading = forget_through_cache(cache, account_id, || {
-        crate::limits::forget_snapshot(agent, account_id, expected_email)
+        forgotten = crate::limits::forget_snapshot(agent, account_id, expected_email)?;
+        Ok(())
     })?;
     announce(cache, reading);
-    Ok(())
+    Ok(forgotten)
 }
 
 pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<(), String> {

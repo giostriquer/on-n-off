@@ -1,6 +1,6 @@
 import type { AccountCategories, AccountsReading, SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { hasLimits, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
+import { hasLimits, hasSavedAccounts, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 
@@ -376,16 +376,17 @@ export function limitsScenario(name: string) {
     },
     readCategories(): AccountCategories {
       return Object.fromEntries(LIMITS_PROVIDERS.map(which => {
-        const saved = which === "muse" ? [] : accountsOf(which).profiles.flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
+        const saved = !hasSavedAccounts(which) ? [] : accountsOf(which).profiles.flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
         const merged = new Map<string, string | null>([...saved, ...categories[which]]);
         return [which, Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []))];
       }));
     },
-    setCategory(agentId: unknown, accountId: unknown, category: unknown) {
+    setCategory(agentId: unknown, accountId: unknown, category: unknown): string | null {
       const which = provider(agentId);
-      if (!which || typeof accountId !== "string") return;
+      if (!which || typeof accountId !== "string") return null;
       const text = typeof category === "string" ? category.trim() : "";
       categories[which].set(accountId, text || null);
+      return text || null;
     },
     readCodexSubscription(accountId: unknown): SubscriptionDate | null {
       return (chosen.codexSubscription ?? paidThrough)(String(accountId));

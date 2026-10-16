@@ -1,7 +1,10 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { confirmItem, type ActionMenuItem } from "@/components/ActionMenu";
 import { actionButton as button } from "@/components/actionButton";
+import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
+import { setCategoryLocally } from "$lib/sharedReads/accounts";
 import type { CardAccount, LimitCard } from "./limitCards";
 
 export function removeAccountQuestion(label: string): string {
@@ -16,12 +19,12 @@ export type CardActions = {
   removing: boolean;
 };
 
-export function useCardActions(card: LimitCard, { blocked, onArchive, onRemove, onCategory }: {
+export function useCardActions(card: LimitCard, { blocked, onArchive, onRemove }: {
   blocked: boolean;
   onArchive: (account: CardAccount) => Promise<void>;
   onRemove: (account: CardAccount) => Promise<void>;
-  onCategory: (account: CardAccount, category: string) => Promise<void>;
 }): CardActions {
+  const client = useQueryClient();
   const [archiving, setArchiving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const { account } = card;
@@ -37,7 +40,10 @@ export function useCardActions(card: LimitCard, { blocked, onArchive, onRemove, 
       id: "category",
       label: "Edit category",
       disabled,
-      panel: done => <CategoryPanel initial={card.identity.category ?? ""} disabled={disabled} onSave={category => onCategory(account, category)} done={done} />,
+      panel: done => <CategoryPanel initial={card.identity.category ?? ""} disabled={disabled} done={done} onSave={async category => {
+        const stored = await api.setAccountCategory(card.provider, account.id, category);
+        setCategoryLocally(client, card.provider, account.id, stored);
+      }} />,
     }] : [],
     items: offered ? [{ id: "archive", label: "Archive account", disabled, busy: archiving, run: archive }] : [],
     danger: offered ? [confirmItem({

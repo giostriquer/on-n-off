@@ -250,9 +250,11 @@ writes, renews or saves a Muse login, and Muse has no saved accounts.
   A category belongs to the account, not to a saved login: the vault's `categories` map holds one
   text per provider and card account id (the observation key), so every Limits card can have one,
   for every provider, saved or not. `read_account_categories` and `set_account_category` need no
-  account adapter. A saved login's category is also copied into its profile, so an older app
-  version still shows it, and a profile category from an older version moves into the map when
-  the vault loads. Forget drops the forgotten account's category.
+  account adapter, and the setter answers with the stored text. `Database` keeps a saved login's
+  profile copy in step with the map on every set and forget, and a login saved after its card was
+  named takes the category, so an older app version still shows it; a profile category from an
+  older version moves into the map when the vault loads. Forget drops the categories of every id
+  it forgets, legacy ids included.
 - **Add / sign in again** launches official CLI authentication in an isolated native home. It checks
   the resulting identity, verifies the expected profile during reauthentication, then saves it.
   Before publication it attempts a usage/plan read using that isolated login: Codex uses app-server

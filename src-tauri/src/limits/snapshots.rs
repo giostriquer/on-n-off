@@ -113,7 +113,7 @@ impl SnapshotStore {
         provider: AgentId,
         account_id: &str,
         email: &str,
-    ) -> Result<(), String> {
+    ) -> Result<Vec<String>, String> {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -126,7 +126,9 @@ impl SnapshotStore {
         let raw = match fs::read_to_string(&path) {
             Ok(raw) => raw,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return self.unarchive_locked(provider, &forgotten).map(drop);
+                return self
+                    .unarchive_locked(provider, &forgotten)
+                    .map(|_| forgotten.to_vec());
             }
             Err(_) => return Err(changed.into()),
         };
@@ -142,10 +144,11 @@ impl SnapshotStore {
             return Err(changed.into());
         }
         self.remove_file(provider, account_id)?;
-        self.unarchive_locked(provider, &forgotten).map(drop)
+        self.unarchive_locked(provider, &forgotten)
+            .map(|_| forgotten.to_vec())
     }
 
-    pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<(), String> {
+    pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<Vec<String>, String> {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -163,7 +166,8 @@ impl SnapshotStore {
         }
         self.remove_file(provider, account_id)?;
         forgotten.push(account_id.to_string());
-        self.unarchive_locked(provider, &forgotten).map(drop)
+        self.unarchive_locked(provider, &forgotten)
+            .map(|_| forgotten)
     }
 
     fn remove_file(&self, provider: AgentId, account_id: &str) -> Result<(), String> {

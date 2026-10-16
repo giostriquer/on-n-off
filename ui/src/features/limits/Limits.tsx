@@ -9,7 +9,7 @@ import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { accountCategoriesQuery, markProfilesArchived, setCategoryLocally } from "$lib/sharedReads/accounts";
+import { accountCategoriesQuery, markProfilesArchived } from "$lib/sharedReads/accounts";
 import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
@@ -138,11 +138,6 @@ function ProviderColumn({
     else await forgetIt();
   }
 
-  async function setCategory(account: CardAccount, category: string) {
-    await api.setAccountCategory(provider, account.id, category);
-    setCategoryLocally(queryClient, provider, account.id, category);
-  }
-
   async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
     setForgetError(null);
     const ids = steps.map(({ accountId }) => accountId);
@@ -179,7 +174,6 @@ function ProviderColumn({
           blocked={blocked}
           onArchive={(account) => archive(card.key, account)}
           onRemove={(account) => remove(account, () => forgetCard(card.key, account))}
-          onCategory={(account, category) => setCategory(account, category)}
           menuButtonRef={(node) => {
             if (node) menus.current.set(card.key, node);
             else menus.current.delete(card.key);
@@ -201,7 +195,6 @@ function AccountCard({
   blocked,
   onArchive,
   onRemove,
-  onCategory,
   menuButtonRef,
 }: {
   card: LimitCard;
@@ -211,11 +204,10 @@ function AccountCard({
   blocked: boolean;
   onArchive: (account: CardAccount) => Promise<void>;
   onRemove: (account: CardAccount) => Promise<void>;
-  onCategory: (account: CardAccount, category: string) => Promise<void>;
   menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
   const { provider, freshness, figures, account } = card;
-  const own = useCardActions(card, { blocked, onArchive, onRemove, onCategory });
+  const own = useCardActions(card, { blocked, onArchive, onRemove });
   const resetActions = account?.resetActions ?? null;
   const actions = useAccountCardActions(account && {
     accountId: account.id,

@@ -26,11 +26,12 @@ export function accountCategoriesQuery() {
   return queryOptions({ queryKey: [...ACCOUNTS, "categories"], queryFn: () => api.readAccountCategories(), retry: false });
 }
 
-export function setCategoryLocally(client: QueryClient, provider: LimitsProvider, accountId: string, category: string): void {
+export function setCategoryLocally(client: QueryClient, provider: LimitsProvider, accountId: string, stored: string | null): void {
   client.setQueryData<AccountCategories>(accountCategoriesQuery().queryKey, (categories) => {
-    const accounts = { ...categories?.[provider] };
-    if (category.trim()) accounts[accountId] = category.trim();
-    else delete accounts[accountId];
+    if (!categories) return categories;
+    const accounts = { ...categories[provider] };
+    if (stored === null) delete accounts[accountId];
+    else accounts[accountId] = stored;
     return { ...categories, [provider]: accounts };
   });
 }

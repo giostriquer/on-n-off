@@ -404,16 +404,22 @@ pub async fn forget_limits_snapshot(
     expected_email: Option<String>,
 ) -> Result<(), AdapterError> {
     blocking("limits forget", move || {
-        crate::limits_refresh::forget_snapshot(agent_id, &account_id, expected_email.as_deref())
-            .map_err(AdapterError::message)?;
-        let _ = crate::accounts::forget_categories(agent_id, std::slice::from_ref(&account_id));
+        let forgotten = crate::limits_refresh::forget_snapshot(
+            agent_id,
+            &account_id,
+            expected_email.as_deref(),
+        )
+        .map_err(AdapterError::message)?;
+        if let Err(error) = crate::accounts::forget_categories(agent_id, &forgotten) {
+            eprintln!("failed to forget account categories: {error}");
+        }
         Ok(())
     })
     .await
 }
 
 #[tauri::command]
-pub async fn read_account_categories() -> Result<crate::accounts::Categories, AdapterError> {
+pub async fn read_account_categories() -> Result<crate::accounts::CategoriesDto, AdapterError> {
     blocking("account categories", || {
         crate::accounts::categories().map_err(AdapterError::message)
     })
@@ -425,7 +431,7 @@ pub async fn set_account_category(
     agent_id: AgentId,
     account_id: String,
     category: String,
-) -> Result<(), AdapterError> {
+) -> Result<Option<String>, AdapterError> {
     if !agent_id.facts().limits_reader {
         return Err(AdapterError::message(
             "This provider has no Limits accounts to name.",
@@ -562,8 +568,6 @@ pub async fn account_action(
     agent: AgentId,
     action: String,
     profile_id: Option<String>,
-    label: Option<String>,
-    category: Option<String>,
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), AdapterError> {
@@ -584,10 +588,6 @@ pub async fn account_action(
             "stopRemembering" => crate::accounts::discovery::set_enabled(false),
             "save" => crate::accounts::save_current(agent),
             "remove" => crate::accounts::remove(id),
-            "category" | "rename" => crate::accounts::set_category(
-                id,
-                category.as_deref().or(label.as_deref()).unwrap_or(""),
-            ),
             "signOut" => crate::accounts::sign_out(agent),
             _ => Err("Unknown account action.".into()),
         }

@@ -435,6 +435,19 @@ it.each([true, false])("shows the paid-through date through a header badge (usag
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
+it("reads every card's categories again when the account lists are announced", async () => {
+  answer([okClaude()], [okCodex()]);
+  readAccountCategories.mockResolvedValueOnce({}).mockResolvedValue({ codex: { "acct-work": "Renamed elsewhere" } });
+  renderLimits();
+  const codex = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+  await waitFor(() => expect(readAccountCategories).toHaveBeenCalledTimes(1));
+  expect(within(codex).queryByText("Renamed elsewhere")).toBeNull();
+
+  await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "accounts" }); });
+
+  expect(await within(codex).findByText("Renamed elsewhere")).toBeInTheDocument();
+});
+
 it("places switching on the account usage card without a second account manager", async()=>{
  answer([okClaude()], [okCodex(),staleCodex()]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
@@ -446,7 +459,7 @@ it("places switching on the account usage card without a second account manager"
  expect(within(personal).getByText("Personal")).toBeVisible();
  expect(screen.queryByRole("button",{name:/Manage .* accounts/})).toBeNull();
  fireEvent.click(use);
- await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","use","saved-personal",undefined));
+ await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","use","saved-personal"));
 });
 
 it("keeps saved accounts available when usage cannot be read, never merges by email, and never shows workspace ids", async () => {
@@ -562,7 +575,7 @@ it("removes reconciled legacy history with the saved card so refresh cannot resu
  fireEvent.click(screen.getByRole("button",{name:"Remove account"}));
  expect(accountAction).not.toHaveBeenCalled();
  fireEvent.click(screen.getByRole("button",{name:"Confirm removal"}));
- await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","remove","saved",undefined));
+ await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","remove","saved"));
  expect(accountAction).not.toHaveBeenCalledWith("codex","signOut",expect.anything(),expect.anything());
  await waitFor(()=>expect(forgetLimitsSnapshot).toHaveBeenCalledWith("codex","profile:user-team",undefined));
  expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex","team","shared@example.com"],["codex","profile:user-team",undefined]]);
@@ -802,7 +815,7 @@ describe("archiving", () => {
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
 
     await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledTimes(2));
-    expect(accountAction).toHaveBeenCalledWith("codex", "remove", "saved", undefined);
+    expect(accountAction).toHaveBeenCalledWith("codex", "remove", "saved");
     expect(forgetLimitsSnapshot.mock.calls).toEqual([["codex", "team", "shared@example.com"], ["codex", "profile:user-team", undefined]]);
     expect(setLimitsArchived).not.toHaveBeenCalled();
   });

@@ -37,7 +37,7 @@ it("reads accounts without changing login and switches only from the selected ca
   setup(); const card = await screen.findByRole("region", { name: "person@example.com" });
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a"));
   expect(api.readAccountActivationBlockers).toHaveBeenCalledWith("codex");
 });
 it("asks before switching beside running clients and switches only on confirmation", async () => {
@@ -57,7 +57,7 @@ it("asks before switching beside running clients and switches only on confirmati
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
   fireEvent.click(await within(card).findByRole("button", { name: "Switch anyway" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "useAlongsideClients", "profile-a", undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "useAlongsideClients", "profile-a"));
   expect(vi.mocked(api.accountAction).mock.calls.map(call => call[1])).toEqual(["useAlongsideClients"]);
   await waitFor(() => expect(within(card).queryByRole("group", { name })).toBeNull());
 });
@@ -81,12 +81,12 @@ it("switches normally when running clients cannot be checked, and waits for the 
   fireEvent.keyDown(within(card).getByRole("group", { name: "Actions for person@example.com" }), { key: "Escape" });
   expect(api.accountAction).not.toHaveBeenCalled();
   await act(async () => answer([]));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a"));
   vi.mocked(api.accountAction).mockClear();
   vi.mocked(api.readAccountActivationBlockers).mockRejectedValueOnce(new Error("Could not list processes"));
   await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeEnabled());
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a"));
   expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
 });
 it("asks before removing the signed-in account's saved login, which leaves it signed in", async () => {
@@ -97,7 +97,7 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   expect(confirm).toHaveTextContent("Remove the saved login for person@example.com? This account stays signed in.");
   expect(api.accountAction).not.toHaveBeenCalled();
   fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a", undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a"));
   await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
 });
 it.each([
@@ -145,7 +145,7 @@ it("signs the signed-in account out once confirmed, and closes the confirmation"
   await waitFor(() => expect(signOut).toBeEnabled());
   fireEvent.click(signOut);
   fireEvent.click(within(card).getByRole("button", { name: "Confirm sign out" }));
-  await waitFor(() => expect(vi.mocked(api.accountAction).mock.calls).toEqual([["codex", "signOut", undefined, undefined]]));
+  await waitFor(() => expect(vi.mocked(api.accountAction).mock.calls).toEqual([["codex", "signOut", undefined]]));
   await waitFor(() => expect(within(card).queryByRole("group", { name: "Confirm account action" })).toBeNull());
 });
 it("says in its confirmation why a confirmed sign-out failed, and lets it be tried again", async () => {
@@ -234,7 +234,7 @@ it("retries a denied vault unlock without starting sign-in or changing accounts"
     vi.mocked(api.readAccounts).mockImplementation(restored);
   });
   fireEvent.click(retry);
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "unlock", undefined, undefined));
+  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "unlock", undefined));
   await waitFor(() => expect(screen.queryByRole("button", {name: "Retry account access"})).toBeNull());
   expect(screen.getByRole("button", {name: "Use account"})).toBeEnabled();
   expect(api.addAccount).not.toHaveBeenCalled();

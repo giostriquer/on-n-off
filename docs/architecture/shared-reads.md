@@ -127,10 +127,11 @@ Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the thre
 `limits:<provider>` sources), `githubPrs.ts`, `resetSpends.ts` and `accounts.ts`. A source module
 is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
 query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
-`accountListQuery`, `accountPreferenceQuery`, `accountCategoriesQuery`, `codexSubscriptionQuery`) and call its operations
-(`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`, `refreshGithubPrs`,
-`rereadPendingResetSpends`, `rereadAccountListsAndPreference`, `accountChanged`,
-`cachedAccountList`, `markProfilesArchived`, `setCategoryLocally`); they never write a key. Each module also exports its source's entry for the
+`accountListQuery`, `accountPreferenceQuery`, `accountCategoriesQuery`, `codexSubscriptionQuery`)
+and call its operations (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`,
+`refreshGithubPrs`, `rereadPendingResetSpends`, `rereadAccountListsAndPreference`,
+`accountChanged`, `cachedAccountList`, `markProfilesArchived`, `setCategoryLocally`); they never
+write a key. Each module also exports its source's entry for the
 announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
 table from those entries alone. A key changed in one place is therefore changed in both. The
 modules import no React and no query observer: the table and the shell's Refresh are in the

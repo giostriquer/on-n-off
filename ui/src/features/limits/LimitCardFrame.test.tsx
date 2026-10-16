@@ -56,7 +56,7 @@ beforeEach(() => {
   forgetLimitsSnapshot.mockReset().mockResolvedValue(undefined);
   setLimitsArchived.mockReset().mockResolvedValue(undefined);
   readAccountCategories.mockReset().mockResolvedValue({});
-  setAccountCategory.mockReset().mockResolvedValue(undefined);
+  setAccountCategory.mockReset().mockImplementation(async (_provider: LimitsProvider, _account: string, category: string) => category.trim() || null);
 });
 
 afterEach(() => {
@@ -202,13 +202,15 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     expect(within(current).queryByText("Elsewhere")).toBeNull();
   });
 
-  it("is edited from the menu without asking anything, and cleared by saving it blank", async () => {
-    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Old" } });
-    answer(read => [CURRENT[read]()]);
+  it("is edited from the menu without asking anything, and cleared by saving it blank, leaving other cards' categories", async () => {
+    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Old", [`${provider}-old`]: "Other card" } });
+    answer(read => [CURRENT[read](), remembered(read)]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    const other = card(`${name} limits · ${oldLabel(provider)}`);
     await within(current).findByText("Old");
     const editor = await openEditor(current);
+    expect(within(current).getByRole("group", { name: "Edit account category" })).toContainElement(editor);
     expect(editor).toHaveFocus();
     expect(editor).toHaveValue("Old");
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
@@ -216,6 +218,7 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
     await waitFor(() => expect(setAccountCategory).toHaveBeenCalledWith(provider, accountId(provider), "  Research / client blue "));
     expect(await within(current).findByText("Research / client blue")).toBeInTheDocument();
+    expect(within(other).getByText("Other card")).toBeInTheDocument();
     expect(within(current).queryByRole("textbox")).toBeNull();
     expect(within(current).getByRole("button", { name: `More actions for ${label(provider)}` })).toHaveFocus();
 
@@ -225,16 +228,34 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     await waitFor(() => expect(within(current).queryByText("Research / client blue")).toBeNull());
   });
 
-  it("says why a category was not saved and keeps the editor open", async () => {
-    setAccountCategory.mockRejectedValueOnce(new Error("the vault is locked"));
+  it("saves once at a time, and says why a category was not saved while keeping the editor open to retry", async () => {
+    let fail!: (reason: Error) => void;
+    setAccountCategory.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
     answer(read => [CURRENT[read]()]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
-    fireEvent.change(await openEditor(current), { target: { value: "Work" } });
-    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
-    expect(await within(current).findByRole("alert")).toHaveTextContent("the vault is locked");
+    const editor = await openEditor(current);
+    expect(editor).toHaveValue("");
+    fireEvent.change(editor, { target: { value: "Work" } });
+    const save = within(current).getByRole("button", { name: "Save category" });
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toBeDisabled());
+    fireEvent.click(save);
+    expect(setAccountCategory).toHaveBeenCalledTimes(1);
+    await act(async () => fail(new Error("the vault is locked")));
+    expect(within(current).getByRole("alert")).toHaveTextContent("the vault is locked");
     expect(within(current).getByRole("textbox", { name: "Category (optional)" })).toHaveValue("Work");
+    expect(save).toBeEnabled();
     expect(within(current).queryByText("Work", { selector: "div" })).toBeNull();
+  });
+
+  it("still offers the card and its editor when the categories cannot be read", async () => {
+    readAccountCategories.mockRejectedValue(new Error("the vault is locked"));
+    answer(read => [CURRENT[read]()]);
+    renderLimits();
+    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    await waitFor(() => expect(readAccountCategories).toHaveBeenCalled());
+    expect(await openEditor(current)).toHaveValue("");
   });
 });
 

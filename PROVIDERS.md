@@ -365,8 +365,8 @@ See [accounts architecture and validation boundaries](docs/architecture/accounts
 
 Saved profile names use the provider email. An optional free-text category belongs to each
 account (provider and card account id), saved or not, for every provider, and survives credential
-updates. “Remember accounts on this device”
-is an explicit global opt-in for Claude and Codex, checked about every 30 seconds while the app runs.
+updates. “Remember accounts on this device” is an explicit global opt-in for Claude and Codex,
+checked about every 30 seconds while the app runs.
 Disabling retains saved profiles; removing one excludes it from automatic reenrollment until an
 explicit Save current or Add account. Background discovery never activates a profile.
 
