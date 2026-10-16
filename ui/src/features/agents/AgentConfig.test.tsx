@@ -51,3 +51,21 @@ it("counts only the servers in the MCP config file beside its path", () => {
   const row = screen.getByTitle(mcpConfigPath("claude")).parentElement!;
   expect(within(row).getByText("2 FOUND")).toBeInTheDocument();
 });
+
+it.each([
+  ["claude", "Claude", "claude", "~/.claude/", "~/.claude.json", true],
+  ["codex", "Codex", "codex", "~/.codex/", "~/.codex/config.toml", true],
+  ["antigravity", "Antigravity", "agy", "~/.gemini/", "~/.gemini/config/mcp_config.json", true],
+  ["cursor", "Cursor", "agent", "~/.cursor/", "~/.cursor/mcp.json", false],
+  ["muse", "Muse", "muse", "~/.local/share/muse/", "~/.config/muse/settings.json", false],
+] as const)("names %s's CLI, its home and MCP config, and whether on-n-off switches its MCP servers", (id, displayName, binary, home, mcpConfig, mcpToggle) => {
+  render(<AgentConfig agent={{ ...claude, id, displayName }} tab={null} />);
+
+  const paths = screen.getByRole("region", { name: "Config paths" });
+  expect(within(within(paths).getByText("CLI binary").parentElement!).getByTitle(binary)).toBeInTheDocument();
+  expect(within(within(paths).getByText("Global config").parentElement!).getByTitle(home)).toBeInTheDocument();
+  expect(within(within(paths).getByText("MCP config").parentElement!).getByTitle(mcpConfig)).toBeInTheDocument();
+  const capabilities = screen.getByRole("region", { name: "Adapter capabilities" });
+  const toggle = within(capabilities).getByText("MCP toggle").parentElement!.parentElement!;
+  expect(within(toggle).getByText(mcpToggle ? "YES" : "NO")).toBeInTheDocument();
+});

@@ -52,6 +52,28 @@ describe("ScopeBar", () => {
     expect(onSelect).toHaveBeenCalledWith(String.raw`E:\dev\on-n-off`);
   });
 
+  it.each([
+    ["claude", "~/.claude/settings.json"],
+    ["codex", "~/.codex/config.toml"],
+    ["antigravity", "~/.gemini/antigravity-cli/"],
+    ["cursor", "~/.cursor/"],
+    ["muse", "~/.config/muse/settings.json"],
+  ] as const)("shows %s's global config when no project is selected", (agentId, path) => {
+    render(
+      <ScopeBar
+        agentId={agentId}
+        projects={projects}
+        selectedPath={null}
+        tally=""
+        globalItems={0}
+        onSelect={() => undefined}
+        onPickFolder={() => undefined}
+        onOpenPath={() => undefined}
+      />,
+    );
+    expect(screen.getByTitle(path)).toHaveTextContent(path);
+  });
+
   it("filters projects and pastes a folder path", async () => {
     const onOpenPath = vi.fn();
     const onPickFolder = vi.fn();

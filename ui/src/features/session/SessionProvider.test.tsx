@@ -225,6 +225,27 @@ describe("SessionProvider startup", () => {
     expect(localStorage.getItem(AGENT_KEY)).toBe("claude");
   });
 
+  it.each([
+    ["claude", "claude"],
+    ["codex", "codex"],
+    ["antigravity", "antigravity"],
+    ["cursor", "cursor"],
+    ["muse", "muse"],
+    ["gemini", "claude"],
+    ["Codex", "claude"],
+  ])("boots a remembered %s tab on %s", async (remembered, opened) => {
+    localStorage.setItem(AGENT_KEY, remembered);
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
+    expect(state.refreshOrder[0]).toBe(opened);
+    expect(screen.getByTestId("selected-provider")).toHaveTextContent(opened);
+  });
+
   it("finishes the selected provider before starting background providers", async () => {
     render(
       <StrictMode>

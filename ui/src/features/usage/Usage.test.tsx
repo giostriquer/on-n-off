@@ -135,6 +135,32 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+describe("Usage providers", () => {
+  it("gives every provider Usage reads a row in its colour, even one that reported nothing", async () => {
+    usageSummary.mockResolvedValue(summary());
+    renderUsage();
+    const totals = await screen.findByRole("region", { name: "Usage totals" });
+
+    const bar = (label: string) => {
+      const name = within(totals).getAllByText(label).find((element) => element.tagName === "SPAN") as HTMLElement;
+      return (name.parentElement!.parentElement!.querySelector(".h-full") as HTMLElement).style.background;
+    };
+    const names = within(totals).getAllByText(/^(Claude|Codex|Antigravity|Cursor|Muse)$/).filter((element) => element.tagName === "SPAN");
+    expect(names.map((element) => element.textContent)).toEqual(["Codex", "Claude", "Muse"]);
+    expect(bar("Claude")).toBe("rgb(217, 119, 87)");
+    expect(bar("Codex")).toBe("var(--silkscreen)");
+    expect(bar("Muse")).toBe("rgb(0, 130, 251)");
+  });
+
+  it("names the providers whose transcripts it looked for when it found none", async () => {
+    const empty = summary();
+    usageSummary.mockResolvedValue({ ...empty, buckets: [], sources: empty.sources.map((source) => ({ ...source, status: "missing" as const })) });
+    renderUsage();
+
+    expect(await screen.findByText("No Claude, Codex or Muse session transcripts found on this machine.")).toBeInTheDocument();
+  });
+});
+
 describe("Usage loading continuity", () => {
   it("keeps the displayed totals and chart bounds while a different window loads", async () => {
     const first = deferred<UsageSummary>();

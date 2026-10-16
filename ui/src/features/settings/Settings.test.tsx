@@ -1,6 +1,6 @@
 import { defaultNotchSettings } from "$lib/notchTypes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Settings } from "./Settings";
@@ -167,6 +167,17 @@ describe("Settings", () => {
 
     expect(screen.getByPlaceholderText("agent")).toBeTruthy();
     expect(screen.queryByPlaceholderText("cursor-agent")).toBeNull();
+  });
+
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["Antigravity", "agy"],
+    ["Cursor", "agent"],
+  ])("offers %s's own command as its binary placeholder", (name, binary) => {
+    renderSettings();
+
+    expect(within(screen.getByRole("article", { name })).getByRole("textbox")).toHaveAttribute("placeholder", binary);
   });
 
   it("requests notification permission before enabling limit polling and persists the interval", async () => {

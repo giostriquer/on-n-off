@@ -515,6 +515,18 @@ it("refuses an already-open sign-out confirmation after the native identity chan
  expect(accountAction).not.toHaveBeenCalled();
 });
 
+it("lays out one column per provider with limits, in tab order, and offers to add an account only where accounts can be saved", async () => {
+  answer([okClaude()], [okCodex()]);
+  renderLimits();
+  await screen.findByRole("region", { name: /^Codex limits/ });
+  const columns = screen.getByTestId("limits-screen").querySelector(".grid")!.children;
+  expect([...columns].map((column) => within(column as HTMLElement).getAllByRole("region")[0]?.getAttribute("aria-label")?.split(" ")[0])).toEqual(["Claude", "Codex", "Muse"]);
+
+  fireEvent.click(screen.getByRole("button", {name: "Add account"}));
+  const picker = screen.getByRole("group", {name: "Add account"});
+  expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Antigravity|Cursor|Muse)$/ }).map((button) => button.lastChild?.textContent)).toEqual(["Claude", "Codex"]);
+});
+
 it.each(["claude", "codex"])("adds only the %s account selected in the shared picker", async provider => {
   answer([okClaude()], [okCodex()]);
   renderLimits();
