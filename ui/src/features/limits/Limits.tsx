@@ -63,7 +63,7 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
         <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
-      <div className="grid items-start gap-3" style={{ gridTemplateColumns: `repeat(${providers.length}, minmax(0, 1fr))` }}>
+      <div className="grid grid-flow-col auto-cols-fr items-start gap-3">
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
             {hasSavedAccounts(provider) ? <AccountManager provider={provider}>
