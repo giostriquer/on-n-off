@@ -117,8 +117,7 @@ impl NotchPullRequests {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrContext {
     Work,
     Personal,

@@ -3,8 +3,8 @@ import NotchCore
 import SwiftUI
 
 enum PopoverContent {
-  case provider(ProviderId, Provider?)
-  case pullRequests(PullRequests?)
+  case provider(ProviderCell)
+  case pullRequests(PullRequestCell)
 }
 
 struct PopoverModel {
@@ -23,7 +23,7 @@ struct PopoverModel {
 
   var identity: String {
     switch content {
-    case .provider(let id, _): return id.rawValue
+    case .provider(let cell): return cell.provider.rawValue
     case .pullRequests: return "pull-requests"
     }
   }
@@ -49,10 +49,10 @@ private struct PopoverCard: View {
   var body: some View {
     VStack(alignment: .leading, spacing: metrics.value(10)) {
       switch model.content {
-      case .provider(let id, let entry):
-        ProviderSection(id: id, entry: entry, now: model.now, metrics: metrics)
-      case .pullRequests(let pulls):
-        PullRequestSection(pulls: pulls, now: model.now, metrics: metrics)
+      case .provider(let cell):
+        ProviderSection(cell: cell, now: model.now, metrics: metrics)
+      case .pullRequests(let cell):
+        PullRequestSection(cell: cell, now: model.now, metrics: metrics)
       }
       if let error = model.actionError {
         Text(error).font(metrics.font(10)).foregroundColor(warnAmber)
@@ -195,26 +195,23 @@ private struct SectionHeader: View {
 }
 
 private struct ProviderSection: View {
-  let id: ProviderId
-  let entry: Provider?
+  let cell: ProviderCell
   let now: Date
   let metrics: NotchMetrics
+  private var id: ProviderId { cell.provider }
+  private var entry: Reading? { cell.reading }
   private var windows: [Quota] { entry?.windows ?? [] }
-  private var readable: Bool { entry?.status == "ok" && entry?.currentAccount == true }
 
   var body: some View {
     SectionHeader(
       title: "\(providerName(id)) Usage", metrics: metrics,
       mark: AnyView(ProviderMark(provider: id).fill(Color.white, style: FillStyle(eoFill: true))))
-    if let entry = entry, !readable {
-      Text(entry.message ?? "Usage unavailable.").font(metrics.font(11))
-        .foregroundColor(mutedInk).fixedSize(horizontal: false, vertical: true)
-      if entry.hasObservedValues {
-        Text("Refresh paused. Last observed values below.").font(metrics.font(10))
-          .foregroundColor(warnAmber)
-      }
-    } else if entry == nil {
-      Text("Checking usage…").font(metrics.font(11)).foregroundColor(mutedInk)
+    if let notice = cell.notice {
+      Text(notice.text).font(metrics.font(11))
+        .foregroundColor(toneColor(notice.tone)).fixedSize(horizontal: false, vertical: true)
+    }
+    if let paused = cell.paused {
+      Text(paused.text).font(metrics.font(10)).foregroundColor(toneColor(paused.tone))
     }
     ForEach(windows) { quota in
       QuotaBlock(quota: quota, provider: id, now: now, metrics: metrics)
@@ -224,10 +221,10 @@ private struct ProviderSection: View {
         quota: credits.quota, provider: id, now: now, metrics: metrics,
         note: credits.note(at: now), detail: credits.amounts(at: now))
     }
-    if let sessions = entry?.sessions, !sessions.isEmpty {
+    if !cell.sessions.isEmpty {
       Divider().background(Color.white.opacity(0.1))
       VStack(alignment: .leading, spacing: metrics.value(8)) {
-        ForEach(sessions) { session in
+        ForEach(cell.sessions) { session in
           SessionRow(session: session, accent: providerColor(id), now: now, metrics: metrics)
         }
       }
@@ -305,7 +302,7 @@ private struct SessionRow: View {
 }
 
 private struct PullRequestSection: View {
-  let pulls: PullRequests?
+  let cell: PullRequestCell
   let now: Date
   let metrics: NotchMetrics
 
@@ -315,33 +312,27 @@ private struct PullRequestSection: View {
       mark: AnyView(
         PullRequestMark().stroke(
           Color.white, style: StrokeStyle(lineWidth: metrics.value(1.4), lineCap: .round))))
-    if let pulls = pulls {
-      if let hint = pulls.hint, pulls.status != "ok" {
-        Text(hint).font(metrics.font(11)).foregroundColor(pulls.readable ? warnAmber : mutedInk)
-          .fixedSize(horizontal: false, vertical: true)
-      }
-      if pulls.readable {
-        ForEach(pulls.lists, id: \.id) { list in
-          VStack(alignment: .leading, spacing: metrics.value(6)) {
-            HStack {
-              Text(list.id.title.uppercased())
-                .font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
-              Spacer(minLength: metrics.value(8))
-              Text(list.total > UInt64(list.items.count) ? "\(list.items.count) of \(list.total)" : "\(list.items.count)")
-                .font(metrics.font(9.5).monospacedDigit())
-            }
-            .foregroundColor(mutedInk)
-            if list.items.isEmpty {
-              Text("Nothing open.").font(metrics.font(10.5)).foregroundColor(mutedInk)
-            }
-            ForEach(list.items) { pull in
-              PullRequestRow(pull: pull, metrics: metrics)
-            }
-          }
+    if let notice = cell.notice {
+      Text(notice.text).font(metrics.font(11)).foregroundColor(toneColor(notice.tone))
+        .fixedSize(horizontal: false, vertical: true)
+    }
+    ForEach(cell.reading?.lists ?? [], id: \.id) { list in
+      VStack(alignment: .leading, spacing: metrics.value(6)) {
+        HStack {
+          Text(list.title.uppercased())
+            .font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
+          Spacer(minLength: metrics.value(8))
+          Text(list.total > UInt64(list.items.count) ? "\(list.items.count) of \(list.total)" : "\(list.items.count)")
+            .font(metrics.font(9.5).monospacedDigit())
+        }
+        .foregroundColor(mutedInk)
+        if list.items.isEmpty {
+          Text("Nothing open.").font(metrics.font(10.5)).foregroundColor(mutedInk)
+        }
+        ForEach(list.items) { pull in
+          PullRequestRow(pull: pull, metrics: metrics)
         }
       }
-    } else {
-      Text("Checking pull requests…").font(metrics.font(11)).foregroundColor(mutedInk)
     }
   }
 }
@@ -351,7 +342,9 @@ private struct PullRequestRow: View {
   let metrics: NotchMetrics
   @State private var copied = false
 
-  private var context: RowContext? { RowContext(pull.context) }
+  private var tag: (name: String, ink: Color)? {
+    pull.tag.map { ($0.label.lowercased(), toneColor($0.tone)) }
+  }
 
   private var ciLabel: String {
     switch pull.ci {
@@ -361,26 +354,6 @@ private struct PullRequestRow: View {
     case .pending: return "CI pending"
     case .none, .unknown: return "No checks"
     }
-  }
-
-  private var badges: [(String, Color)] {
-    var badges: [(String, Color)] = []
-    if pull.isDraft { badges.append(("Draft", mutedInk)) }
-    switch pull.reviewDecision {
-    case .approved: badges.append(("Approved", liveGreen))
-    case .changesRequested: badges.append(("Changes requested", tripRed))
-    case .reviewRequired, .unknown, nil: break
-    }
-    switch pull.mergeKind {
-    case .conflicts: badges.append(("Conflicts", tripRed))
-    case .queued: badges.append(("Queued", liveGreen))
-    case .autoMerge: badges.append(("Auto-merge", mutedInk))
-    case .ready: badges.append(("Ready to merge", liveGreen))
-    case .behind: badges.append(("Behind base", warnAmber))
-    case .blocked: badges.append(("Blocked", warnAmber))
-    case .unknown, nil: break
-    }
-    return badges
   }
 
   var body: some View {
@@ -394,36 +367,36 @@ private struct PullRequestRow: View {
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(
-          [pull.title, context?.name, "\(pull.repo) number \(pull.number)"].compactMap { $0 }
+          [pull.title, tag?.name, "\(pull.repo) number \(pull.number)"].compactMap { $0 }
             .joined(separator: ", "))
         .accessibilityHint("Opens the pull request on GitHub.")
         Button(action: copy) {
           Image(systemName: copied ? "checkmark" : "doc.on.doc")
             .font(metrics.font(11, weight: .medium))
-            .foregroundColor(copied ? liveGreen : context?.ink ?? mutedInk)
+            .foregroundColor(copied ? liveGreen : tag?.ink ?? mutedInk)
             .frame(width: metrics.value(20), height: metrics.value(16))
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
         .accessibilityLabel(
-          copied ? "Copied" : context.map { "Copy a \($0.name) review request" } ?? "Copy a review request")
+          copied ? "Copied" : tag.map { "Copy a \($0.name) review request" } ?? "Copy a review request")
         .accessibilityHint("Copies “review please” with the pull request linked, ready for Slack.")
         .help(
-          context.map { "Copy “review please: <title>” for a \($0.name) channel" }
+          tag.map { "Copy “review please: <title>” for a \($0.name) channel" }
             ?? "Copy “review please: <title>” with the title linked")
       }
       HStack(alignment: .center, spacing: metrics.value(8)) {
         Button(action: { Actions.open(pull) }) {
           HStack(spacing: metrics.value(5)) {
-            if let context = context {
-              Text(context.name.uppercased()).font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
-                .foregroundColor(context.ink).lineLimit(1).fixedSize()
+            if let tag = tag {
+              Text(tag.name.uppercased()).font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
+                .foregroundColor(tag.ink).lineLimit(1).fixedSize()
             }
             Text("\(pull.repo) #\(pull.number)").font(metrics.font(10).monospacedDigit())
               .foregroundColor(mutedInk).lineLimit(1)
-            ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
-              Text(badge.0).font(metrics.font(9.5, weight: .medium)).foregroundColor(badge.1)
-                .lineLimit(1)
+            ForEach(Array(pull.badges.enumerated()), id: \.offset) { _, badge in
+              Text(badge.label).font(metrics.font(9.5, weight: .medium))
+                .foregroundColor(toneColor(badge.tone)).lineLimit(1)
             }
           }
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -446,8 +419,8 @@ private struct PullRequestRow: View {
     }
     .overlay(
       Group {
-        if let context = context {
-          Capsule().fill(context.ink).frame(width: metrics.value(2))
+        if let tag = tag {
+          Capsule().fill(tag.ink).frame(width: metrics.value(2))
             .offset(x: -metrics.value(8))
             .accessibilityHidden(true)
         }
@@ -468,16 +441,14 @@ let liveGreen = Color(red: 74 / 255, green: 200 / 255, blue: 120 / 255)
 let workBlue = Color(red: 96 / 255, green: 165 / 255, blue: 250 / 255)
 let personalViolet = Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)
 
-private struct RowContext {
-  let name: String
-  let ink: Color
-
-  init?(_ context: PrContext?) {
-    switch context {
-    case .work: (name, ink) = ("work", workBlue)
-    case .personal: (name, ink) = ("personal", personalViolet)
-    case .unknown, nil: return nil
-    }
+func toneColor(_ tone: Tone) -> Color {
+  switch tone {
+  case .muted: return mutedInk
+  case .green: return liveGreen
+  case .red: return tripRed
+  case .amber: return warnAmber
+  case .work: return workBlue
+  case .personal: return personalViolet
   }
 }
 

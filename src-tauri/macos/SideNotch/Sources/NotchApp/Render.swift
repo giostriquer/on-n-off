@@ -10,21 +10,21 @@ enum Render {
       var settings = message.snapshot.settings
       settings.popoverStyle = .solid
       let displays = message.snapshot.displays
-      guard let rail = RailModel(settings: settings, displays: displays),
-        let styled = RailModel(settings: message.snapshot.settings, displays: displays)
+      guard let rail = RailModel(settings: settings, cells: message.cells, displays: displays),
+        let styled = RailModel(
+          settings: message.snapshot.settings, cells: message.cells, displays: displays)
       else {
         FileHandle.standardError.write(Data("The fixture does not show a rail.\n".utf8))
         return 2
       }
       let now = Date()
-      let entries = Dictionary(uniqueKeysWithValues: message.providers.map { ($0.provider, $0) })
       let out = URL(fileURLWithPath: outputDirectory, isDirectory: true)
       try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
       func writeRail(_ model: RailModel, capHovered: Bool, name: String) throws {
         try write(
           NotchRailView(
-            model: model, entries: entries, pullRequests: message.pullRequests, now: now,
-            active: nil, capHovered: capHovered, action: { _ in }, toggleShow: {}),
+            model: model, cells: message.cells, now: now, active: nil, capHovered: capHovered,
+            action: { _ in }, toggleShow: {}),
           size: model.frame.size, scale: model.display.scale,
           to: out.appendingPathComponent("\(name).png"))
       }

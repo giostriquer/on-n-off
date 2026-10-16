@@ -15,7 +15,7 @@ assert.equal(embedded.status, 0, `segedit could not read the helper's embedded I
 assert.ok(embedded.stdout.equals(readFileSync(infoPlist)), `${executable} embeds another Info.plist than ${infoPlist}: the helper was not relinked`);
 console.log('PASS helper embeds the current Info.plist');
 const settings = { enabled: false, displayId: null, edge: 'right', size: 'standard', show: 'always', providers: ['claude', 'codex', 'antigravity', 'cursor', 'muse'], pullRequests: { enabled: true, lists: ['mine'] }, popoverStyle: 'glass' };
-const snapshot = { version: protocolVersion, sequence: 1, snapshot: { settings, displays: [], error: null }, providers: [] };
+const snapshot = { version: protocolVersion, sequence: 1, snapshot: { settings, displays: [], error: null }, cells: [] };
 async function check(name, input, expectedAck, args = []) {
   const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'pipe'] });
   const timer = setTimeout(() => child.kill('SIGKILL'), 20000);
@@ -56,14 +56,17 @@ const now = Date.now();
 const at = offsetMs => new Date(now + offsetMs).toISOString();
 const quota = (id, label, kind, usedPercent, resetHours) => ({ id, label, kind, usedPercent, resetsAt: at(resetHours * 3_600_000), observedAt: at(0) });
 const session = (id, name, place, project, status, minutesAgo) => ({ id, name, place, project, status, lastActiveAt: at(-minutesAgo * 60_000) });
-const pull = (number, title, ci, reviewDecision, mergeKind, isDraft, context = 'work') => {
+const badge = (label, tone) => ({ label, tone });
+const tags = { work: badge('Work', 'work'), personal: badge('Personal', 'personal') };
+const pull = (number, title, ci, badges, context = 'work') => {
   const repo = context === 'personal' ? 'octocat/dotfiles' : 'acme/webapp';
   return {
     id: `node-${number}`, number, title, url: `https://github.com/${repo}/pull/${number}`, repo,
-    author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
-    ...(context ? { context } : {}),
+    author: 'octocat', ci, updatedAt: '2026-09-01T10:00:00Z', badges,
+    ...(context ? { tag: tags[context] } : {}),
   };
 };
+const segment = (ci, passingWithConflicts = false) => ({ ci, passingWithConflicts });
 const fixture = edge => ({
   version: protocolVersion, sequence: 1,
   snapshot: {
@@ -71,25 +74,27 @@ const fixture = edge => ({
     displays: [{ id: 'fixture', name: 'Fixture', x: 0, y: 0, width: 1920, height: 1080, workY: 25, workHeight: 1055, scale: 2, mirrored: false }],
     error: null,
   },
-  providers: [
-    { provider: 'claude', status: 'ok', currentAccount: true, windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
-    { provider: 'codex', status: 'ok', currentAccount: true, windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
-    { provider: 'antigravity', status: 'unsupported', currentAccount: true, message: 'Antigravity has no subscription limits to show.', windows: [], sessions: [] },
-    { provider: 'muse', status: 'ok', currentAccount: true, windows: [quota('weekly', 'Weekly · all models', 'weekly', 22, 100), quota('session', '5 hour · all models', 'session', 41, 3)], headlineWindowId: 'weekly', sessions: [session('acme-session', 'webapp-ab', 'Terminal', 'webapp', 'working', 0)] },
-    { provider: 'cursor', status: 'unsupported', currentAccount: true, message: 'Cursor has no subscription limits to show.', windows: [], sessions: [] },
+  cells: [
+    { kind: 'provider', provider: 'claude', reading: { status: 'ok', windows: [quota('weekly_all', 'Weekly · all models', 'weekly', 7, 100), quota('session', '5 hour · all models', 'session', 32, 3), quota('weekly_scoped:Fable', 'Weekly · Fable', 'model', 13, 100)], headlineWindowId: 'weekly_all', innerRing: { kind: 'fable', windowId: 'weekly_scoped:Fable' } }, sessions: [session('a', 'repo-28', 'Desktop', 'repo', 'idle', 0), session('b', 'tool-d2', 'Terminal', 'tool', 'working', 2)] },
+    { kind: 'provider', provider: 'codex', reading: { status: 'ok', windows: [quota('primary', 'Weekly · all models', 'weekly', 49, 140)], headlineWindowId: 'primary', innerRing: { kind: 'workspaceShare' }, workspaceCredits: { usedPercent: 32, resetsAt: at(7 * 86_400_000), left: '17,000 of 25,000 left', renewed: '25,000 of 25,000 left' } }, sessions: [session('c', 'tool-42', 'Desktop', 'tool', 'working', 0)] },
+    { kind: 'provider', provider: 'muse', reading: { status: 'ok', windows: [quota('weekly', 'Weekly · all models', 'weekly', 22, 100), quota('session', '5 hour · all models', 'session', 41, 3)], headlineWindowId: 'weekly' }, sessions: [session('acme-session', 'webapp-ab', 'Terminal', 'webapp', 'working', 0)] },
+    { kind: 'provider', provider: 'antigravity', reading: { status: 'unsupported', message: 'Antigravity has no subscription limits to show.', windows: [] }, notice: { text: 'Antigravity has no subscription limits to show.', tone: 'muted' }, sessions: [] },
+    { kind: 'provider', provider: 'cursor', reading: { status: 'unsupported', message: 'Cursor has no subscription limits to show.', windows: [] }, notice: { text: 'Cursor has no subscription limits to show.', tone: 'muted' }, sessions: [] },
+    { kind: 'pullRequests', reading: {
+      readable: true, count: 5,
+      segments: [segment('success', true), segment('success'), segment('pending'), segment('failure'), segment('success')],
+      attention: { conflicts: 2, failing: 1, changesRequested: 1, ready: 1 },
+      lists: [
+        { id: 'mine', title: 'Mine', total: 4, items: [
+          pull(42, 'fix: passing checks with merge conflicts', 'success', [badge('Approved', 'green'), badge('Conflicts', 'red')]),
+          pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', [badge('Approved', 'green'), badge('Ready to merge', 'green')]),
+          pull(40, 'feat: pull requests in the side notch', 'pending', [badge('Draft', 'muted')], 'personal'),
+          pull(39, 'release: corrected usage cost estimates', 'failure', [badge('Changes requested', 'red'), badge('Conflicts', 'red')]),
+        ] },
+        { id: 'reviewRequested', title: 'Review requested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', [badge('Behind base', 'amber')], null)] },
+      ],
+    } },
   ],
-  pullRequests: {
-    status: 'ok', hint: null, stale: false,
-    lists: [
-      { id: 'mine', total: 4, items: [
-        pull(42, 'fix: passing checks with merge conflicts', 'success', 'APPROVED', 'conflicts', false),
-        pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', 'APPROVED', 'ready', false),
-        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true, 'personal'),
-        pull(39, 'release: corrected usage cost estimates', 'failure', 'CHANGES_REQUESTED', 'conflicts', false),
-      ] },
-      { id: 'reviewRequested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', null, 'behind', false, null)] },
-    ],
-  },
   actionError: null,
 });
 function readPng(path) {

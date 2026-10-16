@@ -1,13 +1,12 @@
 import CoreGraphics
 import Foundation
 
-public let protocolVersion = 6
+public let protocolVersion = 7
 public let maxSessions = 12
 
 public enum ProviderId: String, Codable, CaseIterable, Sendable {
   case claude, codex, muse, antigravity, cursor
 }
-public let railProviderOrder = ProviderId.allCases
 
 public struct Quota: Codable, Equatable, Identifiable, Sendable {
   public let id: String
@@ -159,31 +158,23 @@ public enum InnerQuota: Equatable, Sendable {
   }
 }
 
-public struct Provider: Codable, Equatable, Identifiable, Sendable {
-  public var id: ProviderId { provider }
-  public let provider: ProviderId
+public struct Reading: Codable, Equatable, Sendable {
   public let status: String
-  public let currentAccount: Bool
   public let message: String?
   public let windows: [Quota]
   public let headlineWindowId: String?
   public let innerRing: InnerRing?
-  public let sessions: [Session]
   public let workspaceCredits: WorkspaceCredits?
 
   public init(
-    provider: ProviderId, status: String, currentAccount: Bool, message: String?,
-    windows: [Quota], headlineWindowId: String? = nil, innerRing: InnerRing? = nil,
-    sessions: [Session] = [], workspaceCredits: WorkspaceCredits? = nil
+    status: String, message: String?, windows: [Quota], headlineWindowId: String? = nil,
+    innerRing: InnerRing? = nil, workspaceCredits: WorkspaceCredits? = nil
   ) {
-    self.provider = provider
     self.status = status
-    self.currentAccount = currentAccount
     self.message = message
     self.windows = windows
     self.headlineWindowId = headlineWindowId
     self.innerRing = innerRing
-    self.sessions = sessions
     self.workspaceCredits = workspaceCredits
   }
 
@@ -203,9 +194,51 @@ public struct Provider: Codable, Equatable, Identifiable, Sendable {
     (headlineWindowId == nil || headline != nil) && (innerRing == nil || inner != nil)
   }
 
-  public var hasObservedValues: Bool { !windows.isEmpty || workspaceCredits != nil }
-
   public var ringIsLastObserved: Bool { status != "ok" && headline != nil }
+}
+
+public enum Tone: String, Codable, Sendable {
+  case muted, green, red, amber, work, personal
+  public init(from decoder: Decoder) throws {
+    self = try decodeLenient(decoder, unknown: .muted)
+  }
+}
+
+public struct Notice: Codable, Equatable, Sendable {
+  public let text: String
+  public let tone: Tone
+  public init(text: String, tone: Tone) {
+    self.text = text
+    self.tone = tone
+  }
+}
+
+public struct Badge: Codable, Equatable, Sendable {
+  public let label: String
+  public let tone: Tone
+  public init(label: String, tone: Tone) {
+    self.label = label
+    self.tone = tone
+  }
+}
+
+public struct ProviderCell: Codable, Equatable, Sendable {
+  public let provider: ProviderId
+  public let reading: Reading?
+  public let notice: Notice?
+  public let paused: Notice?
+  public let sessions: [Session]
+
+  public init(
+    provider: ProviderId, reading: Reading?, notice: Notice? = nil, paused: Notice? = nil,
+    sessions: [Session] = []
+  ) {
+    self.provider = provider
+    self.reading = reading
+    self.notice = notice
+    self.paused = paused
+    self.sessions = sessions
+  }
 }
 
 public enum Edge: String, Codable, Sendable {
@@ -217,13 +250,6 @@ public enum ShowMode: String, Codable, Sendable { case always, onHover }
 
 public enum GithubList: String, Codable, CaseIterable, Sendable {
   case mine, reviewRequested, assigned
-  public var title: String {
-    switch self {
-    case .mine: return "Mine"
-    case .reviewRequested: return "Review requested"
-    case .assigned: return "Assigned"
-    }
-  }
 }
 
 public struct PullRequestSettings: Codable, Equatable, Sendable {
@@ -233,7 +259,6 @@ public struct PullRequestSettings: Codable, Equatable, Sendable {
     self.enabled = enabled
     self.lists = lists
   }
-  public var selectedLists: [GithubList] { GithubList.allCases.filter(lists.contains) }
 }
 
 public enum RailCell: Hashable, Sendable {
@@ -267,7 +292,7 @@ public struct Settings: Codable, Equatable, Sendable {
   public init(
     enabled: Bool = false, displayId: String? = nil, edge: Edge = .right,
     size: NotchSize = .standard, show: ShowMode = .always,
-    providers: [ProviderId] = railProviderOrder,
+    providers: [ProviderId] = ProviderId.allCases,
     pullRequests: PullRequestSettings = PullRequestSettings(), popoverStyle: NotchStyle = .glass
   ) {
     self.enabled = enabled
@@ -280,10 +305,29 @@ public struct Settings: Codable, Equatable, Sendable {
     self.popoverStyle = popoverStyle
   }
 
-  public var railProviders: [ProviderId] { railProviderOrder.filter(providers.contains) }
+  private enum CodingKeys: String, CodingKey {
+    case enabled, displayId, edge, size, show, providers, pullRequests, popoverStyle
+  }
 
-  public var railCells: [RailCell] {
-    railProviders.map(RailCell.provider) + (pullRequests.enabled ? [.pullRequests] : [])
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    enabled = try values.decode(Bool.self, forKey: .enabled)
+    displayId = try values.decodeIfPresent(String.self, forKey: .displayId)
+    edge = try values.decode(Edge.self, forKey: .edge)
+    size = try values.decode(NotchSize.self, forKey: .size)
+    show = try values.decode(ShowMode.self, forKey: .show)
+    providers = try values.decode([KnownProvider].self, forKey: .providers).compactMap(\.id)
+    pullRequests = try values.decode(PullRequestSettings.self, forKey: .pullRequests)
+    popoverStyle = try values.decode(NotchStyle.self, forKey: .popoverStyle)
+  }
+
+  public var cellCount: Int { Set(providers).count + (pullRequests.enabled ? 1 : 0) }
+}
+
+private struct KnownProvider: Decodable {
+  let id: ProviderId?
+  init(from decoder: Decoder) throws {
+    id = ProviderId(rawValue: try decoder.singleValueContainer().decode(String.self))
   }
 }
 
@@ -353,6 +397,7 @@ public struct Snapshot: Codable, Equatable, Sendable {
 }
 
 public let maxPullRequests = 25
+public let maxRingSegments = 24
 
 private func decodeLenient<Value: RawRepresentable>(
   _ decoder: Decoder, unknown: Value
@@ -366,31 +411,6 @@ public enum CiState: String, Codable, Sendable {
   public init(from decoder: Decoder) throws {
     self = try decodeLenient(decoder, unknown: .unknown)
   }
-  public var failing: Bool { self == .failure || self == .error }
-}
-
-public enum ReviewDecision: String, Codable, Sendable {
-  case approved = "APPROVED"
-  case changesRequested = "CHANGES_REQUESTED"
-  case reviewRequired = "REVIEW_REQUIRED"
-  case unknown
-  public init(from decoder: Decoder) throws {
-    self = try decodeLenient(decoder, unknown: .unknown)
-  }
-}
-
-public enum MergeKind: String, Codable, Sendable {
-  case conflicts, queued, autoMerge, ready, behind, blocked, unknown
-  public init(from decoder: Decoder) throws {
-    self = try decodeLenient(decoder, unknown: .unknown)
-  }
-}
-
-public enum PrContext: String, Codable, Sendable {
-  case work, personal, unknown
-  public init(from decoder: Decoder) throws {
-    self = try decodeLenient(decoder, unknown: .unknown)
-  }
 }
 
 public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
@@ -400,17 +420,14 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
   public let url: String
   public let repo: String
   public let author: String
-  public let isDraft: Bool
-  public let reviewDecision: ReviewDecision?
   public let ci: CiState
-  public let mergeKind: MergeKind?
   public let updatedAt: String
-  public let context: PrContext?
+  public let badges: [Badge]
+  public let tag: Badge?
 
   public init(
     id: String, number: UInt64, title: String, url: String, repo: String, author: String,
-    isDraft: Bool, reviewDecision: ReviewDecision?, ci: CiState, mergeKind: MergeKind?,
-    updatedAt: String, context: PrContext? = nil
+    ci: CiState, updatedAt: String, badges: [Badge] = [], tag: Badge? = nil
   ) {
     self.id = id
     self.number = number
@@ -418,15 +435,11 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
     self.url = url
     self.repo = repo
     self.author = author
-    self.isDraft = isDraft
-    self.reviewDecision = reviewDecision
     self.ci = ci
-    self.mergeKind = mergeKind
     self.updatedAt = updatedAt
-    self.context = context
+    self.badges = badges
+    self.tag = tag
   }
-
-  public var passingWithConflicts: Bool { ci == .success && mergeKind == .conflicts }
 
   public var link: URL? {
     guard let url = URL(string: url), url.scheme == "https", url.host == "github.com" else {
@@ -438,36 +451,95 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
 
 public struct PullRequestList: Codable, Equatable, Sendable {
   public let id: GithubList
+  public let title: String
   public let total: UInt64
   public let items: [PullRequest]
-  public init(id: GithubList, total: UInt64, items: [PullRequest]) {
+  public init(id: GithubList, title: String, total: UInt64, items: [PullRequest]) {
     self.id = id
+    self.title = title
     self.total = total
     self.items = items
   }
 }
 
-public struct PullRequests: Codable, Equatable, Sendable {
-  public let status: String
-  public let hint: String?
-  public let stale: Bool
+public struct Segment: Codable, Equatable, Sendable {
+  public let ci: CiState
+  public let passingWithConflicts: Bool
+  public init(ci: CiState, passingWithConflicts: Bool) {
+    self.ci = ci
+    self.passingWithConflicts = passingWithConflicts
+  }
+}
+
+public struct Attention: Codable, Equatable, Sendable {
+  public let conflicts: Int
+  public let failing: Int
+  public let changesRequested: Int
+  public let ready: Int
+  public init(conflicts: Int, failing: Int, changesRequested: Int, ready: Int) {
+    self.conflicts = conflicts
+    self.failing = failing
+    self.changesRequested = changesRequested
+    self.ready = ready
+  }
+}
+
+public struct PullRequestReading: Codable, Equatable, Sendable {
+  public let readable: Bool
+  public let count: Int
+  public let segments: [Segment]
+  public let attention: Attention
   public let lists: [PullRequestList]
-  public init(status: String, hint: String?, stale: Bool, lists: [PullRequestList]) {
-    self.status = status
-    self.hint = hint
-    self.stale = stale
+  public init(
+    readable: Bool, count: Int, segments: [Segment], attention: Attention,
+    lists: [PullRequestList]
+  ) {
+    self.readable = readable
+    self.count = count
+    self.segments = segments
+    self.attention = attention
     self.lists = lists
   }
-  public var readable: Bool { status == "ok" || stale }
-  public var rows: [PullRequest] {
-    var seen = Set<String>()
-    return lists.flatMap(\.items).filter { seen.insert($0.id).inserted }
+}
+
+public struct PullRequestCell: Codable, Equatable, Sendable {
+  public let reading: PullRequestReading?
+  public let notice: Notice?
+  public init(reading: PullRequestReading?, notice: Notice? = nil) {
+    self.reading = reading
+    self.notice = notice
   }
-  public var count: Int { rows.count }
-  public var ready: Int { rows.filter { $0.mergeKind == .ready }.count }
-  public var failing: Int { rows.filter(\.ci.failing).count }
-  public var changesRequested: Int {
-    rows.filter { $0.reviewDecision == .changesRequested }.count
+  public var readable: Bool { reading?.readable == true }
+}
+
+public enum Cell: Equatable, Sendable {
+  case provider(ProviderCell)
+  case pullRequests(PullRequestCell)
+
+  public var id: RailCell {
+    switch self {
+    case .provider(let cell): return .provider(cell.provider)
+    case .pullRequests: return .pullRequests
+    }
+  }
+}
+
+private struct CellSlot: Decodable {
+  let cell: Cell?
+  private enum CodingKeys: String, CodingKey { case kind, provider }
+
+  init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    switch try values.decode(String.self, forKey: .kind) {
+    case "provider":
+      let known = ProviderId(rawValue: try values.decode(String.self, forKey: .provider))
+      cell = try known.map { _ in .provider(try ProviderCell(from: decoder)) }
+    case "pullRequests":
+      cell = .pullRequests(try PullRequestCell(from: decoder))
+    default:
+      throw DecodingError.dataCorruptedError(
+        forKey: .kind, in: values, debugDescription: "Unknown cell")
+    }
   }
 }
 
@@ -475,34 +547,31 @@ public struct HostMessage: Decodable, Sendable {
   public let version: Int
   public let sequence: UInt64
   public let snapshot: Snapshot
-  public let providers: [Provider]
-  public let pullRequests: PullRequests?
+  public let cells: [Cell]
   public let actionError: String?
+
+  private enum CodingKeys: String, CodingKey {
+    case version, sequence, snapshot, cells, actionError
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    version = try values.decode(Int.self, forKey: .version)
+    sequence = try values.decode(UInt64.self, forKey: .sequence)
+    snapshot = try values.decode(Snapshot.self, forKey: .snapshot)
+    cells = try values.decode([CellSlot].self, forKey: .cells).compactMap(\.cell)
+    actionError = try values.decodeIfPresent(String.self, forKey: .actionError)
+  }
 
   public static func decode(_ data: Data) throws -> HostMessage {
     guard data.count <= 262_144 else { throw ProtocolError.invalidMessage }
     let value = try JSONDecoder().decode(Self.self, from: data)
-    guard value.version == protocolVersion, value.providers.count <= railProviderOrder.count,
-      Set(value.providers.map(\.provider)).count == value.providers.count,
-      value.providers.allSatisfy({ entry in
-        entry.currentAccount && entry.windows.count <= 100 && entry.referencesAreSent
-          && entry.windows.allSatisfy {
-            (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-          }
-          && (entry.workspaceCredits.map {
-            (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-          } ?? true)
-          && entry.sessions.count <= maxSessions
-          && entry.sessions.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }
-      }),
-      value.pullRequests.map({ pulls in
-        pulls.lists.count <= GithubList.allCases.count
-          && Set(pulls.lists.map(\.id)).count == pulls.lists.count
-          && pulls.lists.allSatisfy { list in
-            list.items.count <= maxPullRequests
-              && list.items.allSatisfy { !$0.id.isEmpty && !$0.title.isEmpty && $0.link != nil }
-          }
-      }) ?? true, value.snapshot.displays.count <= 64,
+    let settings = value.snapshot.settings
+    guard value.version == protocolVersion,
+      Set(value.cells.map(\.id)).count == value.cells.count,
+      !settings.enabled || value.cells.count == settings.cellCount,
+      value.cells.allSatisfy(\.isValid),
+      value.snapshot.displays.count <= 64,
       value.snapshot.displays.allSatisfy({ display in
         !display.id.isEmpty && display.scale > 0 && display.width > 0 && display.height > 0
           && [
@@ -512,6 +581,35 @@ public struct HostMessage: Decodable, Sendable {
       })
     else { throw ProtocolError.invalidMessage }
     return value
+  }
+}
+
+extension Cell {
+  fileprivate var isValid: Bool {
+    switch self {
+    case .provider(let cell):
+      return cell.sessions.count <= maxSessions
+        && cell.sessions.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }
+        && (cell.reading.map { reading in
+          reading.windows.count <= 100 && reading.referencesAreSent
+            && reading.windows.allSatisfy {
+              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
+            }
+            && (reading.workspaceCredits.map {
+              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
+            } ?? true)
+        } ?? true)
+    case .pullRequests(let cell):
+      return cell.reading.map { pulls in
+        pulls.segments.count <= maxRingSegments
+          && pulls.lists.count <= GithubList.allCases.count
+          && Set(pulls.lists.map(\.id)).count == pulls.lists.count
+          && pulls.lists.allSatisfy { list in
+            list.items.count <= maxPullRequests
+              && list.items.allSatisfy { !$0.id.isEmpty && !$0.title.isEmpty && $0.link != nil }
+          }
+      } ?? true
+    }
   }
 }
 
@@ -565,7 +663,7 @@ public func railLayout(size: NotchSize, displayScale: Double, edge: Edge) -> Rai
 public func notchRailFrame(settings: Settings, displays: [Display]) -> CGRect? {
   guard settings.enabled, let display = selectedDisplay(settings: settings, displays: displays)
   else { return nil }
-  let count = settings.railCells.count
+  let count = settings.cellCount
   guard count > 0 else { return nil }
   let layout = railLayout(size: settings.size, displayScale: display.scale, edge: settings.edge)
   let length = layout.length(count: count)

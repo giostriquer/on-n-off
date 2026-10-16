@@ -31,9 +31,11 @@ pub struct ProviderCell {
     pub sessions: Vec<LiveSession>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PrCell {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub reading: Option<PrReading>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub notice: Option<Notice>,
 }
 
@@ -63,15 +65,10 @@ pub struct Badge {
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrReading {
-    pub status: GithubStatus,
-    pub hint: Option<String>,
-    pub stale: bool,
-    #[serde(skip)]
     pub readable: bool,
-    #[serde(skip)]
     pub count: u64,
-    #[serde(skip)]
     pub segments: Vec<PrSegment>,
+    pub attention: PrAttention,
     pub lists: Vec<PrList>,
 }
 
@@ -82,11 +79,19 @@ pub struct PrSegment {
     pub passing_with_conflicts: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrAttention {
+    pub conflicts: u64,
+    pub failing: u64,
+    pub changes_requested: u64,
+    pub ready: u64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrList {
     pub id: GithubList,
-    #[serde(skip)]
     pub title: &'static str,
     pub total: u64,
     pub items: Vec<PrRow>,
@@ -101,18 +106,10 @@ pub struct PrRow {
     pub url: String,
     pub repo: String,
     pub author: String,
-    pub is_draft: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub merge_kind: Option<MergeKind>,
     pub updated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub context: Option<PrContext>,
-    #[serde(skip)]
     pub badges: Vec<Badge>,
-    #[serde(skip)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<Badge>,
 }
 
@@ -208,7 +205,7 @@ fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
 
 fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
     let readable = dto.status == GithubStatus::Ok || dto.stale;
-    let lists: Vec<PrList> = selected
+    let shown: Vec<(GithubList, u64, Vec<&GithubPrDto>)> = selected
         .iter()
         .filter(|_| readable)
         .map(|list| {
@@ -217,69 +214,67 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
                 GithubList::ReviewRequested => &dto.data.review_requested,
                 GithubList::Assigned => &dto.data.assigned,
             };
-            PrList {
-                id: *list,
-                title: list_title(*list),
-                total: source.total,
-                items: source
-                    .items
-                    .iter()
-                    .filter_map(pr_row)
-                    .take(MAX_PULL_REQUESTS)
-                    .collect(),
-            }
+            let items = source
+                .items
+                .iter()
+                .filter(|pr| pr.url.starts_with("https://github.com/"))
+                .take(MAX_PULL_REQUESTS)
+                .collect();
+            (*list, source.total, items)
         })
         .collect();
     let mut seen = std::collections::BTreeSet::new();
-    let rows: Vec<&PrRow> = lists
+    let rows: Vec<&GithubPrDto> = shown
         .iter()
-        .flat_map(|list| &list.items)
-        .filter(|row| seen.insert(row.id.as_str()))
+        .flat_map(|(_, _, items)| items.iter().copied())
+        .filter(|pr| seen.insert(pr.id.as_str()))
         .collect();
-    let count = rows.len() as u64;
-    let segments = if readable {
-        rows.iter()
-            .take(MAX_RING_SEGMENTS)
-            .map(|row| PrSegment {
-                ci: row.ci,
-                passing_with_conflicts: row.ci == CiState::Success
-                    && row.merge_kind == Some(MergeKind::Conflicts),
-            })
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let count = |test: fn(&GithubPrDto) -> bool| rows.iter().filter(|pr| test(pr)).count() as u64;
     PrReading {
-        status: dto.status,
-        hint: dto.hint.clone(),
-        stale: dto.stale,
         readable,
-        count,
-        segments,
-        lists,
+        count: rows.len() as u64,
+        segments: rows
+            .iter()
+            .take(MAX_RING_SEGMENTS)
+            .map(|pr| PrSegment {
+                ci: pr.ci,
+                passing_with_conflicts: pr.ci == CiState::Success
+                    && pr.merge_kind == Some(MergeKind::Conflicts),
+            })
+            .collect(),
+        attention: PrAttention {
+            conflicts: count(|pr| pr.merge_kind == Some(MergeKind::Conflicts)),
+            failing: count(|pr| matches!(pr.ci, CiState::Failure | CiState::Error)),
+            changes_requested: count(|pr| {
+                pr.review_decision == Some(ReviewDecision::ChangesRequested)
+            }),
+            ready: count(|pr| pr.merge_kind == Some(MergeKind::Ready)),
+        },
+        lists: shown
+            .into_iter()
+            .map(|(id, total, items)| PrList {
+                id,
+                title: list_title(id),
+                total,
+                items: items.into_iter().map(pr_row).collect(),
+            })
+            .collect(),
     }
 }
 
-fn pr_row(pr: &GithubPrDto) -> Option<PrRow> {
-    if !pr.url.starts_with("https://github.com/") {
-        return None;
-    }
-    Some(PrRow {
+fn pr_row(pr: &GithubPrDto) -> PrRow {
+    PrRow {
         id: pr.id.clone(),
         number: pr.number,
         title: pr.title.clone(),
         url: pr.url.clone(),
         repo: pr.repo.clone(),
         author: pr.author.clone(),
-        is_draft: pr.is_draft,
-        review_decision: pr.review_decision,
         ci: pr.ci,
-        merge_kind: pr.merge_kind,
         updated_at: pr.updated_at.clone(),
-        context: PrContext::of(pr),
         badges: badges(pr),
         tag: PrContext::of(pr).map(tag),
-    })
+    }
 }
 
 fn list_title(list: GithubList) -> &'static str {

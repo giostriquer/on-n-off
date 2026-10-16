@@ -1,7 +1,5 @@
 use super::*;
-use crate::dto::{
-    CiState, LimitWindowDto, LimitWindowKind, LimitsStatus, MergeKind, Reading, ReviewDecision,
-};
+use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
 use crate::side_notch::sessions::SessionStatus;
 
 fn pr(number: u64) -> serde_json::Value {
@@ -68,9 +66,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
         None,
     );
     let cell = pr_cell(&frame);
-    assert_eq!(cell.status, GithubStatus::Ok);
-    assert_eq!(cell.hint.as_deref(), Some("Read a minute ago."));
-    assert!(cell.stale);
+    assert!(cell.readable);
     assert_eq!(
         cell.lists
             .iter()
@@ -112,12 +108,8 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
             url: "https://github.com/acme/webapp/pull/99".into(),
             repo: "acme/webapp".into(),
             author: "octocat".into(),
-            is_draft: false,
-            review_decision: Some(ReviewDecision::Approved),
             ci: CiState::Success,
-            merge_kind: Some(MergeKind::Ready),
             updated_at: "2026-09-01T10:00:00Z".into(),
-            context: None,
             badges: vec![
                 Badge {
                     label: "Approved",
@@ -148,10 +140,6 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
     let frame = rail(&settings(vec![GithubList::Mine]), unread, Some(&dto), None);
     let rows = &pr_cell(&frame).lists[0].items;
     assert_eq!(
-        rows.iter().map(|row| row.context).collect::<Vec<_>>(),
-        [Some(PrContext::Work), Some(PrContext::Personal), None]
-    );
-    assert_eq!(
         rows.iter().map(|row| row.tag).collect::<Vec<_>>(),
         [
             Some(Badge {
@@ -167,8 +155,8 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
         "the tag both notches draw, in its context's ink"
     );
     assert!(
-        rows.iter().all(|row| row.review_decision.is_none()),
-        "no review decision recorded on these rows"
+        rows.iter().all(|row| row.badges.is_empty()),
+        "no review decision or merge state recorded on these rows"
     );
 }
 
@@ -568,5 +556,39 @@ fn a_provider_that_was_read_is_not_checking_even_without_windows() {
         notices(&provider_cell_of(Some(empty))),
         (None, None),
         "the read answered; it just reported no windows"
+    );
+}
+
+#[test]
+fn what_needs_attention_is_counted_once_per_pull_request() {
+    let mut conflicted = pr(1);
+    conflicted["mergeKind"] = "conflicts".into();
+    let mut failing = pr(2);
+    failing["ci"] = "error".into();
+    failing["reviewDecision"] = "CHANGES_REQUESTED".into();
+    let mut ready = pr(3);
+    ready["mergeKind"] = "ready".into();
+    ready["ci"] = "failure".into();
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": "ok", "stale": false, "scope": [],
+        "mine": {"total": 3, "items": [conflicted.clone(), failing, ready]},
+        "reviewRequested": {"total": 1, "items": [conflicted]},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap();
+    let frame = rail(
+        &settings(vec![GithubList::Mine, GithubList::ReviewRequested]),
+        unread,
+        Some(&dto),
+        None,
+    );
+    assert_eq!(
+        pr_cell(&frame).attention,
+        PrAttention {
+            conflicts: 1,
+            failing: 2,
+            changes_requested: 1,
+            ready: 1,
+        }
     );
 }
