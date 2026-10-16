@@ -134,7 +134,10 @@ struct UsageReadResult {
     usage: Option<SubscriptionUsage>,
 }
 
-fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
+fn normalize(
+    answers: ServeAnswers,
+    login_email: Option<Option<String>>,
+) -> Result<Parsed, ServeFailure> {
     let account = &answers.account;
     match account.state.as_str() {
         "accountLogin" => {}
@@ -162,7 +165,7 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
         .map(str::trim)
         .filter(|label| !label.is_empty())
         .map(str::to_string);
-    let account_dto = account_dto(label);
+    let account_dto = account_dto(login_email.unwrap_or(label));
     let Some(usage) = answers.usage else {
         return Err(ServeFailure::NoUsageYet(account_dto));
     };
@@ -289,7 +292,7 @@ pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
     finish_read(read_current(
         home,
         start,
-        crate::accounts::muse_store::signed_in_login,
+        crate::accounts::muse_store::signed_in,
         |token| mint::fetch(mint::KEY_ENDPOINT, token),
     ))
 }
@@ -297,24 +300,26 @@ pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
 fn read_current(
     home: &Path,
     start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
-    login: impl FnOnce(&Path) -> Option<MuseLogin>,
+    signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
     mint: impl FnOnce(&AccessToken) -> Option<mint::MintResponse>,
 ) -> Result<Parsed, ServeFailure> {
-    login(&crate::paths::muse_config_for(home))
-        .and_then(|login| {
-            mint(&login.token).and_then(|response| mint::normalize(login.email, &response))
-        })
-        .unwrap_or_else(|| read_with(home, start))
+    let login = signed_in(&crate::paths::muse_config_for(home));
+    let minted = login.as_ref().and_then(|login| {
+        let response = mint(login.token.as_ref()?)?;
+        mint::normalize(login.email.clone(), &response)
+    });
+    minted.unwrap_or_else(|| read_with(home, start, login.map(|login| login.email)))
 }
 
 fn read_with(
     home: &Path,
     start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
+    login_email: Option<Option<String>>,
 ) -> Result<Parsed, ServeFailure> {
     let config = crate::paths::muse_config_for(home);
     let data = crate::paths::muse_data_for(home);
     let answers = query_serve(start(home, &config, &data)?, &data).map_err(ServeFailure::Failed)?;
-    normalize(answers)
+    normalize(answers, login_email)
 }
 
 fn start(home: &Path, config: &Path, data: &Path) -> Result<Session, ServeFailure> {

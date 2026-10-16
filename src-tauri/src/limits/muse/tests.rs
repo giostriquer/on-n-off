@@ -50,7 +50,7 @@ fn happy_replies() -> Vec<Value> {
 fn handshake_requests_the_experimental_api_and_reads_usage() {
     let script = Script::new(happy_replies());
     let answers = query(&script).expect("query");
-    let parsed = normalize(answers).expect("normalize");
+    let parsed = normalize(answers, None).expect("normalize");
 
     assert_eq!(
         script.sent()[0],
@@ -111,7 +111,7 @@ fn an_opaque_numeric_tier_is_not_a_plan_name() {
     let mut replies = happy_replies();
     replies[3]["result"]["usage"]["tier"] = json!("27681631238169137");
     let answers = query(&Script::new(replies)).expect("query");
-    let parsed = normalize(answers).expect("normalize");
+    let parsed = normalize(answers, None).expect("normalize");
     assert_eq!(parsed.reading.plan, None);
     assert_eq!(parsed.reading.windows.len(), 2, "windows still read");
 }
@@ -148,7 +148,7 @@ fn signed_out_and_api_key_states_map_to_their_cards() {
             json!({"id": 2, "result": account(state, None)}),
         ]);
         let answers = query(&script).expect("query");
-        let card = finish_read(normalize(answers));
+        let card = finish_read(normalize(answers, None));
         assert_eq!(card.status, status, "{state}");
         assert!(
             card.message.as_deref().is_some_and(|m| m.contains(needle)),
@@ -168,7 +168,7 @@ fn unobserved_usage_keeps_the_account_on_a_failed_card() {
         json!({"id": 4, "result": account("accountLogin", Some("you@example.com"))}),
     ]);
     let answers = query(&script).expect("query");
-    let card = finish_read(normalize(answers));
+    let card = finish_read(normalize(answers, None));
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(
         card.account.as_ref().map(|account| account.id.as_str()),
@@ -231,9 +231,11 @@ fn a_missing_muse_cli_reads_as_not_installed() {
     let missing = root.join("muse");
 
     let error = begin(SERVE, Command::new(&missing)).err();
-    let card = finish_read(read_with(&root, |_, _, _| {
-        begin(SERVE, Command::new(&missing))
-    }));
+    let card = finish_read(read_with(
+        &root,
+        |_, _, _| begin(SERVE, Command::new(&missing)),
+        None,
+    ));
 
     assert_eq!(error, Some(ServeFailure::NotInstalled));
     assert_eq!(card.status, LimitsStatus::SignedOut);
@@ -416,11 +418,11 @@ fn a_muse_read_writes_these_exact_lines() {
     );
 }
 
-fn login(email: Option<&str>) -> MuseLogin {
-    MuseLogin {
-        token: AccessToken::new("device-token"),
+fn signed_in(email: Option<&str>) -> Option<MuseLogin> {
+    Some(MuseLogin {
         email: email.map(str::to_string),
-    }
+        token: Some(AccessToken::new("device-token")),
+    })
 }
 
 fn mint_body() -> Value {
@@ -554,17 +556,6 @@ fn an_inactive_or_unpaid_subscription_reads_unsupported() {
 }
 
 #[test]
-fn a_mint_login_without_an_email_is_the_default_account() {
-    let parsed = mint::normalize(None, &mint_response(mint_body()))
-        .expect("mint reading")
-        .expect("parsed");
-    assert_eq!(
-        parsed.account.expect("account").id,
-        super::super::DEFAULT_ACCOUNT
-    );
-}
-
-#[test]
 fn a_minted_key_in_the_response_is_never_kept() {
     let mut body = mint_body();
     body["api_key"] = json!("LLM|secret-minted-key");
@@ -642,7 +633,7 @@ fn a_mint_reading_answers_without_starting_serve() {
         serve_must_not_run,
         |asked: &Path| {
             assert_eq!(asked, config);
-            Some(login(Some("you@example.com")))
+            signed_in(Some("you@example.com"))
         },
         |token| {
             assert_eq!(token.authorization(), "Bearer device-token");
@@ -670,13 +661,31 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
     );
     assert_eq!(serve_windows(no_login), 2);
 
-    let rejected = read_current(&root, serve_read(&root), |_| Some(login(None)), |_| None);
+    let expired = read_current(
+        &root,
+        serve_read(&root),
+        |_| {
+            Some(MuseLogin {
+                email: Some("you@example.com".to_string()),
+                token: None,
+            })
+        },
+        |_| panic!("no token means no mint"),
+    );
+    assert_eq!(serve_windows(expired), 2);
+
+    let rejected = read_current(
+        &root,
+        serve_read(&root),
+        |_| signed_in(Some("you@example.com")),
+        |_| None,
+    );
     assert_eq!(serve_windows(rejected), 2);
 
     let idle = read_current(
         &root,
         serve_read(&root),
-        |_| Some(login(None)),
+        |_| signed_in(Some("you@example.com")),
         |_| {
             Some(mint_response(
                 json!({"is_subs_active": true, "subs_usage": null}),
@@ -684,4 +693,71 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
         },
     );
     assert_eq!(serve_windows(idle), 2);
+}
+
+#[test]
+fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
+    let root = crate::paths::scratch_dir("muse-identity-fallback");
+    let minted = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(Some("You@Example.com")),
+        |_| Some(mint_response(mint_body())),
+    )
+    .expect("mint reading")
+    .account
+    .expect("account");
+    assert_eq!(minted.id, "email:you@example.com");
+    for serve_label in ["Display Name", "Other@Example.org"] {
+        let mut replies = happy_replies();
+        replies[1]["result"]["museHome"] =
+            json!(crate::paths::muse_data_for(&root).to_string_lossy());
+        replies[2]["result"]["label"] = json!(serve_label);
+        replies[4]["result"]["label"] = json!(serve_label);
+        let fallback = read_current(
+            &root,
+            move |_, _, _| Ok(Script::new(replies).session(SERVE)),
+            |_| signed_in(Some("You@Example.com")),
+            |_| None,
+        )
+        .expect("serve fallback")
+        .account
+        .expect("account");
+        assert_eq!(fallback, minted, "{serve_label}");
+    }
+}
+
+#[test]
+fn a_login_without_an_email_is_the_default_account_on_both_paths() {
+    let root = crate::paths::scratch_dir("muse-identity-default");
+    let minted = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(None),
+        |_| Some(mint_response(mint_body())),
+    )
+    .expect("mint reading")
+    .account
+    .expect("account");
+    let fallback = read_current(&root, serve_read(&root), |_| signed_in(None), |_| None)
+        .expect("serve fallback")
+        .account
+        .expect("account");
+    assert_eq!(minted.id, super::super::DEFAULT_ACCOUNT);
+    assert_eq!(fallback, minted);
+}
+
+#[test]
+fn the_serve_label_names_the_account_only_without_an_auth_login() {
+    let root = crate::paths::scratch_dir("muse-identity-serve-label");
+    let read = read_current(
+        &root,
+        serve_read(&root),
+        |_| None,
+        |_| panic!("no login means no mint"),
+    )
+    .expect("serve read");
+    let account = read.account.expect("account");
+    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.label.as_deref(), Some("You@Example.com"));
 }
