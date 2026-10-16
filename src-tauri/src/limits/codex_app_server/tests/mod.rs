@@ -371,9 +371,19 @@ fn a_login_that_changes_while_the_app_server_starts_is_caught_before_the_request
 
 #[test]
 fn a_reset_credit_is_never_spent_without_a_chatgpt_login() {
-    for account in [
-        json!({"account": null}),
-        json!({"account": {"type": "apiKey"}}),
+    for (account, refusal) in [
+        (
+            json!({"account": null}),
+            "Codex is not signed in, so there is no banked reset to use.",
+        ),
+        (
+            json!({"account": {"type": "apiKey"}}),
+            "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.",
+        ),
+        (
+            json!({"account": {"type": "somethingNew"}}),
+            "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.",
+        ),
     ] {
         let (outcome, script) = spend(
             "acct-1",
@@ -381,7 +391,7 @@ fn a_reset_credit_is_never_spent_without_a_chatgpt_login() {
             consume_replies(account, None),
         );
 
-        assert!(outcome.is_err(), "{outcome:?}");
+        assert_eq!(outcome, Err(refusal.to_string()));
         assert!(consume_requests(&script.unwrap()).is_empty());
     }
 }
