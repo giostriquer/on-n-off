@@ -345,7 +345,7 @@ impl NotchProvider {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 impl NotchProvider {
     pub fn headline_window_id(&self) -> Option<&str> {
         self.headline_window_id.as_deref()

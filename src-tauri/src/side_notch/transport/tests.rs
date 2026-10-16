@@ -1,4 +1,5 @@
 use super::*;
+use crate::side_notch::host::Lifetime as _;
 
 #[test]
 fn shutdown_reaps_an_unresponsive_child_without_the_supervisor() {

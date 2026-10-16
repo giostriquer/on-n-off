@@ -1,9 +1,6 @@
 use super::*;
-use crate::dto::ProviderLimitsDto;
-use crate::side_notch::model::{
-    Display, Edge, NotchPullRequests, NotchSettings, NotchSize, NotchStyle, ShowMode,
-};
-use crate::side_notch::sessions::SessionStatus;
+use crate::side_notch::model::{Edge, NotchPullRequests, NotchSize, NotchStyle};
+use crate::side_notch::protocol::PROTOCOL_VERSION;
 
 fn pinned_snapshot() -> NotchSnapshot {
     NotchSnapshot {
@@ -171,45 +168,20 @@ const PINNED_FRAME: &str = concat!(
 );
 
 fn sent() -> String {
-    let snapshot = pinned_snapshot();
-    let providers: [Poll<Option<NativeProvider>>; PROVIDER_COUNT] = RAIL_ORDER.map(|agent| {
-        let mut poll = Poll::new(None);
-        if snapshot.settings.rail_providers().contains(&agent) {
-            poll.finish(
-                NotchProvider::current(pinned_limits(agent)).map(NativeProvider::from),
-                Instant::now(),
-                0,
-            );
-        }
-        poll
-    });
-    let sessions = read_pinned_sessions(&snapshot.settings.rail_providers());
-    let pulls = pinned_pull_requests();
-    let action_error = Some(PINNED_ACTION_ERROR.to_string());
-    let message = Message {
-        version: PROTOCOL_VERSION,
-        sequence: 1,
-        snapshot: &snapshot,
-        providers: message_providers(&snapshot, &providers, &sessions),
-        pull_requests: snapshot.settings.pull_requests.enabled.then(|| {
-            native_pull_requests(&pulls, &snapshot.settings.pull_requests.selected_lists())
-        }),
-        action_error: &action_error,
-    };
-    String::from_utf8(serde_json::to_vec(&message).unwrap()).unwrap()
-}
-
-fn read_pinned_sessions(selected: &[AgentId]) -> Vec<Vec<LiveSession>> {
-    RAIL_ORDER
-        .into_iter()
-        .map(|agent| {
-            if selected.contains(&agent) {
-                pinned_sessions(agent)
-            } else {
-                Vec::new()
-            }
-        })
-        .collect()
+    let app = FakeApp::default();
+    for agent in RAIL_ORDER {
+        app.world().limits.insert(agent, pinned_limits(agent));
+        app.world().sessions.insert(agent, pinned_sessions(agent));
+    }
+    app.world().pull_requests = Some(pinned_pull_requests());
+    app.world().open_error = Some(PINNED_ACTION_ERROR.into());
+    let mut rig = Rig::new(app, pinned_snapshot());
+    rig.tick(Duration::ZERO);
+    rig.act(Inbound::Action(Action::OpenLimits));
+    let wire = rig.wire.wire();
+    let snapshot = wire.snapshots.last().expect("a frame was sent");
+    let frame = wire.frames.last().expect("a frame was sent");
+    String::from_utf8(crate::side_notch::protocol::encode(1, snapshot, frame).unwrap()).unwrap()
 }
 
 #[test]

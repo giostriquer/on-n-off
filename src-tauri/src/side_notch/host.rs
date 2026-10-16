@@ -11,12 +11,12 @@ use std::{
     sync::mpsc,
     time::{Duration, Instant},
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::{
     sync::{Arc, Condvar, Mutex},
     thread,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use tauri::{AppHandle, Emitter, Manager};
 
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
@@ -67,10 +67,12 @@ pub struct PrRowData {
     pub title: String,
     pub url: String,
     pub repo: String,
+    pub author: String,
     pub is_draft: bool,
     pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
     pub merge_kind: Option<MergeKind>,
+    pub updated_at: String,
     pub context: Option<PrContext>,
 }
 
@@ -80,25 +82,34 @@ pub(super) enum Action {
     OpenLimits,
     OpenPullRequests,
     SetShow(ShowMode),
+    #[cfg(any(target_os = "macos", test))]
+    ScreensChanged,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum Inbound {
     Action(Action),
+    #[cfg(any(target_os = "windows", test))]
     Handled(Result<(), String>),
+    #[cfg(any(target_os = "macos", test))]
+    Confirmed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Link {
     Opened,
     Open,
+    #[cfg(any(target_os = "macos", test))]
+    Closed,
 }
 
 pub(super) trait Transport {
     fn connect(&mut self) -> Result<Link, String>;
     fn receive(&mut self, inbound: &mut Vec<Inbound>) -> Result<(), String>;
-    fn send(&mut self, frame: RailData) -> Result<(), String>;
+    fn ready(&self) -> bool;
+    fn send(&mut self, snapshot: &NotchSnapshot, frame: RailData) -> Result<(), String>;
     fn close(&mut self);
+    fn settings_changed(&mut self);
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -118,6 +129,8 @@ pub(super) trait App: Clone + Send + 'static {
     fn spawn(&self, read: impl FnOnce() + Send + 'static);
     fn open(&self, page: Page) -> Result<(), String>;
     fn settings_revision(&self) -> u64;
+    #[cfg(any(target_os = "macos", test))]
+    fn reread(&self) -> NotchSnapshot;
     fn save(&self, settings: NotchSettings) -> Result<NotchSnapshot, String>;
     fn publish(&self, status: &NotchSnapshot);
 }
@@ -263,6 +276,7 @@ impl<T: Transport, A: App> Host<T, A> {
     pub fn desire(&mut self, next: NotchSnapshot) {
         if next.revision == self.app.settings_revision() {
             self.snapshot = next;
+            self.transport.settings_changed();
             self.delivery.mark_dirty();
         }
     }
@@ -316,6 +330,8 @@ impl<T: Transport, A: App> Host<T, A> {
                 self.action_error = None;
             }
             Ok(Link::Open) => {}
+            #[cfg(any(target_os = "macos", test))]
+            Ok(Link::Closed) => return false,
             Err(error) => {
                 self.runtime_error = Some(error);
                 return false;
@@ -365,19 +381,33 @@ impl<T: Transport, A: App> Host<T, A> {
                 }
                 self.delivery.mark_dirty();
             }
+            #[cfg(any(target_os = "macos", test))]
+            Inbound::Action(Action::ScreensChanged) => {
+                let next = self.app.reread();
+                if next.revision == self.app.settings_revision() {
+                    self.snapshot = next;
+                    self.delivery.mark_dirty();
+                }
+                for poll in &mut self.providers {
+                    poll.last_read = None;
+                }
+            }
+            #[cfg(any(target_os = "windows", test))]
             Inbound::Handled(result) => {
                 self.action_error = result.err();
                 self.delivery.mark_dirty();
             }
+            #[cfg(any(target_os = "macos", test))]
+            Inbound::Confirmed => self.runtime_error = None,
         }
     }
 
     fn deliver(&mut self, now: Instant) -> Result<(), String> {
-        if !self.delivery.due(now) {
+        if !self.delivery.due(now) || !self.transport.ready() {
             return Ok(());
         }
         let frame = self.rail();
-        self.transport.send(frame)?;
+        self.transport.send(&self.snapshot, frame)?;
         self.delivery.sent(now);
         Ok(())
     }
@@ -537,21 +567,23 @@ fn pr_row(pr: &GithubPrDto) -> Option<PrRowData> {
         title: pr.title.clone(),
         url: pr.url.clone(),
         repo: pr.repo.clone(),
+        author: pr.author.clone(),
         is_draft: pr.is_draft,
         review_decision: pr.review_decision,
         ci: pr.ci,
         merge_kind: pr.merge_kind,
+        updated_at: pr.updated_at.clone(),
         context: PrContext::of(pr),
     })
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub(super) trait Lifetime: Send + Sync {
     fn stopped(&self) -> bool;
     fn shutdown(&self);
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct Controller {
     desired: Mutex<Option<NotchSnapshot>>,
     wake: Condvar,
@@ -559,7 +591,7 @@ struct Controller {
     lifetime: Arc<dyn Lifetime>,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl Controller {
     fn wait(&self, timeout: Option<Duration>) {
         let desired = self
@@ -580,8 +612,11 @@ impl Controller {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn setup(app: &mut tauri::App) {
+    #[cfg(target_os = "macos")]
+    let (transport, lifetime) = super::transport::Pipe::new();
+    #[cfg(target_os = "windows")]
     let (transport, lifetime) = super::win_transport::Overlay::new(app.handle().clone());
     let controller = Arc::new(Controller {
         desired: Mutex::new(None),
@@ -597,14 +632,14 @@ pub fn setup(app: &mut tauri::App) {
         .expect("spawn the side notch supervisor");
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn shutdown(app: &AppHandle) {
     let controller = app.state::<Arc<Controller>>();
     controller.lifetime.shutdown();
     controller.wake.notify_all();
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn sync(app: &AppHandle, snapshot: NotchSnapshot) -> Result<(), String> {
     if snapshot.revision != super::config::revision() {
         return Ok(());
@@ -618,7 +653,7 @@ pub fn sync(app: &AppHandle, snapshot: NotchSnapshot) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
     if let Ok(error) = app.state::<Arc<Controller>>().error.lock() {
         if snapshot.error.is_none() {
@@ -627,7 +662,7 @@ pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport) {
     let mut host = Host::new(app, transport, initial_snapshot(), Instant::now());
     while !controller.lifetime.stopped() {
@@ -644,7 +679,7 @@ fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport)
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn initial_snapshot() -> NotchSnapshot {
     let revision = super::config::revision();
     match super::config::read() {
@@ -668,14 +703,14 @@ fn initial_snapshot() -> NotchSnapshot {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Changed {
     snapshot: NotchSnapshot,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 impl App for AppHandle {
     fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
         crate::limits_refresh::read_limits_revisioned(agent, force)
@@ -722,6 +757,11 @@ impl App for AppHandle {
 
     fn settings_revision(&self) -> u64 {
         super::config::revision()
+    }
+
+    #[cfg(any(target_os = "macos", test))]
+    fn reread(&self) -> NotchSnapshot {
+        super::read()
     }
 
     fn save(&self, settings: NotchSettings) -> Result<NotchSnapshot, String> {

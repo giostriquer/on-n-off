@@ -173,6 +173,7 @@ fn visual_dump() {
                     title: format!("Fix the flaky resize test number {n} on Windows builds"),
                     url: format!("https://github.com/octo/tools/pull/{n}"),
                     repo: "octo/tools".into(),
+                    author: "octocat".into(),
                     is_draft: n == 2,
                     review_decision: if n % 2 == 0 {
                         Some(ReviewDecision::Approved)
@@ -185,6 +186,7 @@ fn visual_dump() {
                         CiState::Success
                     },
                     merge_kind: if n == 1 { Some(MergeKind::Ready) } else { None },
+                    updated_at: "2026-09-01T10:00:00Z".into(),
                     context: Some(if n == 3 {
                         PrContext::Personal
                     } else {

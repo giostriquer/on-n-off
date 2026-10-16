@@ -1,6 +1,7 @@
 #![allow(unsafe_code)]
 
 use super::host::{self, Action, Inbound, Link, RailData, Transport};
+use super::model::NotchSnapshot;
 use super::win_window::{WinAction, WindowMsg};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use tauri::AppHandle;
@@ -118,7 +119,11 @@ impl Transport for Overlay {
         Ok(())
     }
 
-    fn send(&mut self, frame: RailData) -> Result<(), String> {
+    fn ready(&self) -> bool {
+        true
+    }
+
+    fn send(&mut self, _: &NotchSnapshot, frame: RailData) -> Result<(), String> {
         let sent = self
             .window
             .as_ref()
@@ -136,6 +141,8 @@ impl Transport for Overlay {
         }
         self.lifetime.state().window = None;
     }
+
+    fn settings_changed(&mut self) {}
 }
 
 fn copy_review_request(title: &str, url: &str) -> Result<(), String> {

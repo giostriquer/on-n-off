@@ -143,10 +143,12 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
             title: "Fix #99".into(),
             url: "https://github.com/acme/webapp/pull/99".into(),
             repo: "acme/webapp".into(),
+            author: "octocat".into(),
             is_draft: false,
             review_decision: Some(ReviewDecision::Approved),
             ci: CiState::Success,
             merge_kind: Some(MergeKind::Ready),
+            updated_at: "2026-09-01T10:00:00Z".into(),
             context: None,
         }]
     );

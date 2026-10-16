@@ -219,3 +219,94 @@ fn a_limits_read_that_changed_nothing_redraws_nothing() {
     assert_eq!(rig.frames(), sent + 1, "a new reading redraws");
     assert_eq!(providers(&rig.last_frame()), [(AgentId::Claude, 20.0)]);
 }
+
+#[test]
+fn a_screen_change_rereads_the_settings_and_reads_limits_again() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+    let mut moved = snapshot();
+    moved.displays[0].x = 1512.0;
+    app.world().reread = Some(moved.clone());
+
+    rig.act(Inbound::Action(Action::ScreensChanged));
+    assert_eq!(rig.wire.wire().snapshots.last(), Some(&moved));
+    assert_eq!(app.limits_asked(), READ_ALL);
+
+    let sent = rig.frames();
+    app.world().reread = Some(NotchSnapshot {
+        revision: 9,
+        ..snapshot()
+    });
+    rig.tick(Duration::from_millis(100));
+    rig.act(Inbound::Action(Action::ScreensChanged));
+    assert_eq!(
+        rig.frames(),
+        sent,
+        "settings saved since then are not drawn"
+    );
+    assert_eq!(
+        app.limits_asked(),
+        READ_ALL,
+        "the limits are read for the new screens all the same"
+    );
+}
+
+#[test]
+fn the_error_stays_until_the_surface_confirms_a_frame() {
+    let mut rig = Rig::started(FakeApp::default());
+    rig.wire.wire().fail_receive = Some(STOPPED.into());
+    rig.tick(Duration::from_millis(100));
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.wire.wire().opened, 2);
+    assert_eq!(rig.host.runtime_error().as_deref(), Some(STOPPED));
+
+    rig.act(Inbound::Confirmed);
+    assert_eq!(rig.host.runtime_error(), None);
+    assert_eq!(rig.published().pop().unwrap().error, None);
+}
+
+#[test]
+fn while_the_surface_waits_to_retry_nothing_is_read_or_sent() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::new(app.clone(), snapshot());
+    rig.wire.wire().waiting = true;
+    rig.tick(Duration::ZERO);
+    rig.tick(Duration::from_secs(10 * 60));
+    assert_eq!(rig.frames(), 0);
+    assert!(app.take_asked().is_empty());
+
+    rig.wire.wire().waiting = false;
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.frames(), 1);
+}
+
+#[test]
+fn a_surface_that_is_not_ready_gets_the_frame_once_it_is_and_reads_go_on() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+    let sent = rig.frames();
+
+    rig.wire.wire().unready = true;
+    rig.act(Inbound::Action(Action::OpenLimits));
+    rig.tick(Duration::from_secs(5 * 60));
+    assert_eq!(rig.frames(), sent);
+    assert_eq!(app.limits_asked(), READ_ALL);
+
+    rig.wire.wire().unready = false;
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.frames(), sent + 1);
+}
+
+#[test]
+fn only_settings_that_are_taken_tell_the_surface() {
+    let mut rig = Rig::started(FakeApp::default());
+    rig.host.desire(NotchSnapshot {
+        revision: 4,
+        ..snapshot()
+    });
+    assert_eq!(rig.wire.wire().settings_changed, 0);
+    rig.host.desire(snapshot());
+    assert_eq!(rig.wire.wire().settings_changed, 1);
+}

@@ -8,8 +8,15 @@ use std::sync::{Arc, Mutex, MutexGuard};
 mod frame;
 mod link;
 mod polls;
+mod wire;
 
 type Job = Box<dyn FnOnce() + Send>;
+
+const READ_ALL: [Asked; 3] = [
+    Asked::Limits(AgentId::Claude, false),
+    Asked::Limits(AgentId::Codex, false),
+    Asked::Limits(AgentId::Muse, false),
+];
 
 #[derive(Clone, Debug, PartialEq)]
 enum Asked {
@@ -33,6 +40,7 @@ struct World {
     asked: Vec<Asked>,
     open_error: Option<String>,
     save_error: Option<String>,
+    reread: Option<NotchSnapshot>,
     saved: Vec<NotchSettings>,
     published: Vec<NotchSnapshot>,
     settings_revision: u64,
@@ -135,6 +143,10 @@ impl App for FakeApp {
         self.world().settings_revision
     }
 
+    fn reread(&self) -> NotchSnapshot {
+        self.world().reread.clone().unwrap_or_else(snapshot)
+    }
+
     fn save(&self, settings: NotchSettings) -> Result<NotchSnapshot, String> {
         let mut world = self.world();
         world.saved.push(settings.clone());
@@ -159,7 +171,11 @@ struct Wire {
     up: bool,
     opened: usize,
     closed: usize,
+    waiting: bool,
+    unready: bool,
+    settings_changed: usize,
     frames: Vec<RailData>,
+    snapshots: Vec<NotchSnapshot>,
     inbound: Vec<Inbound>,
     refuse: Option<String>,
     fail_receive: Option<String>,
@@ -181,6 +197,9 @@ impl Transport for FakeTransport {
         if wire.up {
             return Ok(Link::Open);
         }
+        if wire.waiting {
+            return Ok(Link::Closed);
+        }
         if let Some(error) = wire.refuse.clone() {
             return Err(error);
         }
@@ -199,12 +218,17 @@ impl Transport for FakeTransport {
         Ok(())
     }
 
-    fn send(&mut self, frame: RailData) -> Result<(), String> {
+    fn ready(&self) -> bool {
+        !self.wire().unready
+    }
+
+    fn send(&mut self, snapshot: &NotchSnapshot, frame: RailData) -> Result<(), String> {
         let mut wire = self.wire();
         if let Some(error) = wire.fail_send.take() {
             wire.up = false;
             return Err(error);
         }
+        wire.snapshots.push(snapshot.clone());
         wire.frames.push(frame);
         Ok(())
     }
@@ -215,6 +239,10 @@ impl Transport for FakeTransport {
             wire.closed += 1;
         }
         wire.up = false;
+    }
+
+    fn settings_changed(&mut self) {
+        self.wire().settings_changed += 1;
     }
 }
 

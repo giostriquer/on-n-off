@@ -1,11 +1,5 @@
 use super::*;
 
-const READ_ALL: [Asked; 3] = [
-    Asked::Limits(AgentId::Claude, false),
-    Asked::Limits(AgentId::Codex, false),
-    Asked::Limits(AgentId::Muse, false),
-];
-
 #[test]
 fn limits_are_read_again_on_the_apps_interval_and_not_before() {
     let app = app_with(&[(AgentId::Claude, 10.0)]);
