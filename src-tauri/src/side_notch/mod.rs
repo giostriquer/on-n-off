@@ -119,7 +119,7 @@ pub fn save(settings: NotchSettings) -> Result<NotchSnapshot, String> {
             if settings.providers.is_empty() {
                 return Err("Choose at least one provider for the notch.".into());
             }
-            if model::layout(&settings, &displays).is_none() {
+            if model::layout(&settings, &displays, model::frame::cell_count(&settings)).is_none() {
                 return Err(
                     "Select a connected display with mirroring turned off and room for the notch."
                         .into(),

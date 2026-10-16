@@ -177,11 +177,6 @@ impl NotchSettings {
             .filter(|agent| self.providers.contains(agent))
             .collect()
     }
-
-    #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    pub fn cell_count(&self) -> usize {
-        self.rail_providers().len() + usize::from(self.pull_requests.enabled)
-    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -300,19 +295,15 @@ pub fn selected_display<'a>(
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
-    if !settings.enabled {
-        return None;
-    }
-    let count = settings.cell_count();
-    if count == 0 {
+pub fn layout(settings: &NotchSettings, displays: &[Display], cells: usize) -> Option<Layout> {
+    if !settings.enabled || cells == 0 {
         return None;
     }
     let display = selected_display(settings, displays)?;
     let metrics = rail_metrics(settings.size, display.scale, settings.edge);
     let vertical = settings.edge.is_vertical();
     let thickness = metrics.thickness;
-    let length = metrics.length(count);
+    let length = metrics.length(cells);
     let aligned = |value: f64| pixel_aligned(value, display.scale);
     if vertical {
         if length > display.work_height {
@@ -369,8 +360,8 @@ pub fn rail_cell_frames(edge: Edge, metrics: &RailMetrics, count: usize) -> Vec<
 }
 
 #[cfg(any(target_os = "windows", test))]
-pub fn pill_frame(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
-    let rail = layout(settings, displays)?;
+pub fn pill_frame(settings: &NotchSettings, displays: &[Display], cells: usize) -> Option<Layout> {
+    let rail = layout(settings, displays, cells)?;
     let display = selected_display(settings, displays)?;
     let value = |points: f64| pixel_aligned(points * settings.size.scale(), display.scale);
     let thickness = value(6.0);

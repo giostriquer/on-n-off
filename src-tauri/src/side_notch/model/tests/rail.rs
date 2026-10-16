@@ -115,17 +115,17 @@ fn every_rail_frame_and_pill_matches_the_shared_cases() {
             .collect();
         let current = NotchSettings {
             enabled: case.enabled.unwrap_or(true),
-            providers: RAIL_ORDER[..case.cells.unwrap_or(RAIL_ORDER.len())].to_vec(),
             size: case.size,
             ..settings("main", case.edge)
         };
+        let cells = case.cells.unwrap_or(RAIL_ORDER.len());
         assert_pixels(
-            pixels(layout(&current, &displays), case.scale),
+            pixels(layout(&current, &displays, cells), case.scale),
             case.rail,
             &format!("rail case {index}"),
         );
         assert_pixels(
-            pixels(pill_frame(&current, &displays), case.scale),
+            pixels(pill_frame(&current, &displays, cells), case.scale),
             case.pill,
             &format!("pill case {index}"),
         );

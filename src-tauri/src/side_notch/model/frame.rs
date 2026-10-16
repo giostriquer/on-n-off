@@ -125,25 +125,39 @@ pub fn rail(
         .into_iter()
         .map(|(provider, reading, sessions)| (provider, (reading, sessions)))
         .collect();
-    let mut cells: Vec<CellData> = settings
-        .rail_providers()
-        .into_iter()
-        .map(|provider| {
-            let (reading, sessions) = reads.remove(&provider).unwrap_or_default();
-            CellData::Provider(provider_cell(provider, reading, sessions))
+    let cells = slots(settings)
+        .map(|slot| match slot {
+            Slot::Provider(provider) => {
+                let (reading, sessions) = reads.remove(&provider).unwrap_or_default();
+                CellData::Provider(provider_cell(provider, reading, sessions))
+            }
+            Slot::PullRequests => {
+                CellData::PullRequests(pr_cell(pulls, &settings.pull_requests.selected_lists()))
+            }
         })
         .collect();
-    if settings.pull_requests.enabled {
-        cells.push(CellData::PullRequests(pr_cell(
-            pulls,
-            &settings.pull_requests.selected_lists(),
-        )));
-    }
     RailData {
         settings: settings.clone(),
         cells,
         action_error,
     }
+}
+
+pub fn cell_count(settings: &NotchSettings) -> usize {
+    slots(settings).count()
+}
+
+enum Slot {
+    Provider(AgentId),
+    PullRequests,
+}
+
+fn slots(settings: &NotchSettings) -> impl Iterator<Item = Slot> {
+    settings
+        .rail_providers()
+        .into_iter()
+        .map(Slot::Provider)
+        .chain(settings.pull_requests.enabled.then_some(Slot::PullRequests))
 }
 
 fn provider_cell(

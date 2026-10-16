@@ -64,11 +64,15 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let defaults = NotchSettings::default();
     assert!(defaults.pull_requests.enabled);
     assert_eq!(defaults.pull_requests.lists, [GithubList::Mine]);
-    assert_eq!(defaults.cell_count(), 4, "three providers plus the cell");
+    assert_eq!(
+        frame::cell_count(&defaults),
+        4,
+        "three providers plus the cell"
+    );
     let legacy: NotchSettings =
         serde_json::from_str(r#"{"enabled":true,"displayId":"main","edge":"right"}"#).unwrap();
     assert_eq!(
-        legacy.cell_count(),
+        frame::cell_count(&legacy),
         6,
         "older documents gain the cell and keep their providers"
     );
@@ -83,7 +87,9 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     );
     let displays = [display("main", 0.0, 1.0)];
     assert_eq!(
-        layout(&current, &displays).unwrap().height,
+        layout(&current, &displays, frame::cell_count(&current))
+            .unwrap()
+            .height,
         rail_metrics(NotchSize::Standard, 1.0, Edge::Right).length(6)
     );
     let json = serde_json::to_value(&current).unwrap();

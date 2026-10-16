@@ -252,15 +252,6 @@ public enum GithubList: String, Codable, CaseIterable, Sendable {
   case mine, reviewRequested, assigned
 }
 
-public struct PullRequestSettings: Codable, Equatable, Sendable {
-  public var enabled: Bool
-  public var lists: [GithubList]
-  public init(enabled: Bool = true, lists: [GithubList] = [.mine]) {
-    self.enabled = enabled
-    self.lists = lists
-  }
-}
-
 public enum RailCell: Hashable, Sendable {
   case provider(ProviderId)
   case pullRequests
@@ -286,48 +277,17 @@ public struct Settings: Codable, Equatable, Sendable {
   public var edge: Edge
   public var size: NotchSize
   public var show: ShowMode
-  public var providers: [ProviderId]
-  public var pullRequests: PullRequestSettings
   public var popoverStyle: NotchStyle
   public init(
     enabled: Bool = false, displayId: String? = nil, edge: Edge = .right,
-    size: NotchSize = .standard, show: ShowMode = .always,
-    providers: [ProviderId] = ProviderId.allCases,
-    pullRequests: PullRequestSettings = PullRequestSettings(), popoverStyle: NotchStyle = .glass
+    size: NotchSize = .standard, show: ShowMode = .always, popoverStyle: NotchStyle = .glass
   ) {
     self.enabled = enabled
     self.displayId = displayId
     self.edge = edge
     self.size = size
     self.show = show
-    self.providers = providers
-    self.pullRequests = pullRequests
     self.popoverStyle = popoverStyle
-  }
-
-  private enum CodingKeys: String, CodingKey {
-    case enabled, displayId, edge, size, show, providers, pullRequests, popoverStyle
-  }
-
-  public init(from decoder: Decoder) throws {
-    let values = try decoder.container(keyedBy: CodingKeys.self)
-    enabled = try values.decode(Bool.self, forKey: .enabled)
-    displayId = try values.decodeIfPresent(String.self, forKey: .displayId)
-    edge = try values.decode(Edge.self, forKey: .edge)
-    size = try values.decode(NotchSize.self, forKey: .size)
-    show = try values.decode(ShowMode.self, forKey: .show)
-    providers = try values.decode([KnownProvider].self, forKey: .providers).compactMap(\.id)
-    pullRequests = try values.decode(PullRequestSettings.self, forKey: .pullRequests)
-    popoverStyle = try values.decode(NotchStyle.self, forKey: .popoverStyle)
-  }
-
-  public var cellCount: Int { Set(providers).count + (pullRequests.enabled ? 1 : 0) }
-}
-
-private struct KnownProvider: Decodable {
-  let id: ProviderId?
-  init(from decoder: Decoder) throws {
-    id = ProviderId(rawValue: try decoder.singleValueContainer().decode(String.self))
   }
 }
 
@@ -568,10 +528,8 @@ public struct HostMessage: Decodable, Sendable {
   public static func decode(_ data: Data) throws -> HostMessage {
     guard data.count <= 262_144 else { throw ProtocolError.invalidMessage }
     let value = try JSONDecoder().decode(Self.self, from: data)
-    let settings = value.snapshot.settings
     guard value.version == protocolVersion,
       Set(value.cells.map(\.id)).count == value.cells.count,
-      !settings.enabled || value.cells.count == settings.cellCount,
       value.cells.allSatisfy(\.isValid),
       value.snapshot.displays.count <= 64,
       value.snapshot.displays.allSatisfy({ display in
@@ -662,11 +620,10 @@ public func railLayout(size: NotchSize, displayScale: Double, edge: Edge) -> Rai
     glyphSize: value(24), labelHeight: labelHeight)
 }
 
-public func notchRailFrame(settings: Settings, displays: [Display]) -> CGRect? {
-  guard settings.enabled, let display = selectedDisplay(settings: settings, displays: displays)
+public func notchRailFrame(settings: Settings, displays: [Display], count: Int) -> CGRect? {
+  guard settings.enabled, count > 0,
+    let display = selectedDisplay(settings: settings, displays: displays)
   else { return nil }
-  let count = settings.cellCount
-  guard count > 0 else { return nil }
   let layout = railLayout(size: settings.size, displayScale: display.scale, edge: settings.edge)
   let length = layout.length(count: count)
   let thickness = layout.thickness
@@ -683,8 +640,8 @@ public func notchRailFrame(settings: Settings, displays: [Display]) -> CGRect? {
   return CGRect(x: aligned(x), y: aligned(y), width: length, height: thickness)
 }
 
-public func notchPillFrame(settings: Settings, displays: [Display]) -> CGRect? {
-  guard let rail = notchRailFrame(settings: settings, displays: displays),
+public func notchPillFrame(settings: Settings, displays: [Display], count: Int) -> CGRect? {
+  guard let rail = notchRailFrame(settings: settings, displays: displays, count: count),
     let display = selectedDisplay(settings: settings, displays: displays)
   else { return nil }
   func value(_ points: Double) -> Double {

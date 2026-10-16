@@ -62,7 +62,7 @@ struct RailModel {
 
   init?(settings: NotchCore.Settings, cells: [Cell], displays: [Display]) {
     guard let display = selectedDisplay(settings: settings, displays: displays),
-      let frame = notchRailFrame(settings: settings, displays: displays)
+      let frame = notchRailFrame(settings: settings, displays: displays, count: cells.count)
     else { return nil }
     self.settings = settings
     cellIds = cells.map(\.id)

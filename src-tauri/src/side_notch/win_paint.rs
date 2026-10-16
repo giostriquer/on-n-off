@@ -275,7 +275,7 @@ pub fn plan(
     data: &RailData,
     hover: Hover,
 ) -> Option<Plan> {
-    let rail = R::from(layout(settings, displays)?);
+    let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
     let edge = settings.edge;
     let display_scale = display.scale;
@@ -369,7 +369,7 @@ pub fn plan(
         None => rail,
     };
     let pill = if collapsed {
-        pill_frame(settings, displays).map(R::from)
+        pill_frame(settings, displays, data.cells.len()).map(R::from)
     } else {
         None
     };

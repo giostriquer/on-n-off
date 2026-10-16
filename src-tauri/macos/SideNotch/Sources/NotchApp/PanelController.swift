@@ -446,7 +446,9 @@ final class PanelController: NSObject, NSWindowDelegate {
   }
 
   private func updateFrames() {
-    guard let rail = rail, let pill = notchPillFrame(settings: rail.settings, displays: [rail.display])
+    guard let rail = rail,
+      let pill = notchPillFrame(
+        settings: rail.settings, displays: [rail.display], count: rail.cellIds.count)
     else {
       pinned = nil
       hovered = nil

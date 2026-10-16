@@ -117,7 +117,10 @@ fn a_frame_carries_the_settings_and_the_action_error() {
     let frame = rig.last_frame();
     assert_eq!(frame.settings, snapshot().settings);
     assert_eq!(frame.action_error.as_deref(), Some("boom"));
-    assert_eq!(frame.cells.len(), snapshot().settings.cell_count());
+    assert_eq!(
+        frame.cells.len(),
+        crate::side_notch::model::frame::cell_count(&snapshot().settings)
+    );
     assert!(
         frame.cells.iter().all(|cell| match cell {
             CellData::Provider(cell) => cell.reading.is_none(),

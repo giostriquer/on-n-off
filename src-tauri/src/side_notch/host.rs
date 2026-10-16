@@ -335,7 +335,12 @@ impl<T: Transport, A: App> Host<T, A> {
 
     fn visible(&self) -> bool {
         self.snapshot.error.is_none()
-            && layout(&self.snapshot.settings, &self.snapshot.displays).is_some()
+            && layout(
+                &self.snapshot.settings,
+                &self.snapshot.displays,
+                frame::cell_count(&self.snapshot.settings),
+            )
+            .is_some()
     }
 
     fn start_reads(&mut self, now: Instant) {

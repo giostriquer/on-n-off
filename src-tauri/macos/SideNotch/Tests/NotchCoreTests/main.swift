@@ -19,13 +19,8 @@ final class NotchTests {
     Reading(
       status: status, message: nil, windows: windows, headlineWindowId: headline, innerRing: inner)
   }
-  func rail(
-    _ displayId: String, edge: Edge = .right, size: NotchSize = .standard,
-    providers: [ProviderId] = ProviderId.allCases, pullRequests: Bool = false
-  ) -> Settings {
-    Settings(
-      enabled: true, displayId: displayId, edge: edge, size: size, providers: providers,
-      pullRequests: PullRequestSettings(enabled: pullRequests, lists: [.mine]))
+  func rail(_ displayId: String, edge: Edge = .right, size: NotchSize = .standard) -> Settings {
+    Settings(enabled: true, displayId: displayId, edge: edge, size: size)
   }
   func display(_ id: String, x: Double = 0, mirrored: Bool = false, scale: Double = 2) -> Display
   {
@@ -163,14 +158,6 @@ final class NotchTests {
     expectEqual(session(0).isWorking, false)
   }
 
-  func testTheRailCountsEachProviderOnceAndThePullRequestCell() {
-    expectEqual(rail("main", providers: [.cursor, .claude, .claude]).cellCount, 2)
-    let defaults = Settings(enabled: true, displayId: "main")
-    expectEqual(defaults.providers, ProviderId.allCases)
-    expectEqual(defaults.pullRequests.enabled, true)
-    expectEqual(defaults.cellCount, 6)
-  }
-
   func testRailFramesAndPillsMatchTheSharedCases() throws {
     let fixture = try RailFixture.load()
     expectEqual(fixture.rails.isEmpty, false)
@@ -186,14 +173,14 @@ final class NotchTests {
           mirrored: screen.mirrored ?? false)
       }
       let settings = Settings(
-        enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size,
-        providers: Array(ProviderId.allCases.prefix(entry.cells ?? ProviderId.allCases.count)),
-        pullRequests: PullRequestSettings(enabled: false, lists: [.mine]))
+        enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size)
+      let count = entry.cells ?? ProviderId.allCases.count
       expectPixels(
-        notchRailFrame(settings: settings, displays: displays).map(pixels), entry.rail,
-        scale: entry.scale, "rail case \(index)")
+        notchRailFrame(settings: settings, displays: displays, count: count).map(pixels),
+        entry.rail, scale: entry.scale, "rail case \(index)")
       expectPixels(
-        notchPillFrame(settings: settings, displays: displays).map(pixels), entry.pill,
+        notchPillFrame(settings: settings, displays: displays, count: count).map(pixels),
+        entry.pill,
         scale: entry.scale, "pill case \(index)")
     }
   }
@@ -219,25 +206,16 @@ final class NotchTests {
     }
   }
 
-  func testSettingsDecodeTheHostDocumentAndSkipUnknownProviders() throws {
+  func testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads() throws {
     let document = try JSONDecoder().decode(
       Settings.self,
       from: Data(
-        #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex","codex"],"pullRequests":{"enabled":true,"lists":["mine","assigned"]},"popoverStyle":"solid"}"#
+        #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex","gemini"],"pullRequests":{"enabled":true,"lists":["mine","starred"]},"popoverStyle":"solid"}"#
           .utf8))
-    expectEqual(document.pullRequests.lists, [.mine, .assigned])
     expectEqual(document.show, ShowMode.onHover)
     expectEqual(document.edge, Edge.top)
     expectEqual(document.size, NotchSize.compact)
-    expectEqual(document.cellCount, 2)
     expectEqual(document.popoverStyle, NotchStyle.solid)
-    let newer = try JSONDecoder().decode(
-      Settings.self,
-      from: Data(
-        #"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["gemini","claude"],"pullRequests":{"enabled":false,"lists":[]},"popoverStyle":"glass"}"#
-          .utf8))
-    expectEqual(newer.providers, [.claude])
-    expectEqual(newer.cellCount, 1)
     expectThrows(
       try JSONDecoder().decode(
         Settings.self, from: Data(#"{"enabled":true,"displayId":"main","edge":"right"}"#.utf8)))
@@ -246,7 +224,7 @@ final class NotchTests {
         try JSONDecoder().decode(
           Settings.self,
           from: Data(
-            (#"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover","providers":["codex"],"pullRequests":{"enabled":true,"lists":["mine"]}"#
+            (#"{"enabled":true,"displayId":"main","edge":"top","size":"compact","show":"onHover""#
               + style + "}").utf8)))
     }
   }
@@ -265,7 +243,7 @@ final class NotchTests {
       bar.inset + bar.cellLength + bar.cellSpacing)
     expectEqual(cells[0].minY, layout.length(count: 4) - cells[3].maxY)
 
-    let railFrame = notchRailFrame(settings: rail("main"), displays: [main])!
+    let railFrame = notchRailFrame(settings: rail("main"), displays: [main], count: 4)!
     let cell = cells[0].offsetBy(dx: railFrame.minX, dy: railFrame.minY)
     let size = CGSize(width: 300, height: 420)
     let frame = popoverFrame(cell: cell, edge: .right, size: size, display: main, scale: 1)
@@ -351,7 +329,6 @@ final class NotchTests {
       Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(gemini),\(claude)]").utf8))
     expectEqual(decoded.cells.map(\.id), [RailCell.provider(.claude)])
     expectEqual(providerCell(decoded)?.notice, Notice(text: "Checking usage…", tone: .muted))
-    expectEqual(decoded.snapshot.settings.cellCount, 1)
     let muse = claude.replacingOccurrences(of: "\"provider\":\"claude\"", with: "\"provider\":\"muse\"")
     let reordered = try HostMessage.decode(
       Data(
@@ -361,11 +338,6 @@ final class NotchTests {
     expectThrows(
       try HostMessage.decode(
         Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(claude),\(claude)]").utf8)))
-    expectThrows(
-      try HostMessage.decode(
-        Data(
-          rail.replacingOccurrences(of: "[\"gemini\",\"claude\"]", with: "[\"codex\",\"claude\"]")
-            .replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(claude)]").utf8)))
   }
 
   func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
@@ -477,7 +449,6 @@ final class NotchTests {
     expectEqual(
       golden.cells.map(\.id),
       [.provider(.claude), .provider(.codex), .provider(.muse), .pullRequests])
-    expectEqual(golden.snapshot.settings.cellCount, golden.cells.count)
 
     let claude = providerCell(golden, 0)
     expectEqual(claude?.reading?.headline?.usedPercent, 41.5)
@@ -650,10 +621,9 @@ checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
 checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
-checks.testTheRailCountsEachProviderOnceAndThePullRequestCell()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
 try checks.testRailMetricsMatchTheSharedCases()
-try checks.testSettingsDecodeTheHostDocumentAndSkipUnknownProviders()
+try checks.testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
 try checks.testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal()
@@ -663,5 +633,5 @@ try checks.testRowsCarryTheirTagAndBadgesInTheTonesTheHostChose()
 try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("19 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

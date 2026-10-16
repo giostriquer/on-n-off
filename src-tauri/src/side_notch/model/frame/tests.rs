@@ -171,7 +171,7 @@ fn the_pr_cell_is_there_only_while_it_is_on() {
     let mut off = settings(vec![GithubList::Mine]);
     off.pull_requests.enabled = false;
     let without = rail(&off, unread(), Some(&dto), None);
-    assert_eq!(without.cells.len(), off.cell_count());
+    assert_eq!(without.cells.len(), cell_count(&off));
     assert!(without
         .cells
         .iter()
@@ -246,7 +246,7 @@ fn every_selected_provider_has_a_cell_in_rail_order_and_one_not_yet_read_is_chec
         ],
         "a cell for every selected provider in rail order, then the pull requests; only Claude was read"
     );
-    assert_eq!(frame.cells.len(), selected.cell_count());
+    assert_eq!(frame.cells.len(), cell_count(&selected));
     let CellData::Provider(first) = &frame.cells[0] else {
         panic!("Claude leads the rail");
     };

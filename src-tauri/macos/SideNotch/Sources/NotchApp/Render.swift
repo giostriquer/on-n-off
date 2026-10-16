@@ -46,7 +46,7 @@ enum Render {
       }
       try writeRail(rail, capHovered: false, name: "rail")
       try writeRail(rail, capHovered: true, name: "rail-cap-hovered")
-      if let pill = notchPillFrame(settings: settings, displays: displays) {
+      if let pill = notchPillFrame(settings: settings, displays: displays, count: rail.cellIds.count) {
         try write(
           NotchPillView(vertical: settings.edge.isVertical), size: pill.size,
           scale: rail.display.scale, to: out.appendingPathComponent("pill.png"))
