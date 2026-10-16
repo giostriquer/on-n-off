@@ -590,13 +590,16 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
     );
 }
 
-fn pr_row(number: u64, context: Option<PrContext>) -> PrRowData {
+const WORK: Color = [96, 165, 250, 255];
+const PERSONAL: Color = [192, 132, 252, 255];
+
+fn pr_row(number: u64, repo: &str, context: Option<PrContext>) -> PrRowData {
     PrRowData {
         id: format!("n{number}"),
         number,
         title: format!("Fix #{number}"),
-        url: format!("https://github.com/acme/webapp/pull/{number}"),
-        repo: "acme/webapp".into(),
+        url: format!("https://github.com/{repo}/pull/{number}"),
+        repo: repo.into(),
         is_draft: false,
         review_decision: None,
         ci: CiState::Success,
@@ -605,19 +608,43 @@ fn pr_row(number: u64, context: Option<PrContext>) -> PrRowData {
     }
 }
 
-fn tallest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
-    (0..pixmap.width())
-        .map(|x| {
-            (0..pixmap.height())
-                .filter(|&y| {
-                    pixmap
-                        .pixel(x, y)
-                        .is_some_and(|px| [px.red(), px.green(), px.blue(), px.alpha()] == ink)
-                })
-                .count() as u32
+fn longest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
+    let mut longest = 0;
+    for x in 0..pixmap.width() {
+        let mut run = 0;
+        for y in 0..pixmap.height() {
+            let hit = pixmap
+                .pixel(x, y)
+                .is_some_and(|px| [px.red(), px.green(), px.blue(), px.alpha()] == ink);
+            run = if hit { run + 1 } else { 0 };
+            longest = longest.max(run);
+        }
+    }
+    longest
+}
+
+fn bluish([r, g, b]: [f64; 3]) -> bool {
+    b > 100.0 && b > r * 1.4 && b > g * 1.15
+}
+
+fn violet([r, g, b]: [f64; 3]) -> bool {
+    b > 100.0 && r > g * 1.2 && b > g * 1.5
+}
+
+fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -> usize {
+    let xs = rect.x.floor() as u32..(rect.x + rect.w).ceil() as u32;
+    let ys = rect.y.floor() as u32..(rect.y + rect.h).ceil() as u32;
+    ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            pixmap.pixel(x, y).is_some_and(|px| {
+                hue([
+                    f64::from(px.red()),
+                    f64::from(px.green()),
+                    f64::from(px.blue()),
+                ])
+            })
         })
-        .max()
-        .unwrap_or(0)
+        .count()
 }
 
 #[test]
@@ -628,11 +655,16 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
         stale: false,
         lists: vec![PrListData {
             id: GithubList::Mine,
-            total: 3,
+            total: 4,
             items: vec![
-                pr_row(1, Some(PrContext::Work)),
-                pr_row(2, Some(PrContext::Personal)),
-                pr_row(3, None),
+                pr_row(1, "acme/webapp", Some(PrContext::Work)),
+                pr_row(2, "octocat/dotfiles", Some(PrContext::Personal)),
+                pr_row(3, "acme/webapp", None),
+                pr_row(
+                    1234,
+                    "octocat/a-repository-name-long-enough-to-run-into-the-ci-dot",
+                    Some(PrContext::Personal),
+                ),
             ],
         }],
     };
@@ -648,26 +680,68 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
-    let tags: Vec<(&str, Color)> = popover
+    let texts: Vec<(&str, R, f64, TextWeight, Color)> = popover
         .entries
         .iter()
-        .filter_map(|(item, _)| match item {
-            PopItem::Text { text, color, .. } if text == "WORK" || text == "PERSONAL" => {
-                Some((text.as_str(), *color))
-            }
+        .filter_map(|(item, rect)| match item {
+            PopItem::Text {
+                text,
+                size,
+                weight,
+                color,
+                ..
+            } => Some((text.as_str(), *rect, *size, *weight, *color)),
             _ => None,
         })
         .collect();
-    assert_eq!(tags, [("WORK", WORK_BLUE), ("PERSONAL", PERSONAL_VIOLET)]);
-    let copy_inks: Vec<Color> = popover
+    let tags: Vec<usize> = (0..texts.len())
+        .filter(|&i| matches!(texts[i].0, "WORK" | "PERSONAL"))
+        .collect();
+    assert_eq!(
+        tags.iter()
+            .map(|&i| (texts[i].0, texts[i].4))
+            .collect::<Vec<_>>(),
+        [
+            ("WORK", WORK),
+            ("PERSONAL", PERSONAL),
+            ("PERSONAL", PERSONAL)
+        ],
+        "the tags wear the helper's own inks, and an unread row has none"
+    );
+    let dots: Vec<R> = popover
         .entries
         .iter()
-        .filter_map(|(item, _)| match item {
-            PopItem::CopyIcon { color } => Some(*color),
+        .filter_map(|(item, rect)| matches!(item, PopItem::Dot { .. }).then_some(*rect))
+        .collect();
+    for &i in &tags {
+        let (tag, tag_rect, tag_size, tag_weight, _) = texts[i];
+        let (repo, repo_rect, repo_size, repo_weight, _) = texts[i + 1];
+        assert!(
+            repo_rect.x >= tag_rect.x + measure_weight(tag, tag_size, tag_weight, 1.0),
+            "{repo:?} starts after its {tag} tag"
+        );
+        assert!(
+            repo_rect.x + measure_weight(repo, repo_size, repo_weight, 1.0) <= dots[3].x,
+            "{repo:?} stays clear of the CI dot"
+        );
+    }
+    let long = texts[tags[2] + 1].0;
+    assert!(
+        long.starts_with("octocat/a-repository") && long.ends_with('…'),
+        "a repository too long for the line is ellipsized, not run under the dot: {long:?}"
+    );
+    let copies: Vec<(Color, R)> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, rect)| match item {
+            PopItem::CopyIcon { color } => Some((*color, *rect)),
             _ => None,
         })
         .collect();
-    assert_eq!(copy_inks, [WORK_BLUE, PERSONAL_VIOLET, MUTED_INK]);
+    assert_eq!(
+        copies.iter().map(|(color, _)| *color).collect::<Vec<_>>(),
+        [WORK, PERSONAL, MUTED_INK, PERSONAL]
+    );
     let stripes: Vec<(Color, R)> = popover
         .entries
         .iter()
@@ -683,10 +757,9 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
         .collect();
     assert_eq!(
         stripes.iter().map(|(color, _)| *color).collect::<Vec<_>>(),
-        [WORK_BLUE, PERSONAL_VIOLET],
-        "a row whose owner was never read has no stripe"
+        [WORK, PERSONAL, PERSONAL]
     );
-    for ((_, stripe), row) in stripes.iter().zip(&rows) {
+    for ((_, stripe), row) in stripes.iter().zip([rows[0], rows[1], rows[3]]) {
         assert_eq!(
             (stripe.y, stripe.h),
             (row.y, row.h),
@@ -698,10 +771,24 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
         );
     }
     let pixmap = render(&planned);
-    for ink in [WORK_BLUE, PERSONAL_VIOLET] {
+    for ink in [WORK, PERSONAL] {
         assert!(
-            tallest_run(&pixmap, ink) >= 20,
-            "the painted popover shows a {ink:?} stripe"
+            longest_run(&pixmap, ink) >= 20,
+            "the painted popover shows an unbroken {ink:?} stripe"
         );
     }
+    let painted: Vec<(usize, usize)> = copies
+        .iter()
+        .map(|(_, rect)| {
+            (
+                hued_pixels(&pixmap, *rect, bluish),
+                hued_pixels(&pixmap, *rect, violet),
+            )
+        })
+        .collect();
+    assert!(
+        painted[0].0 > 0 && painted[1].1 > 0 && painted[3].1 > 0,
+        "the copy icons are painted in their row's ink: {painted:?}"
+    );
+    assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
 }

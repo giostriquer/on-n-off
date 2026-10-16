@@ -105,6 +105,7 @@ fn the_merge_fields_keep_their_camel_case_wire_names() {
         r#""mergeQueue":{"position":2}"#,
         r#""autoMerge":true"#,
         r#""mergeKind":"conflicts""#,
+        r#""inOrganization":true"#,
     ] {
         assert!(raw.contains(needle), "{needle} missing from {raw}");
     }
