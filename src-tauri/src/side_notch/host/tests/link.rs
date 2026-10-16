@@ -5,11 +5,14 @@ const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
 #[test]
 fn delivery_is_dirty_driven_with_a_slow_heartbeat() {
     let app = app_with(&[(AgentId::Claude, 10.0)]);
-    let mut rig = Rig::started(app);
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
     assert_eq!(rig.frames(), 2, "the opening frame, then the first reads");
 
     rig.tick(Duration::from_secs(2));
     rig.tick(Duration::from_secs(18));
+    rig.tick(Duration::from_millis(100));
+    assert!(app.take_asked().contains(&Asked::Sessions(AgentId::Claude)));
     assert_eq!(rig.frames(), 2, "sessions read again and unchanged");
     rig.act(Inbound::Action(Action::OpenLimits));
     assert_eq!(rig.frames(), 3, "an action redraws at once");
@@ -19,6 +22,43 @@ fn delivery_is_dirty_driven_with_a_slow_heartbeat() {
     rig.tick(Duration::from_millis(100));
     assert_eq!(rig.frames(), 4, "the heartbeat");
     assert!(HEARTBEAT_INTERVAL >= Duration::from_secs(30));
+}
+
+#[test]
+fn a_sessions_read_that_found_a_new_session_redraws_with_it() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::started(app.clone());
+    let sent = rig.frames();
+    app.world()
+        .sessions
+        .insert(AgentId::Claude, vec![session("claude")]);
+
+    rig.tick(Duration::from_secs(10));
+    assert_eq!(rig.frames(), sent);
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(
+        rig.frames(),
+        sent + 1,
+        "the next sessions read changed them"
+    );
+    let Some(CellData::Provider(claude)) = rig.last_frame().cells.first().cloned() else {
+        panic!("a provider cell");
+    };
+    assert_eq!(claude.sessions, [session("claude")]);
+}
+
+#[test]
+fn a_pull_request_read_that_changed_nothing_redraws_nothing() {
+    let app = FakeApp::default();
+    app.world().pull_requests = Some(prs(vec![pr(1)]));
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+
+    rig.tick(Duration::from_secs(60));
+    assert!(app.take_asked().contains(&Asked::PullRequests(false)));
+    let sent = rig.frames();
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.frames(), sent, "the same pull requests again");
 }
 
 #[test]
