@@ -218,7 +218,7 @@ impl Queue {
         cleared
     }
 
-    fn listed(&self) -> Vec<PendingResetSpendDto> {
+    pub(super) fn listed(&self) -> Vec<PendingResetSpendDto> {
         self.with(|pending| {
             pending
                 .values()

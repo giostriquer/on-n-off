@@ -825,3 +825,5 @@ fn limits_checks_wake_the_monitor_in_five_minutes_without_delaying_a_reset() {
     let faster = crate::limits_refresh::check_interval(minutes(2));
     assert_eq!(next_wake(faster, None, now, now), Duration::from_secs(120));
 }
+
+mod poll;
