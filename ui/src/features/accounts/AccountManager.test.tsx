@@ -129,6 +129,27 @@ it("keeps email as the account name and allows a free-text category to be edited
   fireEvent.click(screen.getByRole("button", { name: "Save category" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
 });
+it("re-reads both account lists, the Codex subscription dates and that provider's limits after an account action, and no other read", async () => {
+  const client = setup();
+  const card = await screen.findByRole("region", { name: "person@example.com" });
+  const others = [["limits", "codex"], ["limits", "claude"], ["subscription", "codex", "profile:billing-a"], ["github", "prs"], ["reset-spends"]];
+  for (const key of others) client.setQueryData(key, []);
+  expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"]]);
+  fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
+  await waitFor(() => expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"], ["claude"], ["codex"]]));
+  expect(others.map(key => client.getQueryState(key)?.isInvalidated)).toEqual([true, false, true, false, false]);
+});
+it("re-reads the account lists and the remembering preference, not the subscription dates, when automatic saving changes", async () => {
+  const client = setup({ preferences: true });
+  const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" });
+  await waitFor(() => expect(checkbox).toBeEnabled());
+  client.setQueryData(["accounts", "codex"], { profiles: [] });
+  client.setQueryData(["subscription", "codex", "profile:billing-a"], null);
+  fireEvent.click(checkbox);
+  await waitFor(() => expect(api.readAccountPreferences).toHaveBeenCalledTimes(2));
+  expect(client.getQueryState(["accounts", "codex"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["subscription", "codex", "profile:billing-a"])?.isInvalidated).toBe(false);
+});
 it("requires opt-in in Settings before automatically saving accounts", async () => {
   setup({ preferences: true }); const checkbox = await screen.findByRole("button", { name: "Automatically save accounts I sign in to" });
   await waitFor(() => expect(checkbox).toBeEnabled()); expect(checkbox).toHaveAttribute("aria-pressed", "false");
