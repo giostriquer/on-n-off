@@ -8,10 +8,6 @@ import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { AgentInfo, AppSettings, LimitsPollMinutes } from "$lib/types";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 const apiMocks = vi.hoisted(() => ({
   requestNotificationPermission: vi.fn<() => Promise<boolean>>(),
 }));

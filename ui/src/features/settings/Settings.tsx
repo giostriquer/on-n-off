@@ -2,7 +2,6 @@ import { AccountPreferences } from "@/features/accounts/AccountPreferences";
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { FolderOpen, X } from "lucide-react";
-import { open } from "@tauri-apps/plugin-dialog";
 import { CardToggle, SettingRow, SettingsCard, caption, cardButton, cardIconButton, cardSelect, rowLabel } from "@/components/SettingsCard";
 import { UpdaterSettingsCard } from "@/features/updater/UpdaterSettingsCard";
 import { NotchSettingsCard } from "@/features/notch/NotchSettingsCard";
@@ -387,11 +386,8 @@ function ProviderCard({
   }, [binaryPath]);
 
   async function pickBinary() {
-    const picked = await open({
-      multiple: false,
-      filters: [{ name: "CLI", extensions: ["exe", "cmd", "bat"] }],
-    });
-    if (typeof picked !== "string") {
+    const picked = await api.pickCliBinary();
+    if (picked === null) {
       return;
     }
     setDraft(picked);

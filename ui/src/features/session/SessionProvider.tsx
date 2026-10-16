@@ -8,7 +8,6 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import * as api from "$lib/api";
 import {
   agentRoot,
@@ -530,8 +529,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const pickProjectFolder = useCallback(async () => {
-    const dir = await open({ directory: true, multiple: false });
-    if (typeof dir !== "string") {
+    const dir = await api.pickFolder();
+    if (dir === null) {
       return;
     }
     await rememberExtra(selectedRef.current, dir);
@@ -690,10 +689,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [agentLabel, applyScopedTab, flags, note, scopeSuffix, withLock],
   );
 
-  const pickFolder = useCallback(async (): Promise<string | null> => {
-    const dir = await open({ directory: true, multiple: false });
-    return typeof dir === "string" ? dir : null;
-  }, []);
+  const pickFolder = useCallback((): Promise<string | null> => api.pickFolder(), []);
 
   const install = useCallback(
     async (source: string): Promise<boolean> => {

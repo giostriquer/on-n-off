@@ -37,10 +37,6 @@ const api = vi.hoisted(() => ({
   listAgents: vi.fn<() => Promise<AgentInfo[]>>(),
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
   loadAppSettings: api.loadAppSettings,

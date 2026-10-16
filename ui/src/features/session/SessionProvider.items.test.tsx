@@ -21,10 +21,6 @@ const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as con
   readsHooks: id === "claude" || id === "codex",
 }));
 
-vi.mock("@tauri-apps/plugin-dialog", () => ({
-  open: () => Promise.resolve(null),
-}));
-
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),
   loadAppSettings: () => Promise.resolve({ hiddenAgents: [], binaryPaths: {} }),
