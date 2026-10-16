@@ -135,12 +135,13 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
         })
         .collect();
     let readable = dto.status == GithubStatus::Ok || dto.stale;
-    let rows: Vec<&PrRow> = lists.iter().flat_map(|list| &list.items).collect();
     let mut seen = std::collections::BTreeSet::new();
-    let count = rows
+    let rows: Vec<&PrRow> = lists
         .iter()
+        .flat_map(|list| &list.items)
         .filter(|row| seen.insert(row.id.as_str()))
-        .count() as u64;
+        .collect();
+    let count = rows.len() as u64;
     let segments = if readable {
         rows.iter()
             .take(MAX_RING_SEGMENTS)

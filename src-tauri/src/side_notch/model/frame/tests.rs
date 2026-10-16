@@ -283,3 +283,39 @@ fn the_conflict_band_marks_only_passing_rows_with_merge_conflicts() {
         }
     }
 }
+
+#[test]
+fn a_pull_request_in_two_lists_is_one_segment_of_the_ring() {
+    let mut failing = pr(2);
+    failing["ci"] = "failure".into();
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": "ok", "stale": false, "scope": [],
+        "mine": {"total": 2, "items": [pr(1), failing]},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 1, "items": [pr(1)]}
+    }))
+    .unwrap();
+    let frame = rail(
+        &settings(vec![GithubList::Mine, GithubList::Assigned]),
+        unread,
+        Some(&dto),
+        None,
+    );
+    let reading = pr_cell(&frame);
+    assert_eq!(reading.lists[1].items.len(), 1, "both lists still show it");
+    assert_eq!(reading.count, 2);
+    assert_eq!(
+        reading.segments,
+        [
+            PrSegment {
+                ci: CiState::Success,
+                passing_with_conflicts: false
+            },
+            PrSegment {
+                ci: CiState::Failure,
+                passing_with_conflicts: false
+            },
+        ],
+        "one segment per pull request, as the count is"
+    );
+}
