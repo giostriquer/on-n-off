@@ -444,13 +444,15 @@ private struct PullRequestRow: View {
         .help(ciLabel)
       }
     }
-    .overlay(alignment: .leading) {
-      if let context = context {
-        Capsule().fill(context.ink).frame(width: metrics.value(2))
-          .offset(x: -metrics.value(8))
-          .accessibilityHidden(true)
-      }
-    }
+    .overlay(
+      Group {
+        if let context = context {
+          Capsule().fill(context.ink).frame(width: metrics.value(2))
+            .offset(x: -metrics.value(8))
+            .accessibilityHidden(true)
+        }
+      },
+      alignment: .leading)
   }
 
   private func copy() {
