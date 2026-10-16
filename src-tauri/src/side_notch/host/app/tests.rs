@@ -1,5 +1,6 @@
 use super::*;
 use crate::side_notch::model::NotchSettings;
+use std::sync::atomic::Ordering;
 
 #[derive(Clone, Default)]
 struct FakeShell(Arc<Mutex<Seen>>);
@@ -25,7 +26,12 @@ impl Shell for FakeShell {
 
 fn production() -> (Production<FakeShell>, FakeShell) {
     let shell = FakeShell::default();
-    (Production(shell.clone()), shell)
+    let app = Production {
+        shell: shell.clone(),
+        limits_poll: Box::leak(Box::new(AtomicU64::new(0))),
+        pull_requests_poll: Box::leak(Box::new(AtomicU64::new(0))),
+    };
+    (app, shell)
 }
 
 #[test]
@@ -46,12 +52,30 @@ fn the_notch_follows_the_revisions_of_the_shared_reads_themselves() {
 }
 
 #[test]
-fn the_intervals_are_the_ones_the_shared_reads_keep() {
+fn the_notch_checks_limits_at_the_saved_poll_and_at_least_every_five_minutes() {
     let (app, _) = production();
     assert_eq!(
         app.limits_interval(),
-        crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
+        Duration::from_secs(5 * 60),
+        "a test build's default"
     );
+    app.limits_poll.store(30 * 60, Ordering::Release);
+    assert_eq!(app.limits_interval(), Duration::from_secs(5 * 60));
+    app.limits_poll.store(2 * 60, Ordering::Release);
+    assert_eq!(app.limits_interval(), Duration::from_secs(2 * 60));
+}
+
+#[test]
+fn the_production_notch_shares_the_intervals_a_settings_save_replaces() {
+    let app = Production::new(FakeShell::default());
+    assert!(std::ptr::eq(
+        app.limits_poll,
+        &crate::limits_refresh::POLL_SECONDS
+    ));
+    assert!(std::ptr::eq(
+        app.pull_requests_poll,
+        &crate::github::POLL_SECONDS
+    ));
 }
 
 #[test]
@@ -63,11 +87,16 @@ fn the_notch_takes_settings_at_the_revision_they_were_saved_at() {
 }
 
 #[test]
-fn the_pull_request_interval_is_the_saved_setting_without_a_file_read() {
+fn the_notch_reads_pull_requests_at_the_saved_interval() {
     let (app, _) = production();
-    crate::github::set_poll_seconds(120);
+    assert_eq!(
+        app.pull_requests_interval(),
+        Duration::from_secs(60),
+        "a test build's default"
+    );
+    app.pull_requests_poll.store(120, Ordering::Release);
     assert_eq!(app.pull_requests_interval(), Duration::from_secs(120));
-    crate::github::set_poll_seconds(30);
+    app.pull_requests_poll.store(30, Ordering::Release);
     assert_eq!(app.pull_requests_interval(), Duration::from_secs(30));
 }
 

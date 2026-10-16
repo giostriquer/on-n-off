@@ -30,7 +30,7 @@ const RATE_LIMIT_FALLBACK_SECS: i64 = 60;
 
 static READ_LOCK: Mutex<()> = Mutex::new(());
 static READ_MEMO: ReadMemo = ReadMemo::new();
-static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 type Failure = (GithubStatus, String);
 
@@ -88,14 +88,10 @@ pub fn set_poll_seconds(seconds: u16) {
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
-pub fn poll_interval() -> std::time::Duration {
-    let cached = POLL_SECONDS.load(Ordering::Acquire);
-    if cached > 0 {
-        return std::time::Duration::from_secs(cached);
-    }
-    let seconds = u64::from(settings::load_settings().github_poll_seconds);
-    let _ = POLL_SECONDS.compare_exchange(0, seconds, Ordering::AcqRel, Ordering::Acquire);
-    std::time::Duration::from_secs(POLL_SECONDS.load(Ordering::Acquire))
+pub(crate) fn poll_interval_in(memo: &AtomicU64) -> std::time::Duration {
+    settings::remembered_seconds(memo, || {
+        u64::from(settings::load_settings().github_poll_seconds)
+    })
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

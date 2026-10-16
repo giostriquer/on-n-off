@@ -464,3 +464,25 @@ fn a_file_starting_with_a_byte_order_mark_keeps_its_settings() {
     assert!(settings.close_to_tray);
     assert_eq!(settings.github_scopes, ["org:acme"]);
 }
+
+#[test]
+fn a_remembered_interval_reads_its_setting_once() {
+    let memo = AtomicU64::new(0);
+    let loads = std::cell::Cell::new(0);
+    let load = || {
+        loads.set(loads.get() + 1);
+        120
+    };
+    assert_eq!(remembered_seconds(&memo, load), Duration::from_secs(120));
+    assert_eq!(remembered_seconds(&memo, load), Duration::from_secs(120));
+    assert_eq!(loads.get(), 1, "read once, then remembered");
+}
+
+#[test]
+fn a_saved_interval_is_returned_without_reading_the_settings() {
+    let memo = AtomicU64::new(30);
+    assert_eq!(
+        remembered_seconds(&memo, || panic!("the settings were read")),
+        Duration::from_secs(30)
+    );
+}
