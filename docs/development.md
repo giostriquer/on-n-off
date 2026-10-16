@@ -34,8 +34,8 @@ locates the subsystems. Module doc-comments explain their implementation.
   Change the shape and change all three, each of which has a test pinning it.
 - The side notch rail's sizes and frames: `rail_metrics` and the frames built from it in
   `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
-  the Windows painter; change a measurement in both files and both checks
-  ([why](architecture/side-notch.md#on-macos)).
+  the Windows painter; change a measurement in both files and in the fixture both checks read,
+  `rail-cases.json` ([why](architecture/side-notch.md#on-macos)).
 
 For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
 `ui/src/components/`; do not introduce a parallel checkbox or switch.

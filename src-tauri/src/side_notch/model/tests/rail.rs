@@ -1,334 +1,178 @@
 use super::*;
+use serde::Deserialize;
+
+const CASES: &str =
+    include_str!("../../../../macos/SideNotch/Tests/NotchCoreTests/rail-cases.json");
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Fixture {
+    work_area: WorkArea,
+    rails: Vec<RailCase>,
+    metrics: Vec<MetricsCase>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WorkArea {
+    width: f64,
+    height: f64,
+    work_y: f64,
+    work_height: f64,
+}
+
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Screen {
+    id: String,
+    x: Option<f64>,
+    width: Option<f64>,
+    work_y: Option<f64>,
+    work_height: Option<f64>,
+    scale: Option<f64>,
+    mirrored: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RailCase {
+    displays: Option<Vec<Screen>>,
+    scale: f64,
+    size: NotchSize,
+    edge: Edge,
+    cells: Option<usize>,
+    enabled: Option<bool>,
+    rail: Option<[f64; 4]>,
+    pill: Option<[f64; 4]>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MetricsCase {
+    scale: f64,
+    size: NotchSize,
+    thickness: f64,
+    cell_length: f64,
+    cell_spacing: f64,
+    inset: f64,
+    cell_padding: f64,
+    content_spacing: f64,
+    icon_slot: f64,
+    label_height: f64,
+    ring_stroke: f64,
+    inner_ring_stroke: f64,
+    inner_ring_inset: f64,
+    glyph_size: f64,
+}
+
+fn fixture() -> Fixture {
+    serde_json::from_str(CASES).expect("the shared rail cases parse")
+}
+
+fn pixels(frame: Option<Layout>, scale: f64) -> Option<[f64; 4]> {
+    frame.map(|frame| [frame.x, frame.y, frame.width, frame.height].map(|points| points * scale))
+}
+
+fn assert_pixels<const N: usize>(actual: Option<[f64; N]>, expected: Option<[f64; N]>, what: &str) {
+    let matches = match (actual, expected) {
+        (None, None) => true,
+        (Some(actual), Some(expected)) => actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| (actual - expected).abs() < 1e-6),
+        _ => false,
+    };
+    assert!(matches, "{what}: {actual:?} != {expected:?}");
+}
 
 #[test]
-fn the_rail_frame_at_every_size_edge_and_display_scale() {
-    use Edge::{Bottom, Left, Right, Top};
-    use NotchSize::{Compact, Large, Standard};
-    let frames = [
-        (1.0, Compact, Right, [1661.0, 366.0, 67.0, 418.0]),
-        (1.0, Compact, Left, [0.0, 366.0, 67.0, 418.0]),
-        (1.0, Compact, Top, [648.0, 33.0, 433.0, 64.0]),
-        (1.0, Compact, Bottom, [648.0, 1053.0, 433.0, 64.0]),
-        (1.0, Standard, Right, [1652.0, 337.0, 76.0, 477.0]),
-        (1.0, Standard, Left, [0.0, 337.0, 76.0, 477.0]),
-        (1.0, Standard, Top, [618.0, 33.0, 492.0, 73.0]),
-        (1.0, Standard, Bottom, [618.0, 1044.0, 492.0, 73.0]),
-        (1.0, Large, Right, [1642.0, 307.0, 86.0, 536.0]),
-        (1.0, Large, Left, [0.0, 307.0, 86.0, 536.0]),
-        (1.0, Large, Top, [586.0, 33.0, 556.0, 82.0]),
-        (1.0, Large, Bottom, [586.0, 1035.0, 556.0, 82.0]),
-        (
-            1.25,
-            Compact,
-            Right,
-            [1661.6, 367.2, 66.4, 415.20000000000005],
-        ),
-        (1.25, Compact, Left, [0.0, 367.2, 66.4, 415.20000000000005]),
-        (1.25, Compact, Top, [648.8, 32.8, 431.20000000000005, 63.2]),
-        (
-            1.25,
-            Compact,
-            Bottom,
-            [648.8, 1053.6, 431.20000000000005, 63.2],
-        ),
-        (1.25, Standard, Right, [1652.0, 335.2, 76.0, 480.0]),
-        (1.25, Standard, Left, [0.0, 335.2, 76.0, 480.0]),
-        (1.25, Standard, Top, [618.4, 32.8, 492.0, 73.6]),
-        (1.25, Standard, Bottom, [618.4, 1043.2, 492.0, 73.6]),
-        (1.25, Large, Right, [1642.4, 308.8, 85.6, 532.8]),
-        (1.25, Large, Left, [0.0, 308.8, 85.6, 532.8]),
-        (1.25, Large, Top, [588.0, 32.8, 552.8, 81.6]),
-        (1.25, Large, Bottom, [588.0, 1035.2, 552.8, 81.6]),
-        (
-            1.5,
-            Compact,
-            Right,
-            [
-                1661.3333333333333,
-                366.6666666666667,
-                66.66666666666667,
-                416.66666666666663,
-            ],
-        ),
-        (
-            1.5,
-            Compact,
-            Left,
-            [
-                0.0,
-                366.6666666666667,
-                66.66666666666667,
-                416.66666666666663,
-            ],
-        ),
-        (
-            1.5,
-            Compact,
-            Top,
-            [
-                647.3333333333334,
-                33.333333333333336,
-                433.33333333333337,
-                63.33333333333333,
-            ],
-        ),
-        (
-            1.5,
-            Compact,
-            Bottom,
-            [
-                647.3333333333334,
-                1054.0,
-                433.33333333333337,
-                63.33333333333333,
-            ],
-        ),
-        (1.5, Standard, Right, [1652.0, 334.0, 76.0, 482.0]),
-        (1.5, Standard, Left, [0.0, 334.0, 76.0, 482.0]),
-        (1.5, Standard, Top, [618.0, 33.333333333333336, 492.0, 74.0]),
-        (
-            1.5,
-            Standard,
-            Bottom,
-            [618.0, 1043.3333333333333, 492.0, 74.0],
-        ),
-        (
-            1.5,
-            Large,
-            Right,
-            [
-                1642.6666666666667,
-                304.6666666666667,
-                85.33333333333333,
-                541.3333333333334,
-            ],
-        ),
-        (
-            1.5,
-            Large,
-            Left,
-            [0.0, 304.6666666666667, 85.33333333333333, 541.3333333333334],
-        ),
-        (
-            1.5,
-            Large,
-            Top,
-            [
-                586.6666666666666,
-                33.333333333333336,
-                554.6666666666666,
-                82.66666666666667,
-            ],
-        ),
-        (
-            1.5,
-            Large,
-            Bottom,
-            [
-                586.6666666666666,
-                1034.6666666666667,
-                554.6666666666666,
-                82.66666666666667,
-            ],
-        ),
-        (2.0, Compact, Right, [1661.5, 365.0, 66.5, 420.5]),
-        (2.0, Compact, Left, [0.0, 365.0, 66.5, 420.5]),
-        (2.0, Compact, Top, [649.0, 33.0, 430.5, 64.5]),
-        (2.0, Compact, Bottom, [649.0, 1052.5, 430.5, 64.5]),
-        (2.0, Standard, Right, [1652.0, 336.5, 76.0, 477.0]),
-        (2.0, Standard, Left, [0.0, 336.5, 76.0, 477.0]),
-        (2.0, Standard, Top, [618.0, 33.0, 492.0, 73.0]),
-        (2.0, Standard, Bottom, [618.0, 1044.0, 492.0, 73.0]),
-        (2.0, Large, Right, [1642.5, 306.0, 85.5, 538.5]),
-        (2.0, Large, Left, [0.0, 306.0, 85.5, 538.5]),
-        (2.0, Large, Top, [587.5, 33.0, 553.5, 82.5]),
-        (2.0, Large, Bottom, [587.5, 1034.5, 553.5, 82.5]),
-    ];
-    for (scale, size, edge, [x, y, width, height]) in frames {
-        let mut current = settings("main", edge);
-        current.size = size;
-        assert_eq!(
-            layout(&current, &[display("main", 0.0, scale)]),
-            Some(Layout {
-                x,
-                y,
-                width,
-                height
-            }),
-            "{size:?} on the {edge:?} edge at {scale}x"
+fn every_rail_frame_and_pill_matches_the_shared_cases() {
+    let fixture = fixture();
+    assert!(!fixture.rails.is_empty());
+    let area = &fixture.work_area;
+    let main = [Screen {
+        id: "main".into(),
+        ..Screen::default()
+    }];
+    for (index, case) in fixture.rails.iter().enumerate() {
+        let displays: Vec<Display> = case
+            .displays
+            .as_deref()
+            .unwrap_or(&main)
+            .iter()
+            .map(|screen| Display {
+                id: screen.id.clone(),
+                name: screen.id.clone(),
+                x: screen.x.unwrap_or(0.0),
+                y: 0.0,
+                width: screen.width.unwrap_or(area.width),
+                height: area.height,
+                work_y: screen.work_y.unwrap_or(area.work_y),
+                work_height: screen.work_height.unwrap_or(area.work_height),
+                scale: screen.scale.unwrap_or(case.scale),
+                mirrored: screen.mirrored.unwrap_or(false),
+            })
+            .collect();
+        let current = NotchSettings {
+            enabled: case.enabled.unwrap_or(true),
+            providers: RAIL_ORDER[..case.cells.unwrap_or(RAIL_ORDER.len())].to_vec(),
+            size: case.size,
+            ..settings("main", case.edge)
+        };
+        assert_pixels(
+            pixels(layout(&current, &displays), case.scale),
+            case.rail,
+            &format!("rail case {index}"),
+        );
+        assert_pixels(
+            pixels(pill_frame(&current, &displays), case.scale),
+            case.pill,
+            &format!("pill case {index}"),
         );
     }
 }
 
 #[test]
-fn a_compact_rail_needs_room_for_its_length() {
-    let mut compact = settings("main", Edge::Right);
-    compact.size = NotchSize::Compact;
-    for (scale, work_height, fits) in [
-        (1.0, 417.0, false),
-        (1.0, 417.5, false),
-        (1.0, 418.0, true),
-        (2.0, 417.0, false),
-        (2.0, 417.5, false),
-        (2.0, 420.5, true),
-    ] {
-        let mut short = display("main", 0.0, scale);
-        short.work_height = work_height;
-        assert_eq!(
-            layout(&compact, &[short]).is_some(),
-            fits,
-            "a {work_height} pt work area at {scale}x"
+fn every_rail_metric_matches_the_shared_cases() {
+    let fixture = fixture();
+    assert!(!fixture.metrics.is_empty());
+    for case in fixture.metrics {
+        let m = rail_metrics(case.size, case.scale, Edge::Right);
+        assert_pixels(
+            Some(
+                [
+                    m.thickness,
+                    m.cell_length,
+                    m.cell_spacing,
+                    m.inset,
+                    m.cell.padding,
+                    m.cell.content_spacing,
+                    m.cell.icon_slot,
+                    m.cell.label_height,
+                    m.cell.ring_stroke,
+                    m.cell.inner_ring_stroke,
+                    m.cell.inner_ring_inset,
+                    m.cell.glyph,
+                ]
+                .map(|points| points * case.scale),
+            ),
+            Some([
+                case.thickness,
+                case.cell_length,
+                case.cell_spacing,
+                case.inset,
+                case.cell_padding,
+                case.content_spacing,
+                case.icon_slot,
+                case.label_height,
+                case.ring_stroke,
+                case.inner_ring_stroke,
+                case.inner_ring_inset,
+                case.glyph_size,
+            ]),
+            &format!("{:?} at {}x", case.size, case.scale),
         );
-    }
-}
-
-#[test]
-fn the_rail_metrics_at_every_size_and_display_scale() {
-    use NotchSize::{Compact, Large, Standard};
-    let expected = [
-        (
-            1.0,
-            Compact,
-            [
-                67.0, 64.0, 7.0, 35.0, 35.0, 1.0, 3.0, 40.0, 4.0, 3.0, 5.0, 21.0, 19.0,
-            ],
-        ),
-        (
-            1.0,
-            Standard,
-            [
-                76.0, 73.0, 8.0, 40.0, 40.0, 1.0, 3.0, 46.0, 4.0, 3.0, 6.0, 24.0, 22.0,
-            ],
-        ),
-        (
-            1.0,
-            Large,
-            [
-                86.0, 82.0, 9.0, 45.0, 45.0, 1.0, 3.0, 52.0, 5.0, 3.0, 7.0, 27.0, 25.0,
-            ],
-        ),
-        (
-            1.25,
-            Compact,
-            [
-                66.4, 63.2, 7.2, 35.2, 35.2, 0.8, 2.4, 40.0, 3.2, 2.4, 5.6, 20.8, 19.2,
-            ],
-        ),
-        (
-            1.25,
-            Standard,
-            [
-                76.0, 73.6, 8.0, 40.0, 40.0, 0.8, 3.2, 46.4, 4.0, 3.2, 6.4, 24.0, 22.4,
-            ],
-        ),
-        (
-            1.25,
-            Large,
-            [
-                85.6, 81.6, 8.8, 44.8, 44.8, 0.8, 3.2, 52.0, 4.8, 3.2, 6.4, 27.2, 24.8,
-            ],
-        ),
-        (
-            1.5,
-            Compact,
-            [
-                66.66666666666667,
-                63.33333333333333,
-                7.333333333333333,
-                35.333333333333336,
-                35.333333333333336,
-                0.6666666666666666,
-                2.6666666666666665,
-                40.0,
-                3.3333333333333335,
-                2.6666666666666665,
-                5.333333333333333,
-                21.333333333333332,
-                19.333333333333332,
-            ],
-        ),
-        (
-            1.5,
-            Standard,
-            [
-                76.0,
-                74.0,
-                8.0,
-                40.0,
-                40.0,
-                1.3333333333333333,
-                3.3333333333333335,
-                46.0,
-                4.0,
-                3.3333333333333335,
-                6.0,
-                24.0,
-                22.0,
-            ],
-        ),
-        (
-            1.5,
-            Large,
-            [
-                85.33333333333333,
-                82.66666666666667,
-                9.333333333333334,
-                45.333333333333336,
-                45.333333333333336,
-                1.3333333333333333,
-                3.3333333333333335,
-                52.0,
-                4.666666666666667,
-                3.3333333333333335,
-                6.666666666666667,
-                27.333333333333332,
-                24.666666666666668,
-            ],
-        ),
-        (
-            2.0,
-            Compact,
-            [
-                66.5, 64.5, 7.0, 35.0, 35.0, 1.0, 2.5, 40.5, 3.5, 2.5, 5.5, 21.0, 19.5,
-            ],
-        ),
-        (
-            2.0,
-            Standard,
-            [
-                76.0, 73.0, 8.0, 40.0, 40.0, 1.0, 3.0, 46.0, 4.0, 3.0, 6.0, 24.0, 22.0,
-            ],
-        ),
-        (
-            2.0,
-            Large,
-            [
-                85.5, 82.5, 9.0, 45.0, 45.0, 1.0, 3.5, 52.0, 4.5, 3.5, 7.0, 27.0, 25.0,
-            ],
-        ),
-    ];
-    for (scale, size, values) in expected {
-        let m = rail_metrics(size, scale, Edge::Right);
-        assert_eq!(
-            [
-                m.thickness,
-                m.cell_length,
-                m.cell_spacing,
-                m.inset,
-                m.ear(),
-                m.cell.padding,
-                m.cell.content_spacing,
-                m.cell.icon_slot,
-                m.cell.ring_stroke,
-                m.cell.inner_ring_stroke,
-                m.cell.inner_ring_inset,
-                m.cell.glyph,
-                m.cell.label_height,
-            ],
-            values,
-            "{size:?} at {scale}x"
-        );
-        let across = rail_metrics(size, scale, Edge::Top);
+        let across = rail_metrics(case.size, case.scale, Edge::Top);
         assert_eq!(
             (across.thickness, across.cell_length),
             (m.cell_length, m.thickness)
@@ -337,38 +181,25 @@ fn the_rail_metrics_at_every_size_and_display_scale() {
 }
 
 #[test]
-fn the_pill_at_every_size_and_display_scale() {
-    use NotchSize::{Compact, Large, Standard};
-    for (scale, size, thickness_px, length_px) in [
-        (1.0, Compact, 5.0, 105.0),
-        (1.0, Standard, 6.0, 120.0),
-        (1.0, Large, 7.0, 135.0),
-        (1.25, Compact, 7.0, 131.0),
-        (1.25, Standard, 8.0, 150.0),
-        (1.25, Large, 8.0, 169.0),
-        (1.5, Compact, 8.0, 158.0),
-        (1.5, Standard, 9.0, 180.0),
-        (1.5, Large, 10.0, 203.0),
-        (2.0, Compact, 11.0, 210.0),
-        (2.0, Standard, 12.0, 240.0),
-        (2.0, Large, 14.0, 270.0),
-    ] {
-        let (thickness, length) = (thickness_px / scale, length_px / scale);
-        let mut current = settings("main", Edge::Right);
-        current.size = size;
-        let displays = [display("main", 0.0, scale)];
-        let rail = layout(&current, &displays).expect("fits");
-        assert_eq!(
-            pill_frame(&current, &displays),
-            Some(Layout {
-                x: rail.x + rail.width - thickness,
-                y: rail.y + rail.height / 2.0 - length / 2.0,
-                width: thickness,
-                height: length,
-            }),
-            "{size:?} at {scale}x"
-        );
-    }
+fn cells_tile_the_rail() {
+    let metrics = rail_metrics(NotchSize::Standard, 1.0, Edge::Right);
+    let cells = rail_cell_frames(Edge::Right, &metrics, 4);
+    assert_eq!(cells.len(), 4);
+    assert_eq!(cells[0].y, metrics.ear());
+    assert_eq!(
+        cells[3].y + cells[3].height,
+        metrics.length(4) - metrics.ear()
+    );
+    let bar = rail_metrics(NotchSize::Standard, 1.0, Edge::Top);
+    assert_eq!(bar.thickness, metrics.cell_length);
+    assert_eq!(
+        rail_cell_frames(Edge::Top, &bar, 2)[1].x,
+        bar.inset + bar.cell_length + bar.cell_spacing
+    );
+    assert_eq!(
+        cells[0].y,
+        metrics.length(4) - (cells[3].y + cells[3].height)
+    );
 }
 
 #[test]

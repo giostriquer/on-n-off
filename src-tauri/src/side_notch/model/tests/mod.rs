@@ -1,6 +1,5 @@
 use super::*;
 
-mod notch_core;
 mod projection;
 mod rail;
 
@@ -97,6 +96,11 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
             AgentId::Antigravity,
             AgentId::Cursor,
         ]
+    );
+    selected.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude];
+    assert_eq!(
+        selected.rail_providers(),
+        [AgentId::Claude, AgentId::Cursor]
     );
 }
 

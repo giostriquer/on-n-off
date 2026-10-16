@@ -131,8 +131,13 @@ Things that are easy to get wrong:
   The helper draws from the Swift copy. Rust's copy decides whether the rail has room (`save` and
   the host's reads) and is what the Windows painter draws its silhouette, cells, cap and pill
   from. A change to `model.rs` alone therefore moves the Windows notch and the macOS room check,
-  never the macOS helper: change a measurement in both, and in both checks, which assert the same
-  cases with the same numbers (`NotchCoreChecks`, and `model/tests/notch_core.rs` for Rust).
+  never the macOS helper. The expected numbers live once, in
+  `macos/SideNotch/Tests/NotchCoreTests/rail-cases.json`, which `NotchCoreChecks` and
+  `model/tests/rail.rs` both read: each case is a list of displays (the one named `main` is
+  selected), a size, an edge and a cell count, and the rail and pill it gets in device pixels, or
+  `null` where the rail hides; the metrics rows give every measurement of a right-edge rail. To
+  change a measurement, edit both files and the fixture. A change on one side only fails that
+  side's check.
   Popovers are not in `model.rs`: the Windows painter places them with its own copy of
   `popoverFrame` (`popover_frame`) and lays out what is in them itself.
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
