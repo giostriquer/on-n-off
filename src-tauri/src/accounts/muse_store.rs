@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
 use serde::Deserialize;
+use serde_json::Value;
 
 use super::model::AccessToken;
 
@@ -31,7 +32,7 @@ struct CliProvider {
     #[serde(default)]
     user_email: Option<String>,
     #[serde(default)]
-    expires_at: Option<i64>,
+    expires_at: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -109,10 +110,8 @@ fn stored_login(
 ) -> Option<Stored> {
     let auth: CliAuth = serde_json::from_str(text).ok()?;
     let meta = auth.providers.get("meta")?;
-    if meta
-        .expires_at
-        .is_some_and(|expires_at| expires_at <= now_secs)
-    {
+    let expires_at = meta.expires_at.as_ref().and_then(Value::as_i64);
+    if expires_at.is_some_and(|expires_at| expires_at <= now_secs) {
         return None;
     }
     let token = match non_empty(meta.access_token.as_deref()) {
@@ -123,7 +122,7 @@ fn stored_login(
     Some(Stored {
         token,
         email: non_empty(meta.user_email.as_deref()),
-        expires_at: meta.expires_at,
+        expires_at,
     })
 }
 

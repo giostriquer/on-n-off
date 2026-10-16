@@ -180,3 +180,18 @@ fn a_denied_lookup_is_remembered_until_auth_json_changes() {
     assert!(cache.login(&config, NOW, &denied).is_none());
     assert_eq!(calls.get(), 1);
 }
+
+#[test]
+fn an_expiry_of_another_shape_keeps_the_login() {
+    for expires_at in [r#""2030-01-01""#, "1.5e9", "null"] {
+        let config = config_with_auth(&format!(
+            r#"{{"providers":{{"meta":{{"mechanism":"oauth","access_token":"device-token","expires_at":{expires_at}}}}}}}"#
+        ));
+        assert!(
+            LoginCache::new()
+                .login(&config, NOW, &no_keychain)
+                .is_some(),
+            "{expires_at}"
+        );
+    }
+}
