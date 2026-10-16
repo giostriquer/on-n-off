@@ -281,3 +281,57 @@ fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
         )
     );
 }
+
+fn offers_over(polls: &[(&str, &str)]) -> Vec<usize> {
+    let alerts = opted_in("acct");
+    let mut memory = AlertMemory::default();
+    polls
+        .iter()
+        .map(|(renews, observed_at)| {
+            offered(
+                &mut memory,
+                &card("acct", 96.0, renews, observed_at, 1),
+                &alerts,
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn a_reset_time_read_a_second_or_two_apart_is_the_same_weekly_cycle() {
+    let offers = offers_over(&[
+        ("2026-10-05T12:00:00Z", "2026-10-01T11:10:00Z"),
+        ("2026-10-05T12:00:01Z", "2026-10-01T11:20:00Z"),
+        ("2026-10-05T12:00:00Z", "2026-10-01T11:30:00Z"),
+        ("2026-10-05T12:00:00Z", "2026-10-01T11:40:00Z"),
+        ("2026-10-05T12:00:01Z", "2026-10-01T11:50:00Z"),
+        ("2026-10-05T12:00:01Z", "2026-10-01T12:00:00Z"),
+        ("2026-10-05T12:00:02Z", "2026-10-01T12:10:00Z"),
+        ("2026-10-05T11:59:59Z", "2026-10-01T12:20:00Z"),
+    ]);
+
+    assert_eq!(offers, [0, 1, 0, 0, 0, 0, 0, 0]);
+}
+
+#[test]
+fn one_reset_time_written_two_ways_is_one_weekly_cycle() {
+    let offers = offers_over(&[
+        ("2026-10-05T12:00:00+00:00", "2026-10-01T11:50:00Z"),
+        ("2026-10-05T12:00:00Z", "2026-10-01T12:00:00Z"),
+        ("2026-10-05T12:00:00+00:00", "2026-10-01T12:10:00Z"),
+    ]);
+
+    assert_eq!(offers, [0, 1, 0]);
+}
+
+#[test]
+fn a_reset_time_more_than_two_seconds_away_is_another_weekly_cycle() {
+    let offers = offers_over(&[
+        ("2026-10-05T12:00:00Z", "2026-10-01T11:30:00Z"),
+        ("2026-10-05T12:00:00Z", "2026-10-01T11:40:00Z"),
+        ("2026-10-05T12:00:03Z", "2026-10-01T11:50:00Z"),
+        ("2026-10-05T12:00:03Z", "2026-10-01T12:00:00Z"),
+    ]);
+
+    assert_eq!(offers, [0, 1, 0, 1]);
+}

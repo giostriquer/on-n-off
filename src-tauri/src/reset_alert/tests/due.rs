@@ -342,3 +342,26 @@ fn an_account_without_a_label_is_named_for_what_it_is() {
         "Codex has 5% of its limit left and renews in 4d 0h. Open on-n-off to use a banked reset."
     );
 }
+
+#[test]
+fn a_spend_whose_reset_time_reads_a_second_or_two_apart_is_still_made() {
+    for renews in [
+        "2026-10-05T12:00:01Z",
+        "2026-10-05T11:59:58+00:00",
+        "2026-10-05T12:00:00+00:00",
+    ] {
+        let mut waiting = scheduled();
+
+        let due = falls_due(
+            &mut waiting,
+            &[live(96.0, renews)],
+            &automatic(),
+            minutes_after_now(10),
+        );
+
+        assert!(
+            matches!(due.as_slice(), [Due::Spend(..)]),
+            "{renews}: {due:?}"
+        );
+    }
+}
