@@ -147,6 +147,52 @@ describe("the app settings document", () => {
     expect(document.state().settings).toEqual(afterSave);
   });
 
+  it("applies a change made before the document has loaded to Rust's document, never to the placeholder", async () => {
+    const { transport, document } = rust();
+
+    await expect(document.patch({ closeToTray: true })).resolves.toEqual({ ...LOADED, closeToTray: true });
+
+    expect(transport.load).toHaveBeenCalledTimes(1);
+    expect(transport.save.mock.calls).toEqual([[{ ...LOADED, closeToTray: true }]]);
+  });
+
+  it("waits for a load under way before applying a change", async () => {
+    const { transport, document } = rust();
+    const reading = deferred<AppSettings>();
+    transport.load.mockReturnValueOnce(reading.promise);
+
+    void document.load();
+    const patched = document.patch({ closeToTray: true });
+    await settle();
+    expect(transport.save).not.toHaveBeenCalled();
+    reading.resolve(LOADED);
+    await patched;
+
+    expect(transport.load).toHaveBeenCalledTimes(1);
+    expect(transport.save.mock.calls).toEqual([[{ ...LOADED, closeToTray: true }]]);
+  });
+
+  it("reads the document again before a change when the first load failed, and saves nothing when it still cannot", async () => {
+    const { transport, document } = rust();
+    transport.load.mockRejectedValueOnce(new Error("settings unavailable"));
+    await document.load();
+
+    await document.patch({ closeToTray: true });
+    expect(transport.save.mock.calls).toEqual([[{ ...LOADED, closeToTray: true }]]);
+
+    const unreadable = rust();
+    const unavailable = new Error("settings unavailable");
+    unreadable.transport.load.mockRejectedValue(unavailable);
+    const failed = vi.fn();
+    unreadable.document.onSaveFailed(failed);
+    await unreadable.document.load();
+
+    await expect(unreadable.document.patch({ closeToTray: true })).resolves.toBeNull();
+    expect(unreadable.transport.save).not.toHaveBeenCalled();
+    expect(failed.mock.calls).toEqual([[unavailable]]);
+    expect(unreadable.document.state()).toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
+  });
+
   it("hands an updater the document to change", async () => {
     const { transport, document } = rust({ ...LOADED, hiddenAgents: ["cursor"] });
     await document.load();

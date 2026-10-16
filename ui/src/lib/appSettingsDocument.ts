@@ -53,6 +53,9 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
 
   function patch(change: AppSettingsChange): Promise<AppSettings | null> {
     return inTurn(async () => {
+      if (!current.loaded) {
+        hold(await transport.load());
+      }
       const latest = current.settings;
       const saved = await transport.save({ ...latest, ...(typeof change === "function" ? change(latest) : change) });
       hold(saved);
