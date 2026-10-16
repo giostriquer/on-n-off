@@ -235,15 +235,19 @@ itself (`limits/muse/mint.rs`) and keeps only the quota fields of the answer.
 Muse saved accounts are a later decision of the same day, reversing "Muse has no saved accounts"
 because every provider should offer the same account actions. `accounts/muse.rs` is the third
 adapter. A Muse login's identity is its lowercased `user_email` (Muse's `auth.json` carries no user
-id); its secret is `{access_token, api_key, secret_schema_version}` and the rest of
-`providers.meta` is its metadata. Muse 1.4.10 stores the signed-in login either inline in
+id); its secret is `{access_token, api_key}` and the rest of `providers.meta` is its
+metadata. Muse 1.4.10 stores the signed-in login either inline in
 `auth.json` (file backend, Windows) or in the macOS Keychain item `ai.meta.dev.credentials` /
 `meta` with `storage: "keychain"` metadata; neither holds a refresh token, so a Muse login never
 renews and on-n-off never renews one: an expired saved login asks for Sign in again.
-`accounts/muse_store.rs` owns both files: one parse of `auth.json` (an inline token, else the
+`accounts/muse_store.rs` owns both files: one parse of `auth.json` (an inline secret, else the
 Keychain item when the metadata says `storage: "keychain"` or the login is OAuth), one Keychain
-lookup cached by `auth.json`'s content and modification time (a denied lookup is an error for
-accounts, never "no login"), and one writer. Every store yields the same saved secret,
+lookup and one writer. The lookup is cached in memory by `auth.json`'s path, content and
+modification time, and the cache keeps only the parsed `{access_token, api_key}`; a store that
+cannot reach the Keychain (Windows, a disposable QA home, a saved login's home) never reads it
+from the cache. A denied lookup is an error for accounts, never "no login". A login with any
+credential is a login: an API-key login fails identification, so a switch is refused rather than
+overwriting it. Every store yields the same saved secret,
 `{access_token, api_key}`. Activation writes it back to the store Muse already uses: the same
 Keychain item through `/usr/bin/security`, keeping its `secret_schema_version` (1 when there is
 no item yet), or inline; `auth.json` is replaced atomically with other providers' entries kept,

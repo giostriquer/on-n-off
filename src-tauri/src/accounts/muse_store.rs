@@ -14,6 +14,8 @@ const SECRETS: [&str; 2] = ["access_token", "api_key"];
 const DEFAULT_SCHEMA_VERSION: i64 = 1;
 const MALFORMED: &str = "The Muse login document is malformed. It has not been changed.";
 const MALFORMED_ITEM: &str = "The Muse Keychain login is malformed. It has not been changed.";
+const UNREACHABLE: &str =
+    "Muse keeps this login in the Keychain, which on-n-off cannot reach here.";
 
 pub(crate) struct MuseLogin {
     pub(crate) email: Option<String>,
@@ -30,7 +32,6 @@ pub(super) enum Storage {
 pub(super) struct NativeLogin {
     pub(super) metadata: Map<String, Value>,
     pub(super) secret: Map<String, Value>,
-    pub(super) storage: Storage,
 }
 
 pub(super) trait Keychain {
@@ -96,15 +97,18 @@ fn document(text: &str) -> Result<Map<String, Value>, String> {
     }
 }
 
-fn meta_of(document: &Map<String, Value>) -> Option<Meta> {
-    let meta = document.get("providers")?.get("meta")?.as_object()?;
-    let metadata: Map<String, Value> = meta
-        .iter()
+fn metadata_of(meta: &Map<String, Value>) -> Map<String, Value> {
+    meta.iter()
         .filter(|(name, _)| !SECRETS.contains(&name.as_str()) && name.as_str() != "storage")
         .map(|(name, value)| (name.clone(), value.clone()))
-        .collect();
+        .collect()
+}
+
+fn meta_of(document: &Map<String, Value>) -> Option<Meta> {
+    let meta = document.get("providers")?.get("meta")?.as_object()?;
+    let metadata = metadata_of(meta);
     let inline = secret_of(meta);
-    let storage = if inline.contains_key("access_token") {
+    let storage = if !inline.is_empty() {
         Some(Storage::Inline)
     } else if meta.get("storage").and_then(Value::as_str) == Some("keychain")
         || meta.get("mechanism").and_then(Value::as_str) == Some("oauth")
@@ -156,11 +160,19 @@ fn read_auth(config: &Path) -> Result<Option<(String, String)>, String> {
 
 type Lookup = Result<Option<String>, String>;
 type Fields = Map<String, Value>;
+type Secret = Result<Option<Fields>, String>;
+
+fn parsed(lookup: Lookup) -> Secret {
+    match lookup? {
+        Some(raw) => bundle(&raw).map(|bundle| Some(secret_of(&bundle))),
+        None => Ok(None),
+    }
+}
 
 struct Cached {
     config: PathBuf,
     stamp: String,
-    lookup: Lookup,
+    secret: Secret,
 }
 
 pub(crate) struct LoginCache(Mutex<Option<Cached>>);
@@ -170,25 +182,28 @@ impl LoginCache {
         Self(Mutex::new(None))
     }
 
-    fn keychain(&self, config: &Path, stamp: &str, lookup: &dyn Fn() -> Lookup) -> Lookup {
+    fn keychain(&self, config: &Path, stamp: &str, lookup: &dyn Fn() -> Lookup) -> Secret {
         let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(cached) = cache
             .as_ref()
             .filter(|cached| cached.config == config && cached.stamp == stamp)
         {
-            return cached.lookup.clone();
+            return cached.secret.clone();
         }
-        let answer = lookup();
+        let answer = parsed(lookup());
         *cache = Some(Cached {
             config: config.to_path_buf(),
             stamp: stamp.to_string(),
-            lookup: answer.clone(),
+            secret: answer.clone(),
         });
         answer
     }
 
-    fn forget(&self) {
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    fn forget(&self, config: &Path) {
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if cache.as_ref().is_some_and(|cached| cached.config == config) {
+            *cache = None;
+        }
     }
 
     pub(crate) fn login(
@@ -208,8 +223,7 @@ impl LoginCache {
                 .keychain(config, &stamp, lookup)
                 .ok()
                 .flatten()
-                .and_then(|raw| bundle(&raw).ok())
-                .and_then(|bundle| token_of(&bundle)),
+                .and_then(|secret| token_of(&secret)),
             None => None,
         };
         Some(MuseLogin {
@@ -221,7 +235,7 @@ impl LoginCache {
     pub(super) fn native(
         &self,
         config: &Path,
-        lookup: &dyn Fn() -> Lookup,
+        keychain: Option<&dyn Keychain>,
     ) -> Result<Option<NativeLogin>, String> {
         let Some((text, stamp)) = read_auth(config)? else {
             return Ok(None);
@@ -232,18 +246,20 @@ impl LoginCache {
         let secret = match meta.storage {
             None => return Ok(None),
             Some(Storage::Inline) => meta.inline,
-            Some(Storage::Keychain) => match self.keychain(config, &stamp, lookup)? {
-                Some(raw) => secret_of(&bundle(&raw)?),
-                None => return Ok(None),
-            },
+            Some(Storage::Keychain) => {
+                let keychain = keychain.ok_or(UNREACHABLE)?;
+                match self.keychain(config, &stamp, &|| keychain.read())? {
+                    Some(secret) => secret,
+                    None => return Ok(None),
+                }
+            }
         };
-        if !secret.contains_key("access_token") {
+        if secret.is_empty() {
             return Ok(None);
         }
         Ok(Some(NativeLogin {
             metadata: meta.metadata,
             secret,
-            storage: meta.storage.unwrap_or(Storage::Inline),
         }))
     }
 
@@ -269,10 +285,7 @@ impl LoginCache {
                 } else {
                     Storage::Inline
                 });
-        let reachable = || {
-            keychain
-                .ok_or("Muse keeps this login in the Keychain, which on-n-off cannot reach here.")
-        };
+        let reachable = || keychain.ok_or(UNREACHABLE);
         let providers = document
             .entry("providers")
             .or_insert_with(|| json!({}))
@@ -286,13 +299,7 @@ impl LoginCache {
                 }
             }
             Some((metadata, secret)) => {
-                let mut meta: Map<String, Value> = metadata
-                    .iter()
-                    .filter(|(name, _)| {
-                        !SECRETS.contains(&name.as_str()) && name.as_str() != "storage"
-                    })
-                    .map(|(name, value)| (name.clone(), value.clone()))
-                    .collect();
+                let mut meta = metadata_of(metadata);
                 let secret = secret_of(secret);
                 match target {
                     Storage::Keychain => {
@@ -319,7 +326,7 @@ impl LoginCache {
         let bytes =
             serde_json::to_vec_pretty(&document).map_err(|_| "Cannot encode the Muse login.")?;
         let written = super::vault::atomic_write(&file, &bytes);
-        self.forget();
+        self.forget(config);
         written
     }
 }

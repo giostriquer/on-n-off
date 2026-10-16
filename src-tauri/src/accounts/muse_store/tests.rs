@@ -268,7 +268,7 @@ impl Keychain for FakeKeychain {
 }
 
 fn read_native(config: &Path, keychain: &FakeKeychain) -> Result<Option<NativeLogin>, String> {
-    LoginCache::new().native(config, &|| keychain.read())
+    LoginCache::new().native(config, Some(keychain))
 }
 
 fn metadata(email: &str) -> Map<String, Value> {
@@ -306,8 +306,6 @@ fn every_store_reads_the_same_secret_shape() {
 
     assert_eq!(in_keychain.secret, secret("t1"));
     assert_eq!(inline.secret, secret("t1"));
-    assert_eq!(in_keychain.storage, Storage::Keychain);
-    assert_eq!(inline.storage, Storage::Inline);
     assert!(!in_keychain.metadata.contains_key("storage"));
     assert!(!inline.metadata.contains_key("access_token"));
 }
@@ -321,8 +319,26 @@ fn an_oauth_login_without_storage_or_token_still_reads_the_keychain() {
 
     let login = read_native(&config, &keychain).unwrap().unwrap();
 
-    assert_eq!(login.storage, Storage::Keychain);
     assert_eq!(login.secret, secret("t1"));
+}
+
+#[test]
+fn an_api_key_login_is_a_login_wherever_muse_keeps_it() {
+    let inline = config_with_auth(
+        r#"{"providers":{"meta":{"mechanism":"api_key","api_key":"k","user_email":"you@example.com"}}}"#,
+    );
+    let in_keychain = config_with_auth(
+        r#"{"providers":{"meta":{"mechanism":"api_key","storage":"keychain","user_email":"you@example.com"}}}"#,
+    );
+    let keychain = FakeKeychain::holding(r#"{"secret_schema_version":1,"api_key":"k"}"#);
+    let api_key = json!({"api_key": "k"}).as_object().unwrap().clone();
+
+    for login in [
+        read_native(&inline, &FakeKeychain::default()),
+        read_native(&in_keychain, &keychain),
+    ] {
+        assert_eq!(login.unwrap().unwrap().secret, api_key);
+    }
 }
 
 #[test]
@@ -538,9 +554,12 @@ fn a_write_forgets_the_cached_lookup_so_the_next_read_sees_the_new_login() {
     let config = config_with_auth(KEYCHAIN_AUTH);
     let keychain = FakeKeychain::holding(r#"{"access_token":"old","api_key":"old"}"#);
     let cache = LoginCache::new();
-    let lookup = || keychain.read();
     assert_eq!(
-        cache.native(&config, &lookup).unwrap().unwrap().secret["access_token"],
+        cache
+            .native(&config, Some(&keychain))
+            .unwrap()
+            .unwrap()
+            .secret["access_token"],
         "old"
     );
 
@@ -553,9 +572,49 @@ fn a_write_forgets_the_cached_lookup_so_the_next_read_sees_the_new_login() {
         .unwrap();
 
     assert_eq!(
-        cache.native(&config, &lookup).unwrap().unwrap().secret["access_token"],
+        cache
+            .native(&config, Some(&keychain))
+            .unwrap()
+            .unwrap()
+            .secret["access_token"],
         "t1"
     );
+}
+
+#[test]
+fn a_store_without_the_keychain_never_gets_a_cached_keychain_answer() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let cache = LoginCache::new();
+    assert!(cache
+        .login(&config, NOW, &keychain_token)
+        .unwrap()
+        .token
+        .is_some());
+
+    assert_eq!(cache.native(&config, None), Err(UNREACHABLE.to_string()));
+}
+
+#[test]
+fn writing_another_store_keeps_the_cached_lookup() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    cache.login(&config, NOW, &lookup).unwrap();
+
+    cache
+        .write(
+            &crate::paths::scratch_dir("muse-store-other-home"),
+            None,
+            Some((&metadata("you@example.com"), &secret("t1"))),
+        )
+        .unwrap();
+    cache.login(&config, NOW, &lookup).unwrap();
+
+    assert_eq!(calls.get(), 1);
 }
 
 #[test]

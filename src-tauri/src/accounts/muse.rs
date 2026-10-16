@@ -10,7 +10,7 @@ use super::{
 use crate::dto::{AgentId, ProviderLimitsDto};
 use crate::http::HttpError;
 use crate::limits::{read_saved_muse, SavedReadError, SavedReadUrls};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::{
     ffi::OsString,
     fs,
@@ -21,6 +21,7 @@ use std::{
 
 const ENV_CREDENTIALS: [&str; 1] = ["META_API_KEY"];
 const OVERRIDES: [&str; 3] = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "MUSE_AUTH_PATH"];
+const MALFORMED_LOGIN: &str = "The saved Muse login is malformed.";
 
 pub(super) struct Muse;
 
@@ -166,14 +167,8 @@ impl MuseNative {
 
 impl Native for MuseNative {
     fn read(&self) -> Result<Option<Login>, String> {
-        let lookup = || match self.keychain() {
-            Some(keychain) => keychain.read(),
-            None => Err(
-                "Muse keeps this login in the Keychain, which on-n-off cannot reach here.".into(),
-            ),
-        };
         Ok(SIGNED_IN
-            .native(&self.config, &lookup)?
+            .native(&self.config, self.keychain())?
             .map(|native| Login {
                 auth: Value::Object(native.secret),
                 account: Value::Object(native.metadata),
@@ -185,13 +180,13 @@ impl Native for MuseNative {
     }
 
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
-        let empty = Map::new();
-        let parts = login.map(|login| {
-            (
-                login.account.as_object().unwrap_or(&empty),
-                login.auth.as_object().unwrap_or(&empty),
-            )
-        });
+        let parts = match login {
+            Some(login) => Some((
+                login.account.as_object().ok_or(MALFORMED_LOGIN)?,
+                login.auth.as_object().ok_or(MALFORMED_LOGIN)?,
+            )),
+            None => None,
+        };
         SIGNED_IN.write(&self.config, self.keychain(), parts)
     }
 

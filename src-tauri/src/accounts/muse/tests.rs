@@ -235,6 +235,30 @@ fn an_api_key_login_is_not_a_subscription() {
     assert_eq!(store.subscription().unwrap(), Some(you()));
 }
 
+fn switch_to_a_saved_login(native: &MuseNative) -> Result<(), String> {
+    let mut db = super::super::store::Database::default();
+    let id = db
+        .save(you(), login("you@example.com", "t1"), None)
+        .unwrap();
+    super::super::transaction::activate(&mut db, native, &id, false, &mut |_| Ok(()))
+}
+
+#[test]
+fn a_signed_in_api_key_login_blocks_a_switch_and_is_left_alone() {
+    let dir = scratch_dir("muse-api-key-switch");
+    let native = MuseNative {
+        urls: urls("http://127.0.0.1:9/".into()),
+        ..MuseNative::private(&dir)
+    };
+    fs::create_dir_all(&native.config).unwrap();
+    let api_key = r#"{"providers":{"meta":{"mechanism":"api_key","api_key":"k","user_email":"you@example.com"}}}"#;
+    fs::write(native.auth_file(), api_key).unwrap();
+
+    assert!(native.read().unwrap().is_some());
+    assert!(switch_to_a_saved_login(&native).is_err());
+    assert_eq!(fs::read_to_string(native.auth_file()).unwrap(), api_key);
+}
+
 #[test]
 fn a_home_and_a_new_sign_in_read_usage_with_their_own_token() {
     let dir = scratch_dir("muse-home-usage");
@@ -376,6 +400,27 @@ mod keychain {
         assert_eq!(meta["storage"], "keychain");
         assert_eq!(meta["user_email"], "you@example.com");
         assert!(meta.get("access_token").is_none() && meta.get("api_key").is_none());
+    }
+
+    #[test]
+    fn an_api_key_login_kept_in_the_keychain_blocks_a_switch_and_is_left_alone() {
+        let dir = scratch_dir("muse-keychain-api-key");
+        let store = native(&dir);
+        fs::create_dir_all(&store.config).unwrap();
+        let api_key = r#"{"providers":{"meta":{"mechanism":"api_key","storage":"keychain","user_email":"you@example.com"}}}"#;
+        fs::write(store.auth_file(), api_key).unwrap();
+
+        let ((read, switched), sent) =
+            with_test_runner(fake_items(&[("meta", r#"{"api_key":"k"}"#)]), || {
+                (store.read(), switch_to_a_saved_login(&store))
+            });
+
+        assert_eq!(read.unwrap().unwrap().auth, json!({"api_key": "k"}));
+        assert!(switched.is_err());
+        assert_eq!(fs::read_to_string(store.auth_file()).unwrap(), api_key);
+        assert!(!sent
+            .iter()
+            .any(|command| command.starts_with("add-generic-password")));
     }
 
     #[test]
