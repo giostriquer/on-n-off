@@ -477,6 +477,8 @@ pub struct GithubPrDto {
     pub auto_merge: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub merge_kind: Option<MergeKind>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub in_organization: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

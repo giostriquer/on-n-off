@@ -25,6 +25,7 @@ fn pr(id: &str, ci: CiState) -> GithubPrDto {
         merge_queue: None,
         auto_merge: false,
         merge_kind: None,
+        in_organization: None,
     }
 }
 

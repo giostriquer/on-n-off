@@ -152,6 +152,34 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_onsite() {
 }
 
 #[test]
+fn each_row_carries_whether_it_is_work_or_personal() {
+    let row = |number: u64, in_organization: serde_json::Value| {
+        serde_json::json!({
+            "id": format!("n{number}"), "number": number, "title": "Fix",
+            "url": format!("https://github.com/acme/webapp/pull/{number}"), "repo": "acme/webapp",
+            "author": "octocat", "isDraft": false, "ci": "success", "headRef": "fix",
+            "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z", "inOrganization": in_organization
+        })
+    };
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": "ok", "stale": false, "scope": [],
+        "mine": {"total": 3, "items": [row(1, true.into()), row(2, false.into()), row(3, serde_json::Value::Null)]},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap();
+    let cell = pr_cell(&dto, &[GithubList::Mine]);
+    assert_eq!(
+        cell.lists[0]
+            .items
+            .iter()
+            .map(|row| row.context)
+            .collect::<Vec<_>>(),
+        [Some(PrContext::Work), Some(PrContext::Personal), None]
+    );
+}
+
+#[test]
 fn a_rail_data_frame_carries_settings_cells_and_errors() {
     let providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT] =
         [(); PROVIDER_COUNT].map(|_| Poll::new(None));

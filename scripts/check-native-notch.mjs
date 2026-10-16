@@ -56,10 +56,14 @@ const now = Date.now();
 const at = offsetMs => new Date(now + offsetMs).toISOString();
 const quota = (id, label, kind, usedPercent, resetHours) => ({ id, label, kind, usedPercent, resetsAt: at(resetHours * 3_600_000), observedAt: at(0) });
 const session = (id, name, place, project, status, minutesAgo) => ({ id, name, place, project, status, lastActiveAt: at(-minutesAgo * 60_000) });
-const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
-  id: `node-${number}`, number, title, url: `https://github.com/octo/tools/pull/${number}`, repo: 'octo/tools',
-  author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
-});
+const pull = (number, title, ci, reviewDecision, mergeKind, isDraft, context = 'work') => {
+  const repo = context === 'personal' ? 'octocat/dotfiles' : 'acme/webapp';
+  return {
+    id: `node-${number}`, number, title, url: `https://github.com/${repo}/pull/${number}`, repo,
+    author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
+    ...(context ? { context } : {}),
+  };
+};
 const fixture = edge => ({
   version: protocolVersion, sequence: 1,
   snapshot: {
@@ -80,10 +84,10 @@ const fixture = edge => ({
       { id: 'mine', total: 4, items: [
         pull(42, 'fix: passing checks with merge conflicts', 'success', 'APPROVED', 'conflicts', false),
         pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', 'APPROVED', 'ready', false),
-        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true),
+        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true, 'personal'),
         pull(39, 'release: corrected usage cost estimates', 'failure', 'CHANGES_REQUESTED', 'conflicts', false),
       ] },
-      { id: 'reviewRequested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', null, 'behind', false)] },
+      { id: 'reviewRequested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', null, 'behind', false, null)] },
     ],
   },
   actionError: null,
@@ -124,6 +128,31 @@ function readPng(path) {
 const railInk = [8, 8, 8, 255];
 const popoverInk = [14, 14, 17, 255];
 const popoverBorder = [40, 40, 43, 255];
+const contextInk = { work: [96, 165, 250, 255], personal: [192, 132, 252, 255] };
+const contextHue = {
+  work: ([r, g, b]) => b > 100 && b > r * 1.4 && b > g * 1.15,
+  personal: ([r, g, b]) => b > 100 && r > g * 1.2 && b > g * 1.5,
+};
+const columnRuns = (png, x, test, minLength, y0 = 0, y1 = png.height) => {
+  const runs = [];
+  let start = -1;
+  for (let y = y0; y <= y1; y++) {
+    const hit = y < y1 && test(png.at(x, y));
+    if (hit && start < 0) start = y;
+    if (!hit && start >= 0) {
+      if (y - start >= minLength) runs.push([start, y]);
+      start = -1;
+    }
+  }
+  return runs;
+};
+const mostRuns = (png, x0, x1, test, minLength, y0, y1) => Array.from({ length: x1 - x0 }, (_, i) => ({ x: x0 + i, runs: columnRuns(png, x0 + i, test, minLength, y0, y1) }))
+  .reduce((best, column) => (column.runs.length > best.runs.length ? column : best), { x: -1, runs: [] });
+const countIn = (png, x0, x1, y0, y1, test) => {
+  let count = 0;
+  for (let y = Math.max(0, y0); y < Math.min(png.height, y1); y++) for (let x = Math.max(0, x0); x < Math.min(png.width, x1); x++) count += test(png.at(x, y)) ? 1 : 0;
+  return count;
+};
 const oppositeEdge = { right: 'left', left: 'right', top: 'bottom', bottom: 'top' };
 const near = (pixel, ink) => pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3);
 const edgeLine = (png, edge, inset) => {
@@ -181,6 +210,23 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     assert.ok(Math.abs((first + last) / 2 - line.length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${line.length / 2}`);
     (popoverSizes[name] ??= {})[edge] = [png.width, png.height];
   }
+  const pulls = readPng(resolve(dir, 'popover-pull-requests.png'));
+  const half = Math.floor(pulls.width / 2);
+  const stripes = Object.fromEntries(Object.entries(contextInk).map(([context, ink]) => [context, mostRuns(pulls, 0, half, (pixel) => near(pixel, ink), 20 * scale)]));
+  assert.deepEqual([stripes.work.runs.length, stripes.personal.runs.length], [3, 1], `render ${edge}: popover-pull-requests.png has ${stripes.work.runs.length} work and ${stripes.personal.runs.length} personal stripes, not one per work row and one per personal row`);
+  const [personalRow] = stripes.personal.runs;
+  assert.ok(stripes.work.runs[1][1] <= personalRow[0] && personalRow[1] <= stripes.work.runs[2][0], `render ${edge}: popover-pull-requests.png puts the personal stripe at ${personalRow}, not on the third row between work rows ${stripes.work.runs[1]} and ${stripes.work.runs[2]}`);
+  for (const [context, { x, runs }] of Object.entries(stripes)) {
+    for (const [top, bottom] of runs) {
+      const copy = mostRuns(pulls, half, pulls.width, (pixel) => near(pixel, contextInk[context]), 4 * scale, top, bottom);
+      assert.ok(copy.runs.length > 0, `render ${edge}: popover-pull-requests.png has no ${context} copy icon in the row at ${top}–${bottom} px`);
+      const tag = countIn(pulls, x + 4 * scale, x + 60 * scale, bottom - 14 * scale, bottom, contextHue[context]);
+      assert.ok(tag >= 10, `render ${edge}: popover-pull-requests.png has ${tag} px of ${context} ink where the row at ${top}–${bottom} px carries its tag`);
+    }
+  }
+  const unread = stripes.work.runs[2][1] + 4 * scale;
+  const stray = Object.entries(contextHue).map(([context, test]) => [context, countIn(pulls, 0, pulls.width, unread, pulls.height, test)]).filter(([, count]) => count > 0);
+  assert.deepEqual(stray, [], `render ${edge}: popover-pull-requests.png shows context ink below the last row that has one, on a row whose owner was never read: ${JSON.stringify(stray)}`);
   console.log(`PASS render ${edge} → ${dir}`);
 }
 const tailPx = 8 * fixture('right').snapshot.displays[0].scale;

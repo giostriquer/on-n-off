@@ -172,7 +172,7 @@ fn pull_requests_keep_only_the_selected_lists_capped_with_row_fields() {
         serde_json::json!({
             "id": format!("node-{number}"), "number": number, "title": format!("Fix #{number}"),
             "url": format!("https://github.com/octo/tools/pull/{number}"), "repo": "octo/tools",
-            "author": "giovanne", "isDraft": false, "reviewDecision": "APPROVED", "ci": "success",
+            "author": "octocat", "isDraft": false, "reviewDecision": "APPROVED", "ci": "success",
             "headRef": "fix", "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z",
             "mergeKind": "ready"
         })
@@ -215,6 +215,30 @@ fn pull_requests_keep_only_the_selected_lists_capped_with_row_fields() {
         row.get("headRef").is_none(),
         "branch names are not needed in the notch"
     );
+}
+
+#[test]
+fn each_row_travels_as_work_or_personal_and_an_unread_owner_as_neither() {
+    let pr = |number: u64, in_organization: serde_json::Value| {
+        serde_json::json!({
+            "id": format!("node-{number}"), "number": number, "title": format!("Fix #{number}"),
+            "url": format!("https://github.com/acme/webapp/pull/{number}"), "repo": "acme/webapp",
+            "author": "octocat", "isDraft": false, "ci": "success", "headRef": "fix",
+            "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z", "inOrganization": in_organization
+        })
+    };
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": "ok", "stale": false, "scope": [],
+        "mine": {"total": 3, "items": [pr(1, true.into()), pr(2, false.into()), pr(3, serde_json::Value::Null)]},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap();
+    let json = serde_json::to_value(native_pull_requests(&dto, &[GithubList::Mine])).unwrap();
+    let rows = &json["lists"][0]["items"];
+    assert_eq!(rows[0]["context"], "work");
+    assert_eq!(rows[1]["context"], "personal");
+    assert!(rows[2].get("context").is_none());
 }
 
 #[test]

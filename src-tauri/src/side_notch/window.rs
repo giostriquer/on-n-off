@@ -1,7 +1,7 @@
 use super::{
     model::{
         layout, workspace_share_wording, GithubList, InnerRing, NotchProvider, NotchSnapshot,
-        RAIL_ORDER,
+        PrContext, RAIL_ORDER,
     },
     protocol::{Action, PROTOCOL_VERSION},
     sessions::{self, LiveSession},
@@ -121,6 +121,8 @@ struct NativePr {
     #[serde(skip_serializing_if = "Option::is_none")]
     merge_kind: Option<MergeKind>,
     updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context: Option<PrContext>,
 }
 
 impl NativePr {
@@ -140,6 +142,7 @@ impl NativePr {
             ci: pr.ci,
             merge_kind: pr.merge_kind,
             updated_at: pr.updated_at.clone(),
+            context: PrContext::of(pr),
         })
     }
 }

@@ -1,7 +1,8 @@
 use crate::dto::AgentId;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use crate::dto::{
-    LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+    GithubPrDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto,
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +127,27 @@ impl NotchPullRequests {
             .into_iter()
             .filter(|list| self.lists.contains(list))
             .collect()
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PrContext {
+    Work,
+    Personal,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl PrContext {
+    pub fn of(pr: &GithubPrDto) -> Option<Self> {
+        pr.in_organization.map(|organization| {
+            if organization {
+                Self::Work
+            } else {
+                Self::Personal
+            }
+        })
     }
 }
 

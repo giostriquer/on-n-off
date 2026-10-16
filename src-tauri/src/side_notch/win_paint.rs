@@ -6,7 +6,7 @@ mod text;
 use super::model::{
     layout, workspace_share_note, workspace_share_renewed, workspace_share_window,
     workspace_share_wording, Edge, GithubList, InnerRing, NotchProvider, NotchSettings, NotchSize,
-    ShowMode,
+    PrContext, ShowMode,
 };
 use crate::dto::{
     AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
@@ -59,6 +59,7 @@ pub struct PrRowData {
     pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
     pub merge_kind: Option<MergeKind>,
+    pub context: Option<PrContext>,
 }
 
 impl PrRowData {
@@ -313,7 +314,12 @@ pub enum PopItem {
     Dot {
         ci: CiState,
     },
-    CopyIcon,
+    CopyIcon {
+        color: Color,
+    },
+    Stripe {
+        color: Color,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1029,6 +1035,7 @@ fn popover_entries(
                     y += line_h(10.5, TextWeight::Regular) + v(6.0);
                 }
                 for row in &list.items {
+                    let context = row.context.map(context_tag);
                     let title_size = v(11.0);
                     let copy_w = v(20.0);
                     let lines = wrap_lines(
@@ -1057,7 +1064,9 @@ fn popover_entries(
                         );
                         if line_index == 0 {
                             entries.push((
-                                PopItem::CopyIcon,
+                                PopItem::CopyIcon {
+                                    color: context.map_or(MUTED_INK, |(_, ink)| ink),
+                                },
                                 R::new(x + inner_w - copy_w, y, copy_w, copy_h),
                             ));
                             zones.push((
@@ -1072,8 +1081,33 @@ fn popover_entries(
                     }
                     y += v(2.0);
                     let repo_size = v(10.0);
-                    let repo = format!("{} #{}", row.repo, row.number);
                     let mut line_x = x;
+                    let badge_limit = x + inner_w - v(7.0) - v(10.0);
+                    if let Some((tag, ink)) = context {
+                        let tag_size = v(9.5);
+                        text_entry(
+                            &mut entries,
+                            line_x,
+                            y,
+                            inner_w,
+                            line_h(9.5, TextWeight::Semibold),
+                            tag.into(),
+                            tag_size,
+                            TextWeight::Semibold,
+                            ink,
+                            false,
+                        );
+                        line_x +=
+                            measure_weight(tag, tag_size, TextWeight::Semibold, display_scale)
+                                + v(5.0);
+                    }
+                    let repo = ellipsize(
+                        &format!("{} #{}", row.repo, row.number),
+                        badge_limit - line_x,
+                        repo_size,
+                        TextWeight::Regular,
+                        display_scale,
+                    );
                     text_entry(
                         &mut entries,
                         line_x,
@@ -1087,7 +1121,6 @@ fn popover_entries(
                         false,
                     );
                     line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
-                    let badge_limit = x + inner_w - v(7.0) - v(10.0);
                     for (badge, color) in row_badges(row) {
                         let badge_size = v(9.5);
                         let badge_w =
@@ -1118,16 +1151,23 @@ fn popover_entries(
                             v(7.0),
                         ),
                     ));
+                    let row_rect = R::new(
+                        x,
+                        row_top,
+                        inner_w,
+                        y + line_h(10.0, TextWeight::Regular) - row_top,
+                    );
+                    if let Some((_, ink)) = context {
+                        entries.push((
+                            PopItem::Stripe { color: ink },
+                            R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
+                        ));
+                    }
                     zones.push((
                         Zone::OpenRow {
                             url: row.url.clone(),
                         },
-                        R::new(
-                            x,
-                            row_top,
-                            inner_w,
-                            y + line_h(10.0, TextWeight::Regular) - row_top,
-                        ),
+                        row_rect,
                     ));
                     y += line_h(10.0, TextWeight::Regular) + v(6.0);
                 }
@@ -1311,6 +1351,15 @@ const FABLE_TRACK: Color = [53, 42, 38, 255];
 const CREDITS_INK: Color = [168, 176, 186, 255];
 const CREDITS_TRACK: Color = [38, 41, 45, 255];
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
+const WORK_BLUE: Color = [96, 165, 250, 255];
+const PERSONAL_VIOLET: Color = [192, 132, 252, 255];
+
+fn context_tag(context: PrContext) -> (&'static str, Color) {
+    match context {
+        PrContext::Work => ("WORK", WORK_BLUE),
+        PrContext::Personal => ("PERSONAL", PERSONAL_VIOLET),
+    }
+}
 
 fn provider_color(provider: AgentId) -> Color {
     match provider {
@@ -1972,13 +2021,18 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
                     }
                 }
             }
-            PopItem::CopyIcon => {
+            PopItem::CopyIcon { color } => {
                 marks::copy_icon(
                     (px.x as f32, px.y as f32, px.w as f32, px.h as f32),
                     1.2 * scale,
-                    MUTED_INK,
+                    *color,
                     pixmap,
                 );
+            }
+            PopItem::Stripe { color } => {
+                if let Some(path) = capsule_px(px.x as f32, px.y as f32, px.w as f32, px.h as f32) {
+                    paint_solid(pixmap, &path, *color, false);
+                }
             }
         }
     }

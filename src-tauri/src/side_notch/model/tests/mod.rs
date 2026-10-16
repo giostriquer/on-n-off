@@ -459,3 +459,22 @@ fn the_share_note_gives_the_reset_date_rather_than_a_weekday() {
     );
     assert_eq!(note(None), "");
 }
+
+#[test]
+fn an_organizations_pull_request_is_work_and_a_users_is_personal() {
+    let pr = |in_organization: serde_json::Value| -> crate::dto::GithubPrDto {
+        serde_json::from_value(serde_json::json!({
+            "id": "node-1", "number": 1, "title": "Fix", "url": "https://github.com/acme/webapp/pull/1",
+            "repo": "acme/webapp", "author": "octocat", "isDraft": false, "ci": "success",
+            "headRef": "fix", "baseRef": "main", "updatedAt": "", "inOrganization": in_organization
+        }))
+        .unwrap()
+    };
+    assert_eq!(PrContext::of(&pr(true.into())), Some(PrContext::Work));
+    assert_eq!(PrContext::of(&pr(false.into())), Some(PrContext::Personal));
+    assert_eq!(
+        PrContext::of(&pr(serde_json::Value::Null)),
+        None,
+        "a pull request read before GitHub reported its owner is neither"
+    );
+}

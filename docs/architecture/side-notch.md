@@ -51,8 +51,15 @@ current account's card, and both notches only draw it:
   (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
   reset.
 
-The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`; protocol version 5)
-and refuses a message naming a window it did not send; the Windows painter gets them in memory.
+Each pull request row's context is decided the same way, by `PrContext::of` from GitHub's
+`isInOrganization`: work for an organization's repository, personal for a user's. Both popovers
+draw it as a WORK or PERSONAL tag before the repository, a stripe down the row's leading edge and a
+copy icon in the same ink, so a review request is not pasted into the wrong channel. A row read
+before GitHub reported its owner draws none of them.
+
+The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`, each row's
+`context`; protocol version 6) and refuses a message naming a window it did not send; the Windows
+painter gets them in memory.
 What depends on the clock stays with each, since they redraw between reads: a window's percent now
 and its reset note.
 

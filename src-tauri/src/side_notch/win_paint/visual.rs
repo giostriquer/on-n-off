@@ -183,6 +183,11 @@ fn visual_dump() {
                         CiState::Success
                     },
                     merge_kind: if n == 1 { Some(MergeKind::Ready) } else { None },
+                    context: Some(if n == 3 {
+                        PrContext::Personal
+                    } else {
+                        PrContext::Work
+                    }),
                 })
                 .collect(),
         }],

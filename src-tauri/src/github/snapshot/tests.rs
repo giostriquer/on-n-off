@@ -31,6 +31,7 @@ fn data() -> GithubPrsData {
                 merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
                 auto_merge: true,
                 merge_kind: Some(MergeKind::Conflicts),
+                in_organization: Some(true),
             }],
         },
         review_requested: GithubPrListDto::default(),
@@ -104,6 +105,7 @@ fn the_merge_fields_keep_their_camel_case_wire_names() {
         r#""mergeQueue":{"position":2}"#,
         r#""autoMerge":true"#,
         r#""mergeKind":"conflicts""#,
+        r#""inOrganization":true"#,
     ] {
         assert!(raw.contains(needle), "{needle} missing from {raw}");
     }
