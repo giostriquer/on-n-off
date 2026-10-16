@@ -198,3 +198,24 @@ fn the_status_is_published_once_per_change_and_never_for_old_settings() {
     rig.tick(Duration::from_millis(100));
     assert_eq!(rig.published().len(), 1, "settings saved since then");
 }
+
+#[test]
+fn a_limits_read_that_changed_nothing_redraws_nothing() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::started(app.clone());
+    let sent = rig.frames();
+
+    app.world().limits_revisions.insert(AgentId::Claude, 1);
+    rig.tick(Duration::from_millis(100));
+    rig.tick(Duration::from_millis(100));
+    assert!(app
+        .limits_asked()
+        .contains(&Asked::Limits(AgentId::Claude, false)));
+    assert_eq!(rig.frames(), sent, "the same reading again");
+
+    replace_limits(&app, AgentId::Claude, 20.0);
+    rig.tick(Duration::from_millis(100));
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(rig.frames(), sent + 1, "a new reading redraws");
+    assert_eq!(providers(&rig.last_frame()), [(AgentId::Claude, 20.0)]);
+}

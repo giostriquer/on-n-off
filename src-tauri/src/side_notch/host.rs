@@ -283,8 +283,10 @@ impl<T: Transport, A: App> Host<T, A> {
                     revision,
                     entry,
                 } => {
+                    if self.providers[index].value != entry {
+                        self.delivery.mark_dirty();
+                    }
                     self.providers[index].finish(entry, now, revision);
-                    self.delivery.mark_dirty();
                 }
                 Read::Sessions(latest) => {
                     if latest != self.sessions.value {
