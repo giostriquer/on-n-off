@@ -743,3 +743,45 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
         assert!(texts.contains(&checking.to_string()), "{texts:?}");
     }
 }
+
+#[test]
+fn a_read_pull_request_cell_draws_the_figure_and_segments_the_model_decided() {
+    let mut conflicted = pr(1, "Fix the first thing", "o/r");
+    conflicted["mergeKind"] = "conflicts".into();
+    let mut failing = pr(2, "Fix the second thing", "o/r");
+    failing["ci"] = "failure".into();
+    let cell = pulls(vec![conflicted, failing]);
+    let CellData::PullRequests(decided) = &cell else {
+        panic!("a pull request cell");
+    };
+    let segments = decided.reading.as_ref().expect("read").segments.clone();
+    assert_eq!(
+        segments,
+        [
+            PrSegment {
+                ci: CiState::Success,
+                passing_with_conflicts: true
+            },
+            PrSegment {
+                ci: CiState::Failure,
+                passing_with_conflicts: false
+            },
+        ]
+    );
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![cell.clone()]),
+        Hover::default(),
+    )
+    .expect("fits");
+    assert_eq!(
+        planned.cells[0].content,
+        CellContent::PullRequests {
+            label: "2".into(),
+            segments
+        },
+        "the ring draws the frame's own figure and segments"
+    );
+}
