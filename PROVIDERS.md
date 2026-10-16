@@ -198,7 +198,7 @@ adapter assumes today (change the adapter and this file together).
 3. The UI keeps no provider list of its own: `ui/src/lib/providers.ts` derives its tabs, orders,
    names, commands and which screens a provider has from that fixture. Add the `AgentId` member
    (`ui/src/lib/types.ts`), which `providersContract.test.ts` holds equal to the fixture's keys, then
-   the rows `tsc` asks for: the provider's colours, MCP notice and display paths in `providers.ts`,
+   the rows `tsc` asks for: the provider's colours, toggles and display paths in `providers.ts`,
    its icon in `ProviderIcon.tsx`, and, for a provider with Limits or saved accounts, its member of
    `LimitsProvider` or `AccountProvider` and the records keyed by them (the contract test fails
    until those unions name exactly the providers the fixture gives the fact). The notch helper still

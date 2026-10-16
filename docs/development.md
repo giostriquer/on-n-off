@@ -15,9 +15,10 @@ locates the subsystems. Module doc-comments explain their implementation.
 - A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
   from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. In the UI
   it comes from `ui/src/lib/providers.ts`, which derives it from the catalogue fixture Rust asserts
-  it writes; a fact Rust does not own (colours, MCP notice, display paths) is a `Record<AgentId, …>`
-  row there, never a `switch` with a `default` or a string compare. Only the notch helper still
-  keeps its own list; `PROVIDERS.md` names it.
+  it writes. What only the UI states about a provider (its colours, the paths Agent Config, the
+  scope bar and the install sheet print, how its plugins and MCP servers are switched and the
+  notice where they cannot be) is a `Record<AgentId, …>` row in that module, so a provider without
+  one does not compile. Only the notch helper still keeps its own list; `PROVIDERS.md` names it.
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly; only `ui/src/lib/api.ts`
   and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
   `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.

@@ -80,17 +80,50 @@ export function providerChartColor(id: AgentId, dark: boolean): string {
   return LOOK[id].chart[dark ? "dark" : "light"];
 }
 
-const MCP_READ_ONLY: Readonly<Record<AgentId, string | null>> = {
-  claude: null,
-  codex: null,
-  antigravity: null,
-  cursor:
-    "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
-  muse: "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.",
+export type McpToggle =
+  | { readonly toggle: true; readonly detail: string }
+  | { readonly toggle: false; readonly detail: string; readonly notice: string };
+
+export type ProviderToggles = {
+  readonly plugin: string;
+  readonly mcp: McpToggle;
 };
 
-export function mcpReadOnlyNotice(id: AgentId): string | null {
-  return MCP_READ_ONLY[id];
+const TOGGLES: Readonly<Record<AgentId, ProviderToggles>> = {
+  claude: {
+    plugin: "claude plugin enable/disable",
+    mcp: { toggle: true, detail: "file patch · ~/.claude.json disabled" },
+  },
+  codex: {
+    plugin: "file patch · [plugins.*.enabled]",
+    mcp: { toggle: true, detail: "file patch · [mcp_servers.*.enabled]" },
+  },
+  antigravity: {
+    plugin: "agy plugin enable/disable",
+    mcp: { toggle: true, detail: "file patch · mcpServers.*.disabled" },
+  },
+  cursor: {
+    plugin: "not implemented yet",
+    mcp: {
+      toggle: false,
+      detail: "managed in Cursor · read-only here",
+      notice:
+        "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
+    },
+  },
+  muse: {
+    plugin: "muse plugins enable/disable",
+    mcp: {
+      toggle: false,
+      detail: "managed in Muse · read-only here",
+      notice:
+        "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.",
+    },
+  },
+};
+
+export function providerToggles(id: AgentId): ProviderToggles {
+  return TOGGLES[id];
 }
 
 export type ProviderPaths = {

@@ -416,8 +416,10 @@ order is not something either side's equality checks. JSON booleans reach `tsc` 
 narrow unions `LimitsProvider` and `AccountProvider` are declared beside the module and the contract
 test holds each to the providers the fixture gives the fact. Facts Rust does not own are
 `Record<AgentId, …>` tables in the same module, so a provider without a row does not compile: its
-bar, icon and chart colours, the read-only MCP notice (which also says the MCP toggle does not
-work there) and the display paths the UI prints. The icons themselves stay in `ProviderIcon.tsx`, an
+bar, icon and chart colours; how its plugins and MCP servers are switched (`providerToggles`, whose
+MCP row is either a toggle or read-only with the notice the MCP screen shows, and decides Agent
+Config's YES or NO); and the display paths Agent Config, the scope bar and the install sheet print
+(`providerPaths`). The icons themselves stay in `ProviderIcon.tsx`, an
 exhaustive table too, because their SVG paths belong in the screens' chunks and the module is in
 the initial bundle. The display paths are the UI's description of where each provider keeps
 things; they are not resolved, so a Muse home moved by `XDG_*`, or Muse's Windows folders, still

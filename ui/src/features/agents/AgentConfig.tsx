@@ -4,9 +4,9 @@ import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { configMcpCount } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
-import { mcpReadOnlyNotice, providerBinary, providerPaths } from "$lib/providers";
+import { providerBinary, providerPaths, providerToggles } from "$lib/providers";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
-import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
+import type { AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
 type AgentConfigProps = {
   agent: AgentInfo;
@@ -18,36 +18,6 @@ type AgentConfigProps = {
   onSelectScope?: (path: string | null) => void;
   onPickFolder?: () => void;
 };
-
-function pluginToggleValue(id: AgentId): string {
-  switch (id) {
-    case "claude":
-      return "claude plugin enable/disable";
-    case "antigravity":
-      return "agy plugin enable/disable";
-    case "codex":
-      return "file patch · [plugins.*.enabled]";
-    case "cursor":
-      return "not implemented yet";
-    case "muse":
-      return "muse plugins enable/disable";
-  }
-}
-
-function mcpToggleValue(id: AgentId): string {
-  switch (id) {
-    case "claude":
-      return "file patch · ~/.claude.json disabled";
-    case "antigravity":
-      return "file patch · mcpServers.*.disabled";
-    case "codex":
-      return "file patch · [mcp_servers.*.enabled]";
-    case "cursor":
-      return "managed in Cursor · read-only here";
-    case "muse":
-      return "managed in Muse · read-only here";
-  }
-}
 
 function Status({ ok, label }: { ok: boolean; label: string }) {
   return (
@@ -117,6 +87,7 @@ export function AgentConfig({
 }: AgentConfigProps) {
   const [query, setQuery] = useState("");
   const paths = providerPaths(agent.id);
+  const toggles = providerToggles(agent.id);
   const pluginCount = tab?.plugins.length ?? 0;
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
@@ -365,8 +336,8 @@ export function AgentConfig({
               detail={agent.installFolder ? "supported" : "not on this CLI"}
               ok={agent.installFolder}
             />
-            <Capability label="Plugin toggle" detail={pluginToggleValue(agent.id)} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={mcpReadOnlyNotice(agent.id) === null} />
+            <Capability label="Plugin toggle" detail={toggles.plugin} ok={agent.pluginToggle} />
+            <Capability label="MCP toggle" detail={toggles.mcp.detail} ok={toggles.mcp.toggle} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 
