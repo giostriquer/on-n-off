@@ -81,7 +81,7 @@ pub fn read_prs_revisioned(force: bool) -> (GithubPrsDto, u64) {
     (dto, reading.revision())
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn revision() -> u64 {
     READ_MEMO.revision.current()
 }

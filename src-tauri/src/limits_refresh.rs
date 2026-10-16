@@ -174,7 +174,7 @@ fn announce(cache: &Cache, reading: Reading) {
     }
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 pub fn revision(agent: AgentId) -> u64 {
     cache_for(agent).map_or(0, |cache| cache.revision.current())
 }

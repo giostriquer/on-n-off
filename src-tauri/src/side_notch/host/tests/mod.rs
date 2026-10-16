@@ -22,7 +22,9 @@ enum Asked {
 #[derive(Default)]
 struct World {
     limits: HashMap<AgentId, Vec<ProviderLimitsDto>>,
+    limits_revisions: HashMap<AgentId, u64>,
     pull_requests: Option<GithubPrsDto>,
+    pull_requests_revision: u64,
     sessions: HashMap<AgentId, Vec<LiveSession>>,
     limits_interval: Option<Duration>,
     pull_requests_interval: Option<Duration>,
@@ -64,10 +66,22 @@ impl FakeApp {
 }
 
 impl App for FakeApp {
-    fn read_limits(&self, agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
+    fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
         let mut world = self.world();
         world.asked.push(Asked::Limits(agent, force));
-        world.limits.get(&agent).cloned().unwrap_or_default()
+        let entries = world.limits.get(&agent).cloned().unwrap_or_default();
+        (
+            entries,
+            world.limits_revisions.get(&agent).copied().unwrap_or(0),
+        )
+    }
+
+    fn limits_revision(&self, agent: AgentId) -> u64 {
+        self.world()
+            .limits_revisions
+            .get(&agent)
+            .copied()
+            .unwrap_or(0)
     }
 
     fn limits_interval(&self) -> Duration {
@@ -76,13 +90,18 @@ impl App for FakeApp {
             .unwrap_or(Duration::from_secs(5 * 60))
     }
 
-    fn read_pull_requests(&self, force: bool) -> GithubPrsDto {
+    fn read_pull_requests(&self, force: bool) -> (GithubPrsDto, u64) {
         let mut world = self.world();
         world.asked.push(Asked::PullRequests(force));
-        world
+        let dto = world
             .pull_requests
             .clone()
-            .unwrap_or_else(|| prs(Vec::new()))
+            .unwrap_or_else(|| prs(Vec::new()));
+        (dto, world.pull_requests_revision)
+    }
+
+    fn pull_requests_revision(&self) -> u64 {
+        self.world().pull_requests_revision
     }
 
     fn pull_requests_interval(&self) -> Duration {
@@ -345,6 +364,18 @@ fn providers(frame: &RailData) -> Vec<(AgentId, f64)> {
             CellData::PullRequests(_) => None,
         })
         .collect()
+}
+
+fn replace_limits(app: &FakeApp, agent: AgentId, percent: f64) {
+    let mut world = app.world();
+    world.limits.insert(agent, card(agent, percent));
+    *world.limits_revisions.entry(agent).or_default() += 1;
+}
+
+fn replace_pull_requests(app: &FakeApp, mine: Vec<serde_json::Value>) {
+    let mut world = app.world();
+    world.pull_requests = Some(prs(mine));
+    world.pull_requests_revision += 1;
 }
 
 fn app_with(cards: &[(AgentId, f64)]) -> FakeApp {

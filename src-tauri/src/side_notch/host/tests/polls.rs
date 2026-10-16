@@ -161,3 +161,82 @@ fn nothing_is_read_while_the_rail_has_nowhere_to_go() {
         assert!(rig.frames() > 0, "the surface still gets the settings");
     }
 }
+
+#[test]
+fn a_limits_read_another_surface_replaced_reaches_the_notch_without_waiting() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    app.world().limits_revisions.insert(AgentId::Claude, 7);
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+    rig.tick(Duration::from_secs(1));
+    assert!(
+        app.limits_asked().is_empty(),
+        "nothing new in the shared cache, so wait out the interval"
+    );
+
+    replace_limits(&app, AgentId::Claude, 55.0);
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(
+        app.limits_asked(),
+        [Asked::Limits(AgentId::Claude, false)],
+        "the Limits screen's refresh replaced the cached read: pick it up now, unforced"
+    );
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(providers(&rig.last_frame()), [(AgentId::Claude, 55.0)]);
+    rig.tick(Duration::from_secs(1));
+    assert!(
+        app.limits_asked().is_empty(),
+        "the read it made is at the current revision"
+    );
+}
+
+#[test]
+fn a_newer_revision_waits_for_the_read_in_flight() {
+    let app = app_with(&[(AgentId::Claude, 10.0)]);
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+    app.world().hold = true;
+
+    replace_limits(&app, AgentId::Claude, 20.0);
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(app.world().held.len(), 1);
+    replace_limits(&app, AgentId::Claude, 30.0);
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(app.world().held.len(), 1, "one read in flight");
+
+    app.release();
+    rig.tick(Duration::from_millis(100));
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(
+        app.world().held.len(),
+        0,
+        "that read saw the newest revision"
+    );
+    assert_eq!(providers(&rig.last_frame()), [(AgentId::Claude, 30.0)]);
+}
+
+#[test]
+fn a_pull_request_read_another_surface_replaced_reaches_the_notch_without_waiting() {
+    let app = FakeApp::default();
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+
+    replace_pull_requests(&app, vec![pr(1)]);
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(
+        app.take_asked()
+            .into_iter()
+            .filter(|asked| matches!(asked, Asked::PullRequests(_)))
+            .collect::<Vec<_>>(),
+        [Asked::PullRequests(false)],
+        "the Pull requests screen's refresh reaches the notch in the next tick, unforced"
+    );
+    rig.tick(Duration::from_millis(100));
+    let frame = rig.last_frame();
+    let Some(CellData::PullRequests(cell)) = frame.cells.last() else {
+        panic!("a pull request cell");
+    };
+    assert_eq!(cell.lists[0].items.len(), 1);
+    rig.tick(Duration::from_secs(1));
+    assert!(app.take_asked().is_empty());
+}

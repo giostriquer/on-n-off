@@ -108,9 +108,11 @@ pub(super) enum Page {
 }
 
 pub(super) trait App: Clone + Send + 'static {
-    fn read_limits(&self, agent: AgentId, force: bool) -> Vec<ProviderLimitsDto>;
+    fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64);
+    fn limits_revision(&self, agent: AgentId) -> u64;
     fn limits_interval(&self) -> Duration;
-    fn read_pull_requests(&self, force: bool) -> GithubPrsDto;
+    fn read_pull_requests(&self, force: bool) -> (GithubPrsDto, u64);
+    fn pull_requests_revision(&self) -> u64;
     fn pull_requests_interval(&self) -> Duration;
     fn read_sessions(&self, agent: AgentId) -> Vec<LiveSession>;
     fn spawn(&self, read: impl FnOnce() + Send + 'static);
@@ -126,6 +128,7 @@ struct Poll<T> {
     started: Option<Instant>,
     last_read: Option<Instant>,
     force: bool,
+    read_at: u64,
 }
 
 impl<T> Poll<T> {
@@ -136,12 +139,14 @@ impl<T> Poll<T> {
             started: None,
             last_read: None,
             force: false,
+            read_at: 0,
         }
     }
 
-    fn due(&self, now: Instant, interval: Duration) -> bool {
+    fn due(&self, now: Instant, interval: Duration, latest: u64) -> bool {
         !self.loading
             && (self.force
+                || self.read_at != latest
                 || self
                     .last_read
                     .is_none_or(|last_read| now.saturating_duration_since(last_read) >= interval))
@@ -153,10 +158,11 @@ impl<T> Poll<T> {
         std::mem::take(&mut self.force)
     }
 
-    fn finish(&mut self, value: T, now: Instant) {
+    fn finish(&mut self, value: T, now: Instant, read_at: u64) {
         self.value = value;
         self.loading = false;
         self.last_read = Some(now);
+        self.read_at = read_at;
     }
 
     fn release_stale(&mut self, now: Instant) {
@@ -198,9 +204,16 @@ impl Delivery {
 }
 
 enum Read {
-    Limits(usize, Option<NotchProvider>),
+    Limits {
+        index: usize,
+        revision: u64,
+        entry: Option<NotchProvider>,
+    },
     Sessions(Vec<Vec<LiveSession>>),
-    PullRequests(Box<GithubPrsDto>),
+    PullRequests {
+        revision: u64,
+        dto: Box<GithubPrsDto>,
+    },
 }
 
 pub(super) struct Host<T, A> {
@@ -265,21 +278,25 @@ impl<T: Transport, A: App> Host<T, A> {
     fn collect(&mut self, now: Instant) {
         for read in self.reads.try_iter() {
             match read {
-                Read::Limits(index, entry) => {
-                    self.providers[index].finish(entry, now);
+                Read::Limits {
+                    index,
+                    revision,
+                    entry,
+                } => {
+                    self.providers[index].finish(entry, now, revision);
                     self.delivery.mark_dirty();
                 }
                 Read::Sessions(latest) => {
                     if latest != self.sessions.value {
                         self.delivery.mark_dirty();
                     }
-                    self.sessions.finish(latest, now);
+                    self.sessions.finish(latest, now, 0);
                 }
-                Read::PullRequests(latest) => {
-                    if self.pulls.value.as_ref() != Some(&*latest) {
+                Read::PullRequests { revision, dto } => {
+                    if self.pulls.value.as_ref() != Some(&*dto) {
                         self.delivery.mark_dirty();
                     }
-                    self.pulls.finish(Some(*latest), now);
+                    self.pulls.finish(Some(*dto), now, revision);
                 }
             }
         }
@@ -376,17 +393,23 @@ impl<T: Transport, A: App> Host<T, A> {
         self.sessions.release_stale(now);
         let interval = self.app.limits_interval();
         for (index, agent) in RAIL_ORDER.into_iter().enumerate() {
-            if !selected.contains(&agent) || !self.providers[index].due(now, interval) {
+            if !selected.contains(&agent)
+                || !self.providers[index].due(now, interval, self.app.limits_revision(agent))
+            {
                 continue;
             }
             let force = self.providers[index].start(now);
             let (app, sender) = (self.app.clone(), self.sender.clone());
             self.app.spawn(move || {
-                let entry = NotchProvider::current(app.read_limits(agent, force));
-                let _ = sender.send(Read::Limits(index, entry));
+                let (entries, revision) = app.read_limits(agent, force);
+                let _ = sender.send(Read::Limits {
+                    index,
+                    revision,
+                    entry: NotchProvider::current(entries),
+                });
             });
         }
-        if self.sessions.due(now, SESSIONS_INTERVAL) {
+        if self.sessions.due(now, SESSIONS_INTERVAL, 0) {
             self.sessions.start(now);
             let (app, sender) = (self.app.clone(), self.sender.clone());
             let selected = selected.clone();
@@ -395,14 +418,20 @@ impl<T: Transport, A: App> Host<T, A> {
             });
         }
         self.pulls.release_stale(now);
-        if self.snapshot.settings.pull_requests.enabled && self.pulls.due(now, self.pulls_interval)
+        if self.snapshot.settings.pull_requests.enabled
+            && self
+                .pulls
+                .due(now, self.pulls_interval, self.app.pull_requests_revision())
         {
             let force = self.pulls.start(now);
             self.pulls_interval = self.app.pull_requests_interval();
             let (app, sender) = (self.app.clone(), self.sender.clone());
             self.app.spawn(move || {
-                let dto = app.read_pull_requests(force);
-                let _ = sender.send(Read::PullRequests(Box::new(dto)));
+                let (dto, revision) = app.read_pull_requests(force);
+                let _ = sender.send(Read::PullRequests {
+                    revision,
+                    dto: Box::new(dto),
+                });
             });
         }
     }
@@ -646,16 +675,24 @@ struct Changed {
 
 #[cfg(target_os = "windows")]
 impl App for AppHandle {
-    fn read_limits(&self, agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
-        crate::limits_refresh::read_limits(agent, force)
+    fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
+        crate::limits_refresh::read_limits_revisioned(agent, force)
+    }
+
+    fn limits_revision(&self, agent: AgentId) -> u64 {
+        crate::limits_refresh::revision(agent)
     }
 
     fn limits_interval(&self) -> Duration {
         crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
     }
 
-    fn read_pull_requests(&self, force: bool) -> GithubPrsDto {
-        crate::github::read_prs(force)
+    fn read_pull_requests(&self, force: bool) -> (GithubPrsDto, u64) {
+        crate::github::read_prs_revisioned(force)
+    }
+
+    fn pull_requests_revision(&self) -> u64 {
+        crate::github::revision()
     }
 
     fn pull_requests_interval(&self) -> Duration {
