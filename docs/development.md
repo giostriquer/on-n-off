@@ -12,6 +12,9 @@ locates the subsystems. Module doc-comments explain their implementation.
   (`accounts::Adapter`, implemented in `accounts/claude.rs` and `accounts/codex.rs` over
   `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
   through `supports_accounts`.
+- A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
+  from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. The UI
+  and the notch helper still keep their own; `PROVIDERS.md` names them.
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.

@@ -332,22 +332,23 @@ gone nothing can rebuild it.
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
-| `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every provider list is drawn from it. See below. |
+| `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every Rust provider list is drawn from it; the UI's and the Swift helper's are still kept by hand. See below. |
 
 ### Provider catalogue
 
 `AgentId::ALL` lists every provider in tab order, and `AgentId::facts` gives each one row: key,
-display name, binary and aliases, rail rank, whether a fresh notch shows it, whether it has a
-Limits reader, which `UsageProvider` reads its transcripts, and whether it offers saved accounts.
-The row is one exhaustive `match`, so a new provider does not compile without one; nothing in
-Rust makes a list name every variant, so a test walks the variants serde declares and requires
-each in `ALL` once. Lists a const context needs are computed at compile time: `RAIL_ORDER`
-places each row at its rail rank and refuses a rank that is taken or out of range, and
-`WITH_LIMITS` and `WITH_SAVED_ACCOUNTS` keep `ALL`'s order. A provider string decoded by hand
-(scan-cache rows, aggregate keys, CLI names) goes through `AgentId::from_key`,
-`UsageProvider::from_key` or `AgentId::from_binary`, and one none of them knows is skipped, never
-taken for another provider. Settings, folded usage and IPC decode providers through serde, whose
-lowercase name a test holds equal to the row's key.
+display name, binary and aliases, whether it has a Limits reader, which `UsageProvider` reads its
+transcripts, and whether it offers saved accounts. The row is one exhaustive `match`, so a new
+provider does not compile without one; nothing in Rust makes a list name every variant, so a test
+walks the variants serde declares and requires each in `ALL` once. `UsageProvider`, the providers
+Usage reads, lives beside it, and its own variants are checked against the rows the same way.
+`RAIL_ORDER`, the side notch's order, is a literal of `ALL`'s length that a compile-time check
+holds to naming every provider; `WITH_LIMITS` and `WITH_SAVED_ACCOUNTS` are compile-time filters
+in `ALL`'s order. A provider string decoded by hand (scan-cache rows, CLI names) goes through
+`UsageProvider::from_key` or `AgentId::from_binary`, and one neither knows is skipped, never taken
+for another provider. Settings, folded usage and IPC decode providers through serde, whose
+lowercase name a test holds equal to the row's key. Usage keys its buckets by `UsageProvider`
+itself, so no provider name is parsed back there.
 
 The catalogue is data. Code that does something different per provider stays an exhaustive
 `match` in its own module (the Limits reader and its locks and caches, `accounts::adapter`,
@@ -355,8 +356,13 @@ transcript directories, session readers, homes, colours), and an agreement test 
 when a fact and that code disagree.
 
 The notch's provider default has two values, kept as found: `NotchSettings::default()` shows the
-providers marked for a fresh notch (Claude, Codex, Muse), while a stored notch document with no
-`providers` field shows every provider in rail order.
+providers with a Limits reader (`WITH_LIMITS`: Claude, Codex, Muse), while a stored notch document
+with no `providers` field shows every provider in rail order.
+
+The UI (`ui/src/lib/appSettings.ts`, `notchTypes.ts`, `usageMerge.ts`,
+`features/limits/useLimitsProviders.ts`, `features/accounts/AddAccount.tsx`) and the notch helper
+(`ProviderId` in `NotchCore/Models.swift`) keep their own provider lists, which no test compares
+with the catalogue; `PROVIDERS.md` lists them under "When adding a provider".
 
 ## Where the state lives
 
@@ -388,7 +394,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
-| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists drawn from them there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`) and the lookups `AgentId::from_key` and `AgentId::from_binary`; Usage reads its rows through `UsageProvider::all` and `UsageProvider::from_key` (`usage/transcripts.rs`) |
+| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; the UI and Swift lists are outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Provider.headline` |
