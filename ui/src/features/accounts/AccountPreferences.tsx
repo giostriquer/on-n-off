@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CardToggle, SettingRow, SettingsCard, SwitchRow } from "@/components/SettingsCard";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
-import { accountPreferenceQuery, rereadAccountLists } from "$lib/sharedReads/accounts";
+import { accountPreferenceQuery, rereadAccountListsAndPreference } from "$lib/sharedReads/accounts";
 
 const LABEL = "Automatically save accounts I sign in to";
 
@@ -36,7 +36,7 @@ function useAutomaticAccountSaving() {
   const on = query.data ?? false;
   async function change(enabled: boolean) {
     setBusy(true); setError(null);
-    try { await api.accountAction("codex", enabled ? "remember" : "stopRemembering"); await rereadAccountLists(client); }
+    try { await api.accountAction("codex", enabled ? "remember" : "stopRemembering"); await rereadAccountListsAndPreference(client); }
     catch (error) { setError(parseInvokeError(error).message); }
     finally { setBusy(false); }
   }

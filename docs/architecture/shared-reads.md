@@ -110,8 +110,8 @@ is the only place that knows its query keys and its reads through `$lib/api`. Sc
 query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
 `accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`) and call its operations
 (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`, `refreshGithubPrs`,
-`rereadPendingResetSpends`, `rereadAccountLists`, `accountChanged`, `cachedAccountList`,
-`updateAccountList`); they never write a key. Each module also exports its source's entry for the
+`rereadPendingResetSpends`, `rereadAccountListsAndPreference`, `accountChanged`,
+`cachedAccountList`, `updateAccountList`); they never write a key. Each module also exports its source's entry for the
 announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
 table from those entries alone. A key changed in one place is therefore changed in both. The
 modules import no React and no query observer: the table and the shell's Refresh are in the
@@ -133,7 +133,7 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   with the remembering preference (`["accounts", …]`) and the Codex subscription dates
   (`["subscription", "codex", …]`). An account change in the window (`accountChanged`) re-reads
   both and that provider's limits; the shell's Refresh and the remembering toggle re-read the
-  lists only (`rereadAccountLists`).
+  lists and the preference, not the subscription dates (`rereadAccountListsAndPreference`).
 - **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not
   the screen, decides which accounts are due, including an active account close to its limit.
 

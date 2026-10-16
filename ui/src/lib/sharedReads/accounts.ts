@@ -4,16 +4,17 @@ import type { AccountProvider, AccountsReading } from "$lib/accountTypes";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
 
-const ACCOUNT_LISTS = ["accounts"] as const;
+const ACCOUNTS = ["accounts"] as const;
 const CODEX_SUBSCRIPTIONS = ["subscription", "codex"] as const;
+const ANNOUNCED = [ACCOUNTS, CODEX_SUBSCRIPTIONS] as const;
 const DAY_MS = 24 * 60 * 60_000;
 
 function accountListKey(provider: AccountProvider) {
-  return [...ACCOUNT_LISTS, provider] as const;
+  return [...ACCOUNTS, provider] as const;
 }
 
 export const accountsAnnouncements = {
-  accounts: [ACCOUNT_LISTS, CODEX_SUBSCRIPTIONS],
+  accounts: ANNOUNCED,
 } satisfies Record<Extract<SharedReadSource, "accounts">, readonly QueryKey[]>;
 
 export function accountListQuery(provider: AccountProvider) {
@@ -21,7 +22,7 @@ export function accountListQuery(provider: AccountProvider) {
 }
 
 export function accountPreferenceQuery() {
-  return queryOptions({ queryKey: [...ACCOUNT_LISTS, "preferences"], queryFn: () => api.readAccountPreferences(), retry: false });
+  return queryOptions({ queryKey: [...ACCOUNTS, "preferences"], queryFn: () => api.readAccountPreferences(), retry: false });
 }
 
 export function codexSubscriptionQuery(accountId: string, refresh = true) {
@@ -48,14 +49,13 @@ export function updateAccountList(
   client.setQueryData<AccountsReading>(accountListKey(provider), (reading) => reading && update(reading));
 }
 
-export function rereadAccountLists(client: QueryClient): Promise<void> {
-  return client.invalidateQueries({ queryKey: ACCOUNT_LISTS });
+export function rereadAccountListsAndPreference(client: QueryClient): Promise<void> {
+  return client.invalidateQueries({ queryKey: ACCOUNTS });
 }
 
 export async function accountChanged(client: QueryClient, provider: AccountProvider): Promise<void> {
   await Promise.all([
-    rereadAccountLists(client),
+    ...ANNOUNCED.map((queryKey) => client.invalidateQueries({ queryKey })),
     rereadLimits(client, provider),
-    client.invalidateQueries({ queryKey: CODEX_SUBSCRIPTIONS }),
   ]);
 }
