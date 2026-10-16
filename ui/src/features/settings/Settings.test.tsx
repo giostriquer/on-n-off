@@ -2,10 +2,11 @@ import { defaultNotchSettings } from "$lib/notchTypes";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { Settings } from "./Settings";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { AgentInfo, AppSettings } from "$lib/types";
+import type { AppSettingsChange } from "$lib/appSettingsDocument";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 
 const apiMocks = vi.hoisted(() => ({
@@ -98,7 +99,7 @@ function renderSettings({
   resetAlerts = {},
 }: {
   onToggleVisible?: (id: AgentInfo["id"], hidden: boolean) => void;
-  onSettingsChange?: (patch: Partial<AppSettings>) => void;
+  onSettingsChange?: (change: AppSettingsChange) => void;
   githubScopes?: string[];
   resetAlerts?: AppSettings["resetAlerts"];
 } = {}) {
@@ -108,18 +109,7 @@ function renderSettings({
       <UpdateProvider initialProviderReady automaticUpdates client={updaterClient}>
         <Settings
           agents={agents}
-          settings={{
-            hiddenAgents: [],
-            binaryPaths: {},
-            automaticUpdates: true,
-            limitNotifications: false,
-            limitsPollMinutes: 10,
-            githubScopes,
-            githubNotifications: false,
-            githubPollSeconds: 60,
-            closeToTray: false,
-            resetAlerts,
-          }}
+          settings={settingsWith({ githubScopes, resetAlerts })}
           onToggleVisible={onToggleVisible}
           onSaveBinary={() => undefined}
           onSettingsChange={onSettingsChange}
@@ -127,6 +117,25 @@ function renderSettings({
       </UpdateProvider>
     </QueryClientProvider>,
   );
+}
+
+function settingsWith(fields: Pick<AppSettings, "githubScopes" | "resetAlerts">): AppSettings {
+  return {
+    hiddenAgents: [],
+    binaryPaths: {},
+    automaticUpdates: true,
+    limitNotifications: false,
+    limitsPollMinutes: 10,
+    githubNotifications: false,
+    githubPollSeconds: 60,
+    closeToTray: false,
+    ...fields,
+  };
+}
+
+function lastChangeTo(onSettingsChange: Mock<(change: AppSettingsChange) => void>, latest: AppSettings) {
+  const change = onSettingsChange.mock.lastCall![0];
+  return typeof change === "function" ? change(latest) : change;
 }
 
 describe("Settings", () => {
@@ -203,8 +212,9 @@ describe("Settings", () => {
 
   it("adds and removes GitHub scopes with Enter and the chip button, never on blur", async () => {
     const user = userEvent.setup();
-    const onSettingsChange = vi.fn();
-    renderSettings({ onSettingsChange, githubScopes: ["org:acme", "repo:me/tool"] });
+    const onSettingsChange = vi.fn<(change: AppSettingsChange) => void>();
+    const rendered = settingsWith({ githubScopes: ["org:acme", "repo:me/tool"], resetAlerts: {} });
+    renderSettings({ onSettingsChange, githubScopes: rendered.githubScopes });
 
     const card = screen.getByRole("region", { name: "Pull requests" });
     expect(card).toHaveTextContent("org:acme");
@@ -213,11 +223,20 @@ describe("Settings", () => {
     const input = screen.getByRole("textbox", { name: "Scopes" });
     expect(input).toHaveAccessibleDescription(/org:NAME, user:NAME or OWNER\/REPO/);
     await user.type(input, "  user:me{Enter}");
-    expect(onSettingsChange).toHaveBeenCalledWith({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
+    expect(onSettingsChange).toHaveBeenCalledTimes(1);
+    expect(lastChangeTo(onSettingsChange, rendered)).toEqual({ githubScopes: ["org:acme", "repo:me/tool", "user:me"] });
+    expect(lastChangeTo(onSettingsChange, { ...rendered, githubScopes: ["org:other"] })).toEqual({
+      githubScopes: ["org:other", "user:me"],
+    });
+    expect(lastChangeTo(onSettingsChange, { ...rendered, githubScopes: ["user:me"] })).toEqual({ githubScopes: ["user:me"] });
     expect(input).toHaveValue("");
 
     await user.click(screen.getByRole("button", { name: "Remove org:acme" }));
-    expect(onSettingsChange).toHaveBeenCalledWith({ githubScopes: ["repo:me/tool"] });
+    expect(onSettingsChange).toHaveBeenCalledTimes(2);
+    expect(lastChangeTo(onSettingsChange, rendered)).toEqual({ githubScopes: ["repo:me/tool"] });
+    expect(lastChangeTo(onSettingsChange, { ...rendered, githubScopes: ["org:acme", "org:other"] })).toEqual({
+      githubScopes: ["org:other"],
+    });
 
     onSettingsChange.mockClear();
     await user.type(input, "   {Enter}");
@@ -276,14 +295,16 @@ describe("Settings", () => {
   });
   it("lists each banked reset alert and turns one off", async () => {
     const user = userEvent.setup();
-    const onSettingsChange = vi.fn();
-    renderSettings({
-      onSettingsChange,
+    const onSettingsChange = vi.fn<(change: AppSettingsChange) => void>();
+    const side = { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true };
+    const rendered = settingsWith({
+      githubScopes: [],
       resetAlerts: {
         "acct-work": { label: "work@example.com", maxLeftPercent: 5, minHoursToRenewal: 24, automatic: false },
-        "acct-side": { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true },
+        "acct-side": side,
       },
     });
+    renderSettings({ onSettingsChange, resetAlerts: rendered.resetAlerts });
 
     const list = screen.getByRole("list", { name: "Accounts with a banked reset alert" });
     expect(list).toHaveTextContent("work@example.com · 5% or less left, 24h or more before it renews · tells you");
@@ -291,8 +312,10 @@ describe("Settings", () => {
 
     await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for work@example.com" }));
 
-    expect(onSettingsChange).toHaveBeenCalledWith({
-      resetAlerts: { "acct-side": { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true } },
+    expect(onSettingsChange).toHaveBeenCalledTimes(1);
+    expect(lastChangeTo(onSettingsChange, rendered)).toEqual({ resetAlerts: { "acct-side": side } });
+    expect(lastChangeTo(onSettingsChange, { ...rendered, resetAlerts: { "acct-work": side, "acct-new": side } })).toEqual({
+      resetAlerts: { "acct-new": side },
     });
   });
 

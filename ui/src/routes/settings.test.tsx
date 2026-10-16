@@ -165,6 +165,39 @@ describe("the Settings route", () => {
     expect(tray).toHaveAttribute("aria-pressed", "true");
   });
 
+  it("lands two GitHub scopes added before the first one is saved", async () => {
+    const first = deferred<AppSettings>();
+    api.saveAppSettings.mockImplementationOnce(() => first.promise);
+    const user = userEvent.setup();
+    await renderSettings();
+    const scopes = screen.getByRole("textbox", { name: "Scopes" });
+
+    await user.type(scopes, "org:one{Enter}");
+    await user.type(scopes, "org:two{Enter}");
+    first.resolve({ ...LOADED, githubScopes: ["org:acme", "org:one"] });
+
+    await waitFor(() => expect(api.saveAppSettings).toHaveBeenCalledTimes(2));
+    expect(lastSaved()).toEqual({ ...LOADED, githubScopes: ["org:acme", "org:one", "org:two"] });
+  });
+
+  it("turns off two banked reset alerts before the first one is saved", async () => {
+    const work = { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 24, automatic: false };
+    const side = { label: null, maxLeftPercent: 3, minHoursToRenewal: 48, automatic: true };
+    const withAlerts = { ...LOADED, resetAlerts: { "acct-work": work, "acct-side": side } };
+    api.loadAppSettings.mockResolvedValue(withAlerts);
+    const first = deferred<AppSettings>();
+    api.saveAppSettings.mockImplementationOnce(() => first.promise);
+    const user = userEvent.setup();
+    await renderSettings();
+
+    await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for you@example.com" }));
+    await user.click(screen.getByRole("button", { name: "Turn off the banked reset alert for Codex account" }));
+    first.resolve({ ...withAlerts, resetAlerts: { "acct-side": side } });
+
+    await waitFor(() => expect(api.saveAppSettings).toHaveBeenCalledTimes(2));
+    expect(lastSaved()).toEqual({ ...LOADED, resetAlerts: {} });
+  });
+
   it("saves automatic updates, limit notifications and the poll interval the same way", async () => {
     const user = userEvent.setup();
     await renderSettings();
