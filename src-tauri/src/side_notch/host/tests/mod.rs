@@ -277,6 +277,7 @@ impl Rig {
     fn tick(&mut self, after: Duration) {
         self.now += after;
         self.host.tick(self.now);
+        self.host.publish();
     }
 
     fn act(&mut self, item: Inbound) {

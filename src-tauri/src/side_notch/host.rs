@@ -228,7 +228,6 @@ impl<T: Transport, A: App> Host<T, A> {
         if self.exchange(now) && self.visible() {
             self.start_reads(now);
         }
-        self.publish();
     }
 
     fn collect(&mut self, now: Instant) {
@@ -410,7 +409,7 @@ impl<T: Transport, A: App> Host<T, A> {
         }
     }
 
-    fn publish(&mut self) {
+    pub fn publish(&mut self) {
         let mut status = self.snapshot.clone();
         if status.error.is_none() {
             status.error = self.runtime_error.clone();

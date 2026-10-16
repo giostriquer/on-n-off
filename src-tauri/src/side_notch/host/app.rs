@@ -95,6 +95,7 @@ fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport)
         if let Ok(mut error) = controller.error.lock() {
             *error = host.runtime_error();
         }
+        host.publish();
         controller.wait(host.enabled().then_some(Duration::from_millis(100)));
     }
 }
