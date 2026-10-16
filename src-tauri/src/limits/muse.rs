@@ -1,10 +1,3 @@
-// Muse subscription limits from the CLI's own key-mint call (`mint`), which
-// reports both windows for the stored device login with no model turn spent.
-// When no device token can be read, or the mint answer carries no window,
-// the read falls back to `muse serve`: its experimental `usage/read`
-// reports the last subscription usage that host observed from a provider
-// frame, and when the fresh host has observed nothing, the card says so and
-// keeps its account so the remembered reading stands in.
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,6 +7,8 @@ use serde_json::json;
 
 use super::pipeline::finish;
 use super::Parsed;
+use crate::accounts::model::AccessToken;
+use crate::accounts::muse_store::MuseLogin;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{
@@ -192,8 +187,6 @@ fn normalize(answers: ServeAnswers) -> Result<Parsed, ServeFailure> {
     Ok(Parsed {
         account: Some(account_dto),
         reading: Reading {
-            // The tier arrives as an opaque numeric id, not a plan name;
-            // keep it only when it reads as one.
             plan: Some(usage.tier.trim().to_string())
                 .filter(|tier| tier.chars().any(|c| c.is_alphabetic())),
             windows: vec![weekly_window, session_window],
@@ -296,48 +289,22 @@ pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
     finish_read(read_current(
         home,
         start,
-        |config| mint::load_login_cached(config, &keychain_token),
-        |login| mint::fetch(mint::KEY_ENDPOINT, &login.token),
+        crate::accounts::muse_store::signed_in_login,
+        |token| mint::fetch(mint::KEY_ENDPOINT, token),
     ))
 }
 
-/// The mint read answers first when a device login can be read; a rejected
-/// login is signed out, and any other mint failure — or an answer with no
-/// window — falls back to the serve read, which still names the account
-/// states the mint cannot see.
 fn read_current(
     home: &Path,
     start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
-    login: impl FnOnce(&Path) -> Option<mint::DeviceLogin>,
-    mint: impl FnOnce(&mint::DeviceLogin) -> Result<mint::MintResponse, mint::MintError>,
+    login: impl FnOnce(&Path) -> Option<MuseLogin>,
+    mint: impl FnOnce(&AccessToken) -> Option<mint::MintResponse>,
 ) -> Result<Parsed, ServeFailure> {
-    let config = crate::paths::muse_config_for(home);
-    if let Some(device) = login(&config) {
-        match mint(&device) {
-            Ok(response) => {
-                if let Some(parsed) = mint::normalize(&device, &response) {
-                    return parsed;
-                }
-            }
-            Err(mint::MintError::Unauthorized) => {
-                return Err(ServeFailure::SignedOut);
-            }
-            Err(mint::MintError::Unavailable) => {}
-        }
-    }
-    read_with(home, start)
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_token() -> Option<String> {
-    crate::accounts::keychain_find_password(mint::KEYCHAIN_SERVICE, Some(mint::KEYCHAIN_ACCOUNT))
-        .ok()
-        .flatten()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keychain_token() -> Option<String> {
-    None
+    login(&crate::paths::muse_config_for(home))
+        .and_then(|login| {
+            mint(&login.token).and_then(|response| mint::normalize(login.email, &response))
+        })
+        .unwrap_or_else(|| read_with(home, start))
 }
 
 fn read_with(

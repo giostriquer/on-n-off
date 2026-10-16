@@ -79,12 +79,12 @@ pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError>
 }
 
 pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpError> {
-    post_json_headers(url, bearer, &[], body)
+    let authorization = format!("Bearer {bearer}");
+    post_json_headers(url, &[("Authorization", authorization.as_str())], body)
 }
 
 pub fn post_json_headers(
     url: &str,
-    bearer: &str,
     headers: &[(&str, &str)],
     body: &Value,
 ) -> Result<Value, HttpError> {
@@ -93,8 +93,7 @@ pub fn post_json_headers(
     let mut request = agent()
         .post(url)
         .header("Accept", "application/json")
-        .header("Content-Type", "application/json")
-        .header("Authorization", &format!("Bearer {bearer}"));
+        .header("Content-Type", "application/json");
     for (name, value) in headers {
         request = request.header(*name, *value);
     }
