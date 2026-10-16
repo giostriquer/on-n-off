@@ -260,8 +260,10 @@ describe("SessionProvider local-first startup", () => {
 
     renderSession();
 
-    await waitFor(() => expect(screen.getByTestId("plugin-id")).toHaveTextContent("workbench@workshop"));
-    expect(screen.getByTestId("ready")).toHaveTextContent("yes");
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-id")).toHaveTextContent("workbench@workshop");
+      expect(screen.getByTestId("ready")).toHaveTextContent("yes");
+    });
     expect(screen.getByTestId("busy")).toHaveTextContent("no");
     expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0");
     await waitFor(() => {

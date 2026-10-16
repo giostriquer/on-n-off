@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { createMainWindowQueryClient, createPopoverQueryClient } from "$lib/queryClients";
 import type { SharedReadChanged, SharedReadSource } from "$lib/types";
 import { SharedReads } from "./announcements";
 import { githubPrsQuery, refreshGithubPrs } from "./githubPrs";
@@ -24,6 +25,7 @@ vi.mock("$lib/api", () => ({
 type ForcedSource = {
   name: string;
   source: SharedReadSource;
+  queryKey: readonly unknown[];
   show: () => unknown;
   refresh: (client: QueryClient) => Promise<void>;
   read: ReturnType<typeof vi.fn>;
@@ -37,6 +39,7 @@ const FORCED_SOURCES: ForcedSource[] = [
   {
     name: "Claude's limits",
     source: "limits:claude",
+    queryKey: limitsQuery("claude", 5).queryKey,
     show: () => useQuery(limitsQuery("claude", 5)),
     refresh: refreshLimits,
     read: calls.readLimits,
@@ -48,6 +51,7 @@ const FORCED_SOURCES: ForcedSource[] = [
   {
     name: "the pull requests",
     source: "github:prs",
+    queryKey: githubPrsQuery(60).queryKey,
     show: () => useQuery(githubPrsQuery(60)),
     refresh: refreshGithubPrs,
     read: calls.readGithubPrs,
@@ -58,9 +62,16 @@ const FORCED_SOURCES: ForcedSource[] = [
   },
 ];
 
-it.each(FORCED_SOURCES)(
-  "$name: a refresh asked during the first read is made once that read answers, and leaves no force behind for an announcement",
-  async ({ source, show, refresh, read, shown, answer, unforced, forced }) => {
+const WINDOWS = [
+  { window: "main window", client: createMainWindowQueryClient },
+  { window: "popover", client: createPopoverQueryClient },
+];
+
+const CASES = FORCED_SOURCES.flatMap((forcedSource) => WINDOWS.map((window) => ({ ...forcedSource, ...window })));
+
+it.each(CASES)(
+  "$name, in the $window: a refresh asked during the first read is made once that read answers, and leaves no force behind for an announcement",
+  async ({ source, show, refresh, read, shown, answer, unforced, forced, client: createClient }) => {
     calls.listeners.clear();
     let answerFirst!: (value: unknown) => void;
     let waiting = true;
@@ -69,7 +80,7 @@ it.each(FORCED_SOURCES)(
       waiting = false;
       return new Promise((resolve) => { answerFirst = resolve; });
     });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const client = createClient();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
@@ -87,6 +98,23 @@ it.each(FORCED_SOURCES)(
     for (const listener of calls.listeners) listener({ source });
     await waitFor(() => expect(reads()).toEqual([unforced, forced, unforced]));
     hook.unmount();
+    client.clear();
+  },
+);
+
+it.each(CASES)(
+  "$name, in the $window, with no screen showing it: a refresh reads forced every time it is asked, and the read it leaves behind is unforced",
+  async ({ queryKey, refresh, read, shown, answer, unforced, forced, client: createClient }) => {
+    read.mockReset().mockResolvedValue(answer);
+    const client = createClient();
+    const reads = () => read.mock.calls.filter(shown);
+
+    await act(async () => { await refresh(client); });
+    expect(reads()).toEqual([forced]);
+    await act(async () => { await client.refetchQueries({ queryKey, type: "all" }); });
+    expect(reads()).toEqual([forced, unforced]);
+    await act(async () => { await refresh(client); });
+    expect(reads()).toEqual([forced, unforced, forced]);
     client.clear();
   },
 );

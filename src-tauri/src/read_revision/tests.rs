@@ -25,26 +25,19 @@ fn only_a_replacement_is_worth_announcing() {
     assert_eq!(Reading::Unchanged(3).revision(), 3);
 }
 
-fn every_source() -> [Source; 6] {
-    let every = [
-        Source::Accounts,
-        Source::LimitsClaude,
-        Source::LimitsCodex,
-        Source::LimitsMuse,
-        Source::GithubPrs,
-        Source::ResetSpends,
-    ];
-    for source in every {
-        match source {
-            Source::Accounts
-            | Source::LimitsClaude
-            | Source::LimitsCodex
-            | Source::LimitsMuse
-            | Source::GithubPrs
-            | Source::ResetSpends => {}
-        }
+fn after(source: Source) -> Option<Source> {
+    match source {
+        Source::Accounts => Some(Source::LimitsClaude),
+        Source::LimitsClaude => Some(Source::LimitsCodex),
+        Source::LimitsCodex => Some(Source::LimitsMuse),
+        Source::LimitsMuse => Some(Source::GithubPrs),
+        Source::GithubPrs => Some(Source::ResetSpends),
+        Source::ResetSpends => None,
     }
-    every
+}
+
+fn every_source() -> Vec<Source> {
+    std::iter::successors(Some(Source::Accounts), |&source| after(source)).collect()
 }
 
 #[test]
@@ -61,6 +54,12 @@ fn the_announcements_the_ui_listens_for_are_the_ones_rust_sends() {
             )
         })
         .collect();
+    for (position, source) in every_source().into_iter().enumerate() {
+        assert_eq!(
+            source as usize, position,
+            "{source:?} is listed out of the order Source declares it in"
+        );
+    }
     assert_eq!(
         announcements.len(),
         every_source().len(),

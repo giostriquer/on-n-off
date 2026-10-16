@@ -86,8 +86,8 @@ sequenceDiagram
 
 `force` bypasses the cache and belongs to a person pressing refresh. A forced answer would call
 the provider, replace the read, and announce again — without end. Every UI source's answer
-(`ui/src/lib/sharedReads/announcements.test.tsx`, after a forced read) and the notch's poll are
-tested for this.
+(`ui/src/lib/sharedReads/announcements.test.tsx`), the forced read's own function after it has run
+(`ui/src/lib/sharedReads/forcedRead.test.tsx`) and the notch's poll are tested for this.
 
 ## The asymmetry worth knowing
 
@@ -126,7 +126,11 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   already in flight, so a refresh asked during it is not answered by it, then fetches once with
   `force = true` through a query function that disarms itself after its first call. TanStack
   keeps the last function it fetched with for the query's later refetches, an announcement's
-  included; disarmed, that function reads unforced. The shell's Refresh and the popover's are
+  included; disarmed, that function reads unforced. The forced fetch passes `staleTime: 0`, or the
+  main window's 30-second default would answer it from the cache. A screen showing the query puts
+  its own unforced function back when it next renders, which can hide one that never disarmed, so
+  `forcedRead.test.tsx` also checks the disarm with no screen showing the read, on each window's
+  own query client (`ui/src/lib/queryClients.ts`). The shell's Refresh and the popover's are
   `refreshLimits`, every limits source forced; the Pull requests screen's is `refreshGithubPrs`.
   A forced read is tried once and not retried.
 - **Accounts has no forced read.** Its announcement covers two key families, the account lists
