@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery, type QueryClient } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { createMainWindowQueryClient, createPopoverQueryClient } from "$lib/queryClients";
 import type { SharedReadChanged, SharedReadSource } from "$lib/types";
 import { SharedReads } from "./announcements";
 import { githubPrsQuery, refreshGithubPrs } from "./githubPrs";
@@ -58,9 +59,16 @@ const FORCED_SOURCES: ForcedSource[] = [
   },
 ];
 
-it.each(FORCED_SOURCES)(
-  "$name: a refresh asked during the first read is made once that read answers, and leaves no force behind for an announcement",
-  async ({ source, show, refresh, read, shown, answer, unforced, forced }) => {
+const WINDOWS = [
+  { window: "main window", client: createMainWindowQueryClient },
+  { window: "popover", client: createPopoverQueryClient },
+];
+
+const CASES = FORCED_SOURCES.flatMap((forcedSource) => WINDOWS.map((window) => ({ ...forcedSource, ...window })));
+
+it.each(CASES)(
+  "$name, in the $window: a refresh asked during the first read is made once that read answers, and leaves no force behind for an announcement",
+  async ({ source, show, refresh, read, shown, answer, unforced, forced, client: createClient }) => {
     calls.listeners.clear();
     let answerFirst!: (value: unknown) => void;
     let waiting = true;
@@ -69,7 +77,7 @@ it.each(FORCED_SOURCES)(
       waiting = false;
       return new Promise((resolve) => { answerFirst = resolve; });
     });
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const client = createClient();
     const wrapper = ({ children }: { children: ReactNode }) => (
       <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
     );
