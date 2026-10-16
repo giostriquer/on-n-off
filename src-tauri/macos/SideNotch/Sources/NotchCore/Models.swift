@@ -222,6 +222,15 @@ public struct Badge: Codable, Equatable, Sendable {
   }
 }
 
+extension InnerQuota {
+  public var spokenName: String {
+    switch self {
+    case .fable: return "Fable weekly"
+    case .workspaceShare: return "workspace credits"
+    }
+  }
+}
+
 public struct ProviderCell: Codable, Equatable, Sendable {
   public let provider: ProviderId
   public let reading: Reading?
@@ -238,6 +247,21 @@ public struct ProviderCell: Codable, Equatable, Sendable {
     self.notice = notice
     self.paused = paused
     self.sessions = sessions
+  }
+
+  public func spoken(name: String, at now: Date) -> String {
+    let headline = reading?.headline
+    let period =
+      headline.map { _ in "weekly" }
+      ?? (reading == nil ? "updating" : (reading?.message ?? "unavailable"))
+    guard let headline = headline else { return "\(name), \(period)" }
+    let reached = headline.isReached(at: now) ? ", limit reached" : ""
+    let inner = reading?.inner.map {
+      ", \($0.spokenName), \($0.quota.text(at: now)) used"
+        + ($0.quota.isReached(at: now) ? ", limit reached" : "")
+    } ?? ""
+    let paused = reading?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
+    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + inner + paused
   }
 }
 
@@ -472,6 +496,17 @@ public struct PullRequestCell: Codable, Equatable, Sendable {
     self.notice = notice
   }
   public var readable: Bool { reading?.readable == true }
+
+  public var spoken: String {
+    guard let pulls = reading else { return "Pull requests, updating" }
+    guard readable else { return "Pull requests, \(notice?.text ?? "unavailable")" }
+    let counts = pulls.attention
+    let attention = [
+      (counts.conflicts, "with merge conflicts"), (counts.failing, "failing CI"),
+      (counts.changesRequested, "with changes requested"), (counts.ready, "ready to merge"),
+    ].filter { $0.0 > 0 }.map { "\($0.0) \($0.1)" }
+    return (["Pull requests, \(pulls.count) open"] + attention).joined(separator: ", ")
+  }
 }
 
 public enum Cell: Equatable, Sendable {

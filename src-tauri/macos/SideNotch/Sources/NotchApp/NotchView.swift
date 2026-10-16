@@ -207,32 +207,17 @@ private struct MeterCell: View {
   private var id: ProviderId { cell.provider }
   private var entry: Reading? { cell.reading }
   private var headline: Quota? { entry?.headline }
-  private var inner: (quota: Quota, name: String, ink: Ink, track: Color)? {
+  private var inner: (quota: Quota, ink: Ink, track: Color)? {
     switch entry?.inner {
     case .fable(let quota)?:
-      return (quota, "Fable weekly", fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
+      return (quota, fableInk, Color(red: 53 / 255, green: 42 / 255, blue: 38 / 255))
     case .workspaceShare(let quota)?:
-      return (
-        quota, "workspace credits", creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255)
-      )
+      return (quota, creditsInk, Color(red: 38 / 255, green: 41 / 255, blue: 45 / 255))
     case nil:
       return nil
     }
   }
-  private var period: String {
-    headline.map { _ in "weekly" } ?? (entry == nil ? "updating" : (entry?.message ?? "unavailable"))
-  }
-  private var description: String {
-    let name = providerName(id)
-    guard let headline = headline else { return "\(name), \(period)" }
-    let reached = headline.isReached(at: now) ? ", limit reached" : ""
-    let innerDescription = inner.map {
-      ", \($0.name), \($0.quota.text(at: now)) used"
-        + ($0.quota.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
-    let paused = entry?.ringIsLastObserved == true ? ", refresh paused, last observed" : ""
-    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + innerDescription + paused
-  }
+  private var description: String { cell.spoken(name: providerName(id), at: now) }
 
   var body: some View {
     RailCellChrome(
@@ -267,19 +252,8 @@ private struct PullRequestRailCell: View {
   let layout: RailLayout
   let metrics: NotchMetrics
   let action: () -> Void
-  private var readable: Bool { cell.readable }
   private var segments: [Segment] { cell.reading?.segments ?? [] }
-  private var description: String {
-    guard let pulls = cell.reading else { return "Pull requests, updating" }
-    guard readable else { return "Pull requests, \(cell.notice?.text ?? "unavailable")" }
-    var attention: [String] = []
-    let counts = pulls.attention
-    if counts.conflicts > 0 { attention.append("\(counts.conflicts) with merge conflicts") }
-    if counts.failing > 0 { attention.append("\(counts.failing) failing CI") }
-    if counts.changesRequested > 0 { attention.append("\(counts.changesRequested) with changes requested") }
-    if counts.ready > 0 { attention.append("\(counts.ready) ready to merge") }
-    return (["Pull requests, \(pulls.count) open"] + attention).joined(separator: ", ")
-  }
+  private var description: String { cell.spoken }
 
   var body: some View {
     RailCellChrome(

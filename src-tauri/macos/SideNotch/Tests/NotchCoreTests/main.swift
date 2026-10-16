@@ -499,6 +499,55 @@ final class NotchTests {
     expectNil(review?.first?.tag)
   }
 
+  func testVoiceOverSpeaksEachCellFromWhatTheHostDecided() {
+    let weekly = quota("weekly", 46, id: "weekly")
+    let fable = quota("model", 100, label: "Weekly · Fable", id: "fable")
+    expectEqual(ProviderCell(provider: .claude, reading: nil).spoken(name: "Claude", at: now), "Claude, updating")
+    expectEqual(
+      ProviderCell(
+        provider: .claude,
+        reading: reading(windows: [weekly, fable], headline: "weekly", inner: .fable(windowId: "fable"))
+      ).spoken(name: "Claude", at: now),
+      "Claude, weekly, 46% used, Fable weekly, 100% used, limit reached")
+    expectEqual(
+      ProviderCell(
+        provider: .claude, reading: reading(windows: [weekly], status: "failed", headline: "weekly"),
+        notice: Notice(text: "Claude Code reported no usage.", tone: .muted),
+        paused: Notice(text: "Refresh paused. Last observed values below.", tone: .amber)
+      ).spoken(name: "Claude", at: now),
+      "Claude, weekly, 46% used, refresh paused, last observed")
+    expectEqual(
+      ProviderCell(
+        provider: .cursor,
+        reading: Reading(
+          status: "unsupported", message: "Cursor has no subscription limits to show.", windows: []),
+        notice: Notice(text: "Cursor has no subscription limits to show.", tone: .muted)
+      ).spoken(name: "Cursor", at: now),
+      "Cursor, Cursor has no subscription limits to show.")
+    expectEqual(
+      ProviderCell(
+        provider: .codex, reading: reading(windows: [], status: "signedOut"),
+        notice: Notice(text: "Usage unavailable.", tone: .muted)
+      ).spoken(name: "Codex", at: now),
+      "Codex, unavailable")
+
+    let attention = Attention(conflicts: 1, failing: 2, changesRequested: 0, ready: 1)
+    expectEqual(PullRequestCell(label: "—", reading: nil).spoken, "Pull requests, updating")
+    expectEqual(
+      PullRequestCell(
+        label: "—",
+        reading: PullRequestReading(
+          readable: false, count: 0, segments: [],
+          attention: Attention(conflicts: 0, failing: 0, changesRequested: 0, ready: 0), lists: []),
+        notice: Notice(text: "Sign in with the GitHub CLI.", tone: .muted)
+      ).spoken, "Pull requests, Sign in with the GitHub CLI.")
+    expectEqual(
+      PullRequestCell(
+        label: "3",
+        reading: PullRequestReading(readable: true, count: 3, segments: [], attention: attention, lists: [])
+      ).spoken, "Pull requests, 3 open, 1 with merge conflicts, 2 failing CI, 1 ready to merge")
+  }
+
   func testReviewRequestsLinkTheTitleAndEscapeMarkup() {
     let url = URL(string: "https://github.com/octo/tools/pull/42?x=1&y=2")!
     expectEqual(
@@ -631,7 +680,8 @@ try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
 try checks.testPullRequestsValidateLinksListsSegmentsAndCaps()
 try checks.testRowsCarryTheirTagAndBadgesInTheTonesTheHostChose()
 try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
+checks.testVoiceOverSpeaksEachCellFromWhatTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("19 native check groups; \(failures) failures")
+print("20 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)
