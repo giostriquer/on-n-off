@@ -202,6 +202,71 @@ fn cursor_uses_agent_as_its_command_and_keeps_the_legacy_alias() {
 }
 
 #[test]
+fn every_provider_binary_finds_its_provider_whatever_its_folder_case_or_extension() {
+    for (binary, agent) in [
+        ("claude", AgentId::Claude),
+        ("codex", AgentId::Codex),
+        ("agy", AgentId::Antigravity),
+        ("agent", AgentId::Cursor),
+        ("cursor-agent", AgentId::Cursor),
+        ("muse", AgentId::Muse),
+        ("/opt/acme/bin/Codex", AgentId::Codex),
+        ("CLAUDE.exe", AgentId::Claude),
+        ("agy.cmd", AgentId::Antigravity),
+        ("muse.cmd", AgentId::Muse),
+    ] {
+        assert_eq!(agent_for_binary(binary), Some(agent), "{binary}");
+    }
+    for unknown in ["gemini", "", "claude-code", "/opt/acme/bin/"] {
+        assert_eq!(agent_for_binary(unknown), None, "{unknown}");
+    }
+}
+
+#[test]
+fn a_saved_document_names_every_provider_by_its_lowercase_key_in_tab_order() {
+    let home = crate::paths::scratch_dir("settings-provider-keys");
+    save_under(
+        &home,
+        AppSettings {
+            hidden_agents: vec![
+                AgentId::Muse,
+                AgentId::Cursor,
+                AgentId::Antigravity,
+                AgentId::Codex,
+            ],
+            binary_paths: HashMap::from([
+                (AgentId::Claude, "/opt/acme/bin/claude".to_string()),
+                (AgentId::Codex, "/opt/acme/bin/codex".to_string()),
+                (AgentId::Antigravity, "/opt/acme/bin/agy".to_string()),
+                (AgentId::Cursor, "/opt/acme/bin/agent".to_string()),
+                (AgentId::Muse, "/opt/acme/bin/muse".to_string()),
+            ]),
+            ..AppSettings::default()
+        },
+    )
+    .unwrap();
+
+    let saved: Value =
+        serde_json::from_str(&fs::read_to_string(crate::paths::settings_path_for(&home)).unwrap())
+            .unwrap();
+    assert_eq!(
+        saved["hiddenAgents"],
+        serde_json::json!(["codex", "antigravity", "cursor", "muse"])
+    );
+    assert_eq!(
+        saved["binaryPaths"],
+        serde_json::json!({
+            "claude": "/opt/acme/bin/claude",
+            "codex": "/opt/acme/bin/codex",
+            "antigravity": "/opt/acme/bin/agy",
+            "cursor": "/opt/acme/bin/agent",
+            "muse": "/opt/acme/bin/muse",
+        })
+    );
+    let _ = fs::remove_dir_all(home);
+}
+
+#[test]
 fn missing_cursor_cli_hint_explains_the_agent_name_clash() {
     let hint = cli_hint(AgentId::Cursor, "agent", None).expect("hint");
     assert!(hint.contains("cursor-agent"), "{hint}");

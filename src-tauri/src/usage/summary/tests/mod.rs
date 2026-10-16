@@ -485,7 +485,14 @@ fn missing_dirs_report_missing_sources() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-missing");
     let summary = read_offline(&home, august_input(false));
-    assert_eq!(summary.sources.len(), 3);
+    assert_eq!(
+        summary
+            .sources
+            .iter()
+            .map(|source| source.provider)
+            .collect::<Vec<_>>(),
+        [AgentId::Claude, AgentId::Codex, AgentId::Muse]
+    );
     assert!(summary
         .sources
         .iter()
