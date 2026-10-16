@@ -101,6 +101,16 @@ async function renderSettings() {
   await waitFor(() => expect(screen.getByRole("combobox", { name: "Limits polling interval" })).toHaveValue("10"));
 }
 
+type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => {
+    resolve = yes;
+  });
+  return { promise, resolve };
+}
+
 function lastSaved(): AppSettings {
   return api.saveAppSettings.mock.lastCall![0];
 }
@@ -135,6 +145,24 @@ describe("the Settings route", () => {
     await user.click(await screen.findByRole("button", { name: "Keep on-n-off running in the tray when the window is closed" }));
 
     expect(lastSaved()).toEqual({ ...fromRust, closeToTray: true });
+  });
+
+  it("lands two changes made before the first one is saved", async () => {
+    const first = deferred<AppSettings>();
+    api.saveAppSettings.mockImplementationOnce(() => first.promise);
+    const user = userEvent.setup();
+    await renderSettings();
+    const tray = await screen.findByRole("button", { name: "Keep on-n-off running in the tray when the window is closed" });
+    const updates = screen.getByRole("button", { name: "Automatically download updates" });
+
+    await user.click(tray);
+    await user.click(updates);
+    first.resolve({ ...LOADED, closeToTray: true });
+
+    await waitFor(() => expect(api.saveAppSettings).toHaveBeenCalledTimes(2));
+    expect(lastSaved()).toEqual({ ...LOADED, closeToTray: true, automaticUpdates: false });
+    await waitFor(() => expect(updates).toHaveAttribute("aria-pressed", "false"));
+    expect(tray).toHaveAttribute("aria-pressed", "true");
   });
 
   it("saves automatic updates, limit notifications and the poll interval the same way", async () => {

@@ -24,6 +24,7 @@ export type AppSettingsDocument = {
 export function createAppSettingsDocument(transport: AppSettingsTransport): AppSettingsDocument {
   let current: AppSettingsState = { settings: DEFAULT_APP_SETTINGS, loaded: false };
   let reading: Promise<AppSettings> | null = null;
+  let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
   const failureListeners = new Set<(error: unknown) => void>();
 
@@ -32,26 +33,34 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
     for (const listener of listeners) listener();
   }
 
+  function inTurn<T>(work: () => Promise<T>): Promise<T> {
+    const turn = tail.then(work);
+    tail = turn.catch(() => undefined);
+    return turn;
+  }
+
   function load(): Promise<AppSettings> {
-    reading ??= transport
-      .load()
-      .then(hold, () => undefined)
-      .then(() => current.settings)
-      .finally(() => {
-        reading = null;
-      });
+    reading ??= inTurn(() =>
+      transport
+        .load()
+        .then(hold, () => undefined)
+        .then(() => current.settings),
+    ).finally(() => {
+      reading = null;
+    });
     return reading;
   }
 
-  async function patch(change: AppSettingsChange): Promise<AppSettings | null> {
-    const base = current.settings;
-    try {
-      hold(await transport.save({ ...base, ...(typeof change === "function" ? change(base) : change) }));
-      return current.settings;
-    } catch (error) {
+  function patch(change: AppSettingsChange): Promise<AppSettings | null> {
+    return inTurn(async () => {
+      const latest = current.settings;
+      const saved = await transport.save({ ...latest, ...(typeof change === "function" ? change(latest) : change) });
+      hold(saved);
+      return saved;
+    }).catch((error: unknown) => {
       for (const listener of failureListeners) listener(error);
       return null;
-    }
+    });
   }
 
   return {

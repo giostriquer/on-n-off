@@ -5,6 +5,20 @@ import type { AppSettings } from "./types";
 
 const LOADED: AppSettings = { ...DEFAULT_APP_SETTINGS, githubScopes: ["org:acme"], limitsPollMinutes: 10 };
 
+type Deferred<T> = { promise: Promise<T>; resolve: (value: T) => void };
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((yes) => {
+    resolve = yes;
+  });
+  return { promise, resolve };
+}
+
+function settle() {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 function rust(loaded: AppSettings = LOADED) {
   const transport = {
     load: vi.fn<AppSettingsTransport["load"]>(async () => loaded),
@@ -73,6 +87,64 @@ describe("the app settings document", () => {
 
     expect(transport.save).toHaveBeenCalledWith({ ...fromRust, closeToTray: true });
     expect(document.state().settings).toEqual({ ...fromRust, closeToTray: true });
+  });
+
+  it("applies a second change to the document the first save returned", async () => {
+    const { transport, document } = rust();
+    await document.load();
+    const first = deferred<AppSettings>();
+    const second = deferred<AppSettings>();
+    transport.save.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    const closing = document.patch({ closeToTray: true, githubScopes: ["org:acme", "acme/webapp"] });
+    const updating = document.patch({ automaticUpdates: false });
+    await settle();
+    expect(transport.save).toHaveBeenCalledTimes(1);
+
+    const savedFirst = { ...LOADED, closeToTray: true, githubScopes: ["org:acme", "repo:acme/webapp"] };
+    first.resolve(savedFirst);
+    await expect(closing).resolves.toEqual(savedFirst);
+    await vi.waitFor(() => expect(transport.save).toHaveBeenCalledTimes(2));
+    expect(transport.save.mock.calls[1][0]).toEqual({ ...savedFirst, automaticUpdates: false });
+
+    second.resolve({ ...savedFirst, automaticUpdates: false });
+    await expect(updating).resolves.toEqual({ ...savedFirst, automaticUpdates: false });
+    expect(document.state().settings).toEqual({ ...savedFirst, automaticUpdates: false });
+  });
+
+  it("hands an updater the document the save before it returned", async () => {
+    const { transport, document } = rust();
+    await document.load();
+    const first = deferred<AppSettings>();
+    transport.save.mockReturnValueOnce(first.promise);
+
+    void document.patch((latest) => ({ hiddenAgents: [...latest.hiddenAgents, "cursor"] }));
+    const hiding = document.patch((latest) => ({ hiddenAgents: [...latest.hiddenAgents, "muse"] }));
+    await settle();
+    first.resolve({ ...LOADED, hiddenAgents: ["cursor"] });
+    await hiding;
+
+    expect(transport.save.mock.calls.map(([sent]) => sent.hiddenAgents)).toEqual([["cursor"], ["cursor", "muse"]]);
+  });
+
+  it("reads the document again only once a save under way has answered", async () => {
+    const { transport, document } = rust();
+    await document.load();
+    const saving = deferred<AppSettings>();
+    transport.save.mockReturnValueOnce(saving.promise);
+    const afterSave = { ...LOADED, closeToTray: true, limitsPollMinutes: 15 } satisfies AppSettings;
+
+    const patched = document.patch({ closeToTray: true });
+    const reread = document.load();
+    await settle();
+    expect(transport.load).toHaveBeenCalledTimes(1);
+
+    transport.load.mockResolvedValueOnce(afterSave);
+    saving.resolve({ ...LOADED, closeToTray: true });
+    await patched;
+    await expect(reread).resolves.toEqual(afterSave);
+    expect(transport.load).toHaveBeenCalledTimes(2);
+    expect(document.state().settings).toEqual(afterSave);
   });
 
   it("hands an updater the document to change", async () => {
