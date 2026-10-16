@@ -87,7 +87,7 @@ pub struct Pipe {
     connected_at: Instant,
     sequence: u64,
     awaiting_ack: Option<(u64, Instant)>,
-    next_start: Instant,
+    next_start: Option<Instant>,
     retry_delay: u64,
 }
 
@@ -100,47 +100,47 @@ impl Pipe {
             connected_at: Instant::now(),
             sequence: 0,
             awaiting_ack: None,
-            next_start: Instant::now(),
+            next_start: None,
             retry_delay: 1,
         };
         (pipe, lifetime)
     }
 
-    fn back_off(&mut self) {
-        self.next_start = Instant::now() + Duration::from_secs(self.retry_delay);
+    fn back_off(&mut self, now: Instant) {
+        self.next_start = Some(now + Duration::from_secs(self.retry_delay));
         self.retry_delay = (self.retry_delay * 2).min(MAX_RETRY_SECONDS);
     }
 
-    fn fail(&mut self, error: String) -> String {
+    fn fail(&mut self, now: Instant, error: String) -> String {
         self.connection = None;
         self.awaiting_ack = None;
-        self.back_off();
+        self.back_off(now);
         error
     }
 }
 
 impl Transport for Pipe {
-    fn connect(&mut self) -> Result<Link, String> {
+    fn connect(&mut self, now: Instant) -> Result<Link, String> {
         if self.connection.is_some() {
             return Ok(Link::Open);
         }
-        if Instant::now() < self.next_start {
+        if self.next_start.is_some_and(|at| now < at) {
             return Ok(Link::Closed);
         }
         match self.lifetime.connect() {
             Ok(connection) => {
                 self.connection = Some(connection);
-                self.connected_at = Instant::now();
+                self.connected_at = now;
                 Ok(Link::Opened)
             }
             Err(error) => {
-                self.back_off();
+                self.back_off(now);
                 Err(error)
             }
         }
     }
 
-    fn receive(&mut self, inbound: &mut Vec<Inbound>) -> Result<(), String> {
+    fn receive(&mut self, now: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
         let Some(connection) = &self.connection else {
             return Ok(());
         };
@@ -153,7 +153,7 @@ impl Transport for Pipe {
                         .is_some_and(|(awaited, _)| awaited == sequence)
                     {
                         self.awaiting_ack = None;
-                        if self.connected_at.elapsed() >= STEADY {
+                        if now.saturating_duration_since(self.connected_at) >= STEADY {
                             self.retry_delay = 1;
                         }
                         inbound.push(Inbound::Confirmed);
@@ -175,30 +175,35 @@ impl Transport for Pipe {
         };
         let unanswered = self
             .awaiting_ack
-            .is_some_and(|(_, sent)| sent.elapsed() > ACK_DEADLINE);
+            .is_some_and(|(_, sent)| now.saturating_duration_since(sent) > ACK_DEADLINE);
         let failure = if unanswered {
             Some("Native notch stopped responding. Retrying…".to_string())
         } else {
             failure
         };
-        failure.map_or(Ok(()), |error| Err(self.fail(error)))
+        failure.map_or(Ok(()), |error| Err(self.fail(now, error)))
     }
 
     fn ready(&self) -> bool {
         self.awaiting_ack.is_none()
     }
 
-    fn send(&mut self, snapshot: &NotchSnapshot, frame: RailData) -> Result<(), String> {
+    fn send(
+        &mut self,
+        now: Instant,
+        snapshot: &NotchSnapshot,
+        frame: RailData,
+    ) -> Result<(), String> {
         let Some(connection) = &self.connection else {
             return Ok(());
         };
         self.sequence += 1;
         match encode(self.sequence, snapshot, &frame).and_then(|message| connection.send(message)) {
             Ok(()) => {
-                self.awaiting_ack = Some((self.sequence, Instant::now()));
+                self.awaiting_ack = Some((self.sequence, now));
                 Ok(())
             }
-            Err(error) => Err(self.fail(error)),
+            Err(error) => Err(self.fail(now, error)),
         }
     }
 
@@ -209,7 +214,7 @@ impl Transport for Pipe {
     }
 
     fn settings_changed(&mut self) {
-        self.next_start = Instant::now();
+        self.next_start = None;
     }
 }
 

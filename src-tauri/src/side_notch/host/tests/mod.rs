@@ -193,7 +193,7 @@ impl FakeTransport {
 }
 
 impl Transport for FakeTransport {
-    fn connect(&mut self) -> Result<Link, String> {
+    fn connect(&mut self, _: Instant) -> Result<Link, String> {
         let mut wire = self.wire();
         if wire.up {
             return Ok(Link::Open);
@@ -209,7 +209,7 @@ impl Transport for FakeTransport {
         Ok(Link::Opened)
     }
 
-    fn receive(&mut self, inbound: &mut Vec<Inbound>) -> Result<(), String> {
+    fn receive(&mut self, _: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
         let mut wire = self.wire();
         inbound.append(&mut wire.inbound);
         if let Some(error) = wire.fail_receive.take() {
@@ -223,7 +223,12 @@ impl Transport for FakeTransport {
         !self.wire().unready
     }
 
-    fn send(&mut self, snapshot: &NotchSnapshot, frame: RailData) -> Result<(), String> {
+    fn send(
+        &mut self,
+        _: Instant,
+        snapshot: &NotchSnapshot,
+        frame: RailData,
+    ) -> Result<(), String> {
         let mut wire = self.wire();
         if let Some(error) = wire.fail_send.take() {
             wire.up = false;

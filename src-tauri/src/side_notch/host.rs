@@ -46,10 +46,15 @@ pub(super) enum Link {
 }
 
 pub(super) trait Transport {
-    fn connect(&mut self) -> Result<Link, String>;
-    fn receive(&mut self, inbound: &mut Vec<Inbound>) -> Result<(), String>;
+    fn connect(&mut self, now: Instant) -> Result<Link, String>;
+    fn receive(&mut self, now: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String>;
     fn ready(&self) -> bool;
-    fn send(&mut self, snapshot: &NotchSnapshot, frame: RailData) -> Result<(), String>;
+    fn send(
+        &mut self,
+        now: Instant,
+        snapshot: &NotchSnapshot,
+        frame: RailData,
+    ) -> Result<(), String>;
     fn close(&mut self);
     fn settings_changed(&mut self);
 }
@@ -247,7 +252,7 @@ impl<T: Transport, A: App> Host<T, A> {
             self.runtime_error = None;
             return false;
         }
-        match self.transport.connect() {
+        match self.transport.connect(now) {
             Ok(Link::Opened) => {
                 self.delivery.mark_dirty();
                 self.action_error = None;
@@ -261,7 +266,7 @@ impl<T: Transport, A: App> Host<T, A> {
             }
         }
         let mut inbound = Vec::new();
-        let received = self.transport.receive(&mut inbound);
+        let received = self.transport.receive(now, &mut inbound);
         for item in inbound {
             self.handle(item);
         }
@@ -330,7 +335,7 @@ impl<T: Transport, A: App> Host<T, A> {
             return Ok(());
         }
         let frame = self.rail();
-        self.transport.send(&self.snapshot, frame)?;
+        self.transport.send(now, &self.snapshot, frame)?;
         self.delivery.sent(now);
         Ok(())
     }

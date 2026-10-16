@@ -5,6 +5,7 @@ use super::host::{self, Action, Inbound, Link, Transport};
 use super::model::NotchSnapshot;
 use super::win_window::{WinAction, WindowMsg};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
+use std::time::Instant;
 use tauri::AppHandle;
 
 const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
@@ -91,7 +92,7 @@ impl Overlay {
 }
 
 impl Transport for Overlay {
-    fn connect(&mut self) -> Result<Link, String> {
+    fn connect(&mut self, _: Instant) -> Result<Link, String> {
         if self.window.is_some() {
             return Ok(Link::Open);
         }
@@ -108,7 +109,7 @@ impl Transport for Overlay {
         Ok(Link::Opened)
     }
 
-    fn receive(&mut self, inbound: &mut Vec<Inbound>) -> Result<(), String> {
+    fn receive(&mut self, _: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
         let Some(window) = &self.window else {
             return Ok(());
         };
@@ -124,7 +125,7 @@ impl Transport for Overlay {
         true
     }
 
-    fn send(&mut self, _: &NotchSnapshot, frame: RailData) -> Result<(), String> {
+    fn send(&mut self, _: Instant, _: &NotchSnapshot, frame: RailData) -> Result<(), String> {
         let sent = self
             .window
             .as_ref()
