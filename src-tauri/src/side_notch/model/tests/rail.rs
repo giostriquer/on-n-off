@@ -201,32 +201,3 @@ fn cells_tile_the_rail() {
         metrics.length(4) - (cells[3].y + cells[3].height)
     );
 }
-
-#[test]
-fn rail_cells_stack_along_the_axis_after_the_first_ear() {
-    let metric_set = rail_metrics(NotchSize::Standard, 1.0, Edge::Right);
-    let frames = rail_cell_frames(Edge::Right, &metric_set, 3);
-    assert_eq!(frames.len(), 3);
-    assert_eq!(frames[0].y, metric_set.inset);
-    assert_eq!(
-        frames[1].y,
-        metric_set.inset + metric_set.cell_length + metric_set.cell_spacing
-    );
-    assert_eq!(
-        frames[2].y,
-        metric_set.inset + 2.0 * (metric_set.cell_length + metric_set.cell_spacing)
-    );
-    assert_eq!(frames[2].x, 0.0);
-    assert_eq!(frames[0].width, metric_set.thickness);
-
-    let horizontal = rail_cell_frames(Edge::Top, &metric_set, 2);
-    assert_eq!(
-        horizontal[0].x, metric_set.inset,
-        "cells run along x for horizontal edges"
-    );
-    assert_eq!(
-        horizontal[1].x,
-        metric_set.inset + metric_set.cell_length + metric_set.cell_spacing
-    );
-    assert_eq!(horizontal[0].y, 0.0);
-}

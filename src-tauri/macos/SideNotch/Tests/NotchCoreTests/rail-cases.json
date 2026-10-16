@@ -71,7 +71,15 @@
     {"displays": [{"id": "main", "workHeight": 63.5}], "scale": 1, "size": "compact", "edge": "top", "rail": null, "pill": null},
     {"displays": [{"id": "main", "workHeight": 64}], "scale": 1, "size": "compact", "edge": "top", "rail": [648, 33, 433, 64], "pill": [812, 33, 105, 5]},
     {"displays": [{"id": "main", "width": 491}], "scale": 1, "size": "standard", "edge": "top", "rail": null, "pill": null},
-    {"displays": [{"id": "main", "width": 492}], "scale": 1, "size": "standard", "edge": "top", "rail": [0, 33, 492, 73], "pill": [186, 33, 120, 6]}
+    {"displays": [{"id": "main", "width": 492}], "scale": 1, "size": "standard", "edge": "top", "rail": [0, 33, 492, 73], "pill": [186, 33, 120, 6]},
+    {"displays": [{"id": "external", "scale": 1}, {"id": "main", "x": -1728}], "scale": 2, "size": "standard", "edge": "right", "rail": [-152, 673, 152, 954], "pill": [-12, 1030, 12, 240]},
+    {"displays": [{"id": "main", "x": -1728}, {"id": "external", "scale": 1}], "scale": 2, "size": "standard", "edge": "left", "rail": [-3456, 673, 152, 954], "pill": [-3456, 1030, 12, 240]},
+    {"displays": [{"id": "main", "x": 100}], "scale": 2, "size": "standard", "edge": "top", "rail": [1436, 66, 984, 146], "pill": [1808, 66, 240, 12]},
+    {"displays": [{"id": "main", "x": 100}], "scale": 2, "size": "standard", "edge": "bottom", "rail": [1436, 2088, 984, 146], "pill": [1808, 2222, 240, 12]},
+    {"displays": [{"id": "main", "workHeight": 300}], "scale": 1, "size": "standard", "edge": "right", "rail": null, "pill": null},
+    {"displays": [{"id": "main", "width": 300, "workHeight": 1000}], "scale": 1, "size": "standard", "edge": "top", "rail": null, "pill": null},
+    {"displays": [{"id": "main", "width": 1920, "workY": 0, "workHeight": 1032}], "scale": 1, "size": "standard", "edge": "right", "cells": 4, "rail": [1844, 318, 76, 396], "pill": [1914, 456, 6, 120]},
+    {"displays": [{"id": "main", "width": 1920, "workY": 0, "workHeight": 1032}], "scale": 1.5, "size": "standard", "edge": "right", "cells": 4, "rail": [2766, 474, 114, 600], "pill": [2871, 684, 9, 180]}
   ],
   "metrics": [
     {"scale": 1, "size": "compact", "thickness": 67, "cellLength": 64, "cellSpacing": 7, "inset": 35, "cellPadding": 1, "contentSpacing": 3, "iconSlot": 40, "labelHeight": 19, "ringStroke": 4, "innerRingStroke": 3, "innerRingInset": 5, "glyphSize": 21},
