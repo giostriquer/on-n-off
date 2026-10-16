@@ -1,0 +1,23 @@
+{
+  "event": "shared-read-changed",
+  "announcements": {
+    "accounts": {
+      "source": "accounts"
+    },
+    "limits:claude": {
+      "source": "limits:claude"
+    },
+    "limits:codex": {
+      "source": "limits:codex"
+    },
+    "limits:muse": {
+      "source": "limits:muse"
+    },
+    "github:prs": {
+      "source": "github:prs"
+    },
+    "limits:reset-spends": {
+      "source": "limits:reset-spends"
+    }
+  }
+}

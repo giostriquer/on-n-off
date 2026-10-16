@@ -62,6 +62,8 @@ impl Source {
     }
 }
 
+const EVENT: &str = "shared-read-changed";
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Announcement {
@@ -79,7 +81,7 @@ pub fn announce(source: Source) {
     ANNOUNCED.with(|announced| announced.borrow_mut().push(source));
     if let Some(app) = APP.get() {
         let _ = app.emit(
-            "shared-read-changed",
+            EVENT,
             Announcement {
                 source: source.name(),
             },
