@@ -19,6 +19,7 @@ struct Fake {
     clock: Cell<DateTime<Utc>>,
     log: RefCell<Vec<Effect>>,
     keys: RefCell<Vec<String>>,
+    saved: RefCell<Option<MonitorState>>,
 }
 
 impl Fake {
@@ -31,6 +32,7 @@ impl Fake {
             clock: Cell::new(at("2026-08-19T13:00:30Z")),
             log: RefCell::new(Vec::new()),
             keys: RefCell::new(Vec::new()),
+            saved: RefCell::new(None),
         }
     }
 
@@ -58,11 +60,12 @@ impl Io for Fake {
         Ok(self.readings.borrow().clone())
     }
 
-    async fn save(&self, _state: &MonitorState) -> Result<(), String> {
+    async fn save(&self, state: &MonitorState) -> Result<(), String> {
         if self.save_fails.get() {
             return Err("disk full".to_string());
         }
         self.log.borrow_mut().push(Effect::Saved);
+        *self.saved.borrow_mut() = Some(state.clone());
         Ok(())
     }
 
@@ -486,7 +489,7 @@ fn an_offer_is_not_made_again_after_a_restart() {
         .effects()
         .iter()
         .any(|effect| matches!(effect, Effect::Told(..))));
-    monitor::save_state(&path, &monitor.state).unwrap();
+    monitor::save_state(&path, monitor.io.saved.borrow().as_ref().unwrap()).unwrap();
 
     let mut restarted = Monitor::new(alerts_only());
     restarted.state = load_state(&path);
