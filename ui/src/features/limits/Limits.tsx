@@ -194,10 +194,7 @@ function ProviderColumn({
 function CardHeader({ card, provider, title, subscription, menu }: { card?: LimitCard; provider: AgentId; title: string; subscription?: ReactNode; menu?: ReactNode }) {
   const updatedAt = card?.freshness.updatedAt;
   const status = card?.status;
-  const line = useRef<HTMLDivElement>(null);
-  const name = useRef<HTMLDivElement>(null);
-  const tagsRow = useRef<HTMLDivElement>(null);
-  const beside = useTagsBeside(line, name, tagsRow);
+  const { beside, line, name, tags: tagsRow } = useTagsBeside();
   const tags = (
     <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center gap-1.5 whitespace-nowrap empty:hidden ${beside ? "" : "mt-1 pl-6"}`}>
       {subscription}

@@ -1,28 +1,29 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 
-type Ref = RefObject<HTMLElement | null>;
-
-export function useTagsBeside(line: Ref, name: Ref, tags: Ref): boolean {
+export function useTagsBeside() {
+  const line = useRef<HTMLDivElement>(null);
+  const name = useRef<HTMLDivElement>(null);
+  const tags = useRef<HTMLDivElement>(null);
   const [beside, setBeside] = useState(true);
   useLayoutEffect(() => {
-    setBeside(fitsBeside(line, name, tags));
+    setBeside(fitsBeside(line.current, name.current, tags.current));
   });
   useLayoutEffect(() => {
-    const node = line.current;
-    if (!node || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => setBeside(fitsBeside(line, name, tags)));
-    observer.observe(node);
+    const observer = new ResizeObserver(() => setBeside(fitsBeside(line.current, name.current, tags.current)));
+    for (const node of [line.current, name.current]) {
+      if (node) observer.observe(node);
+    }
     return () => observer.disconnect();
-  }, [line, name, tags]);
-  return beside;
+  }, []);
+  return { beside, line, name, tags };
 }
 
-function fitsBeside(line: Ref, name: Ref, tags: Ref): boolean {
-  if (!line.current || !name.current || !tags.current) return true;
-  const widths = [...tags.current.children].map((child) => child.getBoundingClientRect().width);
+function fitsBeside(line: HTMLElement | null, name: HTMLElement | null, tags: HTMLElement | null): boolean {
+  if (!line || !name || !tags) return true;
+  const widths = [...tags.children].map((child) => child.getBoundingClientRect().width);
   if (widths.length === 0) return true;
-  const tagsWidth = widths.reduce((sum, width) => sum + width, 0) + columnGap(tags.current) * (widths.length - 1);
-  return name.current.scrollWidth + columnGap(line.current) + tagsWidth + 1 <= line.current.clientWidth;
+  const tagsWidth = widths.reduce((sum, width) => sum + width, 0) + columnGap(tags) * (widths.length - 1);
+  return name.scrollWidth + columnGap(line) + tagsWidth + 1 <= line.clientWidth;
 }
 
 function columnGap(node: Element): number {

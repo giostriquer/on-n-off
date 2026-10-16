@@ -34,6 +34,14 @@ for (const name of ["localStorage", "sessionStorage"] as const) {
   }
 }
 
+if (typeof globalThis.ResizeObserver === "undefined") {
+  globalThis.ResizeObserver = class {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  };
+}
+
 afterEach(cleanup);
 
 afterAll(() => {

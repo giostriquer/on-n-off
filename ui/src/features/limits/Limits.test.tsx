@@ -130,6 +130,25 @@ describe("Limits", () => {
     }
   });
 
+  it("moves an account's tags to their own row when its name is squeezed without a re-render", async () => {
+    const watching = new Map<Element, () => void>();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly changed: () => void) {}
+      observe(node: Element) { watching.set(node, this.changed); }
+      disconnect() { watching.clear(); }
+    });
+    try {
+      const { claude, tags, line } = await claudeTags({ line: 300, name: 120 });
+      expect(tags.parentElement).toBe(line);
+      vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(400);
+      act(() => watching.get(within(claude).getByTitle("me@claude.example"))?.());
+      expect(within(claude).getByTestId("account-tags").parentElement).toBe(claude.querySelector("header"));
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
   it("gives an account's tags their own row across the header when they do not fit beside its name", async () => {
     try {
       const { claude, tags, line } = await claudeTags({ line: 300, name: 400 });
