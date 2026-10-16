@@ -9,6 +9,7 @@ mod snapshot;
 mod tests;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -29,6 +30,7 @@ const RATE_LIMIT_FALLBACK_SECS: i64 = 60;
 
 static READ_LOCK: Mutex<()> = Mutex::new(());
 static READ_MEMO: ReadMemo = ReadMemo::new();
+static POLL_SECONDS: AtomicU64 = AtomicU64::new(0);
 
 type Failure = (GithubStatus, String);
 
@@ -79,6 +81,21 @@ pub fn read_prs_revisioned(force: bool) -> (GithubPrsDto, u64) {
         crate::read_revision::announce(Source::GithubPrs);
     }
     (dto, reading.revision())
+}
+
+pub fn set_poll_seconds(seconds: u16) {
+    POLL_SECONDS.store(u64::from(seconds), Ordering::Release);
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+pub fn poll_interval() -> std::time::Duration {
+    let cached = POLL_SECONDS.load(Ordering::Acquire);
+    if cached > 0 {
+        return std::time::Duration::from_secs(cached);
+    }
+    let seconds = u64::from(settings::load_settings().github_poll_seconds);
+    let _ = POLL_SECONDS.compare_exchange(0, seconds, Ordering::AcqRel, Ordering::Acquire);
+    std::time::Duration::from_secs(POLL_SECONDS.load(Ordering::Acquire))
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]

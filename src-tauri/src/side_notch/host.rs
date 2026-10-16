@@ -177,7 +177,6 @@ pub(super) struct Host<T, A> {
     providers: [Poll<Option<NotchProvider>>; PROVIDER_COUNT],
     sessions: Poll<Vec<Vec<LiveSession>>>,
     pulls: Poll<Option<GithubPrsDto>>,
-    pulls_interval: Duration,
     delivery: Delivery,
     action_error: Option<String>,
     runtime_error: Option<String>,
@@ -196,7 +195,6 @@ impl<T: Transport, A: App> Host<T, A> {
             providers: [(); PROVIDER_COUNT].map(|_| Poll::new(None)),
             sessions: Poll::new(vec![Vec::new(); PROVIDER_COUNT]),
             pulls: Poll::new(None),
-            pulls_interval: Duration::from_secs(60),
             delivery: Delivery::new(now),
             action_error: None,
             runtime_error: None,
@@ -371,12 +369,13 @@ impl<T: Transport, A: App> Host<T, A> {
             self.spawn_read(move |app| Read::Sessions(read_sessions(app, &selected)));
         }
         if self.snapshot.settings.pull_requests.enabled
-            && self
-                .pulls
-                .due(now, self.pulls_interval, self.app.pull_requests_revision())
+            && self.pulls.due(
+                now,
+                self.app.pull_requests_interval(),
+                self.app.pull_requests_revision(),
+            )
         {
             let force = self.pulls.start(now);
-            self.pulls_interval = self.app.pull_requests_interval();
             self.spawn_read(move |app| {
                 let (dto, revision) = app.read_pull_requests(force);
                 Read::PullRequests {

@@ -53,15 +53,18 @@ fn the_intervals_are_the_ones_the_shared_reads_keep() {
         crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
     );
     assert_eq!(
-        app.pull_requests_interval(),
-        Duration::from_secs(u64::from(
-            crate::settings::load_settings().github_poll_seconds
-        ))
-    );
-    assert_eq!(
         app.settings_revision(),
         crate::side_notch::config::revision()
     );
+}
+
+#[test]
+fn the_pull_request_interval_is_the_saved_setting_without_a_file_read() {
+    let (app, _) = production();
+    crate::github::set_poll_seconds(120);
+    assert_eq!(app.pull_requests_interval(), Duration::from_secs(120));
+    crate::github::set_poll_seconds(30);
+    assert_eq!(app.pull_requests_interval(), Duration::from_secs(30));
 }
 
 #[test]

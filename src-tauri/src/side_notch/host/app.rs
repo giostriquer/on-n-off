@@ -158,9 +158,7 @@ impl<S: Shell> App for Production<S> {
     }
 
     fn pull_requests_interval(&self) -> Duration {
-        Duration::from_secs(u64::from(
-            crate::settings::load_settings().github_poll_seconds,
-        ))
+        crate::github::poll_interval()
     }
 
     fn read_sessions(&self, agent: AgentId) -> Vec<LiveSession> {

@@ -198,6 +198,7 @@ pub async fn save_app_settings(
     })
     .await?;
     crate::limits_refresh::set_poll_minutes(saved.limits_poll_minutes);
+    crate::github::set_poll_seconds(saved.github_poll_seconds);
     crate::tray::set_close_to_tray(saved.close_to_tray);
     crate::limits_monitor::wake(&app);
     crate::github_monitor::wake(&app);

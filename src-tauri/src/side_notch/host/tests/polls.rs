@@ -234,3 +234,23 @@ fn a_pull_request_read_another_surface_replaced_reaches_the_notch_without_waitin
     rig.tick(Duration::from_secs(1));
     assert!(app.take_asked().is_empty());
 }
+
+#[test]
+fn a_new_pull_request_interval_counts_from_the_next_check() {
+    let app = FakeApp::default();
+    app.world().pull_requests_interval = Some(Duration::from_secs(120));
+    let mut rig = Rig::started(app.clone());
+    app.take_asked();
+    let pulls = |app: &FakeApp| {
+        app.take_asked()
+            .into_iter()
+            .filter(|asked| matches!(asked, Asked::PullRequests(_)))
+            .count()
+    };
+
+    rig.tick(Duration::from_secs(30));
+    assert_eq!(pulls(&app), 0);
+    app.world().pull_requests_interval = Some(Duration::from_secs(30));
+    rig.tick(Duration::from_millis(100));
+    assert_eq!(pulls(&app), 1, "the shorter interval already ran out");
+}
