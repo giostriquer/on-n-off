@@ -30,15 +30,15 @@ fn unread(_: AgentId) -> (Option<NotchProvider>, Vec<LiveSession>) {
     (None, Vec::new())
 }
 
-fn pr_cell(frame: &RailData) -> &PrCellData {
+fn pr_cell(frame: &RailData) -> &PrReading {
     frame
         .cells
         .iter()
         .find_map(|cell| match cell {
-            CellData::PullRequests(cell) => Some(cell),
+            CellData::PullRequests(cell) => cell.reading.as_ref(),
             CellData::Provider(_) => None,
         })
-        .expect("a pull request cell")
+        .expect("a pull request cell that was read")
 }
 
 #[test]
@@ -95,7 +95,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
     let row = &pr_cell(&frame).lists[0].items[..];
     assert_eq!(
         row,
-        [PrRowData {
+        [PrRow {
             id: "node-99".into(),
             number: 99,
             title: "Fix #99".into(),

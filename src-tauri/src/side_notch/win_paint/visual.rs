@@ -1,6 +1,7 @@
 use super::*;
+use crate::dto::GithubPrsDto;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
-use crate::side_notch::model::frame::{PrCellData, PrListData, ProviderData};
+use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
 use crate::side_notch::sessions::LiveSession;
 
@@ -62,152 +63,127 @@ fn visual_dump() {
     settings.display_id = Some("d1".into());
     settings.providers = RAIL_ORDER.to_vec();
 
-    let claude = ProviderData {
-        cell: projected(
-            AgentId::Claude,
-            LimitsStatus::Ok,
-            None,
-            Reading {
-                windows: vec![
-                    LimitWindowDto {
-                        id: "w2".into(),
-                        label: "Weekly · all models".into(),
-                        kind: LimitWindowKind::Weekly,
-                        used_percent: 27.0,
-                        resets_at: Some("2026-09-07T10:59:00Z".into()),
-                        window_seconds: None,
-                        observed_at: "2026-09-03T10:00:00Z".into(),
-                    },
-                    LimitWindowDto {
-                        id: "w1".into(),
-                        label: "5 hour · all models".into(),
-                        kind: LimitWindowKind::Session,
-                        used_percent: 72.0,
-                        resets_at: Some("2026-09-03T19:59:00Z".into()),
-                        window_seconds: None,
-                        observed_at: "2026-09-03T10:00:00Z".into(),
-                    },
-                    LimitWindowDto {
-                        id: "w3".into(),
-                        label: "Weekly · Fable".into(),
-                        kind: LimitWindowKind::Model,
-                        used_percent: 100.0,
-                        resets_at: Some("2026-09-07T10:59:00Z".into()),
-                        window_seconds: None,
-                        observed_at: "2026-09-03T10:00:00Z".into(),
-                    },
-                ],
-                ..Reading::default()
-            },
-        ),
-        sessions: vec![
-            LiveSession {
-                id: "s1".into(),
-                name: "onosterm-56".into(),
-                place: "Terminal".into(),
-                project: "consolem".into(),
-                status: crate::side_notch::sessions::SessionStatus::Working,
-                last_active_at: "2026-09-03T10:19:00Z".into(),
-            },
-            LiveSession {
-                id: "s2".into(),
-                name: "web-app".into(),
-                place: "VS Code".into(),
-                project: "dashboard".into(),
-                status: crate::side_notch::sessions::SessionStatus::Idle,
-                last_active_at: "2026-09-01T10:19:00Z".into(),
-            },
-        ],
-    };
-    let codex = ProviderData {
-        cell: projected(
-            AgentId::Codex,
-            LimitsStatus::Ok,
-            None,
-            Reading {
-                windows: vec![LimitWindowDto {
-                    id: "c1".into(),
+    let claude = projected(
+        AgentId::Claude,
+        LimitsStatus::Ok,
+        None,
+        Reading {
+            windows: vec![
+                LimitWindowDto {
+                    id: "w2".into(),
                     label: "Weekly · all models".into(),
                     kind: LimitWindowKind::Weekly,
-                    used_percent: 47.0,
+                    used_percent: 27.0,
                     resets_at: Some("2026-09-07T10:59:00Z".into()),
                     window_seconds: None,
                     observed_at: "2026-09-03T10:00:00Z".into(),
-                }],
-                workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
-                    limit: "25000".into(),
-                    used: "8000".into(),
-                    used_percent: 32.0,
-                    resets_at: Some("2026-10-01T12:00:00Z".into()),
-                    reached: false,
-                }),
-                ..Reading::default()
-            },
-        ),
-        sessions: Vec::new(),
-    };
-    let antigravity = ProviderData {
-        cell: projected(
-            AgentId::Antigravity,
-            LimitsStatus::Unsupported,
-            Some("Antigravity has no subscription limits to show."),
-            Reading::default(),
-        ),
-        sessions: Vec::new(),
-    };
-    let cursor = ProviderData {
-        cell: projected(AgentId::Cursor, LimitsStatus::Ok, None, Reading::default()),
-        sessions: Vec::new(),
-    };
-    let pr_cell = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 12,
-            items: (1..=6)
-                .map(|n| PrRowData {
-                    id: format!("n{n}"),
-                    number: n,
-                    title: format!("Fix the flaky resize test number {n} on Windows builds"),
-                    url: format!("https://github.com/octo/tools/pull/{n}"),
-                    repo: "octo/tools".into(),
-                    author: "octocat".into(),
-                    is_draft: n == 2,
-                    review_decision: if n % 2 == 0 {
-                        Some(ReviewDecision::Approved)
-                    } else {
-                        Some(ReviewDecision::ChangesRequested)
-                    },
-                    ci: if n % 3 == 0 {
-                        CiState::Failure
-                    } else {
-                        CiState::Success
-                    },
-                    merge_kind: if n == 1 { Some(MergeKind::Ready) } else { None },
-                    updated_at: "2026-09-01T10:00:00Z".into(),
-                    context: Some(if n == 3 {
-                        PrContext::Personal
-                    } else {
-                        PrContext::Work
-                    }),
-                })
-                .collect(),
-        }],
-    };
+                },
+                LimitWindowDto {
+                    id: "w1".into(),
+                    label: "5 hour · all models".into(),
+                    kind: LimitWindowKind::Session,
+                    used_percent: 72.0,
+                    resets_at: Some("2026-09-03T19:59:00Z".into()),
+                    window_seconds: None,
+                    observed_at: "2026-09-03T10:00:00Z".into(),
+                },
+                LimitWindowDto {
+                    id: "w3".into(),
+                    label: "Weekly · Fable".into(),
+                    kind: LimitWindowKind::Model,
+                    used_percent: 100.0,
+                    resets_at: Some("2026-09-07T10:59:00Z".into()),
+                    window_seconds: None,
+                    observed_at: "2026-09-03T10:00:00Z".into(),
+                },
+            ],
+            ..Reading::default()
+        },
+    );
+    let claude_sessions = vec![
+        LiveSession {
+            id: "s1".into(),
+            name: "onosterm-56".into(),
+            place: "Terminal".into(),
+            project: "consolem".into(),
+            status: crate::side_notch::sessions::SessionStatus::Working,
+            last_active_at: "2026-09-03T10:19:00Z".into(),
+        },
+        LiveSession {
+            id: "s2".into(),
+            name: "web-app".into(),
+            place: "VS Code".into(),
+            project: "dashboard".into(),
+            status: crate::side_notch::sessions::SessionStatus::Idle,
+            last_active_at: "2026-09-01T10:19:00Z".into(),
+        },
+    ];
+    let codex = projected(
+        AgentId::Codex,
+        LimitsStatus::Ok,
+        None,
+        Reading {
+            windows: vec![LimitWindowDto {
+                id: "c1".into(),
+                label: "Weekly · all models".into(),
+                kind: LimitWindowKind::Weekly,
+                used_percent: 47.0,
+                resets_at: Some("2026-09-07T10:59:00Z".into()),
+                window_seconds: None,
+                observed_at: "2026-09-03T10:00:00Z".into(),
+            }],
+            workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
+                limit: "25000".into(),
+                used: "8000".into(),
+                used_percent: 32.0,
+                resets_at: Some("2026-10-01T12:00:00Z".into()),
+                reached: false,
+            }),
+            ..Reading::default()
+        },
+    );
+    let antigravity = projected(
+        AgentId::Antigravity,
+        LimitsStatus::Unsupported,
+        Some("Antigravity has no subscription limits to show."),
+        Reading::default(),
+    );
+    let cursor = projected(AgentId::Cursor, LimitsStatus::Ok, None, Reading::default());
+    let rows: Vec<serde_json::Value> = (1..=6u64)
+        .map(|n| {
+            serde_json::json!({
+                "id": format!("n{n}"), "number": n,
+                "title": format!("Fix the flaky resize test number {n} on Windows builds"),
+                "url": format!("https://github.com/octo/tools/pull/{n}"), "repo": "octo/tools",
+                "author": "octocat", "isDraft": n == 2,
+                "reviewDecision": if n % 2 == 0 { "APPROVED" } else { "CHANGES_REQUESTED" },
+                "ci": if n % 3 == 0 { "failure" } else { "success" },
+                "mergeKind": if n == 1 { Some("ready") } else { None },
+                "headRef": "fix", "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z",
+                "inOrganization": n != 3
+            })
+        })
+        .collect();
+    let pulls: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": "ok", "stale": false, "scope": [],
+        "mine": {"total": 12, "items": rows},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap();
 
-    let data = RailData {
-        settings: settings.clone(),
-        cells: vec![
-            CellData::Provider(claude),
-            CellData::Provider(codex),
-            CellData::Provider(antigravity),
-            CellData::Provider(cursor),
-            CellData::PullRequests(pr_cell),
-        ],
-        action_error: None,
-    };
+    let data = frame::rail(
+        &settings,
+        |agent| match agent {
+            AgentId::Claude => (Some(claude.clone()), claude_sessions.clone()),
+            AgentId::Codex => (Some(codex.clone()), Vec::new()),
+            AgentId::Antigravity => (Some(antigravity.clone()), Vec::new()),
+            AgentId::Cursor => (Some(cursor.clone()), Vec::new()),
+            AgentId::Muse => (None, Vec::new()),
+        },
+        Some(&pulls),
+        None,
+    );
 
     let scale2 = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
     let mut s2 = settings.clone();

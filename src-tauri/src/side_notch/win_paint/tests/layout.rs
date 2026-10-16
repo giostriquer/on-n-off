@@ -110,30 +110,10 @@ fn the_popover_unions_with_the_rail_and_places_zones() {
 #[test]
 fn pull_request_popovers_carry_open_copy_and_footer_zones() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let row = PrRowData {
-        id: "node-1".into(),
-        number: 7,
-        title: "Fix the flaky resize test on Windows".into(),
-        url: "https://github.com/octo/tools/pull/7".into(),
-        repo: "octo/tools".into(),
-        author: "octocat".into(),
-        is_draft: false,
-        review_decision: Some(ReviewDecision::Approved),
-        ci: CiState::Success,
-        merge_kind: Some(MergeKind::Ready),
-        updated_at: "2026-09-01T10:00:00Z".into(),
-        context: None,
-    };
-    let cells = vec![CellData::PullRequests(PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 2,
-            items: vec![row],
-        }],
-    })];
+    let mut row = pr(7, "Fix the flaky resize test on Windows", "octo/tools");
+    row["reviewDecision"] = "APPROVED".into();
+    row["mergeKind"] = "ready".into();
+    let cells = vec![pulls_read("ok", None, 2, vec![row])];
     let planned = plan(
         &settings(),
         &displays,
@@ -222,34 +202,12 @@ fn the_popover_tail_points_at_its_own_cell() {
 }
 #[test]
 fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
-    let pulls = PrCellData {
-        status: GithubStatus::Ok,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Mine,
-            total: 1,
-            items: vec![PrRowData {
-                id: "n1".into(),
-                number: 7,
-                title: "Fix the flaky resize test on Windows".into(),
-                url: "https://github.com/o/r/pull/7".into(),
-                repo: "o/r".into(),
-                author: "octocat".into(),
-                is_draft: false,
-                review_decision: None,
-                ci: CiState::Success,
-                merge_kind: None,
-                updated_at: "2026-09-01T10:00:00Z".into(),
-                context: None,
-            }],
-        }],
-    };
+    let pulls = pulls(vec![pr(7, "Fix the flaky resize test on Windows", "o/r")]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![
         CellData::Provider(session_only(AgentId::Claude, 42.0)),
         CellData::Provider(session_only(AgentId::Codex, 42.0)),
-        CellData::PullRequests(pulls),
+        pulls,
     ];
     let last = cells.len() - 1;
     let planned = plan(

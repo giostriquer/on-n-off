@@ -13,7 +13,7 @@ use crate::dto::{
 };
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-use super::model::frame::{CellData, PrRowData, RailData};
+use super::model::frame::{CellData, PrRow, RailData};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -264,7 +264,7 @@ fn list_title(list: GithubList) -> &'static str {
     }
 }
 
-fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
+fn row_badges(row: &PrRow) -> Vec<(String, Badge)> {
     let mut badges = Vec::new();
     if row.is_draft {
         badges.push(("Draft".into(), Badge::Muted));
@@ -291,13 +291,15 @@ fn row_badges(row: &PrRowData) -> Vec<(String, Badge)> {
 fn cell_content(data: &CellData) -> CellContent {
     match data {
         CellData::Provider(provider) => {
-            let headline = provider.cell.headline().map(quota_view);
+            let reading = provider.reading.as_ref();
+            let headline = reading
+                .and_then(|reading| reading.headline())
+                .map(quota_view);
             CellContent::Provider {
-                provider: provider.cell.provider,
+                provider: provider.provider,
                 headline,
-                inner: provider
-                    .cell
-                    .inner_window()
+                inner: reading
+                    .and_then(|reading| reading.inner_window())
                     .map(|(ring, window)| (ring.clone(), quota_view(&window))),
                 label: headline
                     .and_then(|quota| quota.percent)
@@ -305,9 +307,16 @@ fn cell_content(data: &CellData) -> CellContent {
                     .unwrap_or_else(|| "—".into()),
             }
         }
-        CellData::PullRequests(pulls) => {
+        CellData::PullRequests(cell) => {
+            let Some(pulls) = &cell.reading else {
+                return CellContent::PullRequests {
+                    segments: Vec::new(),
+                    count: 0,
+                    readable: false,
+                };
+            };
             let readable = pulls.status == GithubStatus::Ok || pulls.stale;
-            let rows: Vec<&PrRowData> = pulls.lists.iter().flat_map(|list| &list.items).collect();
+            let rows: Vec<&PrRow> = pulls.lists.iter().flat_map(|list| &list.items).collect();
             let mut seen = std::collections::BTreeSet::new();
             let count = rows
                 .iter()
@@ -531,7 +540,7 @@ fn popover_entries(
         CellData::Provider(provider) => {
             entries.push((
                 PopItem::Mark {
-                    kind: MarkKind::Provider(provider.cell.provider),
+                    kind: MarkKind::Provider(provider.provider),
                     size: v(13.0),
                 },
                 R::new(x, y + header_lift, v(13.0), v(13.0)),
@@ -542,7 +551,7 @@ fn popover_entries(
                 y,
                 inner_w - v(13.0) - v(7.0),
                 line_h(13.0, TextWeight::Semibold),
-                format!("{} Usage", provider_name(provider.cell.provider)),
+                format!("{} Usage", provider_name(provider.provider)),
                 v(13.0),
                 TextWeight::Semibold,
                 [255, 255, 255, 255],
@@ -550,9 +559,9 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            if provider.cell.status != LimitsStatus::Ok {
-                let message = provider
-                    .cell
+            let reading = provider.reading.as_ref();
+            if let Some(reading) = reading.filter(|reading| reading.status != LimitsStatus::Ok) {
+                let message = reading
                     .message
                     .clone()
                     .unwrap_or_else(|| "Usage unavailable.".into());
@@ -578,7 +587,7 @@ fn popover_entries(
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
-                if !provider.cell.windows.is_empty() || provider.cell.workspace_credits.is_some() {
+                if !reading.windows.is_empty() || reading.workspace_credits.is_some() {
                     text_entry(
                         &mut entries,
                         x,
@@ -593,7 +602,9 @@ fn popover_entries(
                     );
                     y += line_h(10.0, TextWeight::Regular) + v(4.0);
                 }
-            } else if provider.cell.windows.is_empty() && provider.cell.message.is_none() {
+            } else if reading
+                .is_none_or(|reading| reading.windows.is_empty() && reading.message.is_none())
+            {
                 text_entry(
                     &mut entries,
                     x,
@@ -616,9 +627,9 @@ fn popover_entries(
                 detail: Option<String>,
             }
             let now = chrono::Utc::now();
-            let mut blocks: Vec<Block> = provider
-                .cell
-                .windows
+            let mut blocks: Vec<Block> = reading
+                .map(|reading| reading.windows.as_slice())
+                .unwrap_or_default()
                 .iter()
                 .map(|window| Block {
                     label: window.label.clone(),
@@ -627,7 +638,7 @@ fn popover_entries(
                     detail: None,
                 })
                 .collect();
-            if let Some(share) = &provider.cell.workspace_credits {
+            if let Some(share) = reading.and_then(|reading| reading.workspace_credits.as_ref()) {
                 let window = workspace_share_window(share);
                 let wording = workspace_share_wording(share);
                 blocks.push(Block {
@@ -687,7 +698,7 @@ fn popover_entries(
                 entries.push((
                     PopItem::Bar {
                         percent: block.percent,
-                        color: meter_color(block.percent, provider_color(provider.cell.provider)),
+                        color: meter_color(block.percent, provider_color(provider.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
@@ -756,7 +767,7 @@ fn popover_entries(
                         v(10.5),
                         TextWeight::Medium,
                         if working {
-                            provider_color(provider.cell.provider)
+                            provider_color(provider.provider)
                         } else {
                             MUTED_INK
                         },
@@ -792,7 +803,7 @@ fn popover_entries(
                 y += spacing - v(8.0);
             }
         }
-        CellData::PullRequests(pulls) => {
+        CellData::PullRequests(cell) => {
             entries.push((
                 PopItem::Mark {
                     kind: MarkKind::PullRequests,
@@ -814,216 +825,241 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            let readable = pulls.status == GithubStatus::Ok || pulls.stale;
-            if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
-                let color = if readable { WARN_AMBER } else { MUTED_INK };
-                for line in wrap_lines(
-                    pulls.hint.as_deref().unwrap_or(""),
-                    inner_w,
-                    v(11.0),
-                    TextWeight::Regular,
-                    display_scale,
-                    4,
-                ) {
-                    text_entry(
-                        &mut entries,
-                        x,
-                        y,
+            if let Some(pulls) = &cell.reading {
+                let readable = pulls.status == GithubStatus::Ok || pulls.stale;
+                if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
+                    let color = if readable { WARN_AMBER } else { MUTED_INK };
+                    for line in wrap_lines(
+                        pulls.hint.as_deref().unwrap_or(""),
                         inner_w,
-                        line_h(11.0, TextWeight::Regular),
-                        line,
                         v(11.0),
                         TextWeight::Regular,
-                        color,
-                        false,
-                    );
-                    y += line_h(11.0, TextWeight::Regular);
-                }
-                y += v(4.0);
-            }
-            for list in pulls.lists.iter().filter(|_| readable) {
-                text_entry(
-                    &mut entries,
-                    x,
-                    y,
-                    inner_w,
-                    line_h(9.5, TextWeight::Semibold),
-                    list_title(list.id).to_uppercase(),
-                    v(9.5),
-                    TextWeight::Semibold,
-                    MUTED_INK,
-                    false,
-                );
-                text_entry(
-                    &mut entries,
-                    x,
-                    y,
-                    inner_w,
-                    line_h(9.5, TextWeight::Regular),
-                    if list.total > list.items.len() as u64 {
-                        format!("{} of {}", list.items.len(), list.total)
-                    } else {
-                        list.items.len().to_string()
-                    },
-                    v(9.5),
-                    TextWeight::Regular,
-                    MUTED_INK,
-                    true,
-                );
-                y += line_h(9.5, TextWeight::Semibold) + v(6.0);
-                if list.items.is_empty() {
-                    text_entry(
-                        &mut entries,
-                        x,
-                        y,
-                        inner_w,
-                        line_h(10.5, TextWeight::Regular),
-                        "Nothing open.".into(),
-                        v(10.5),
-                        TextWeight::Regular,
-                        MUTED_INK,
-                        false,
-                    );
-                    y += line_h(10.5, TextWeight::Regular) + v(6.0);
-                }
-                for row in &list.items {
-                    let context = row.context.map(context_tag);
-                    let title_size = v(11.0);
-                    let copy_w = v(20.0);
-                    let lines = wrap_lines(
-                        &row.title,
-                        inner_w - copy_w - v(8.0),
-                        title_size,
-                        TextWeight::Semibold,
                         display_scale,
-                        2,
-                    );
-                    let copy_h = v(16.0);
-                    let row_top = y;
-                    for (line_index, line) in lines.iter().enumerate() {
-                        let line_h = line_h(11.0, TextWeight::Semibold);
+                        4,
+                    ) {
                         text_entry(
                             &mut entries,
                             x,
                             y,
-                            inner_w - copy_w - v(8.0),
-                            line_h,
-                            line.clone(),
-                            title_size,
-                            TextWeight::Semibold,
-                            [255, 255, 255, 255],
-                            false,
-                        );
-                        if line_index == 0 {
-                            entries.push((
-                                PopItem::CopyIcon {
-                                    color: context.map_or(MUTED_INK, |(_, ink)| ink),
-                                },
-                                R::new(x + inner_w - copy_w, y, copy_w, copy_h),
-                            ));
-                            zones.push((
-                                Zone::CopyRow {
-                                    url: row.url.clone(),
-                                    title: row.title.clone(),
-                                },
-                                R::new(x + inner_w - copy_w, y, copy_w, copy_h.max(y + copy_h - y)),
-                            ));
-                        }
-                        y += line_h;
-                    }
-                    y += v(2.0);
-                    let repo_size = v(10.0);
-                    let mut line_x = x;
-                    let badge_limit = x + inner_w - v(7.0) - v(10.0);
-                    if let Some((tag, ink)) = context {
-                        let tag_size = v(9.5);
-                        text_entry(
-                            &mut entries,
-                            line_x,
-                            y,
                             inner_w,
-                            line_h(9.5, TextWeight::Semibold),
-                            tag.into(),
-                            tag_size,
-                            TextWeight::Semibold,
-                            ink,
+                            line_h(11.0, TextWeight::Regular),
+                            line,
+                            v(11.0),
+                            TextWeight::Regular,
+                            color,
                             false,
                         );
-                        line_x +=
-                            measure_weight(tag, tag_size, TextWeight::Semibold, display_scale)
-                                + v(5.0);
+                        y += line_h(11.0, TextWeight::Regular);
                     }
-                    let repo = ellipsize(
-                        &format!("{} #{}", row.repo, row.number),
-                        badge_limit - line_x,
-                        repo_size,
-                        TextWeight::Regular,
-                        display_scale,
-                    );
+                    y += v(4.0);
+                }
+                for list in pulls.lists.iter().filter(|_| readable) {
                     text_entry(
                         &mut entries,
-                        line_x,
+                        x,
                         y,
                         inner_w,
-                        line_h(10.0, TextWeight::Regular),
-                        repo.clone(),
-                        repo_size,
-                        TextWeight::Regular,
+                        line_h(9.5, TextWeight::Semibold),
+                        list_title(list.id).to_uppercase(),
+                        v(9.5),
+                        TextWeight::Semibold,
                         MUTED_INK,
                         false,
                     );
-                    line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
-                    for (badge, color) in row_badges(row) {
-                        let badge_size = v(9.5);
-                        let badge_w =
-                            measure_weight(&badge, badge_size, TextWeight::Medium, display_scale);
-                        if line_x + badge_w > badge_limit {
-                            break;
+                    text_entry(
+                        &mut entries,
+                        x,
+                        y,
+                        inner_w,
+                        line_h(9.5, TextWeight::Regular),
+                        if list.total > list.items.len() as u64 {
+                            format!("{} of {}", list.items.len(), list.total)
+                        } else {
+                            list.items.len().to_string()
+                        },
+                        v(9.5),
+                        TextWeight::Regular,
+                        MUTED_INK,
+                        true,
+                    );
+                    y += line_h(9.5, TextWeight::Semibold) + v(6.0);
+                    if list.items.is_empty() {
+                        text_entry(
+                            &mut entries,
+                            x,
+                            y,
+                            inner_w,
+                            line_h(10.5, TextWeight::Regular),
+                            "Nothing open.".into(),
+                            v(10.5),
+                            TextWeight::Regular,
+                            MUTED_INK,
+                            false,
+                        );
+                        y += line_h(10.5, TextWeight::Regular) + v(6.0);
+                    }
+                    for row in &list.items {
+                        let context = row.context.map(context_tag);
+                        let title_size = v(11.0);
+                        let copy_w = v(20.0);
+                        let lines = wrap_lines(
+                            &row.title,
+                            inner_w - copy_w - v(8.0),
+                            title_size,
+                            TextWeight::Semibold,
+                            display_scale,
+                            2,
+                        );
+                        let copy_h = v(16.0);
+                        let row_top = y;
+                        for (line_index, line) in lines.iter().enumerate() {
+                            let line_h = line_h(11.0, TextWeight::Semibold);
+                            text_entry(
+                                &mut entries,
+                                x,
+                                y,
+                                inner_w - copy_w - v(8.0),
+                                line_h,
+                                line.clone(),
+                                title_size,
+                                TextWeight::Semibold,
+                                [255, 255, 255, 255],
+                                false,
+                            );
+                            if line_index == 0 {
+                                entries.push((
+                                    PopItem::CopyIcon {
+                                        color: context.map_or(MUTED_INK, |(_, ink)| ink),
+                                    },
+                                    R::new(x + inner_w - copy_w, y, copy_w, copy_h),
+                                ));
+                                zones.push((
+                                    Zone::CopyRow {
+                                        url: row.url.clone(),
+                                        title: row.title.clone(),
+                                    },
+                                    R::new(
+                                        x + inner_w - copy_w,
+                                        y,
+                                        copy_w,
+                                        copy_h.max(y + copy_h - y),
+                                    ),
+                                ));
+                            }
+                            y += line_h;
                         }
+                        y += v(2.0);
+                        let repo_size = v(10.0);
+                        let mut line_x = x;
+                        let badge_limit = x + inner_w - v(7.0) - v(10.0);
+                        if let Some((tag, ink)) = context {
+                            let tag_size = v(9.5);
+                            text_entry(
+                                &mut entries,
+                                line_x,
+                                y,
+                                inner_w,
+                                line_h(9.5, TextWeight::Semibold),
+                                tag.into(),
+                                tag_size,
+                                TextWeight::Semibold,
+                                ink,
+                                false,
+                            );
+                            line_x +=
+                                measure_weight(tag, tag_size, TextWeight::Semibold, display_scale)
+                                    + v(5.0);
+                        }
+                        let repo = ellipsize(
+                            &format!("{} #{}", row.repo, row.number),
+                            badge_limit - line_x,
+                            repo_size,
+                            TextWeight::Regular,
+                            display_scale,
+                        );
                         text_entry(
                             &mut entries,
                             line_x,
                             y,
                             inner_w,
-                            line_h(9.5, TextWeight::Medium),
-                            badge.clone(),
-                            badge_size,
-                            TextWeight::Medium,
-                            badge_color(color),
+                            line_h(10.0, TextWeight::Regular),
+                            repo.clone(),
+                            repo_size,
+                            TextWeight::Regular,
+                            MUTED_INK,
                             false,
                         );
-                        line_x += badge_w + v(6.0);
-                    }
-                    entries.push((
-                        PopItem::Dot { ci: row.ci },
-                        R::new(
-                            x + inner_w - v(7.0),
-                            y + cap_middle(10.0, TextWeight::Regular) - v(7.0) / 2.0,
-                            v(7.0),
-                            v(7.0),
-                        ),
-                    ));
-                    let row_rect = R::new(
-                        x,
-                        row_top,
-                        inner_w,
-                        y + line_h(10.0, TextWeight::Regular) - row_top,
-                    );
-                    if let Some((_, ink)) = context {
+                        line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
+                        for (badge, color) in row_badges(row) {
+                            let badge_size = v(9.5);
+                            let badge_w = measure_weight(
+                                &badge,
+                                badge_size,
+                                TextWeight::Medium,
+                                display_scale,
+                            );
+                            if line_x + badge_w > badge_limit {
+                                break;
+                            }
+                            text_entry(
+                                &mut entries,
+                                line_x,
+                                y,
+                                inner_w,
+                                line_h(9.5, TextWeight::Medium),
+                                badge.clone(),
+                                badge_size,
+                                TextWeight::Medium,
+                                badge_color(color),
+                                false,
+                            );
+                            line_x += badge_w + v(6.0);
+                        }
                         entries.push((
-                            PopItem::Stripe { color: ink },
-                            R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
+                            PopItem::Dot { ci: row.ci },
+                            R::new(
+                                x + inner_w - v(7.0),
+                                y + cap_middle(10.0, TextWeight::Regular) - v(7.0) / 2.0,
+                                v(7.0),
+                                v(7.0),
+                            ),
                         ));
+                        let row_rect = R::new(
+                            x,
+                            row_top,
+                            inner_w,
+                            y + line_h(10.0, TextWeight::Regular) - row_top,
+                        );
+                        if let Some((_, ink)) = context {
+                            entries.push((
+                                PopItem::Stripe { color: ink },
+                                R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
+                            ));
+                        }
+                        zones.push((
+                            Zone::OpenRow {
+                                url: row.url.clone(),
+                            },
+                            row_rect,
+                        ));
+                        y += line_h(10.0, TextWeight::Regular) + v(6.0);
                     }
-                    zones.push((
-                        Zone::OpenRow {
-                            url: row.url.clone(),
-                        },
-                        row_rect,
-                    ));
-                    y += line_h(10.0, TextWeight::Regular) + v(6.0);
+                    y += v(8.0);
                 }
-                y += v(8.0);
+            } else {
+                text_entry(
+                    &mut entries,
+                    x,
+                    y,
+                    inner_w,
+                    line_h(11.0, TextWeight::Regular),
+                    "Checking pull requests…".into(),
+                    v(11.0),
+                    TextWeight::Regular,
+                    MUTED_INK,
+                    false,
+                );
+                y += line_h(11.0, TextWeight::Regular);
             }
         }
     }

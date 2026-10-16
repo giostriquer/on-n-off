@@ -16,36 +16,42 @@ pub struct RailData {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum CellData {
-    Provider(ProviderData),
-    PullRequests(PrCellData),
+    Provider(ProviderCell),
+    PullRequests(PrCell),
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProviderData {
-    pub cell: NotchProvider,
+pub struct ProviderCell {
+    pub provider: AgentId,
+    pub reading: Option<NotchProvider>,
     pub sessions: Vec<LiveSession>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrCell {
+    pub reading: Option<PrReading>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PrCellData {
+pub struct PrReading {
     pub status: GithubStatus,
     pub hint: Option<String>,
     pub stale: bool,
-    pub lists: Vec<PrListData>,
+    pub lists: Vec<PrList>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PrListData {
+pub struct PrList {
     pub id: GithubList,
     pub total: u64,
-    pub items: Vec<PrRowData>,
+    pub items: Vec<PrRow>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PrRowData {
+pub struct PrRow {
     pub id: String,
     pub number: u64,
     pub title: String,
@@ -72,17 +78,22 @@ pub fn rail(
     let mut cells: Vec<CellData> = settings
         .rail_providers()
         .into_iter()
-        .filter_map(|agent| {
-            let (reading, sessions) = read(agent);
-            reading.map(|cell| CellData::Provider(ProviderData { cell, sessions }))
+        .filter_map(|provider| {
+            let (reading, sessions) = read(provider);
+            reading.map(|reading| {
+                CellData::Provider(ProviderCell {
+                    provider,
+                    reading: Some(reading),
+                    sessions,
+                })
+            })
         })
         .collect();
     if settings.pull_requests.enabled {
         if let Some(dto) = pulls {
-            cells.push(CellData::PullRequests(pr_cell(
-                dto,
-                &settings.pull_requests.selected_lists(),
-            )));
+            cells.push(CellData::PullRequests(PrCell {
+                reading: Some(pr_reading(dto, &settings.pull_requests.selected_lists())),
+            }));
         }
     }
     RailData {
@@ -92,8 +103,8 @@ pub fn rail(
     }
 }
 
-fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
-    PrCellData {
+fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
+    PrReading {
         status: dto.status,
         hint: dto.hint.clone(),
         stale: dto.stale,
@@ -105,7 +116,7 @@ fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
                     GithubList::ReviewRequested => &dto.data.review_requested,
                     GithubList::Assigned => &dto.data.assigned,
                 };
-                PrListData {
+                PrList {
                     id: *list,
                     total: source.total,
                     items: source
@@ -120,11 +131,11 @@ fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
     }
 }
 
-fn pr_row(pr: &GithubPrDto) -> Option<PrRowData> {
+fn pr_row(pr: &GithubPrDto) -> Option<PrRow> {
     if !pr.url.starts_with("https://github.com/") {
         return None;
     }
-    Some(PrRowData {
+    Some(PrRow {
         id: pr.id.clone(),
         number: pr.number,
         title: pr.title.clone(),

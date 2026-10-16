@@ -227,8 +227,12 @@ fn a_pull_request_read_another_surface_replaced_reaches_the_notch_without_waitin
     );
     rig.tick(Duration::from_millis(100));
     let frame = rig.last_frame();
-    let Some(CellData::PullRequests(cell)) = frame.cells.last() else {
-        panic!("a pull request cell");
+    let Some(CellData::PullRequests(PrCell {
+        reading: Some(cell),
+        ..
+    })) = frame.cells.last()
+    else {
+        panic!("a pull request cell that was read");
     };
     assert_eq!(cell.lists[0].items.len(), 1);
     rig.tick(Duration::from_secs(1));

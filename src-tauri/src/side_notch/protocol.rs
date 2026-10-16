@@ -1,4 +1,4 @@
-use super::model::frame::{CellData, PrCellData, ProviderData, RailData};
+use super::model::frame::{CellData, PrReading, ProviderCell, RailData};
 use super::model::{workspace_share_wording, InnerRing, NotchProvider, NotchSnapshot, ShowMode};
 use super::sessions::LiveSession;
 use crate::dto::{AgentId, LimitWindowDto, LimitsStatus};
@@ -56,7 +56,7 @@ struct Message<'a> {
     snapshot: &'a NotchSnapshot,
     providers: Vec<MessageProvider<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pull_requests: Option<&'a PrCellData>,
+    pull_requests: Option<&'a PrReading>,
     action_error: &'a Option<String>,
 }
 
@@ -126,15 +126,19 @@ pub fn encode(
         .cells
         .iter()
         .filter_map(|cell| match cell {
-            CellData::Provider(ProviderData { cell, sessions }) => Some(MessageProvider {
-                entry: NativeProvider::from(cell),
+            CellData::Provider(ProviderCell {
+                reading: Some(reading),
+                sessions,
+                ..
+            }) => Some(MessageProvider {
+                entry: NativeProvider::from(reading),
                 sessions,
             }),
-            CellData::PullRequests(_) => None,
+            CellData::Provider(_) | CellData::PullRequests(_) => None,
         })
         .collect();
     let pull_requests = frame.cells.iter().find_map(|cell| match cell {
-        CellData::PullRequests(cell) => Some(cell),
+        CellData::PullRequests(cell) => cell.reading.as_ref(),
         CellData::Provider(_) => None,
     });
     serde_json::to_vec(&Message {

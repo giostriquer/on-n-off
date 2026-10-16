@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::GithubStatus;
-use crate::side_notch::model::frame::PrListData;
+use crate::side_notch::model::frame::{PrCell, PrList};
 use crate::side_notch::model::GithubList;
 
 #[test]
@@ -63,9 +63,10 @@ fn encoded(cells: Vec<CellData>) -> serde_json::Value {
 }
 
 fn sent_provider(entries: serde_json::Value) -> serde_json::Value {
-    let cell = NotchProvider::current(serde_json::from_value(entries).unwrap()).unwrap();
-    encoded(vec![CellData::Provider(ProviderData {
-        cell,
+    let reading = NotchProvider::current(serde_json::from_value(entries).unwrap()).unwrap();
+    encoded(vec![CellData::Provider(ProviderCell {
+        provider: reading.provider,
+        reading: Some(reading),
         sessions: Vec::new(),
     })])["providers"][0]
         .clone()
@@ -132,15 +133,17 @@ fn pull_requests_travel_only_with_a_pull_request_cell() {
     assert!(message.get("pullRequests").is_none());
     assert_eq!(message["providers"], serde_json::json!([]));
 
-    let message = encoded(vec![CellData::PullRequests(PrCellData {
-        status: GithubStatus::RateLimited,
-        hint: None,
-        stale: false,
-        lists: vec![PrListData {
-            id: GithubList::Assigned,
-            total: 0,
-            items: Vec::new(),
-        }],
+    let message = encoded(vec![CellData::PullRequests(PrCell {
+        reading: Some(PrReading {
+            status: GithubStatus::RateLimited,
+            hint: None,
+            stale: false,
+            lists: vec![PrList {
+                id: GithubList::Assigned,
+                total: 0,
+                items: Vec::new(),
+            }],
+        }),
     })]);
     assert_eq!(
         message["pullRequests"],
