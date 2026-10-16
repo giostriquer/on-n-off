@@ -296,6 +296,17 @@ describe("LimitsPopover", () => {
     ]);
   });
 
+  it("reads the app settings again each time the popover opens", async () => {
+    renderPopover();
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(openedHandler).not.toBeNull());
+
+    await act(async () => openedHandler?.());
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(2));
+    await act(async () => openedHandler?.());
+    await waitFor(() => expect(loadAppSettings).toHaveBeenCalledTimes(3));
+  });
+
   it("reapplies the stored theme each time the popover opens", async () => {
     document.documentElement.classList.remove("dark");
     localStorage.setItem("on-n-off.theme", "dark");
