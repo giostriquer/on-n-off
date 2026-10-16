@@ -40,7 +40,7 @@ export function LimitsPopover() {
     void api
       .onLimitsPopoverOpened(() => {
         applyStoredTheme();
-        void loadSettings().then((latest) =>
+        void loadSettings().then(({ settings: latest }) =>
           queryClient.refetchQueries({
             queryKey: ["limits"],
             type: "active",

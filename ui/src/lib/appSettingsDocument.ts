@@ -16,14 +16,14 @@ export type AppSettingsState = {
 export type AppSettingsDocument = {
   state: () => AppSettingsState;
   subscribe: (listener: () => void) => () => void;
-  load: () => Promise<AppSettings>;
+  load: () => Promise<AppSettingsState>;
   patch: (change: AppSettingsChange) => Promise<AppSettings | null>;
   onSaveFailed: (listener: (error: unknown) => void) => () => void;
 };
 
 export function createAppSettingsDocument(transport: AppSettingsTransport): AppSettingsDocument {
   let current: AppSettingsState = { settings: DEFAULT_APP_SETTINGS, loaded: false };
-  let reading: Promise<AppSettings> | null = null;
+  let reading: Promise<AppSettingsState> | null = null;
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
   const failureListeners = new Set<(error: unknown) => void>();
@@ -39,12 +39,12 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
     return turn;
   }
 
-  function load(): Promise<AppSettings> {
+  function load(): Promise<AppSettingsState> {
     reading ??= inTurn(() =>
       Promise.resolve()
         .then(() => transport.load())
         .then(hold, () => undefined)
-        .then(() => current.settings),
+        .then(() => current),
     ).finally(() => {
       reading = null;
     });

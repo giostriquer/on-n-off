@@ -485,14 +485,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
     bootStartedRef.current = true;
     void (async () => {
-      const [nextFlags, nextSettings, nextAgents] = await Promise.allSettled([
-        api.featureFlags(),
-        loadAppSettings(),
-        api.listAgents(),
-      ]);
+      const settingsRead = loadAppSettings();
+      const [nextFlags, nextAgents] = await Promise.allSettled([api.featureFlags(), api.listAgents()]);
+      const { settings, loaded } = await settingsRead;
       setFlags(mergeFlags(nextFlags.status === "fulfilled" ? nextFlags.value : null));
-      if (nextSettings.status === "fulfilled") {
-        showVisibleAgent(nextSettings.value.hiddenAgents);
+      if (loaded) {
+        showVisibleAgent(settings.hiddenAgents);
       }
       if (nextAgents.status === "fulfilled") {
         setAgents(overlayAgents(nextAgents.value));

@@ -34,7 +34,7 @@ describe("the app settings document", () => {
     document.subscribe(changed);
 
     expect(document.state()).toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
-    await expect(document.load()).resolves.toEqual(LOADED);
+    await expect(document.load()).resolves.toEqual({ settings: LOADED, loaded: true });
 
     expect(document.state()).toEqual({ settings: LOADED, loaded: true });
     expect(changed).toHaveBeenCalledTimes(1);
@@ -45,23 +45,23 @@ describe("the app settings document", () => {
 
     const [first, second] = await Promise.all([document.load(), document.load()]);
 
-    expect(first).toEqual(LOADED);
-    expect(second).toEqual(LOADED);
+    expect(first).toEqual({ settings: LOADED, loaded: true });
+    expect(second).toEqual({ settings: LOADED, loaded: true });
     expect(transport.load).toHaveBeenCalledTimes(1);
     await document.load();
     expect(transport.load).toHaveBeenCalledTimes(2);
   });
 
-  it("keeps what it holds when a load fails", async () => {
+  it("keeps what it holds when a load fails, and says whether that is a document Rust sent", async () => {
     const { transport, document } = rust();
     transport.load.mockRejectedValueOnce(new Error("settings unavailable"));
 
-    await expect(document.load()).resolves.toEqual(DEFAULT_APP_SETTINGS);
+    await expect(document.load()).resolves.toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
     expect(document.state()).toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
 
     await document.load();
     transport.load.mockRejectedValueOnce(new Error("settings unavailable"));
-    await expect(document.load()).resolves.toEqual(LOADED);
+    await expect(document.load()).resolves.toEqual({ settings: LOADED, loaded: true });
     expect(document.state()).toEqual({ settings: LOADED, loaded: true });
   });
 
@@ -71,8 +71,8 @@ describe("the app settings document", () => {
       throw new Error("no IPC");
     });
 
-    await expect(document.load()).resolves.toEqual(DEFAULT_APP_SETTINGS);
-    await expect(document.load()).resolves.toEqual(LOADED);
+    await expect(document.load()).resolves.toEqual({ settings: DEFAULT_APP_SETTINGS, loaded: false });
+    await expect(document.load()).resolves.toEqual({ settings: LOADED, loaded: true });
   });
 
   it("saves a change over the whole document and holds the document Rust saved", async () => {
@@ -152,7 +152,7 @@ describe("the app settings document", () => {
     transport.load.mockResolvedValueOnce(afterSave);
     saving.resolve({ ...LOADED, closeToTray: true });
     await patched;
-    await expect(reread).resolves.toEqual(afterSave);
+    await expect(reread).resolves.toEqual({ settings: afterSave, loaded: true });
     expect(transport.load).toHaveBeenCalledTimes(2);
     expect(document.state().settings).toEqual(afterSave);
   });
