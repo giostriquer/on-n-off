@@ -256,8 +256,8 @@ fn a_muse_serve_that_never_answers_times_out_by_name() {
 fn an_oversized_muse_serve_line_is_named_with_its_limit() {
     let session = serve(
         crate::cli_stub::CliStub::new("muse")
-            .stdout(&"x".repeat(128))
-            .sleep(1),
+            .awaits_line()
+            .stdout(&"x".repeat(128)),
         "muse-serve-line-message",
         crate::cli_stub::ANSWER_DEADLINE,
         64,
@@ -273,8 +273,8 @@ fn an_oversized_muse_serve_line_is_named_with_its_limit() {
 fn muse_serve_output_that_is_not_json_is_named() {
     let session = serve(
         crate::cli_stub::CliStub::new("muse")
-            .stdout("not-json")
-            .sleep(1),
+            .awaits_line()
+            .stdout("not-json"),
         "muse-serve-json-message",
         crate::cli_stub::ANSWER_DEADLINE,
         1024,
@@ -291,7 +291,7 @@ fn muse_serve_output_that_is_not_json_is_named() {
 #[test]
 fn a_muse_serve_that_closes_cleanly_before_answering_says_so() {
     let session = serve(
-        crate::cli_stub::CliStub::new("muse").sleep(1),
+        crate::cli_stub::CliStub::new("muse").awaits_line(),
         "muse-serve-closed-message",
         crate::cli_stub::ANSWER_DEADLINE,
         1024,

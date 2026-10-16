@@ -37,7 +37,7 @@ fn opened<T>(
 }
 
 #[test]
-fn a_session_that_never_answers_times_out_and_stops_the_child() {
+fn a_process_that_never_answers_times_out_and_finishing_stops_it() {
     let started = Instant::now();
     let mut process = process(
         &CliStub::new("acme").sleep(5),
@@ -105,6 +105,80 @@ fn stderr_never_reaches_a_message() {
 }
 
 #[test]
+fn a_peer_allows_a_mebibyte_line_and_thirty_seconds_by_default() {
+    for (peer, jsonrpc) in [(LITE, false), (STRICT, true)] {
+        assert_eq!(peer.line_limit, 1024 * 1024);
+        assert_eq!(peer.timeout, Duration::from_secs(30));
+        assert_eq!(peer.jsonrpc, jsonrpc);
+    }
+}
+
+#[test]
+fn a_cli_that_fills_its_stderr_pipe_still_reaches_its_answer() {
+    let root = crate::paths::scratch_dir("json-line-stderr-flood");
+    std::fs::write(
+        root.join("noise.txt"),
+        format!("{}\n", "e".repeat(255)).repeat(1024),
+    )
+    .unwrap();
+    let stub = CliStub::new("acme")
+        .stderr_file("noise.txt")
+        .stdout(r#"{"id":7}"#);
+    let mut process = match Process::spawn(
+        LITE.within(Duration::from_secs(5), 1024),
+        &mut stub.cli(&root).command(),
+    ) {
+        Ok(process) => process,
+        Err(error) => panic!("{error:?}"),
+    };
+
+    let message = process.receive();
+    process.finish();
+
+    assert_eq!(message.unwrap(), json!({"id": 7}));
+}
+
+#[cfg(unix)]
+#[test]
+fn a_request_reaches_the_cli_as_one_line_and_closing_stdin_lets_it_exit_cleanly() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = crate::paths::scratch_dir("json-line-stdin");
+    let cli = root.join("acme");
+    std::fs::write(
+        &cli,
+        concat!(
+            "#!/bin/sh\n",
+            "here=\"$(cd \"$(dirname \"$0\")\" && pwd)\"\n",
+            "head -n 1 > \"$here/received\"\n",
+            "printf '%s\\n' '{\"id\":1,\"result\":{}}'\n",
+            "cat > /dev/null\n",
+            "exit 0\n",
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let mut process = match Process::spawn(
+        LITE.within(Duration::from_secs(10), 1024),
+        &mut Command::new(&cli),
+    ) {
+        Ok(process) => process,
+        Err(error) => panic!("{error:?}"),
+    };
+    let request = json!({"id": 1, "method": "initialize", "params": {"clientInfo": {}}});
+
+    process.send(&request).unwrap();
+    let answer = process.receive();
+    let exit = process.finish();
+
+    assert_eq!(answer.unwrap(), json!({"id": 1, "result": {}}));
+    assert!(exit.is_some_and(|status| status.success()), "{exit:?}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("received")).unwrap(),
+        "{\"id\":1,\"method\":\"initialize\",\"params\":{\"clientInfo\":{}}}\n"
+    );
+}
+
+#[test]
 fn a_missing_cli_is_missing_and_not_a_failure() {
     let root = crate::paths::scratch_dir("json-line-missing");
 
@@ -136,7 +210,7 @@ fn a_cli_that_cannot_start_is_named() {
 
 #[cfg(unix)]
 #[test]
-fn dropping_a_session_stops_its_child() {
+fn dropping_a_process_kills_its_child() {
     let process = process(&CliStub::new("acme").sleep(30), "json-line-drop", LITE);
     let pid = process.child.id().to_string();
 
@@ -165,8 +239,9 @@ fn an_unsuccessful_exit_before_initialize_is_answered_gets_the_peers_guidance() 
 #[test]
 fn a_cli_that_answers_initialize_and_then_exits_unsuccessfully_keeps_the_closed_message() {
     let stub = CliStub::new("acme")
+        .awaits_line()
         .stdout(r#"{"id":1,"result":{}}"#)
-        .sleep(1)
+        .sleep(3)
         .exit(2);
     let Ok(session) = Session::start(LITE, command(&stub, "json-line-late-exit")) else {
         panic!("the stub did not start");

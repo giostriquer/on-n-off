@@ -56,7 +56,7 @@ fn a_codex_app_server_that_never_answers_times_out_by_name() {
 #[test]
 fn an_oversized_codex_app_server_line_is_named_with_its_limit() {
     let session = app_server(
-        CliStub::new("codex").stdout(&"x".repeat(128)).sleep(1),
+        CliStub::new("codex").awaits_line().stdout(&"x".repeat(128)),
         "codex-app-server-line-message",
         ANSWER_DEADLINE,
         64,
@@ -71,7 +71,7 @@ fn an_oversized_codex_app_server_line_is_named_with_its_limit() {
 #[test]
 fn codex_app_server_output_that_is_not_json_is_named() {
     let session = app_server(
-        CliStub::new("codex").stdout("not-json").sleep(1),
+        CliStub::new("codex").awaits_line().stdout("not-json"),
         "codex-app-server-json-message",
         ANSWER_DEADLINE,
         1024,
@@ -88,7 +88,7 @@ fn codex_app_server_output_that_is_not_json_is_named() {
 #[test]
 fn a_codex_app_server_that_closes_cleanly_before_answering_says_so() {
     let session = app_server(
-        CliStub::new("codex").sleep(1),
+        CliStub::new("codex").awaits_line(),
         "codex-app-server-closed-message",
         ANSWER_DEADLINE,
         1024,
