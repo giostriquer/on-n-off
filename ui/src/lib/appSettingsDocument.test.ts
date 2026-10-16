@@ -65,6 +65,16 @@ describe("the app settings document", () => {
     expect(document.state()).toEqual({ settings: LOADED, loaded: true });
   });
 
+  it("answers with what it holds when a read throws before it starts", async () => {
+    const { transport, document } = rust();
+    transport.load.mockImplementationOnce(() => {
+      throw new Error("no IPC");
+    });
+
+    await expect(document.load()).resolves.toEqual(DEFAULT_APP_SETTINGS);
+    await expect(document.load()).resolves.toEqual(LOADED);
+  });
+
   it("saves a change over the whole document and holds the document Rust saved", async () => {
     const { transport, document } = rust();
     await document.load();

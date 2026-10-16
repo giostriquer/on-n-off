@@ -41,8 +41,8 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
 
   function load(): Promise<AppSettings> {
     reading ??= inTurn(() =>
-      transport
-        .load()
+      Promise.resolve()
+        .then(() => transport.load())
         .then(hold, () => undefined)
         .then(() => current.settings),
     ).finally(() => {
