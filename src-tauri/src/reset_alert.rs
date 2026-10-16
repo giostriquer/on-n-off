@@ -107,12 +107,6 @@ fn left_percent(reading: &Reading) -> Option<f64> {
 #[serde(transparent)]
 pub struct AlertMemory(HashMap<String, AlertState>);
 
-impl AlertMemory {
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AlertState {
@@ -190,6 +184,10 @@ pub fn plan(
 }
 
 impl AlertMemory {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     fn offers(
         &mut self,
         readings: &[ProviderLimitsDto],
