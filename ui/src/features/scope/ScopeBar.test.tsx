@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ScopeBar } from "./ScopeBar";
 
@@ -72,6 +72,10 @@ describe("ScopeBar", () => {
       />,
     );
     expect(screen.getByTitle(path)).toHaveTextContent(path);
+
+    fireEvent.click(screen.getByRole("button", { name: /All projects/i }));
+    const global = screen.getByText("GLOBAL").closest("button")!;
+    expect(within(global).getByTitle(path).textContent).toBe(path);
   });
 
   it("filters projects and pastes a folder path", async () => {

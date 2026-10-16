@@ -90,10 +90,21 @@ it.each([
   expect(path("Skills")).toBe(provider.skills);
   expect(path("MCP config")).toBe(provider.mcpConfig);
   expect(path("Backup dir")).toBe("~/.on-n-off/backups");
+  const scope = screen.getByRole("region", { name: "Project scope" });
+  expect(within(scope).getByText("Active scope").parentElement!.lastElementChild!.textContent).toBe(`${provider.home} · global source of truth`);
+  expect(within(within(scope).getByRole("button", { name: /^All projects/ })).getByText(provider.home)).toBeInTheDocument();
   const capabilities = screen.getByRole("region", { name: "Adapter capabilities" });
   const capability = (label: string) => within(capabilities).getByText(label).parentElement!.parentElement!;
   expect(within(capability("Plugin toggle")).getByText(provider.pluginToggle)).toBeInTheDocument();
   expect(within(capability("Plugin toggle")).getByText("YES")).toBeInTheDocument();
   expect(within(capability("MCP toggle")).getByText(provider.mcpToggle)).toBeInTheDocument();
   expect(within(capability("MCP toggle")).getByText(provider.mcpSwitchable ? "YES" : "NO")).toBeInTheDocument();
+});
+
+it("shows the selected project's path as the active scope", () => {
+  const project = { id: "/Users/me/acme", label: "acme", path: "/Users/me/acme", branch: "main", skillCount: 1, mcpCount: 0 };
+  render(<AgentConfig agent={claude} tab={null} projects={[project]} selectedPath="/Users/me/acme" />);
+
+  const scope = screen.getByRole("region", { name: "Project scope" });
+  expect(within(scope).getByText("Active scope").parentElement!.lastElementChild!.textContent).toBe("/Users/me/acme");
 });

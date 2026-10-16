@@ -180,6 +180,14 @@ describe("Settings", () => {
     expect(within(screen.getByRole("article", { name })).getByRole("textbox")).toHaveAttribute("placeholder", binary);
   });
 
+  it("notes where each provider's CLI was found, or its command until a diagnosis names one", async () => {
+    renderSettings();
+
+    expect(within(screen.getByRole("article", { name: "Antigravity" })).getByText("CLI missing · agy")).toBeTruthy();
+    expect(within(screen.getByRole("article", { name: "Cursor" })).getByText("CLI missing · agent")).toBeTruthy();
+    expect(await within(screen.getByRole("article", { name: "Claude" })).findByText("CLI missing · C:\\Users\\me\\.claude")).toBeTruthy();
+  });
+
   it("requests notification permission before enabling limit polling and persists the interval", async () => {
     const user = userEvent.setup();
     const onSettingsChange = vi.fn();

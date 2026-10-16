@@ -16,6 +16,10 @@ describe("appSettings", () => {
     expect(visibleAgentIds(hidden)).toEqual(["claude"]);
   });
 
+  it("keeps the first tab when every provider is hidden", () => {
+    expect(visibleAgentIds(["claude", "codex", "antigravity", "cursor", "muse"])).toEqual(["claude"]);
+  });
+
   it("can show a hidden provider again", () => {
     expect(setAgentHidden(["antigravity"], "antigravity", false)).toEqual([]);
   });
