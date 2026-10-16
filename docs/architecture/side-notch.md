@@ -111,10 +111,14 @@ the current account's card:
 
 Each pull request row's context is decided the same way, by `PrContext::of` from GitHub's
 `isInOrganization`: work for an organization's repository, personal for a user's. It reaches the
-drawers as the row's tag (Work or Personal, in the work or personal tone). Both popovers draw it as
-a WORK or PERSONAL tag before the repository, a stripe down the row's leading edge and a copy icon
-in the same ink, so a review request is not pasted into the wrong channel. A row read before
-GitHub reported its owner has no tag and draws none of them.
+drawers as the row's tag (Work or Personal, in the work or personal tone). Neither popover draws the
+tag's label, which pushed the pull request's number out of the repository line: the tone inks a
+stripe down the row's leading edge and the copy icon, blue for work and a soft lavender for
+personal, so a review request is not pasted into the wrong channel, and the label names the row for
+VoiceOver. A row read before GitHub reported its owner has no tag and draws neither. The model also
+names the viewer's own personal repository without its owner (`dotfiles`, not `octocat/dotfiles`),
+by `repo_label`; another user's personal repository and the viewer's fork of an organization's keep
+the owner.
 
 What stays with each drawer is what depends on the clock, since they redraw between reads (a
 window's percent now, its reset note, a session's age, the percent under a provider's ring), and
@@ -168,7 +172,8 @@ settings and displays), `cells` in rail order and `actionError`. Each cell has a
   there is none) and `sessions`.
 - `pullRequests`: `label`, `reading` (absent while checking: `readable`, `count`, `segments` of `ci`
   and `passingWithConflicts`, `attention`, `lists` of `id`, `title`, `total` and `items`, each row
-  with its `badges` and optional `tag`, each a `label` and a `tone`) and `notice`.
+  with its `repo` as the drawers show it, its `badges` and optional `tag`, each a `label` and a
+  `tone`) and `notice`.
 
 The snapshot's settings still carry the provider list and the pull request settings, for the app;
 the helper reads only `enabled`, `displayId`, `edge`, `size`, `show` and `popoverStyle`.

@@ -285,24 +285,39 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
                 id,
                 title: list_title(id),
                 total,
-                items: items.into_iter().map(pr_row).collect(),
+                items: items
+                    .into_iter()
+                    .map(|pr| pr_row(pr, dto.data.viewer.as_deref()))
+                    .collect(),
             })
             .collect(),
     }
 }
 
-fn pr_row(pr: &GithubPrDto) -> PrRow {
+fn pr_row(pr: &GithubPrDto, viewer: Option<&str>) -> PrRow {
+    let context = PrContext::of(pr);
     PrRow {
         id: pr.id.clone(),
         number: pr.number,
         title: pr.title.clone(),
         url: pr.url.clone(),
-        repo: pr.repo.clone(),
+        repo: repo_label(&pr.repo, context, viewer),
         author: pr.author.clone(),
         ci: pr.ci,
         updated_at: pr.updated_at.clone(),
         badges: badges(pr),
-        tag: PrContext::of(pr).map(tag),
+        tag: context.map(tag),
+    }
+}
+
+fn repo_label(repo: &str, context: Option<PrContext>, viewer: Option<&str>) -> String {
+    match (context, viewer, repo.split_once('/')) {
+        (Some(PrContext::Personal), Some(viewer), Some((owner, name)))
+            if owner.eq_ignore_ascii_case(viewer) =>
+        {
+            name.to_string()
+        }
+        _ => repo.to_string(),
     }
 }
 

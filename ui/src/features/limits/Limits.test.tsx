@@ -110,6 +110,57 @@ describe("Limits", () => {
     expect(within(muse).queryByRole("button", { name: /^More actions/ })).toBeNull();
   });
 
+  async function claudeTags(widths: { line: number; name: number }) {
+    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(widths.line);
+    vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(widths.name);
+    answer([okClaude({ plan: "max ×5" })], [okCodex()]);
+    const { unmount } = renderLimits();
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+    const tags = within(claude).getByTestId("account-tags");
+    expect(within(tags).getByText("Max ×5")).toBeTruthy();
+    return { claude, tags, line: within(claude).getByTitle("me@claude.example").parentElement!, unmount };
+  }
+
+  it("lays an account's tags on its name's line when they fit there", async () => {
+    try {
+      const { tags, line } = await claudeTags({ line: 300, name: 120 });
+      expect(tags.parentElement).toBe(line);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("moves an account's tags to their own row when its name is squeezed without a re-render", async () => {
+    const watching = new Map<Element, () => void>();
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private readonly changed: () => void) {}
+      observe(node: Element) { watching.set(node, this.changed); }
+      disconnect() { watching.clear(); }
+    });
+    try {
+      const { claude, tags, line, unmount } = await claudeTags({ line: 300, name: 120 });
+      expect(tags.parentElement).toBe(line);
+      vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(400);
+      act(() => watching.get(within(claude).getByTitle("me@claude.example"))?.());
+      expect(within(claude).getByTestId("account-tags").parentElement).toBe(claude.querySelector("header"));
+      unmount();
+      expect(watching.size, "every observer lets go of its nodes on unmount").toBe(0);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
+  });
+
+  it("gives an account's tags their own row across the header when they do not fit beside its name", async () => {
+    try {
+      const { claude, tags, line } = await claudeTags({ line: 300, name: 400 });
+      expect(line.contains(tags)).toBe(false);
+      expect(tags.parentElement).toBe(claude.querySelector("header"));
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it("draws the active account's dot beside its headline window, or in its header without one", async () => {
     const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
     answer([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);

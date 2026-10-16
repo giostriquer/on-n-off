@@ -553,7 +553,7 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
 }
 
 const WORK: Color = [96, 165, 250, 255];
-const PERSONAL: Color = [192, 132, 252, 255];
+const PERSONAL: Color = [170, 155, 215, 255];
 
 fn pr_row(number: u64, repo: &str, in_organization: Option<bool>) -> serde_json::Value {
     let mut row = pr(number, &format!("Fix #{number}"), repo);
@@ -580,8 +580,8 @@ fn bluish([r, g, b]: [f64; 3]) -> bool {
     b > 100.0 && b > r * 1.4 && b > g * 1.15
 }
 
-fn violet([r, g, b]: [f64; 3]) -> bool {
-    b > 100.0 && r > g * 1.2 && b > g * 1.5
+fn lavender([r, g, b]: [f64; 3]) -> bool {
+    b > 100.0 && b > r && r > g * 1.05 && b > g * 1.2
 }
 
 fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -> usize {
@@ -601,9 +601,11 @@ fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -
 }
 
 #[test]
-fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon() {
+fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no_tag() {
+    let mut approved = pr_row(1, "acme/webapp", Some(true));
+    approved["reviewDecision"] = "APPROVED".into();
     let pulls = pulls(vec![
-        pr_row(1, "acme/webapp", Some(true)),
+        approved,
         pr_row(2, "octocat/dotfiles", Some(false)),
         pr_row(3, "acme/webapp", None),
         pr_row(
@@ -638,38 +640,58 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
             _ => None,
         })
         .collect();
-    let tags: Vec<usize> = (0..texts.len())
-        .filter(|&i| matches!(texts[i].0, "WORK" | "PERSONAL"))
-        .collect();
-    assert_eq!(
-        tags.iter()
-            .map(|&i| (texts[i].0, texts[i].4))
-            .collect::<Vec<_>>(),
-        [
-            ("WORK", WORK),
-            ("PERSONAL", PERSONAL),
-            ("PERSONAL", PERSONAL)
-        ],
-        "the tags wear the helper's own inks, and an unread row has none"
+    assert!(
+        texts
+            .iter()
+            .all(|(text, ..)| !matches!(*text, "WORK" | "PERSONAL")),
+        "no row carries a WORK or PERSONAL tag"
     );
+    let titles: Vec<R> = texts
+        .iter()
+        .filter(|(text, ..)| text.starts_with("Fix #"))
+        .map(|(_, rect, ..)| *rect)
+        .collect();
+    assert_eq!(titles.len(), 4, "one title line per row: {titles:?}");
+    let repos: Vec<(&str, R, f64, TextWeight, Color)> = texts
+        .iter()
+        .copied()
+        .filter(|(text, ..)| text.starts_with("acme/") || text.starts_with("octocat/"))
+        .collect();
+    assert_eq!(repos.len(), 4, "one repository line per row: {repos:?}");
     let dots: Vec<R> = popover
         .entries
         .iter()
         .filter_map(|(item, rect)| matches!(item, PopItem::Dot { .. }).then_some(*rect))
         .collect();
-    for &i in &tags {
-        let (tag, tag_rect, tag_size, tag_weight, _) = texts[i];
-        let (repo, repo_rect, repo_size, repo_weight, _) = texts[i + 1];
-        assert!(
-            repo_rect.x >= tag_rect.x + measure_weight(tag, tag_size, tag_weight, 1.0),
-            "{repo:?} starts after its {tag} tag"
+    for ((repo, repo_rect, repo_size, repo_weight, color), title) in repos.iter().zip(&titles) {
+        assert_eq!(
+            repo_rect.x, title.x,
+            "{repo:?} starts under its title, with nothing before it"
         );
+        assert_eq!(*color, MUTED_INK, "{repo:?} keeps the muted ink");
         assert!(
-            repo_rect.x + measure_weight(repo, repo_size, repo_weight, 1.0) <= dots[3].x,
+            repo_rect.x + measure_weight(repo, *repo_size, *repo_weight, 1.0) <= dots[3].x,
             "{repo:?} stays clear of the CI dot"
         );
     }
-    let long = texts[tags[2] + 1].0;
+    let (repo, repo_rect, repo_size, repo_weight, _) = repos[0];
+    let (badge, badge_rect, badge_size, badge_weight, _) = *texts
+        .iter()
+        .find(|(text, ..)| *text == "Approved")
+        .expect("the first row shows its review decision");
+    assert_eq!(
+        badge_rect.y, repo_rect.y,
+        "the badge shares its repository's line"
+    );
+    assert!(
+        badge_rect.x >= repo_rect.x + measure_weight(repo, repo_size, repo_weight, 1.0),
+        "the badge follows {repo:?} instead of overlapping it"
+    );
+    assert!(
+        badge_rect.x + measure_weight(badge, badge_size, badge_weight, 1.0) <= dots[3].x,
+        "the badge stays clear of the CI dot"
+    );
+    let long = repos[3].0;
     assert!(
         long.starts_with("octocat/a-repository") && long.ends_with('…'),
         "a repository too long for the line is ellipsized, not run under the dot: {long:?}"
@@ -726,7 +748,7 @@ fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon()
         .map(|(_, rect)| {
             (
                 hued_pixels(&pixmap, *rect, bluish),
-                hued_pixels(&pixmap, *rect, violet),
+                hued_pixels(&pixmap, *rect, lavender),
             )
         })
         .collect();

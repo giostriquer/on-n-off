@@ -59,9 +59,10 @@ const session = (id, name, place, project, status, minutesAgo) => ({ id, name, p
 const badge = (label, tone) => ({ label, tone });
 const tags = { work: badge('Work', 'work'), personal: badge('Personal', 'personal') };
 const pull = (number, title, ci, badges, context = 'work') => {
-  const repo = context === 'personal' ? 'octocat/dotfiles' : 'acme/webapp';
+  const nameWithOwner = context === 'personal' ? 'octocat/dotfiles' : 'acme/webapp';
+  const repo = context === 'personal' ? 'dotfiles' : nameWithOwner;
   return {
-    id: `node-${number}`, number, title, url: `https://github.com/${repo}/pull/${number}`, repo,
+    id: `node-${number}`, number, title, url: `https://github.com/${nameWithOwner}/pull/${number}`, repo,
     author: 'octocat', ci, updatedAt: '2026-09-01T10:00:00Z', badges,
     ...(context ? { tag: tags[context] } : {}),
   };
@@ -133,10 +134,10 @@ function readPng(path) {
 const railInk = [8, 8, 8, 255];
 const popoverInk = [14, 14, 17, 255];
 const popoverBorder = [40, 40, 43, 255];
-const contextInk = { work: [96, 165, 250, 255], personal: [192, 132, 252, 255] };
+const contextInk = { work: [96, 165, 250, 255], personal: [170, 155, 215, 255] };
 const contextHue = {
   work: ([r, g, b]) => b > 100 && b > r * 1.4 && b > g * 1.15,
-  personal: ([r, g, b]) => b > 100 && r > g * 1.2 && b > g * 1.5,
+  personal: ([r, g, b]) => b > 100 && b > r && r > g * 1.05 && b > g * 1.2,
 };
 const columnRuns = (png, x, test, minLength, y0 = 0, y1 = png.height) => {
   const runs = [];
@@ -226,7 +227,7 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
       const copy = mostRuns(pulls, half, pulls.width, (pixel) => near(pixel, contextInk[context]), 4 * scale, top, bottom);
       assert.ok(copy.runs.length > 0, `render ${edge}: popover-pull-requests.png has no ${context} copy icon in the row at ${top}–${bottom} px`);
       const tag = countIn(pulls, x + 4 * scale, x + 60 * scale, bottom - 14 * scale, bottom, contextHue[context]);
-      assert.ok(tag >= 10, `render ${edge}: popover-pull-requests.png has ${tag} px of ${context} ink where the row at ${top}–${bottom} px carries its tag`);
+      assert.equal(tag, 0, `render ${edge}: popover-pull-requests.png has ${tag} px of ${context} ink before the repository of the row at ${top}–${bottom} px, so a tag in its context's ink is back`);
     }
   }
   const unread = stripes.work.runs[2][1] + 4 * scale;
