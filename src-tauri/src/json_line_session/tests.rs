@@ -161,6 +161,26 @@ fn an_unsuccessful_exit_before_initialize_is_answered_gets_the_peers_guidance() 
 }
 
 #[test]
+fn a_cli_that_answers_initialize_and_then_exits_unsuccessfully_keeps_the_closed_message() {
+    let stub = CliStub::new("acme")
+        .stdout(r#"{"id":1,"result":{}}"#)
+        .sleep(1)
+        .exit(2);
+    let Ok(session) = Session::start(LITE, command(&stub, "json-line-late-exit")) else {
+        panic!("the stub did not start");
+    };
+
+    let error = session
+        .run(|session| {
+            session.handshake::<Value>(None, |_| Ok(()))?;
+            session.request::<Value>(Request::new(2, "acme/read"))
+        })
+        .unwrap_err();
+
+    assert_eq!(error, "Acme server closed before returning limits.");
+}
+
+#[test]
 fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
     let message = explained(
         STRICT,
