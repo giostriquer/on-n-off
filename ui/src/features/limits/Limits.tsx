@@ -5,11 +5,12 @@ import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
-import type { AccountsReading } from "$lib/accountTypes";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
+import { markProfilesArchived } from "$lib/sharedReads/accounts";
+import { updateLimits, type LimitsProvider } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
 import { ArchivedAccounts } from "./ArchivedAccounts";
@@ -85,7 +86,7 @@ function ProviderColumn({
   now,
   addAccount,
 }: {
-  provider: AgentId;
+  provider: LimitsProvider;
   query: UseQueryResult<ProviderLimits[]>;
   now: number;
   addAccount: RefObject<HTMLButtonElement | null>;
@@ -109,8 +110,8 @@ function ProviderColumn({
     const ids = steps.map(({ accountId }) => accountId);
     try {
       for (const { accountId, expectedEmail } of steps) await api.forgetLimitsSnapshot(provider, accountId, expectedEmail);
-      queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) =>
-        current?.filter((entry) => entry.currentAccount || !entry.account || !ids.includes(entry.account.id)),
+      updateLimits(queryClient, provider, (entries) =>
+        entries.filter((entry) => entry.currentAccount || !entry.account || !ids.includes(entry.account.id)),
       );
     } catch (reason: unknown) {
       setForgetError(`Could not remove that account: ${displayError(parseInvokeError(reason), name)}`);
@@ -147,12 +148,9 @@ function ProviderColumn({
       setForgetError(`Could not ${verb} that account: ${displayError(parseInvokeError(reason), name)}`);
       throw reason;
     }
-    queryClient.setQueryData<ProviderLimits[]>(["limits", provider], (current) => current?.map((entry) =>
+    updateLimits(queryClient, provider, (entries) => entries.map((entry) =>
       !entry.currentAccount && entry.account && ids.includes(entry.account.id) ? { ...entry, archived } : entry));
-    queryClient.setQueryData<AccountsReading>(["accounts", provider], (current) => current && {
-      ...current,
-      profiles: current.profiles.map((profile) => ids.includes(profile.observationId) ? { ...profile, archived } : profile),
-    });
+    if (manager) markProfilesArchived(queryClient, manager.provider, ids, archived);
   }
 
   if (!column) {

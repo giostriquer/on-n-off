@@ -11,14 +11,15 @@ import { applyStoredTheme } from "$lib/theme";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
-import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
+import { useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
   const { settings, load: loadSettings } = useAppSettings();
-  const { providers, loading, now, refresh } = useLimitsProviders(settings.limitsPollMinutes);
+  const { providers, loading, now } = useLimitsProviders(settings.limitsPollMinutes);
 
   useLayoutEffect(() => {
     applyStoredTheme();
@@ -40,15 +41,7 @@ export function LimitsPopover() {
     void api
       .onLimitsPopoverOpened(() => {
         applyStoredTheme();
-        void loadSettings().then(({ settings: latest }) =>
-          queryClient.refetchQueries({
-            queryKey: ["limits"],
-            type: "active",
-            predicate: (query) =>
-              query.state.dataUpdatedAt > 0 &&
-              Date.now() - query.state.dataUpdatedAt >= limitsRefreshMs(latest.limitsPollMinutes),
-          }),
-        );
+        void loadSettings().then(({ settings: latest }) => refetchStaleLimits(queryClient, latest.limitsPollMinutes));
       })
       .then((stop) => {
         if (disposed) {
@@ -86,7 +79,7 @@ export function LimitsPopover() {
           className="inline-flex size-7 shrink-0 items-center justify-center rounded-full border-0 bg-[var(--popover-control)] text-[var(--mute)] transition-colors hover:text-[var(--silkscreen)] disabled:opacity-45"
           disabled={loading}
           aria-label="Refresh limits"
-          onClick={refresh}
+          onClick={() => void refreshLimits(queryClient)}
         >
           <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
         </button>

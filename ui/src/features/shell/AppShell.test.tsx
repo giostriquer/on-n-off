@@ -220,4 +220,19 @@ describe("AppShell refresh", () => {
     expect(readLimits).toHaveBeenCalledWith("codex", true);
     await waitFor(() => expect(screen.getByRole("button", {name: "Refresh all providers"})).toBeEnabled());
   });
+
+  it("re-reads the account lists with the sweep and leaves the subscription dates to their own daily check", async () => {
+    const client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+    client.setQueryData(["accounts", "codex"], { profiles: [] });
+    client.setQueryData(["accounts", "preferences"], false);
+    client.setQueryData(["subscription", "codex", "acct-work"], null);
+    render(<QueryClientProvider client={client}><AppShell /></QueryClientProvider>);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all providers" }));
+
+    await waitFor(() => expect(screen.getByRole("button", {name: "Refresh all providers"})).toBeEnabled());
+    expect(client.getQueryState(["accounts", "codex"])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(["accounts", "preferences"])?.isInvalidated).toBe(true);
+    expect(client.getQueryState(["subscription", "codex", "acct-work"])?.isInvalidated).toBe(false);
+  });
 });

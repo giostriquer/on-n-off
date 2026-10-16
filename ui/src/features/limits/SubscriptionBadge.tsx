@@ -1,4 +1,5 @@
-import { useCodexSubscription } from "$lib/useCodexSubscription";
+import { useQuery } from "@tanstack/react-query";
+import { codexSubscriptionQuery } from "$lib/sharedReads/accounts";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { LimitsSubscription } from "$lib/limitsTypes";
 import { codexSubscriptionTerm } from "./codexSubscriptionTerm";
@@ -19,7 +20,7 @@ export function SubscriptionBadge({ term, paidThrough, now }: { term?: LimitsSub
 }
 
 export function CodexSubscriptionBadge({accountId, current, term, now}: {accountId: string; current: boolean; term?: LimitsSubscription | null; now: number}) {
-  const query = useCodexSubscription(accountId, current);
+  const query = useQuery(codexSubscriptionQuery(accountId, current));
   return <SubscriptionBadge term={term} paidThrough={query.data ?? null} now={now} />;
 }
 

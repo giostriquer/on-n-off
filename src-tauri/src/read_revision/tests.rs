@@ -25,17 +25,52 @@ fn only_a_replacement_is_worth_announcing() {
     assert_eq!(Reading::Unchanged(3).revision(), 3);
 }
 
+fn after(source: Source) -> Option<Source> {
+    match source {
+        Source::Accounts => Some(Source::LimitsClaude),
+        Source::LimitsClaude => Some(Source::LimitsCodex),
+        Source::LimitsCodex => Some(Source::LimitsMuse),
+        Source::LimitsMuse => Some(Source::GithubPrs),
+        Source::GithubPrs => Some(Source::ResetSpends),
+        Source::ResetSpends => None,
+    }
+}
+
+fn every_source() -> Vec<Source> {
+    std::iter::successors(Some(Source::Accounts), |&source| after(source)).collect()
+}
+
 #[test]
-fn every_source_has_its_own_wire_name() {
-    let names = [
-        Source::LimitsClaude.name(),
-        Source::LimitsCodex.name(),
-        Source::GithubPrs.name(),
-    ];
-    assert_eq!(names, ["limits:claude", "limits:codex", "github:prs"]);
+fn the_announcements_the_ui_listens_for_are_the_ones_rust_sends() {
+    let announcements: serde_json::Map<String, serde_json::Value> = every_source()
+        .into_iter()
+        .map(|source| {
+            let payload = Announcement {
+                source: source.name(),
+            };
+            (
+                source.name().to_string(),
+                serde_json::to_value(payload).unwrap(),
+            )
+        })
+        .collect();
+    for (position, source) in every_source().into_iter().enumerate() {
+        assert_eq!(
+            source as usize, position,
+            "{source:?} is listed out of the order Source declares it in"
+        );
+    }
     assert_eq!(
-        names.iter().collect::<std::collections::HashSet<_>>().len(),
-        names.len(),
-        "two sources sharing a name would refetch each other's query"
+        announcements.len(),
+        every_source().len(),
+        "two sources sharing a name would refetch each other's queries"
+    );
+    let written = serde_json::json!({ "event": EVENT, "announcements": announcements });
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(include_str!("fixtures/shared-reads.json"))
+            .unwrap(),
+        "src-tauri/src/read_revision/fixtures/shared-reads.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
     );
 }

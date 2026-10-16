@@ -32,7 +32,10 @@ locates the subsystems. Module doc-comments explain their implementation.
 - Fake CLIs in tests: `cli_stub.rs`.
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop
-  ([why](architecture/shared-reads.md)).
+  ([why](architecture/shared-reads.md)). In the UI, read it through its source module in
+  `ui/src/lib/sharedReads/`, never through a query key of your own, and force it only with that
+  module's refresh. A new source needs the four changes
+  [the guide lists](architecture/shared-reads.md#in-the-ui).
 - `item_install/` never shells out to a provider CLI.
 - The banked reset alert rule: `reset_alert.rs`, which does no I/O; `limits_monitor.rs` only
   performs the plan it returns, through an `Io` trait its tests fake. A number the UI restates
@@ -42,7 +45,7 @@ locates the subsystems. Module doc-comments explain their implementation.
 - How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
   (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
   keeps its own failure count and passes its own interval; it never restates the formula. The UI's
-  `LIMITS_CHECK_MINUTES` (`ui/src/features/limits/useLimitsProviders.ts`) is checked against
+  `LIMITS_CHECK_MINUTES` (`ui/src/lib/sharedReads/limits.ts`) is checked against
   `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
   keeps the fixture equal to `check_interval`.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the

@@ -395,7 +395,7 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server` and `muse serve`. See below. |
 | `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
 | `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
-| `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
+| `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
 

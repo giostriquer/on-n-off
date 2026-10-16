@@ -1,23 +1,19 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { SessionProvider, useAgentSession } from "@/features/session/SessionProvider";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import { AppSettingsProvider, useAppSettings } from "$lib/useAppSettings";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import type { ReactNode } from "react";
 import { router } from "./router";
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 30_000,
-      refetchOnWindowFocus: false,
-    },
-  },
-});
+const queryClient = createMainWindowQueryClient();
 
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
+      <SharedReads />
       <AppSettingsProvider>
         <SessionProvider>
           <SessionUpdates>
