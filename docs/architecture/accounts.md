@@ -227,7 +227,7 @@ the signed-in Codex login only through `codex_store`'s projections.
 
 Muse is the second exception, also the user's decision (2026-10-16). `accounts/muse_store.rs`
 reads Muse Code's signed-in device login, inline in its `auth.json` or else its macOS Keychain
-item, and yields only the access token, as `model::AccessToken`, with the login's email. Its one
+item, and yields only the access token, as `model::AccessToken`, and the login's email, which also names the account when Limits falls back to `muse serve`. Its one
 caller is the Muse Limits read (`limits/muse.rs`), which sends one POST per read to the key-mint
 endpoint the CLI calls itself (`limits/muse/mint.rs`) and keeps only the quota fields of the
 answer. on-n-off never writes, renews or saves a Muse login, and Muse has no saved accounts.
