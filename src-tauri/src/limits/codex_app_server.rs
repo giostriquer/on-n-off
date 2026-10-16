@@ -514,7 +514,7 @@ fn handshake(
     let initialize: InitializeResponse =
         receive_response(QueryStage::Initialize, transport, 1, "initialize")?;
     let codex_home = initialize.codex_home;
-    if !paths_are_equivalent(&codex_home, expected_codex_home) {
+    if !crate::paths::equivalent(&codex_home, expected_codex_home) {
         return Err(QueryError {
             stage: QueryStage::Initialize,
             kind: QueryErrorKind::Protocol,
@@ -674,30 +674,6 @@ fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, AppServe
             "Codex account type `{other}` has no subscription limits to show."
         ))),
     }
-}
-
-fn paths_are_equivalent(left: &Path, right: &Path) -> bool {
-    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    path_values_are_equivalent(&left, &right)
-}
-
-#[cfg(windows)]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .trim_start_matches(r"\\?\")
-        .replace('\\', "/")
-        .eq_ignore_ascii_case(
-            &right
-                .to_string_lossy()
-                .trim_start_matches(r"\\?\")
-                .replace('\\', "/"),
-        )
-}
-
-#[cfg(not(windows))]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left == right
 }
 
 #[cfg(test)]

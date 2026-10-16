@@ -143,7 +143,7 @@ fn query_serve(
     )?;
     let initialize: InitializeResult =
         receive_response(QueryStage::Initialize, transport, 1, "initialize")?;
-    if !paths_are_equivalent(&initialize.muse_home, expected_data) {
+    if !crate::paths::equivalent(&initialize.muse_home, expected_data) {
         return Err(QueryError {
             stage: QueryStage::Initialize,
             kind: QueryErrorKind::Protocol,
@@ -380,30 +380,6 @@ fn rfc3339_ms(ms: i64) -> String {
     DateTime::from_timestamp_millis(ms)
         .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
         .unwrap_or_default()
-}
-
-fn paths_are_equivalent(left: &Path, right: &Path) -> bool {
-    let left = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
-    let right = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
-    path_values_are_equivalent(&left, &right)
-}
-
-#[cfg(windows)]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .trim_start_matches(r"\\?\")
-        .replace('\\', "/")
-        .eq_ignore_ascii_case(
-            &right
-                .to_string_lossy()
-                .trim_start_matches(r"\\?\")
-                .replace('\\', "/"),
-        )
-}
-
-#[cfg(not(windows))]
-fn path_values_are_equivalent(left: &Path, right: &Path) -> bool {
-    left == right
 }
 
 fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {

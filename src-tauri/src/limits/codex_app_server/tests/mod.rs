@@ -349,15 +349,6 @@ fn nonzero_exit_does_not_hide_typed_timeout_or_invalid_output_errors() {
     }
 }
 
-#[cfg(windows)]
-#[test]
-fn windows_home_comparison_is_case_and_separator_insensitive() {
-    assert!(path_values_are_equivalent(
-        Path::new(r"C:\Users\Me\.codex"),
-        Path::new("c:/users/me/.codex")
-    ));
-}
-
 fn consume_transport(account: Value, consume_reply: Option<Value>) -> FakeTransport {
     consume_transport_at(account, 95.0, consume_reply)
 }
