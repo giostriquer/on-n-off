@@ -1,6 +1,5 @@
+import { PROVIDER_IDS } from "./providers";
 import type { AgentId, AppSettings, ResetAlert } from "./types";
-
-export const ALL_AGENTS: readonly AgentId[] = ["claude", "codex", "antigravity", "cursor", "muse"];
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   hiddenAgents: [],
@@ -50,19 +49,19 @@ export function withBinaryPath(
 
 export function visibleAgentIds(hidden: readonly AgentId[]): AgentId[] {
   const set = new Set(hidden);
-  const visible = ALL_AGENTS.filter((id) => !set.has(id));
-  return visible.length > 0 ? [...visible] : ["claude"];
+  const visible = PROVIDER_IDS.filter((id) => !set.has(id));
+  return visible.length > 0 ? visible : PROVIDER_IDS.slice(0, 1);
 }
 
 export function setAgentHidden(hidden: readonly AgentId[], id: AgentId, hide: boolean): AgentId[] {
   const next = new Set(hidden);
   if (hide) {
     next.add(id);
-    if (ALL_AGENTS.every((agent) => next.has(agent))) {
-      return ALL_AGENTS.filter((agent) => hidden.includes(agent));
+    if (PROVIDER_IDS.every((agent) => next.has(agent))) {
+      return PROVIDER_IDS.filter((agent) => hidden.includes(agent));
     }
   } else {
     next.delete(id);
   }
-  return ALL_AGENTS.filter((agent) => next.has(agent));
+  return PROVIDER_IDS.filter((agent) => next.has(agent));
 }

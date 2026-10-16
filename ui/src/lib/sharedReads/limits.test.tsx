@@ -5,7 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
 import { SharedReads } from "./announcements";
-import { LIMITS_PROVIDERS, limitsQuery, refreshLimits } from "./limits";
+import { LIMITS_PROVIDERS } from "$lib/providers";
+import { limitsQuery, refreshLimits } from "./limits";
 
 const calls = vi.hoisted(() => ({
   readLimits: vi.fn(),

@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import type { AccountProvider, AccountsReading } from "$lib/accountTypes";
+import type { AccountsReading } from "$lib/accountTypes";
+import type { AccountProvider } from "$lib/providers";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
 

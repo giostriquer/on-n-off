@@ -4,6 +4,7 @@ import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { agentRoot, configMcpCount, mcpConfigPath } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
+import { providerBinary } from "$lib/providers";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
@@ -67,17 +68,6 @@ function pluginsDirValue(id: AgentId, rootPath: string): string {
   return id === "antigravity"
     ? `${rootPath}/config/plugins · antigravity-cli/plugins`
     : `${rootPath}/plugins`;
-}
-
-function cliBinaryName(id: AgentId): string {
-  switch (id) {
-    case "antigravity":
-      return "agy";
-    case "cursor":
-      return "agent";
-    default:
-      return id;
-  }
 }
 
 function Status({ ok, label }: { ok: boolean; label: string }) {
@@ -160,7 +150,7 @@ export function AgentConfig({
   const pathRows = [
     {
       label: "CLI binary",
-      value: cliBinaryName(agent.id),
+      value: providerBinary(agent.id),
       state: agent.cliOk ? "FOUND" : "MISSING",
       ok: agent.cliOk,
     },

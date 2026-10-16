@@ -1,11 +1,9 @@
 import { keepPreviousData, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { LimitsPollMinutes, SharedReadSource } from "$lib/types";
 import { readForced } from "./forcedRead";
-
-export const LIMITS_PROVIDERS = ["claude", "codex", "muse"] as const;
-export type LimitsProvider = (typeof LIMITS_PROVIDERS)[number];
 
 const LIMITS = ["limits"] as const;
 

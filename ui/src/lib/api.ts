@@ -239,16 +239,16 @@ export function readCodexSubscription(accountId: string): Promise<import("./subs
   return invoke("read_codex_subscription", { accountId });
 }
 
-export function readAccounts(agent: import("./accountTypes").AccountProvider): Promise<import("./accountTypes").AccountsReading> {
+export function readAccounts(agent: import("./providers").AccountProvider): Promise<import("./accountTypes").AccountsReading> {
   return invoke("read_accounts", { agent });
 }
-export function accountAction(agent: import("./accountTypes").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string, category?: string): Promise<void> {
+export function accountAction(agent: import("./providers").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string, category?: string): Promise<void> {
   return invoke("account_action", { agent, action, profileId: profileId ?? null, category: category ?? null });
 }
-export function readAccountActivationBlockers(agent: import("./accountTypes").AccountProvider): Promise<string[]> {
+export function readAccountActivationBlockers(agent: import("./providers").AccountProvider): Promise<string[]> {
   return invoke("read_account_activation_blockers", { agent });
 }
-export function addAccount(agent: import("./accountTypes").AccountProvider, operationId: string, profileId?: string): Promise<void> {
+export function addAccount(agent: import("./providers").AccountProvider, operationId: string, profileId?: string): Promise<void> {
   return invoke("add_account", { agent, operationId, profileId: profileId ?? null });
 }
 export function cancelAccountLogin(operationId: string): Promise<void> {

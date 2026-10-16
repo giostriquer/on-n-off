@@ -12,7 +12,7 @@ import type {
   ProviderLimits,
 } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
-import { providerLabel } from "$lib/usageMerge";
+import { providerLabel } from "$lib/providers";
 import { accountCards } from "./accountCards";
 import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { codexTermEnded } from "./codexSubscriptionTerm";

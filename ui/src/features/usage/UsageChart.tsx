@@ -5,7 +5,8 @@ import { crosshair } from "@tanstack/charts/crosshair";
 import { scaleLinear } from "@tanstack/charts/scales/linear";
 import { scalePoint } from "@tanstack/charts/scales/point";
 import { tooltip } from "@tanstack/charts/tooltip";
-import { PROVIDERS, providerLabel, type FoldedUsage } from "$lib/usageMerge";
+import { USAGE_PROVIDERS, providerLabel } from "$lib/providers";
+import type { FoldedUsage } from "$lib/usageMerge";
 import { buildChartSeries, toChartRows } from "$lib/usageChart";
 import { formatTokens, formatUsd } from "$lib/usageFormat";
 import type { UsageMetric } from "$lib/usageTypes";
@@ -92,7 +93,7 @@ export function UsageChart({
 
   const rows = useMemo(() => toChartRows(series), [series]);
   const empty = series.columns.every((column) => column.total === 0);
-  const colors = useMemo(() => PROVIDERS.map((provider) => bandColor(provider, dark)), [dark]);
+  const colors = useMemo(() => USAGE_PROVIDERS.map((provider) => bandColor(provider, dark)), [dark]);
 
   const definition = useMemo(() => {
     const labelStep = Math.max(1, Math.floor(series.columns.length / 5));
@@ -158,7 +159,7 @@ export function UsageChart({
         },
       },
       color: {
-        domain: [...PROVIDERS],
+        domain: [...USAGE_PROVIDERS],
         range: colors,
       },
       margin: { top: 10, right: 30, bottom: 32, left: 52 },

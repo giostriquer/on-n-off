@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type ReactNode, type RefCallback } 
 import { useQueryClient } from "@tanstack/react-query";
 import type { SavedProfile } from "$lib/accountTypes";
 import { parseInvokeError } from "$lib/error";
+import { providerLabel } from "$lib/providers";
 import { cachedAccountList } from "$lib/sharedReads/accounts";
 import { accountButton as button, useAccountManagement } from "./AccountManager";
 
@@ -126,7 +127,7 @@ export function AccountCardActions({ accountId, label, current, profile, onForge
     <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">
       {primaryAction()}
       {switchingAlongside
-        ? <SwitchAlongsideConfirmation product={provider === "codex" ? "Codex" : "Claude"} clients={switchingAlongside.clients} disabled={!!disabled}
+        ? <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchingAlongside.clients} disabled={!!disabled}
           onSwitch={() => { setClients(null); void action("useAlongsideClients", switchingAlongside.profile.id).catch(() => {}); }}
           onCancel={() => { setClients(null); useButton.current?.focus(); }} />
         : footer?.({ current, blocked: !!disabled, unconfirmedCurrent })}

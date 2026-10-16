@@ -10,9 +10,9 @@ import { useFocusHandoff } from "$lib/focusHandoff";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { markProfilesArchived } from "$lib/sharedReads/accounts";
-import { updateLimits, type LimitsProvider } from "$lib/sharedReads/limits";
+import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
-import { providerLabel } from "$lib/usageMerge";
+import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
 import { ArchivedAccounts } from "./ArchivedAccounts";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
@@ -63,10 +63,10 @@ function LimitsContent({ pollMinutes }: { pollMinutes: LimitsPollMinutes }) {
         <AddAccount buttonRef={node => { addAccount.current = node; }} />
       </header>
 
-      <div className="grid grid-cols-3 items-start gap-3">
+      <div className="grid items-start gap-3" style={{ gridTemplateColumns: `repeat(${providers.length}, minmax(0, 1fr))` }}>
         {providers.map(({ provider, query }) => (
           <div key={provider} className="flex flex-col gap-3">
-            {(provider === "claude" || provider === "codex") ? <AccountManager provider={provider}>
+            {hasSavedAccounts(provider) ? <AccountManager provider={provider}>
               <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />
             </AccountManager> : <ProviderColumn provider={provider} query={query} now={now} addAccount={addAccount} />}
           </div>

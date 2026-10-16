@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { visibleAgentIds, setAgentHidden, ALL_AGENTS, resetSpendLimit, withBinaryPath } from "./appSettings";
+import { visibleAgentIds, setAgentHidden, resetSpendLimit, withBinaryPath } from "./appSettings";
 
 describe("appSettings", () => {
-  it("defaults to every provider visible", () => {
-    expect(visibleAgentIds([])).toEqual([...ALL_AGENTS]);
+  it("defaults to every provider visible, in tab order", () => {
+    expect(visibleAgentIds([])).toEqual(["claude", "codex", "antigravity", "cursor", "muse"]);
   });
 
   it("hides a provider from tabs without emptying the list", () => {

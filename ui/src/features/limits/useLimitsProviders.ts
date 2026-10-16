@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { LIMITS_PROVIDERS, limitsQuery } from "$lib/sharedReads/limits";
+import { LIMITS_PROVIDERS } from "$lib/providers";
+import { limitsQuery } from "$lib/sharedReads/limits";
 import type { LimitsPollMinutes } from "$lib/types";
 
 export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {

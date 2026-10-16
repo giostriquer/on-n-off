@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import type { AccountAction, AccountProvider } from "$lib/accountTypes";
+import type { AccountAction } from "$lib/accountTypes";
+import type { AccountProvider } from "$lib/providers";
 import { parseInvokeError } from "$lib/error";
 import { accountChanged, accountListQuery } from "$lib/sharedReads/accounts";
 
