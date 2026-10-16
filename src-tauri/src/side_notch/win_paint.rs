@@ -107,9 +107,8 @@ pub enum CellContent {
         label: String,
     },
     PullRequests {
+        label: String,
         segments: Vec<PrSegment>,
-        count: u64,
-        readable: bool,
     },
 }
 
@@ -259,20 +258,14 @@ fn cell_content(data: &CellData) -> CellContent {
                     .unwrap_or_else(|| "—".into()),
             }
         }
-        CellData::PullRequests(cell) => {
-            let Some(pulls) = &cell.reading else {
-                return CellContent::PullRequests {
-                    segments: Vec::new(),
-                    count: 0,
-                    readable: false,
-                };
-            };
-            CellContent::PullRequests {
-                segments: pulls.segments.clone(),
-                count: pulls.count,
-                readable: pulls.readable,
-            }
-        }
+        CellData::PullRequests(cell) => CellContent::PullRequests {
+            label: cell.label.clone(),
+            segments: cell
+                .reading
+                .as_ref()
+                .map(|pulls| pulls.segments.clone())
+                .unwrap_or_default(),
+        },
     }
 }
 
@@ -1573,12 +1566,8 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
             marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
             (label.clone(), if headline.is_some() { 2.0 } else { 0.0 })
         }
-        CellContent::PullRequests {
-            segments,
-            count,
-            readable,
-        } => {
-            if *readable && !segments.is_empty() {
+        CellContent::PullRequests { label, segments } => {
+            if !segments.is_empty() {
                 let span = 360.0 / segments.len() as f32;
                 let gap_deg = if segments.len() > 1 {
                     0.025 * 360.0
@@ -1601,14 +1590,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                 }
             }
             marks::pull_request(glyph_rect, 1.6 * scale, [255, 255, 255, 255], pixmap);
-            (
-                if *readable {
-                    count.to_string()
-                } else {
-                    "—".into()
-                },
-                0.0,
-            )
+            (label.clone(), 0.0)
         }
     };
 

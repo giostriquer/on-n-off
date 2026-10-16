@@ -705,9 +705,12 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
         .iter()
         .map(|cell| match &cell.content {
             CellContent::Provider { label, .. } => label.clone(),
-            CellContent::PullRequests { readable, .. } => {
-                assert!(!readable, "nothing about the pull requests is known yet");
-                "—".into()
+            CellContent::PullRequests { label, segments } => {
+                assert!(
+                    segments.is_empty(),
+                    "nothing about the pull requests is known yet"
+                );
+                label.clone()
             }
         })
         .collect();

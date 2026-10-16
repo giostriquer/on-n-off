@@ -504,6 +504,7 @@ fn reported_pulls(status: &str, hint: Option<&str>, stale: bool) -> GithubPrsDto
 fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_reads_hint() {
     let checking = pr_cell_of(None);
     assert_eq!(checking.reading, None);
+    assert_eq!(checking.label, "—", "no count before the first read");
     assert_eq!(
         checking.notice,
         Some(Notice {
@@ -525,6 +526,10 @@ fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_read
         }),
         "a stale read warns over the rows it still shows"
     );
+    assert_eq!(
+        stale.label, "1",
+        "the ring's figure is the count of what it still shows"
+    );
     assert_eq!(stale.reading.expect("read").lists[0].items.len(), 1);
 
     let unreadable = pr_cell_of(Some(&reported_pulls(
@@ -539,6 +544,7 @@ fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_read
             tone: Tone::Muted
         })
     );
+    assert_eq!(unreadable.label, "—");
     let reading = unreadable.reading.expect("read");
     assert!(!reading.readable);
     assert!(reading.lists.is_empty(), "an unreadable read shows no rows");

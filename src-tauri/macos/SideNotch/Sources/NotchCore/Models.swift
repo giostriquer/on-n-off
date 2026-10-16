@@ -503,9 +503,11 @@ public struct PullRequestReading: Codable, Equatable, Sendable {
 }
 
 public struct PullRequestCell: Codable, Equatable, Sendable {
+  public let label: String
   public let reading: PullRequestReading?
   public let notice: Notice?
-  public init(reading: PullRequestReading?, notice: Notice? = nil) {
+  public init(label: String, reading: PullRequestReading?, notice: Notice? = nil) {
+    self.label = label
     self.reading = reading
     self.notice = notice
   }

@@ -80,7 +80,7 @@ const fixture = edge => ({
     { kind: 'provider', provider: 'muse', reading: { status: 'ok', windows: [quota('weekly', 'Weekly · all models', 'weekly', 22, 100), quota('session', '5 hour · all models', 'session', 41, 3)], headlineWindowId: 'weekly' }, sessions: [session('acme-session', 'webapp-ab', 'Terminal', 'webapp', 'working', 0)] },
     { kind: 'provider', provider: 'antigravity', reading: { status: 'unsupported', message: 'Antigravity has no subscription limits to show.', windows: [] }, notice: { text: 'Antigravity has no subscription limits to show.', tone: 'muted' }, sessions: [] },
     { kind: 'provider', provider: 'cursor', reading: { status: 'unsupported', message: 'Cursor has no subscription limits to show.', windows: [] }, notice: { text: 'Cursor has no subscription limits to show.', tone: 'muted' }, sessions: [] },
-    { kind: 'pullRequests', reading: {
+    { kind: 'pullRequests', label: '5', reading: {
       readable: true, count: 5,
       segments: [segment('success', true), segment('success'), segment('pending'), segment('failure'), segment('success')],
       attention: { conflicts: 2, failing: 1, changesRequested: 1, ready: 1 },

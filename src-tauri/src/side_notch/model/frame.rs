@@ -34,6 +34,7 @@ pub struct ProviderCell {
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
 pub struct PrCell {
+    pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reading: Option<PrReading>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -185,6 +186,7 @@ fn muted(text: String) -> Notice {
 fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
     let Some(dto) = dto else {
         return PrCell {
+            label: "—".into(),
             reading: None,
             notice: Some(muted("Checking pull requests…".into())),
         };
@@ -203,6 +205,11 @@ fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
             },
         });
     PrCell {
+        label: if reading.readable {
+            reading.count.to_string()
+        } else {
+            "—".into()
+        },
         reading: Some(reading),
         notice,
     }
@@ -210,24 +217,27 @@ fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
 
 fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
     let readable = dto.status == GithubStatus::Ok || dto.stale;
-    let shown: Vec<(GithubList, u64, Vec<&GithubPrDto>)> = selected
-        .iter()
-        .filter(|_| readable)
-        .map(|list| {
-            let source = match list {
-                GithubList::Mine => &dto.data.mine,
-                GithubList::ReviewRequested => &dto.data.review_requested,
-                GithubList::Assigned => &dto.data.assigned,
-            };
-            let items = source
-                .items
-                .iter()
-                .filter(|pr| pr.url.starts_with("https://github.com/"))
-                .take(MAX_PULL_REQUESTS)
-                .collect();
-            (*list, source.total, items)
-        })
-        .collect();
+    let shown: Vec<(GithubList, u64, Vec<&GithubPrDto>)> = if readable {
+        selected
+            .iter()
+            .map(|list| {
+                let source = match list {
+                    GithubList::Mine => &dto.data.mine,
+                    GithubList::ReviewRequested => &dto.data.review_requested,
+                    GithubList::Assigned => &dto.data.assigned,
+                };
+                let items = source
+                    .items
+                    .iter()
+                    .filter(|pr| pr.url.starts_with("https://github.com/"))
+                    .take(MAX_PULL_REQUESTS)
+                    .collect();
+                (*list, source.total, items)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut seen = std::collections::BTreeSet::new();
     let rows: Vec<&GithubPrDto> = shown
         .iter()

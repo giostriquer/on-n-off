@@ -294,12 +294,11 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     )
     .expect("fits");
     planned.cells[0].content = CellContent::PullRequests {
+        label: "1".into(),
         segments: vec![PrSegment {
             ci: CiState::Success,
             passing_with_conflicts: false,
         }],
-        count: 1,
-        readable: true,
     };
     let plain = render(&planned);
     if let CellContent::PullRequests { segments, .. } = &mut planned.cells[0].content {

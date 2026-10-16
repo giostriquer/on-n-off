@@ -152,7 +152,7 @@ fn every_cell_travels_in_rail_order_and_a_cell_not_read_yet_carries_only_its_not
              "notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]},
             {"kind":"provider","provider":"muse",
              "notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]},
-            {"kind":"pullRequests",
+            {"kind":"pullRequests","label":"—",
              "notice":{"text":"Checking pull requests…","tone":"muted"}}
         ])
     );

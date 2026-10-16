@@ -394,7 +394,7 @@ final class NotchTests {
       #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"octocat","ci":"success","updatedAt":"2026-09-01T10:00:00Z","badges":[{"label":"Ready to merge","tone":"green"}]}"#
     let segment = #"{"ci":"success","passingWithConflicts":false}"#
     let withPulls = withCells(
-      #"{"kind":"pullRequests","reading":{"readable":true,"count":1,"segments":["# + segment
+      #"{"kind":"pullRequests","label":"1","reading":{"readable":true,"count":1,"segments":["# + segment
         + #"],"attention":{"conflicts":0,"failing":0,"changesRequested":0,"ready":1},"lists":[{"id":"mine","title":"Mine","total":1,"items":["#
         + pull + #"]},{"id":"assigned","title":"Assigned","total":1,"items":["# + pull + "]}]}}")
     let decoded = try HostMessage.decode(Data(withPulls.utf8))
@@ -430,7 +430,7 @@ final class NotchTests {
       try HostMessage.decode(
         Data(
           withCells(
-            #"{"kind":"pullRequests","reading":{"readable":true,"count":4,"segments":[],"attention":{"conflicts":0,"failing":0,"changesRequested":0,"ready":0},"lists":[{"id":"mine","title":"Mine","total":4,"items":["#
+            #"{"kind":"pullRequests","label":"4","reading":{"readable":true,"count":4,"segments":[],"attention":{"conflicts":0,"failing":0,"changesRequested":0,"ready":0},"lists":[{"id":"mine","title":"Mine","total":4,"items":["#
               + [
                 pull(1, #","tag":{"label":"Work","tone":"work"}"#),
                 pull(2, #","tag":{"label":"Personal","tone":"personal"}"#),
@@ -467,6 +467,7 @@ final class NotchTests {
       expectEqual(providerCell(first, index)?.notice, Notice(text: "Checking usage…", tone: .muted))
     }
     expectNil(pullRequestCell(first)?.reading)
+    expectEqual(pullRequestCell(first)?.label, "—")
     expectEqual(
       pullRequestCell(first)?.notice, Notice(text: "Checking pull requests…", tone: .muted))
     expectNil(first.actionError)
@@ -498,6 +499,7 @@ final class NotchTests {
     expectEqual(muse?.sessions.count, 1)
 
     let pulls = pullRequestCell(golden)
+    expectEqual(pulls?.label, "3")
     expectEqual(
       pulls?.notice, Notice(text: "Showing the pull requests read at 10:00.", tone: .amber))
     let reading = pulls?.reading

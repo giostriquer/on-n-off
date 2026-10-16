@@ -283,7 +283,7 @@ private struct PullRequestRailCell: View {
 
   var body: some View {
     RailCellChrome(
-      layout: layout, metrics: metrics, label: readable ? "\(cell.reading?.count ?? 0)" : "—",
+      layout: layout, metrics: metrics, label: cell.label,
       labelOffset: 0, description: description, active: active, action: action,
       ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
