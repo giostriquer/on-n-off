@@ -410,7 +410,10 @@ file at build time and is the one place the UI learns a provider fact: `PROVIDER
 `RAIL_ORDER`, `LIMITS_PROVIDERS`, `ACCOUNT_PROVIDERS`, `USAGE_PROVIDERS`, `providerLabel`,
 `providerBinary`, `providerNames`, `providerRecord` and the guards `isAgentId`, `hasLimits` and
 `hasSavedAccounts`. Every screen's provider list, the Limits columns, the Add account menu, the
-remembered tab, the mock's agent list and the prose that names providers come from these.
+remembered tab, the mock's agent list and the Usage and Overview sentences that name the providers
+whose transcripts were looked for come from these. The Hooks screen's "Claude and Codex only" is
+still written out, because which providers read hooks is `readsHooks` on `AgentInfo`, a run-time
+fact.
 
 The providers are keyed by their key in the fixture, so `tsc` can compare its keys with the
 `AgentId` union (`ui/src/lib/providersContract.test.ts`); orders are arrays, because JSON object
