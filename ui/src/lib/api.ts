@@ -251,6 +251,12 @@ export function readAccountActivationBlockers(agent: import("./providers").Accou
 export function addAccount(agent: import("./providers").AccountProvider, operationId: string, profileId?: string): Promise<void> {
   return invoke("add_account", { agent, operationId, profileId: profileId ?? null });
 }
+export function readAccountCategories(): Promise<import("./accountTypes").AccountCategories> {
+  return invoke("read_account_categories");
+}
+export function setAccountCategory(agentId: import("./providers").LimitsProvider, accountId: string, category: string): Promise<void> {
+  return invoke("set_account_category", { agentId, accountId, category });
+}
 export function cancelAccountLogin(operationId: string): Promise<void> {
   return invoke("cancel_account_login", { operationId });
 }

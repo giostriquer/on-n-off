@@ -1,7 +1,11 @@
 use super::{model::Identity, transaction::Recovery};
+use crate::dto::AgentId;
 use crate::file_lease::FileLease;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+
+pub type Categories = BTreeMap<String, BTreeMap<String, String>>;
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Login {
     pub auth: Value,
@@ -43,6 +47,8 @@ pub struct Database {
     pub ignored_credentials: Vec<String>,
     #[serde(default)]
     recovery: Option<Recovery>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub categories: Categories,
 }
 
 const RECOVER_FIRST: &str = "Recover the interrupted account change first.";
@@ -182,18 +188,59 @@ impl Database {
     }
 
     pub fn set_category(&mut self, id: &str, value: &str) -> Result<(), String> {
+        let identity = self
+            .profiles
+            .iter()
+            .find(|p| p.id == id)
+            .map(|p| p.identity.clone())
+            .ok_or("Profile no longer exists.")?;
+        self.set_account_category(identity.provider, &identity.observation_key(), value)
+    }
+    pub fn set_account_category(
+        &mut self,
+        provider: AgentId,
+        account_id: &str,
+        value: &str,
+    ) -> Result<(), String> {
         let value = value.trim();
         if value.chars().count() > 100 {
             return Err("Keep the category within 100 characters.".into());
         }
-        let profile = self
-            .profiles
-            .iter_mut()
-            .find(|p| p.id == id)
-            .ok_or("Profile no longer exists.")?;
-        profile.category = (!value.is_empty()).then(|| value.to_owned());
+        if account_id.trim().is_empty() {
+            return Err("This card has no account to name.".into());
+        }
+        let category = (!value.is_empty()).then(|| value.to_owned());
+        let accounts = self
+            .categories
+            .entry(provider.key().to_owned())
+            .or_default();
+        match &category {
+            Some(value) => accounts.insert(account_id.to_owned(), value.clone()),
+            None => accounts.remove(account_id),
+        };
+        if accounts.is_empty() {
+            self.categories.remove(provider.key());
+        }
+        for profile in self.profiles.iter_mut().filter(|p| {
+            p.identity.provider == provider && p.identity.observation_key() == account_id
+        }) {
+            profile.category = category.clone();
+        }
         Ok(())
     }
+    pub fn forget_categories(&mut self, provider: AgentId, account_ids: &[String]) -> bool {
+        let Some(accounts) = self.categories.get_mut(provider.key()) else {
+            return false;
+        };
+        let before = accounts.len();
+        accounts.retain(|id, _| !account_ids.contains(id));
+        let changed = accounts.len() != before;
+        if accounts.is_empty() {
+            self.categories.remove(provider.key());
+        }
+        changed
+    }
+
     fn normalize_metadata(&mut self) {
         for profile in &mut self.profiles {
             if profile.email.is_none() {
@@ -218,6 +265,13 @@ impl Database {
                 .email
                 .clone()
                 .unwrap_or_else(|| "Email unavailable".into());
+            if let Some(category) = &profile.category {
+                self.categories
+                    .entry(profile.identity.provider.key().to_owned())
+                    .or_default()
+                    .entry(profile.identity.observation_key())
+                    .or_insert_with(|| category.clone());
+            }
         }
     }
 

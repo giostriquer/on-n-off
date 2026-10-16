@@ -6,7 +6,7 @@ account rotation.
 
 ## Ownership
 
-A profile has a random local UUID and a stable provider/user/workspace identity. Email is the account name; an optional free-text category is separate display metadata.
+A profile has a random local UUID and a stable provider/user/workspace identity. Email is the account name; an optional free-text category is separate display metadata, kept per account rather than per profile (below).
 Neither field is an identity key. Active native storage is authoritative. A saved active credential is a
 non-refreshing shadow; switching away captures the latest native generation. Inactive access-token
 expiry does not discard a renewable login. A saved Claude account that is not the signed-in one
@@ -247,6 +247,12 @@ writes, renews or saves a Muse login, and Muse has no saved accounts.
 - **Edit category** accepts optional free text (up to 100 characters). Blank clears it. Categories
   survive refresh, reauthentication and switching. The provider email remains the primary name;
   missing email is shown as unavailable. Older custom names migrate to categories when loaded.
+  A category belongs to the account, not to a saved login: the vault's `categories` map holds one
+  text per provider and card account id (the observation key), so every Limits card can have one,
+  for every provider, saved or not. `read_account_categories` and `set_account_category` need no
+  account adapter. A saved login's category is also copied into its profile, so an older app
+  version still shows it, and a profile category from an older version moves into the map when
+  the vault loads. Forget drops the forgotten account's category.
 - **Add / sign in again** launches official CLI authentication in an isolated native home. It checks
   the resulting identity, verifies the expected profile during reauthentication, then saves it.
   Before publication it attempts a usage/plan read using that isolated login: Codex uses app-server
@@ -318,7 +324,7 @@ dates read from the logins, through `read_revision` once its leases are released
 remove for the provider whose card they add or remove. Use and sign out do so even when their
 native half fails, because a rollback or a failed logout may still have changed the native login;
 a sign-in does so only once published, and a change refused before it wrote anything is not
-announced. A category edit announces only the account list.
+announced. A category edit announces only the account list, which also invalidates the categories.
 
 ## Archived accounts
 
@@ -458,7 +464,8 @@ Account management is embedded in Limits cards. The Limits header contains one A
 each card owns its usage, subscription date, primary action and optional category. The card frame
 (`LimitCardFrame`) owns each card's ⋯ menu and always offers Check limits now; account management
 adds the saved-login items and the footer's primary action through `useAccountCardActions`, and
-Limits adds Archive account and Remove account on every remembered card (`useHistoryActions`).
+Limits adds Edit category on every card with an account and Archive account and Remove account on
+every remembered card (`useCardActions`).
 Remove account removes a saved login first when there is one, as the archived list does. A
 provider without saved accounts (Muse) keeps the menu, and its remembered cards' Archive account
 and Remove account act on their usage history only. Saved identities

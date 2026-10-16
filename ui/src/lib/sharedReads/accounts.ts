@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import type { AccountsReading } from "$lib/accountTypes";
-import type { AccountProvider } from "$lib/providers";
+import type { AccountCategories, AccountsReading } from "$lib/accountTypes";
+import type { AccountProvider, LimitsProvider } from "$lib/providers";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
 
@@ -20,6 +20,19 @@ export const accountsAnnouncements = {
 
 export function accountListQuery(provider: AccountProvider) {
   return queryOptions({ queryKey: accountListKey(provider), queryFn: () => api.readAccounts(provider), retry: false });
+}
+
+export function accountCategoriesQuery() {
+  return queryOptions({ queryKey: [...ACCOUNTS, "categories"], queryFn: () => api.readAccountCategories(), retry: false });
+}
+
+export function setCategoryLocally(client: QueryClient, provider: LimitsProvider, accountId: string, category: string): void {
+  client.setQueryData<AccountCategories>(accountCategoriesQuery().queryKey, (categories) => {
+    const accounts = { ...categories?.[provider] };
+    if (category.trim()) accounts[accountId] = category.trim();
+    else delete accounts[accountId];
+    return { ...categories, [provider]: accounts };
+  });
 }
 
 export function accountPreferenceQuery() {

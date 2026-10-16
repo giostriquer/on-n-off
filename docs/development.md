@@ -61,10 +61,10 @@ locates the subsystems. Module doc-comments explain their implementation.
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
   shell, header, tags, ⋯ menu and footer from the card model; a card adds only menu items, its
   destructive items and footer content. The menu (`ActionMenu`, `ui/src/components/`) always
-  starts with Check limits now and ends with the destructive items. Archive account and Remove
-  account on a remembered card come from `useHistoryActions` (`historyActions.ts`) for every
-  provider; the saved-login items come from `useAccountCardActions`, which has none without an
-  account manager. The card model reads each per-provider feature from `LIMITS_FEATURES`
+  starts with Check limits now and ends with the destructive items. Edit category on every
+  card with an account, and Archive account and Remove account on a remembered card, come from
+  `useCardActions` (`cardActions.tsx`) for every provider; the saved-login items come from
+  `useAccountCardActions`, which has none without an account manager. The card model reads each per-provider feature from `LIMITS_FEATURES`
   (`limitFeatures.ts`), whose values name the implementation they turn on (`"claude"`, `"codex"`)
   or are `null`: the table is keyed by the catalogue's Limits providers, so a new provider fails
   the typecheck until its row exists, and reusing a feature means reusing that implementation. A

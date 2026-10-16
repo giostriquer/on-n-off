@@ -405,6 +405,34 @@ pub async fn forget_limits_snapshot(
 ) -> Result<(), AdapterError> {
     blocking("limits forget", move || {
         crate::limits_refresh::forget_snapshot(agent_id, &account_id, expected_email.as_deref())
+            .map_err(AdapterError::message)?;
+        let _ = crate::accounts::forget_categories(agent_id, std::slice::from_ref(&account_id));
+        Ok(())
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn read_account_categories() -> Result<crate::accounts::Categories, AdapterError> {
+    blocking("account categories", || {
+        crate::accounts::categories().map_err(AdapterError::message)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_account_category(
+    agent_id: AgentId,
+    account_id: String,
+    category: String,
+) -> Result<(), AdapterError> {
+    if !agent_id.facts().limits_reader {
+        return Err(AdapterError::message(
+            "This provider has no Limits accounts to name.",
+        ));
+    }
+    blocking("account category", move || {
+        crate::accounts::set_account_category(agent_id, &account_id, &category)
             .map_err(AdapterError::message)
     })
     .await

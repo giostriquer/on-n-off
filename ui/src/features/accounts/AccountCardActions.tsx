@@ -52,7 +52,6 @@ export function useAccountCardActions(account: AccountCardInput | null): Account
   }
   const items: ActionMenuItem[] = [];
   if (profile) {
-    items.push({ id: "category", label: "Edit category", disabled, panel: done => <CategoryPanel initial={profile.category ?? ""} disabled={disabled} onSave={category => action("category", profile.id, category)} done={done} /> });
     items.push({ id: "signInAgain", label: "Sign in again", disabled, run: () => void add(profile.id, accountId) });
     if (current) items.push(confirmItem({
       id: "removeLogin", label: "Remove saved login", question: `Remove the saved login for ${label}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled,
@@ -78,14 +77,6 @@ export function useAccountCardActions(account: AccountCardInput | null): Account
         : footer?.({ current, blocked: disabled, unconfirmedCurrent })}
     </>,
   };
-}
-
-function CategoryPanel({ initial, disabled, onSave, done }: { initial: string; disabled: boolean; onSave: (category: string) => Promise<void>; done: () => void }) {
-  const [category, setCategory] = useState(initial);
-  return <form role="group" aria-label="Edit account category" className="flex flex-wrap gap-2" onSubmit={event => { event.preventDefault(); void onSave(category).then(done).catch(() => {}); }}>
-    <input aria-label="Category (optional)" placeholder="Category (optional)" maxLength={100} value={category} onChange={event => setCategory(event.target.value)} className="w-full min-w-0 rounded border border-[var(--hair)] bg-transparent px-2 py-1.5 text-[12px]" />
-    <button className={button} disabled={disabled}>Save category</button><button type="button" className={button} onClick={done}>Cancel</button>
-  </form>;
 }
 
 function SwitchAlongsideConfirmation({ product, clients, disabled, onSwitch, onCancel }: {

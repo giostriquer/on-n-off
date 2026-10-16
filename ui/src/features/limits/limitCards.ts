@@ -84,12 +84,13 @@ export type LimitCardsInput = {
   provider: LimitsProvider;
   entries: ProviderLimits[] | undefined;
   profiles: SavedProfile[];
+  categories?: Readonly<Record<string, string>>;
   now: number;
 };
 
 type Slot = { reading: ProviderLimits; profile: SavedProfile | null } | { reading: null; profile: SavedProfile };
 
-export function limitCards({ provider, entries, profiles, now }: LimitCardsInput): LimitCard[] | null {
+export function limitCards({ provider, entries, profiles, categories = {}, now }: LimitCardsInput): LimitCard[] | null {
   if (!entries && profiles.length === 0) return null;
   const { entries: readings, legacyAccounts } = accountCards(entries ?? [], profiles);
   const slots: Slot[] = readings.map(reading => ({
@@ -99,7 +100,7 @@ export function limitCards({ provider, entries, profiles, now }: LimitCardsInput
   for (const profile of profiles) {
     if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
-  return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, now));
+  return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, now));
 }
 
 export type LimitColumn = { visible: LimitCard[]; archived: LimitCard[] };
@@ -142,7 +143,7 @@ const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnow
 
 type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 
-function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, now: number): LimitCard {
+function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, now: number): LimitCard {
   const { reading, profile } = slot;
   const name = providerLabel(provider);
   const features = LIMITS_FEATURES[provider];
@@ -165,7 +166,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     identity: {
       label: label ?? name,
       ariaLabel: label ? `${name} limits · ${label}` : `${name} limits`,
-      category: profile?.category || null,
+      category: (account && categories[account.id]) || null,
     },
     account: account && {
       id: account.id,

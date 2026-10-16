@@ -14,6 +14,7 @@ const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 const setLimitsArchived = vi.hoisted(() => vi.fn());
+const readAccountCategories = vi.hoisted(() => vi.fn());
 
 const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
 const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
@@ -22,7 +23,7 @@ const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string
 });
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit, pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn() }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, readAccountCategories, setAccountCategory: vi.fn(), onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit, pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn() }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -75,6 +76,7 @@ beforeEach(() => {
   forgetLimitsSnapshot.mockReset();
   forgetLimitsSnapshot.mockResolvedValue(undefined);
   setLimitsArchived.mockReset().mockResolvedValue(undefined);
+  readAccountCategories.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -436,6 +438,7 @@ it.each([true, false])("shows the paid-through date through a header badge (usag
 it("places switching on the account usage card without a second account manager", async()=>{
  answer([okClaude()], [okCodex(),staleCodex()]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
+ readAccountCategories.mockResolvedValue({codex:{"acct-personal":"Personal"}});
  renderLimits();
  const personal=await screen.findByRole("region",{name:"Codex limits · personal@codex.example"});
  const use=await within(personal).findByRole("button",{name:"Use account"});

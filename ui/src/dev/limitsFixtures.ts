@@ -1,6 +1,6 @@
-import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
+import type { AccountCategories, AccountsReading, SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import { hasLimits, isAgentId, type LimitsProvider } from "$lib/providers";
+import { hasLimits, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 
@@ -349,6 +349,11 @@ export function limitsScenario(name: string) {
   const archived: Record<LimitsProvider, Set<string>> = { claude: new Set(chosen.archived?.claude), codex: new Set(chosen.archived?.codex), muse: new Set(chosen.archived?.muse) };
   const forgotten: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };
   const removedLogins: Record<LimitsProvider, Set<string>> = { claude: new Set(), codex: new Set(), muse: new Set() };
+  const categories: Record<LimitsProvider, Map<string, string | null>> = { claude: new Map(), codex: new Map(), muse: new Map() };
+  const accountsOf = (which: LimitsProvider) => {
+    const answer = chosen.accounts?.[which];
+    return answer ? answer() : savedAccounts(which);
+  };
   return {
     readLimits(agentId: unknown): ProviderLimits[] {
       const which = provider(agentId);
@@ -362,13 +367,25 @@ export function limitsScenario(name: string) {
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
-      const answer = which ? chosen.accounts?.[which] : undefined;
-      const reading = answer ? answer() : savedAccounts(agent as AgentId);
+      const reading = which ? accountsOf(which) : savedAccounts(agent as AgentId);
       return which ? {
         ...reading,
         profiles: reading.profiles.flatMap(profile => removedLogins[which].has(profile.id) ? []
           : [archived[which].has(profile.observationId) ? { ...profile, archived: true } : profile]),
       } : reading;
+    },
+    readCategories(): AccountCategories {
+      return Object.fromEntries(LIMITS_PROVIDERS.map(which => {
+        const saved = which === "muse" ? [] : accountsOf(which).profiles.flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
+        const merged = new Map<string, string | null>([...saved, ...categories[which]]);
+        return [which, Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []))];
+      }));
+    },
+    setCategory(agentId: unknown, accountId: unknown, category: unknown) {
+      const which = provider(agentId);
+      if (!which || typeof accountId !== "string") return;
+      const text = typeof category === "string" ? category.trim() : "";
+      categories[which].set(accountId, text || null);
     },
     readCodexSubscription(accountId: unknown): SubscriptionDate | null {
       return (chosen.codexSubscription ?? paidThrough)(String(accountId));

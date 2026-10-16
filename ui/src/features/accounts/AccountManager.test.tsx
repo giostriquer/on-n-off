@@ -89,14 +89,6 @@ it("switches normally when running clients cannot be checked, and waits for the 
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "use", "profile-a", undefined));
   expect(within(card).queryByRole("group", { name: "Confirm switching while Codex is running" })).toBeNull();
 });
-it("asks nothing while the menu or one of its panels is open", async () => {
-  setup(); await screen.findByText("person@example.com");
-  fireEvent.click(screen.getByText("•••"));
-  expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Edit category" }));
-  expect(screen.getByRole("group", { name: "Edit account category" })).toBeTruthy();
-  expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
-});
 it("asks before removing the signed-in account's saved login, which leaves it signed in", async () => {
   setup({ signedIn: true }); await screen.findByText("person@example.com");
   fireEvent.click(screen.getByText("•••"));
@@ -109,28 +101,17 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
 });
 it.each([
-  [false, ["Edit category", "Sign in again"]],
-  [true, ["Edit category", "Sign in again", "Remove saved login", "Sign out"]],
+  [false, ["Sign in again"]],
+  [true, ["Sign in again", "Remove saved login", "Sign out"]],
 ])("offers a saved login (signed in: %s) exactly its own items, with Remove saved login and Sign out only when signed in", async (signedIn, items) => {
   setup({ signedIn });
   const card = await screen.findByRole("region", { name: "person@example.com" });
   fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
   expect(within(within(card).getByRole("group", { name: "Actions for person@example.com" })).getAllByRole("button").map(item => item.textContent)).toEqual(items);
 });
-it("keeps email as the account name and allows a free-text category to be edited or cleared", async () => {
+it("keeps email as the account name", async () => {
   setup(); await screen.findByText("person@example.com");
   expect(screen.queryByText("Legacy name")).toBeNull();
-  fireEvent.click(screen.getByText("•••")); fireEvent.click(screen.getByRole("button", { name: "Edit category" }));
-  expect(screen.getByRole("textbox", { name: "Category (optional)" })).toHaveFocus();
-  fireEvent.change(screen.getByRole("textbox", { name: "Category (optional)" }), { target: { value: "Research / client blue" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save category" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", "Research / client blue"));
-  await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
-  fireEvent.click(screen.getByText("•••"));
-  fireEvent.click(screen.getByRole("button", { name: "Edit category" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Category (optional)" }), { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save category" }));
-  await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "category", "profile-a", ""));
 });
 it("re-reads both account lists, the Codex subscription dates and that provider's limits after an account action, and no other read", async () => {
   const client = setup();
@@ -240,25 +221,6 @@ it("cancels an unfinished sign-in when the account screen is left", async () => 
   cleanup();
   expect(api.cancelAccountLogin).toHaveBeenCalledWith(operation);
   await act(async () => finish());
-});
-
-it("does not steal focus when a category save finishes after its editor was dismissed", async () => {
-  setup();
-  let finish!: () => void;
-  vi.mocked(api.accountAction).mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
-  await screen.findByText("person@example.com");
-  fireEvent.click(screen.getByRole("button", {name: "More actions for person@example.com"}));
-  fireEvent.click(screen.getByRole("button", {name: "Edit category"}));
-  fireEvent.click(screen.getByRole("button", {name: "Save category"}));
-  const trigger = screen.getByRole("button", {name: "More actions for person@example.com"});
-  fireEvent.pointerDown(document.body);
-  const outside = document.createElement("button");
-  document.body.append(outside); outside.focus();
-  try {
-    await act(async () => finish());
-    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
-    expect(outside).toHaveFocus();
-  } finally { outside.remove(); }
 });
 
 it("retries a denied vault unlock without starting sign-in or changing accounts", async () => {
