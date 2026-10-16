@@ -6,6 +6,7 @@ use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
 
 pub const MAX_PULL_REQUESTS: usize = 25;
+pub const MAX_RING_SEGMENTS: usize = 24;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct RailData {
@@ -38,7 +39,20 @@ pub struct PrReading {
     pub status: GithubStatus,
     pub hint: Option<String>,
     pub stale: bool,
+    #[serde(skip)]
+    pub readable: bool,
+    #[serde(skip)]
+    pub count: u64,
+    #[serde(skip)]
+    pub segments: Vec<PrSegment>,
     pub lists: Vec<PrList>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrSegment {
+    pub ci: CiState,
+    pub passing_with_conflicts: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -100,30 +114,53 @@ pub fn rail(
 }
 
 fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
+    let lists: Vec<PrList> = selected
+        .iter()
+        .map(|list| {
+            let source = match list {
+                GithubList::Mine => &dto.data.mine,
+                GithubList::ReviewRequested => &dto.data.review_requested,
+                GithubList::Assigned => &dto.data.assigned,
+            };
+            PrList {
+                id: *list,
+                total: source.total,
+                items: source
+                    .items
+                    .iter()
+                    .filter_map(pr_row)
+                    .take(MAX_PULL_REQUESTS)
+                    .collect(),
+            }
+        })
+        .collect();
+    let readable = dto.status == GithubStatus::Ok || dto.stale;
+    let rows: Vec<&PrRow> = lists.iter().flat_map(|list| &list.items).collect();
+    let mut seen = std::collections::BTreeSet::new();
+    let count = rows
+        .iter()
+        .filter(|row| seen.insert(row.id.as_str()))
+        .count() as u64;
+    let segments = if readable {
+        rows.iter()
+            .take(MAX_RING_SEGMENTS)
+            .map(|row| PrSegment {
+                ci: row.ci,
+                passing_with_conflicts: row.ci == CiState::Success
+                    && row.merge_kind == Some(MergeKind::Conflicts),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     PrReading {
         status: dto.status,
         hint: dto.hint.clone(),
         stale: dto.stale,
-        lists: selected
-            .iter()
-            .map(|list| {
-                let source = match list {
-                    GithubList::Mine => &dto.data.mine,
-                    GithubList::ReviewRequested => &dto.data.review_requested,
-                    GithubList::Assigned => &dto.data.assigned,
-                };
-                PrList {
-                    id: *list,
-                    total: source.total,
-                    items: source
-                        .items
-                        .iter()
-                        .filter_map(pr_row)
-                        .take(MAX_PULL_REQUESTS)
-                        .collect(),
-                }
-            })
-            .collect(),
+        readable,
+        count,
+        segments,
+        lists,
     }
 }
 

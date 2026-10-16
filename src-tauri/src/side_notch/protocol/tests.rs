@@ -138,6 +138,9 @@ fn pull_requests_travel_only_with_a_pull_request_cell() {
             status: GithubStatus::RateLimited,
             hint: None,
             stale: false,
+            readable: false,
+            count: 0,
+            segments: Vec::new(),
             lists: vec![PrList {
                 id: GithubList::Assigned,
                 total: 0,

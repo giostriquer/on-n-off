@@ -227,3 +227,59 @@ fn every_selected_provider_has_a_cell_in_rail_order_and_one_not_yet_read_is_chec
     };
     assert_eq!(first.sessions, [session]);
 }
+
+fn read(status: &str, stale: bool, mine: Vec<serde_json::Value>) -> PrReading {
+    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
+        "status": status, "stale": stale, "scope": [],
+        "mine": {"total": mine.len(), "items": mine},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap();
+    let frame = rail(&settings(vec![GithubList::Mine]), unread, Some(&dto), None);
+    pr_cell(&frame).clone()
+}
+
+#[test]
+fn the_ring_has_a_segment_per_row_up_to_24_once_the_read_is_readable() {
+    let rows = |count: u64| (1..=count).map(pr).collect::<Vec<_>>();
+    let ok = read("ok", false, rows(25));
+    assert!(ok.readable);
+    assert_eq!(ok.count, 25);
+    assert_eq!(ok.segments.len(), MAX_RING_SEGMENTS);
+    assert_eq!(MAX_RING_SEGMENTS, 24);
+
+    let stale = read("rateLimited", true, rows(2));
+    assert!(stale.readable, "a stale read still shows what it last saw");
+    assert_eq!(stale.segments.len(), 2);
+
+    let unreadable = read("ghNotLoggedIn", false, rows(2));
+    assert!(!unreadable.readable);
+    assert_eq!(unreadable.segments, [], "an unreadable read draws no ring");
+}
+
+#[test]
+fn the_conflict_band_marks_only_passing_rows_with_merge_conflicts() {
+    for ci in ["none", "pending", "success", "failure", "error"] {
+        for merge_kind in [
+            serde_json::Value::Null,
+            "conflicts".into(),
+            "ready".into(),
+            "behind".into(),
+            "blocked".into(),
+        ] {
+            let mut row = pr(1);
+            row["ci"] = ci.into();
+            row["mergeKind"] = merge_kind.clone();
+            let segments = read("ok", false, vec![row]).segments;
+            assert_eq!(
+                segments,
+                [PrSegment {
+                    ci: serde_json::from_value(ci.into()).unwrap(),
+                    passing_with_conflicts: ci == "success" && merge_kind == "conflicts",
+                }],
+                "{ci} with {merge_kind}"
+            );
+        }
+    }
+}

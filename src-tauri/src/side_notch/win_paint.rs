@@ -13,7 +13,7 @@ use crate::dto::{
 };
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-use super::model::frame::{CellData, PrRow, RailData};
+use super::model::frame::{CellData, PrRow, PrSegment, RailData};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -117,16 +117,10 @@ pub enum CellContent {
         label: String,
     },
     PullRequests {
-        segments: Vec<PrRingSegment>,
+        segments: Vec<PrSegment>,
         count: u64,
         readable: bool,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PrRingSegment {
-    ci: CiState,
-    passing_with_conflicts: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -315,28 +309,10 @@ fn cell_content(data: &CellData) -> CellContent {
                     readable: false,
                 };
             };
-            let readable = pulls.status == GithubStatus::Ok || pulls.stale;
-            let rows: Vec<&PrRow> = pulls.lists.iter().flat_map(|list| &list.items).collect();
-            let mut seen = std::collections::BTreeSet::new();
-            let count = rows
-                .iter()
-                .filter(|row| seen.insert(row.id.as_str()))
-                .count() as u64;
             CellContent::PullRequests {
-                segments: if readable {
-                    rows.iter()
-                        .take(24)
-                        .map(|row| PrRingSegment {
-                            ci: row.ci,
-                            passing_with_conflicts: row.ci == CiState::Success
-                                && row.merge_kind == Some(MergeKind::Conflicts),
-                        })
-                        .collect()
-                } else {
-                    Default::default()
-                },
-                count,
-                readable,
+                segments: pulls.segments.clone(),
+                count: pulls.count,
+                readable: pulls.readable,
             }
         }
     }
@@ -826,7 +802,7 @@ fn popover_entries(
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
             if let Some(pulls) = &cell.reading {
-                let readable = pulls.status == GithubStatus::Ok || pulls.stale;
+                let readable = pulls.readable;
                 if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
                     let color = if readable { WARN_AMBER } else { MUTED_INK };
                     for line in wrap_lines(

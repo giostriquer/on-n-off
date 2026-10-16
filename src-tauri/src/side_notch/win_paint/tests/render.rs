@@ -294,7 +294,7 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     )
     .expect("fits");
     planned.cells[0].content = CellContent::PullRequests {
-        segments: vec![PrRingSegment {
+        segments: vec![PrSegment {
             ci: CiState::Success,
             passing_with_conflicts: false,
         }],

@@ -282,38 +282,6 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
     );
 }
 
-#[test]
-fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
-    for ci in [
-        CiState::None,
-        CiState::Pending,
-        CiState::Success,
-        CiState::Failure,
-        CiState::Error,
-    ] {
-        for merge_kind in [
-            None,
-            Some(MergeKind::Conflicts),
-            Some(MergeKind::Ready),
-            Some(MergeKind::Behind),
-            Some(MergeKind::Blocked),
-        ] {
-            let mut row = pr(1, "Fixture", "o/r");
-            row["ci"] = serde_json::to_value(ci).unwrap();
-            row["mergeKind"] = serde_json::to_value(merge_kind).unwrap();
-            let content = cell_content(&pulls(vec![row]));
-            let CellContent::PullRequests { segments, .. } = content else {
-                panic!("PR cell")
-            };
-            assert_eq!(segments[0].ci, ci);
-            assert_eq!(
-                segments[0].passing_with_conflicts,
-                ci == CiState::Success && merge_kind == Some(MergeKind::Conflicts)
-            );
-        }
-    }
-}
-
 fn share(
     used: &str,
     used_percent: f64,
