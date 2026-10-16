@@ -16,7 +16,11 @@ notches report (refresh, open Limits or Pull requests, show on hover), the statu
 `side-notch-changed`, and the one projection of what it read into the rail frame (`RailData`): the
 selected providers that have been read, in rail order, with their sessions, then the pull request
 cell when it is on and has been read, each list keeping at most 25 rows and only those on
-github.com, each row with its context.
+github.com, each row with its context. The frame and that projection are `host/frame.rs`; the
+Tauri side, the supervisor thread and the app the host reads through (`Production`, which opens
+windows and emits through the `AppHandle`), is `host/app.rs`. The host keeps no interval of its
+own: it asks for the limits check interval and `github::poll_interval` at every check, both held
+in memory and replaced when settings are saved.
 
 What differs between the platforms is how a frame reaches the pixels and how actions come back.
 That is the `Transport` the host is given, and it is the only thing that differs:
@@ -25,11 +29,15 @@ That is the `Transport` the host is given, and it is the only thing that differs
   (`protocol::encode`) and waits for its ack before sending the next. A helper that fails to start,
   exits or acks nothing for 10 s is started again after a wait of 1 s, doubling to 30 s; new
   settings try again at once, and an ack after 30 s up, or turning the notch off, sets the wait back
-  to 1 s. It alone reports a screen change, which makes the host re-read the displays and the
-  limits.
+  to 1 s. Its time is the host's, passed in on every call, so its tests run on a clock of their own.
 - **Windows, `win_transport.rs` (`Overlay`).** Starts the window thread, hands it each frame over a
-  channel and pings it every tick to notice it died. It carries out the two actions only it has,
-  opening a pull request and copying a review request, and gives the host their result to show.
+  channel, pings it every tick to notice it died, and confirms each frame the window took, which
+  clears the error a lost window left. It carries out the two actions only it has, opening a pull
+  request and copying a review request, and gives the host their result to show.
+
+Both report a screen change, which makes the host re-read the displays and the limits: the helper
+when macOS says the screens changed, the Windows window when its screen poll reads other displays
+than the last time.
 
 Things that are easy to get wrong:
 
@@ -39,13 +47,13 @@ Things that are easy to get wrong:
   notch only on its next interval, and it redrew after every Limits read whether or not it changed.
 - **A read redraws only when it changed what the frame shows.** Otherwise a frame goes out on the
   30 s heartbeat, and after an action or new settings.
-- **What only one transport reports is gated to its platform** (and to test builds): a screen
-  change, a confirmed frame and a wait before retrying on macOS, an action the transport carried
-  out on Windows. The Windows window confirms nothing, so the error the host shows after the window
-  died stays until the notch is turned off.
+- **What only one transport reports is gated to its platform** (and to test builds): a wait before
+  retrying on macOS, an action the transport carried out on Windows.
 - **The host's rules are tested on every OS** through a fake transport and a fake `App`
   (`host/tests/`), the seam that stands for the reads, the settings store and the windows it opens.
-  `host/tests/wire.rs` pins the exact bytes the helper receives.
+  `host/tests/wire.rs` pins the exact bytes the helper receives; `transport/tests.rs` the pipe's
+  acks, waits and frame numbers; `host/app/tests.rs` that `Production` follows the shared reads'
+  own revisions and intervals; `win_transport/tests.rs`, on Windows only, the overlay.
 
 ## On macOS
 
