@@ -23,7 +23,6 @@ export type AppSettingsDocument = {
 
 export function createAppSettingsDocument(transport: AppSettingsTransport): AppSettingsDocument {
   let current: AppSettingsState = { settings: DEFAULT_APP_SETTINGS, loaded: false };
-  let reading: Promise<AppSettingsState> | null = null;
   let tail: Promise<unknown> = Promise.resolve();
   const listeners = new Set<() => void>();
   const failureListeners = new Set<(error: unknown) => void>();
@@ -39,22 +38,23 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
     return turn;
   }
 
+  async function read() {
+    hold(await transport.load());
+  }
+
   function load(): Promise<AppSettingsState> {
-    reading ??= inTurn(() =>
-      Promise.resolve()
-        .then(() => transport.load())
-        .then(hold, () => undefined)
-        .then(() => current),
-    ).finally(() => {
-      reading = null;
-    });
-    return reading;
+    return inTurn(() =>
+      read().then(
+        () => current,
+        () => current,
+      ),
+    );
   }
 
   function patch(change: AppSettingsChange): Promise<AppSettings | null> {
     return inTurn(async () => {
       if (!current.loaded) {
-        hold(await transport.load());
+        await read();
       }
       const latest = current.settings;
       const saved = await transport.save({ ...latest, ...(typeof change === "function" ? change(latest) : change) });

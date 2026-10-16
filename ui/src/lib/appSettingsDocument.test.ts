@@ -40,16 +40,36 @@ describe("the app settings document", () => {
     expect(changed).toHaveBeenCalledTimes(1);
   });
 
-  it("shares a load already under way", async () => {
-    const { transport, document } = rust();
+  it("reads Rust's document on every load, after whatever was asked before it", async () => {
+    let file: AppSettings = LOADED;
+    const first = deferred<AppSettings>();
+    const transport = {
+      load: vi.fn<AppSettingsTransport["load"]>().mockReturnValueOnce(first.promise).mockImplementation(async () => file),
+      save: vi.fn<AppSettingsTransport["save"]>(async (settings) => {
+        file = settings;
+        return settings;
+      }),
+    };
+    const document = createAppSettingsDocument(transport);
 
-    const [first, second] = await Promise.all([document.load(), document.load()]);
+    const before = document.load();
+    const patched = document.patch({ closeToTray: true });
+    const after = document.load();
+    first.resolve(LOADED);
 
-    expect(first).toEqual({ settings: LOADED, loaded: true });
-    expect(second).toEqual({ settings: LOADED, loaded: true });
-    expect(transport.load).toHaveBeenCalledTimes(1);
-    await document.load();
+    await expect(before).resolves.toEqual({ settings: LOADED, loaded: true });
+    await patched;
+    await expect(after).resolves.toEqual({ settings: { ...LOADED, closeToTray: true }, loaded: true });
     expect(transport.load).toHaveBeenCalledTimes(2);
+  });
+
+  it("still answers a load when a subscriber throws", async () => {
+    const { document } = rust();
+    document.subscribe(() => {
+      throw new Error("subscriber failed");
+    });
+
+    await expect(document.load()).resolves.toEqual({ settings: LOADED, loaded: true });
   });
 
   it("keeps what it holds when a load fails, and says whether that is a document Rust sent", async () => {
