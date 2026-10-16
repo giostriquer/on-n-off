@@ -53,19 +53,47 @@ it("counts only the servers in the MCP config file beside its path", () => {
 });
 
 it.each([
-  ["claude", "Claude", "claude", "~/.claude/", "~/.claude.json", true],
-  ["codex", "Codex", "codex", "~/.codex/", "~/.codex/config.toml", true],
-  ["antigravity", "Antigravity", "agy", "~/.gemini/", "~/.gemini/config/mcp_config.json", true],
-  ["cursor", "Cursor", "agent", "~/.cursor/", "~/.cursor/mcp.json", false],
-  ["muse", "Muse", "muse", "~/.local/share/muse/", "~/.config/muse/settings.json", false],
-] as const)("names %s's CLI, its home and MCP config, and whether on-n-off switches its MCP servers", (id, displayName, binary, home, mcpConfig, mcpToggle) => {
-  render(<AgentConfig agent={{ ...claude, id, displayName }} tab={null} />);
+  {
+    id: "claude", displayName: "Claude", binary: "claude", home: "~/.claude/",
+    plugins: "~/.claude/plugins", skills: "~/.claude/plugins · user skills", mcpConfig: "~/.claude.json",
+    pluginToggle: "claude plugin enable/disable", mcpToggle: "file patch · ~/.claude.json disabled", mcpSwitchable: true,
+  },
+  {
+    id: "codex", displayName: "Codex", binary: "codex", home: "~/.codex/",
+    plugins: "~/.codex/plugins", skills: "~/.codex/skills · ~/.agents/skills", mcpConfig: "~/.codex/config.toml",
+    pluginToggle: "file patch · [plugins.*.enabled]", mcpToggle: "file patch · [mcp_servers.*.enabled]", mcpSwitchable: true,
+  },
+  {
+    id: "antigravity", displayName: "Antigravity", binary: "agy", home: "~/.gemini/",
+    plugins: "~/.gemini/config/plugins · antigravity-cli/plugins", skills: "~/.gemini/antigravity-cli/skills · .agents/skills",
+    mcpConfig: "~/.gemini/config/mcp_config.json",
+    pluginToggle: "agy plugin enable/disable", mcpToggle: "file patch · mcpServers.*.disabled", mcpSwitchable: true,
+  },
+  {
+    id: "cursor", displayName: "Cursor", binary: "agent", home: "~/.cursor/",
+    plugins: "~/.cursor/plugins", skills: "~/.cursor/skills · .cursor/skills", mcpConfig: "~/.cursor/mcp.json",
+    pluginToggle: "not implemented yet", mcpToggle: "managed in Cursor · read-only here", mcpSwitchable: false,
+  },
+  {
+    id: "muse", displayName: "Muse", binary: "muse", home: "~/.local/share/muse/",
+    plugins: "~/.local/share/muse/plugins", skills: "~/.config/muse/skills · ~/.agents/skills", mcpConfig: "~/.config/muse/settings.json",
+    pluginToggle: "muse plugins enable/disable", mcpToggle: "managed in Muse · read-only here", mcpSwitchable: false,
+  },
+] as const)("names $id's CLI, the paths it reads and how on-n-off switches its plugins and MCP servers", (provider) => {
+  render(<AgentConfig agent={{ ...claude, id: provider.id, displayName: provider.displayName }} tab={null} />);
 
   const paths = screen.getByRole("region", { name: "Config paths" });
-  expect(within(within(paths).getByText("CLI binary").parentElement!).getByTitle(binary)).toBeInTheDocument();
-  expect(within(within(paths).getByText("Global config").parentElement!).getByTitle(home)).toBeInTheDocument();
-  expect(within(within(paths).getByText("MCP config").parentElement!).getByTitle(mcpConfig)).toBeInTheDocument();
+  const path = (label: string) => within(paths).getByText(label).parentElement!.children[1]!.textContent;
+  expect(path("CLI binary")).toBe(provider.binary);
+  expect(path("Global config")).toBe(provider.home);
+  expect(path("Plugins dir")).toBe(provider.plugins);
+  expect(path("Skills")).toBe(provider.skills);
+  expect(path("MCP config")).toBe(provider.mcpConfig);
+  expect(path("Backup dir")).toBe("~/.on-n-off/backups");
   const capabilities = screen.getByRole("region", { name: "Adapter capabilities" });
-  const toggle = within(capabilities).getByText("MCP toggle").parentElement!.parentElement!;
-  expect(within(toggle).getByText(mcpToggle ? "YES" : "NO")).toBeInTheDocument();
+  const capability = (label: string) => within(capabilities).getByText(label).parentElement!.parentElement!;
+  expect(within(capability("Plugin toggle")).getByText(provider.pluginToggle)).toBeInTheDocument();
+  expect(within(capability("Plugin toggle")).getByText("YES")).toBeInTheDocument();
+  expect(within(capability("MCP toggle")).getByText(provider.mcpToggle)).toBeInTheDocument();
+  expect(within(capability("MCP toggle")).getByText(provider.mcpSwitchable ? "YES" : "NO")).toBeInTheDocument();
 });
