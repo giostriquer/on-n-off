@@ -174,8 +174,9 @@ provider's own client:
   or session window), when a reset is worth using, once per weekly cycle, when a waiting spend
   falls due, the share an automatic spend is held to, and the wording of every notification.
   Given a poll's readings, the alerts, the monitor's saved state and the time, `reset_alert::plan`
-  returns what to do: the notices of the alerts that only notify, the automatic offers to
-  schedule, and the waiting spends that fell due, each to spend or to keep.
+  returns what to do: the poll's offers, which once the state is saved tell the alerts that only
+  notify and schedule the automatic ones (`Offered::commit`), and the waiting spends that fell
+  due, each to spend at its alert's share or to keep with the notice that says why.
 
   It offers the reset when two polls in a row, each a newer reading of the signed-in account in
   the same weekly cycle, find it at the alert's share or below, with its weekly window at least
@@ -184,7 +185,9 @@ provider's own client:
   two seconds of each other are the same cycle: Codex reports that time to the second, the same
   window's time can differ by a second or two from one response to the next, and a remembered
   window can spell the same instant differently, all of which an exact match took for a new week.
-  An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
+  The tolerance is the one the Codex sessions merge matches a window by
+  (`limits::same_reset_instant`), and the saved cycle stays the string Codex sent; one that does
+  not read as a time is another cycle. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
   time comes the reset is used only if a fresh read still finds the signed-in account low in the
   same cycle; a read that fails leaves it waiting, and one found more than fifteen minutes late,
   as after sleep, is kept. A spend that fails is not tried again.
