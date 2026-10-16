@@ -63,6 +63,8 @@ struct MetricsCase {
     inner_ring_stroke: f64,
     inner_ring_inset: f64,
     glyph_size: f64,
+    right_cells: Vec<[f64; 4]>,
+    top_cells: Vec<[f64; 4]>,
 }
 
 fn fixture() -> Fixture {
@@ -177,6 +179,24 @@ fn every_rail_metric_matches_the_shared_cases() {
             (across.thickness, across.cell_length),
             (m.cell_length, m.thickness)
         );
+        for (edge, cells) in [
+            (Edge::Right, &case.right_cells),
+            (Edge::Top, &case.top_cells),
+        ] {
+            assert!(!cells.is_empty());
+            let metrics = rail_metrics(case.size, case.scale, edge);
+            let frames = rail_cell_frames(edge, &metrics, cells.len());
+            for (index, (frame, cell)) in frames.into_iter().zip(cells).enumerate() {
+                assert_pixels(
+                    pixels(Some(frame), case.scale),
+                    Some(*cell),
+                    &format!(
+                        "{edge:?} cell {index} of {:?} at {}x",
+                        case.size, case.scale
+                    ),
+                );
+            }
+        }
     }
 }
 
