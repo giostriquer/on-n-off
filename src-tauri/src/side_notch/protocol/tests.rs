@@ -3,24 +3,24 @@ use super::*;
 #[test]
 fn accepts_only_versioned_typed_actions() {
     assert_eq!(
-        decode_event(br#"{"version":5,"type":"ready"}"#),
+        decode_event(br#"{"version":6,"type":"ready"}"#),
         Ok(Action::Ready)
     );
     assert_eq!(
-        decode_event(br#"{"version":5,"type":"ack","sequence":42}"#),
+        decode_event(br#"{"version":6,"type":"ack","sequence":42}"#),
         Ok(Action::Ack { sequence: 42 })
     );
     assert_eq!(
-        decode_event(br#"{"version":5,"type":"openPullRequests"}"#),
+        decode_event(br#"{"version":6,"type":"openPullRequests"}"#),
         Ok(Action::OpenPullRequests)
     );
     assert_eq!(
-        decode_event(br#"{"version":5,"type":"setShow","show":"onHover"}"#),
+        decode_event(br#"{"version":6,"type":"setShow","show":"onHover"}"#),
         Ok(Action::SetShow {
             show: ShowMode::OnHover
         })
     );
-    assert!(decode_event(br#"{"version":5,"type":"setShow","show":"sometimes"}"#).is_err());
+    assert!(decode_event(br#"{"version":6,"type":"setShow","show":"sometimes"}"#).is_err());
 }
 
 #[test]
@@ -30,11 +30,12 @@ fn rejects_other_protocols_commands_and_unbounded_messages() {
         br#"{"version":2,"type":"ready"}"#,
         br#"{"version":3,"type":"ready"}"#,
         br#"{"version":4,"type":"ready"}"#,
-        br#"{"version":6,"type":"ready"}"#,
-        br#"{"version":5,"type":"exec","command":"arbitrary"}"#,
+        br#"{"version":5,"type":"ready"}"#,
+        br#"{"version":7,"type":"ready"}"#,
+        br#"{"version":6,"type":"exec","command":"arbitrary"}"#,
         br#"{"type":"refresh"}"#,
-        br#"{"version":5,"type":"openLimits","path":"arbitrary"}"#,
-        br#"{"version":5,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"standard"}}"#,
+        br#"{"version":6,"type":"openLimits","path":"arbitrary"}"#,
+        br#"{"version":6,"type":"save","revision":0,"request":1,"settings":{"enabled":true,"displayId":"external","edge":"left","size":"standard"}}"#,
     ] {
         assert!(decode_event(line).is_err());
     }

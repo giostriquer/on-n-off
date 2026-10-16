@@ -195,6 +195,17 @@ fn auto_merge_is_on_exactly_when_github_reports_a_request() {
 }
 
 #[test]
+fn an_organization_owner_is_kept_and_a_reply_without_one_says_nothing() {
+    let mut reply = reply();
+    reply["data"]["mine"]["nodes"][0]["repository"]["isInOrganization"] = json!(true);
+    reply["data"]["review"]["nodes"][0]["repository"]["isInOrganization"] = json!(false);
+    let data = parse(&reply).unwrap().data;
+    assert_eq!(data.mine.items[0].in_organization, Some(true));
+    assert_eq!(data.review_requested.items[0].in_organization, Some(false));
+    assert_eq!(data.review_requested.items[1].in_organization, None);
+}
+
+#[test]
 fn an_unknown_review_decision_is_dropped_not_fatal() {
     let mut value = reply();
     value["data"]["mine"]["nodes"][0]["reviewDecision"] = json!("BRAND_NEW");

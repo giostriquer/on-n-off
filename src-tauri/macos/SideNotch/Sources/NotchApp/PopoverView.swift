@@ -351,6 +351,8 @@ private struct PullRequestRow: View {
   let metrics: NotchMetrics
   @State private var copied = false
 
+  private var context: RowContext? { RowContext(pull.context) }
+
   private var ciLabel: String {
     switch pull.ci {
     case .success: return "CI passing"
@@ -391,23 +393,32 @@ private struct PullRequestRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .accessibilityLabel("\(pull.title), \(pull.repo) number \(pull.number)")
+        .accessibilityLabel(
+          [pull.title, context?.name, "\(pull.repo) number \(pull.number)"].compactMap { $0 }
+            .joined(separator: ", "))
         .accessibilityHint("Opens the pull request on GitHub.")
         Button(action: copy) {
           Image(systemName: copied ? "checkmark" : "doc.on.doc")
             .font(metrics.font(11, weight: .medium))
-            .foregroundColor(copied ? liveGreen : mutedInk)
+            .foregroundColor(copied ? liveGreen : context?.ink ?? mutedInk)
             .frame(width: metrics.value(20), height: metrics.value(16))
             .contentShape(Rectangle())
         }
         .buttonStyle(PlainButtonStyle())
-        .accessibilityLabel(copied ? "Copied" : "Copy a review request")
+        .accessibilityLabel(
+          copied ? "Copied" : context.map { "Copy a \($0.name) review request" } ?? "Copy a review request")
         .accessibilityHint("Copies “review please” with the pull request linked, ready for Slack.")
-        .help("Copy “review please: <title>” with the title linked")
+        .help(
+          context.map { "Copy “review please: <title>” for a \($0.name) channel" }
+            ?? "Copy “review please: <title>” with the title linked")
       }
       HStack(alignment: .center, spacing: metrics.value(8)) {
         Button(action: { Actions.open(pull) }) {
           HStack(spacing: metrics.value(5)) {
+            if let context = context {
+              Text(context.name.uppercased()).font(metrics.font(9.5, weight: .semibold)).tracking(0.4)
+                .foregroundColor(context.ink).lineLimit(1).fixedSize()
+            }
             Text("\(pull.repo) #\(pull.number)").font(metrics.font(10).monospacedDigit())
               .foregroundColor(mutedInk).lineLimit(1)
             ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
@@ -433,6 +444,13 @@ private struct PullRequestRow: View {
         .help(ciLabel)
       }
     }
+    .overlay(alignment: .leading) {
+      if let context = context {
+        Capsule().fill(context.ink).frame(width: metrics.value(2))
+          .offset(x: -metrics.value(8))
+          .accessibilityHidden(true)
+      }
+    }
   }
 
   private func copy() {
@@ -445,6 +463,21 @@ private struct PullRequestRow: View {
 }
 
 let liveGreen = Color(red: 74 / 255, green: 200 / 255, blue: 120 / 255)
+let workBlue = Color(red: 96 / 255, green: 165 / 255, blue: 250 / 255)
+let personalViolet = Color(red: 192 / 255, green: 132 / 255, blue: 252 / 255)
+
+private struct RowContext {
+  let name: String
+  let ink: Color
+
+  init?(_ context: PrContext?) {
+    switch context {
+    case .work: (name, ink) = ("work", workBlue)
+    case .personal: (name, ink) = ("personal", personalViolet)
+    case .unknown, nil: return nil
+    }
+  }
+}
 
 enum Actions {
   static func open(_ pull: PullRequest) {

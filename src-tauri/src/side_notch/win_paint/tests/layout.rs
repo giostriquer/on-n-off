@@ -189,6 +189,7 @@ fn pull_request_popovers_carry_open_copy_and_footer_zones() {
         review_decision: Some(ReviewDecision::Approved),
         ci: CiState::Success,
         merge_kind: Some(MergeKind::Ready),
+        context: None,
     };
     let cells = vec![CellData::PullRequests(PrCellData {
         status: GithubStatus::Ok,
@@ -305,6 +306,7 @@ fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
                 review_decision: None,
                 ci: CiState::Success,
                 merge_kind: None,
+                context: None,
             }],
         }],
     };

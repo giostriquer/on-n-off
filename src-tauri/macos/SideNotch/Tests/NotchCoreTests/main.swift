@@ -321,12 +321,12 @@ final class NotchTests {
 
   func testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions() throws {
     let valid =
-      #"{"version":5,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
+      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
     expectEqual(try HostMessage.decode(Data(valid.utf8)).sequence, 1)
-    for older in ["1", "2", "3", "4"] {
+    for older in ["1", "2", "3", "4", "5"] {
       expectThrows(
         try HostMessage.decode(
-          Data(valid.replacingOccurrences(of: "\"version\":5", with: "\"version\":\(older)").utf8)))
+          Data(valid.replacingOccurrences(of: "\"version\":6", with: "\"version\":\(older)").utf8)))
     }
     expectThrows(
       try HostMessage.decode(Data((valid + String(repeating: " ", count: 262_144)).utf8)))
@@ -370,7 +370,7 @@ final class NotchTests {
 
   func testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames() throws {
     let valid =
-      #"{"version":5,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"sessions":[]}]}"#
+      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[{"provider":"claude","status":"ok","currentAccount":true,"windows":[{"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7,"observedAt":""},{"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13,"observedAt":""}],"headlineWindowId":"weekly_all","innerRing":{"kind":"fable","windowId":"weekly_scoped:Fable"},"sessions":[]}]}"#
     let entry = try HostMessage.decode(Data(valid.utf8)).providers[0]
     expectEqual(entry.headline?.usedPercent, 7)
     expectEqual(entry.inner?.quota.usedPercent, 13)
@@ -390,7 +390,7 @@ final class NotchTests {
 
   func testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows() throws {
     let valid =
-      #"{"version":5,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
+      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[]}"#
     let pull =
       #"{"id":"node","number":42,"title":"ci: one concurrency group","url":"https://github.com/octo/tools/pull/42","repo":"octo/tools","author":"gio","isDraft":false,"reviewDecision":"APPROVED","ci":"success","mergeKind":"ready","updatedAt":"2026-09-01T10:00:00Z"}"#
     let withPulls = valid.replacingOccurrences(
@@ -417,6 +417,26 @@ final class NotchTests {
     expectEqual(maxPullRequests, 25)
   }
 
+  func testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSaysNeither() throws {
+    let message: (String) -> String = { pulls in
+      #"{"version":6,"sequence":1,"snapshot":{"settings":{"enabled":false,"displayId":null,"edge":"right","size":"standard","show":"always","providers":["claude"],"pullRequests":{"enabled":true,"lists":["mine"]},"popoverStyle":"glass"},"displays":[]},"providers":[],"pullRequests":{"status":"ok","hint":null,"stale":false,"lists":[{"id":"mine","total":4,"items":["#
+        + pulls + "]}]}}"
+    }
+    let pull: (Int, String) -> String = { number, context in
+      #"{"id":"node-\#(number)","number":\#(number),"title":"Fix","url":"https://github.com/acme/webapp/pull/\#(number)","repo":"acme/webapp","author":"octocat","isDraft":false,"ci":"success","updatedAt":""\#(context)}"#
+    }
+    let rows = try HostMessage.decode(
+      Data(
+        message(
+          [
+            pull(1, #","context":"work""#), pull(2, #","context":"personal""#),
+            pull(3, #","context":"client""#), pull(4, ""),
+          ].joined(separator: ",")
+        ).utf8)
+    ).pullRequests?.lists.first?.items
+    expectEqual(rows?.map(\.context), [.work, .personal, .unknown, nil])
+  }
+
   func testConflictBandRequiresPassingCIAndMergeConflicts() {
     let states: [CiState] = [.none, .pending, .success, .failure, .error, .unknown]
     let kinds: [MergeKind?] = [nil, .conflicts, .queued, .autoMerge, .ready, .behind, .blocked, .unknown]
@@ -441,14 +461,14 @@ final class NotchTests {
 
   func testClientActionsEncodeACompleteTypedProtocol() throws {
     let cases: [(ClientAction, [String: Any])] = [
-      (.ready, ["version": 5, "type": "ready"]),
-      (.ack(sequence: 42), ["version": 5, "type": "ack", "sequence": 42]),
-      (.screensChanged, ["version": 5, "type": "screensChanged"]),
-      (.refresh, ["version": 5, "type": "refresh"]),
-      (.openLimits, ["version": 5, "type": "openLimits"]),
-      (.openPullRequests, ["version": 5, "type": "openPullRequests"]),
-      (.setShow(.onHover), ["version": 5, "type": "setShow", "show": "onHover"]),
-      (.setShow(.always), ["version": 5, "type": "setShow", "show": "always"]),
+      (.ready, ["version": 6, "type": "ready"]),
+      (.ack(sequence: 42), ["version": 6, "type": "ack", "sequence": 42]),
+      (.screensChanged, ["version": 6, "type": "screensChanged"]),
+      (.refresh, ["version": 6, "type": "refresh"]),
+      (.openLimits, ["version": 6, "type": "openLimits"]),
+      (.openPullRequests, ["version": 6, "type": "openPullRequests"]),
+      (.setShow(.onHover), ["version": 6, "type": "setShow", "show": "onHover"]),
+      (.setShow(.always), ["version": 6, "type": "setShow", "show": "always"]),
     ]
     for (action, expected) in cases {
       let encoded = try JSONEncoder().encode(action)
@@ -500,8 +520,9 @@ checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
 try checks.testPullRequestsValidateLinksListsAndCapsAndCountDistinctRows()
+try checks.testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSaysNeither()
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("21 native check groups; \(failures) failures")
+print("22 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

@@ -31,6 +31,7 @@ fn data() -> GithubPrsData {
                 merge_queue: Some(GithubMergeQueueDto { position: Some(2) }),
                 auto_merge: true,
                 merge_kind: Some(MergeKind::Conflicts),
+                in_organization: Some(true),
             }],
         },
         review_requested: GithubPrListDto::default(),

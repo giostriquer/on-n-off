@@ -56,10 +56,13 @@ const now = Date.now();
 const at = offsetMs => new Date(now + offsetMs).toISOString();
 const quota = (id, label, kind, usedPercent, resetHours) => ({ id, label, kind, usedPercent, resetsAt: at(resetHours * 3_600_000), observedAt: at(0) });
 const session = (id, name, place, project, status, minutesAgo) => ({ id, name, place, project, status, lastActiveAt: at(-minutesAgo * 60_000) });
-const pull = (number, title, ci, reviewDecision, mergeKind, isDraft) => ({
-  id: `node-${number}`, number, title, url: `https://github.com/octo/tools/pull/${number}`, repo: 'octo/tools',
-  author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z',
-});
+const pull = (number, title, ci, reviewDecision, mergeKind, isDraft, context = 'work') => {
+  const repo = context === 'personal' ? 'octocat/dotfiles' : 'acme/webapp';
+  return {
+    id: `node-${number}`, number, title, url: `https://github.com/${repo}/pull/${number}`, repo,
+    author: 'octocat', isDraft, reviewDecision, ci, mergeKind, updatedAt: '2026-09-01T10:00:00Z', context,
+  };
+};
 const fixture = edge => ({
   version: protocolVersion, sequence: 1,
   snapshot: {
@@ -80,7 +83,7 @@ const fixture = edge => ({
       { id: 'mine', total: 4, items: [
         pull(42, 'fix: passing checks with merge conflicts', 'success', 'APPROVED', 'conflicts', false),
         pull(41, 'ci: give push runs on dev and main one concurrency group per commit', 'success', 'APPROVED', 'ready', false),
-        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true),
+        pull(40, 'feat: pull requests in the side notch', 'pending', null, null, true, 'personal'),
         pull(39, 'release: corrected usage cost estimates', 'failure', 'CHANGES_REQUESTED', 'conflicts', false),
       ] },
       { id: 'reviewRequested', total: 1, items: [pull(98, 'Drive Spotify RLE desktop wiring', 'success', null, 'behind', false)] },
@@ -124,6 +127,7 @@ function readPng(path) {
 const railInk = [8, 8, 8, 255];
 const popoverInk = [14, 14, 17, 255];
 const popoverBorder = [40, 40, 43, 255];
+const contextInk = { work: [96, 165, 250, 255], personal: [192, 132, 252, 255] };
 const oppositeEdge = { right: 'left', left: 'right', top: 'bottom', bottom: 'top' };
 const near = (pixel, ink) => pixel.length === 4 && pixel.every((value, i) => Math.abs(value - ink[i]) <= 3);
 const edgeLine = (png, edge, inset) => {
@@ -180,6 +184,12 @@ for (const edge of ['right', 'left', 'top', 'bottom']) {
     assert.ok(opaque.length >= 5 * scale && opaque.length <= 9 * scale && last - first + 1 === opaque.length, `render ${edge}: ${name}.png has ${opaque.length} opaque px 4 pt in from its tail side, not one tail`);
     assert.ok(Math.abs((first + last) / 2 - line.length / 2) <= 2, `render ${edge}: ${name}.png tail is centred at ${(first + last) / 2} px, not mid-popover at ${line.length / 2}`);
     (popoverSizes[name] ??= {})[edge] = [png.width, png.height];
+  }
+  const pulls = readPng(resolve(dir, 'popover-pull-requests.png'));
+  for (const [context, ink] of Object.entries(contextInk)) {
+    const run = Math.max(...Array.from({ length: pulls.width }, (_, x) =>
+      Array.from({ length: pulls.height }, (_, y) => pulls.at(x, y)).filter((pixel) => near(pixel, ink)).length));
+    assert.ok(run >= 20 * scale, `render ${edge}: popover-pull-requests.png has at most ${run} px of ${context} ink in a column, so no ${context} row carries its stripe`);
   }
   console.log(`PASS render ${edge} → ${dir}`);
 }

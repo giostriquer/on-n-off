@@ -1,6 +1,6 @@
 #![allow(unsafe_code)]
 
-use super::model::{layout, GithubList, NotchProvider, NotchSnapshot, RAIL_ORDER};
+use super::model::{layout, GithubList, NotchProvider, NotchSnapshot, PrContext, RAIL_ORDER};
 use super::win_paint::{
     CellData, PrCellData, PrListData, PrRowData, ProviderData, RailData, MAX_PULL_REQUESTS,
 };
@@ -116,6 +116,7 @@ fn to_row(pr: &GithubPrDto) -> Option<PrRowData> {
         review_decision: pr.review_decision,
         ci: pr.ci,
         merge_kind: pr.merge_kind,
+        context: PrContext::of(pr),
     })
 }
 

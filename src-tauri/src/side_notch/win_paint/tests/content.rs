@@ -126,6 +126,7 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
                 review_decision: None,
                 ci: CiState::Success,
                 merge_kind: None,
+                context: None,
             }],
         }],
     };
@@ -202,6 +203,7 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
                 review_decision: None,
                 ci: CiState::Success,
                 merge_kind: None,
+                context: None,
             }],
         }],
     };
@@ -256,6 +258,7 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
                 review_decision: None,
                 ci: CiState::Success,
                 merge_kind: None,
+                context: None,
             }],
         }],
     };
@@ -361,6 +364,7 @@ fn conflict_band_only_marks_passing_prs_with_merge_conflicts() {
                         review_decision: None,
                         ci,
                         merge_kind,
+                        context: None,
                     }],
                 }],
             }));
@@ -584,4 +588,120 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
         ))),
         "—"
     );
+}
+
+fn pr_row(number: u64, context: Option<PrContext>) -> PrRowData {
+    PrRowData {
+        id: format!("n{number}"),
+        number,
+        title: format!("Fix #{number}"),
+        url: format!("https://github.com/acme/webapp/pull/{number}"),
+        repo: "acme/webapp".into(),
+        is_draft: false,
+        review_decision: None,
+        ci: CiState::Success,
+        merge_kind: None,
+        context,
+    }
+}
+
+fn tallest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
+    (0..pixmap.width())
+        .map(|x| {
+            (0..pixmap.height())
+                .filter(|&y| {
+                    pixmap
+                        .pixel(x, y)
+                        .is_some_and(|px| [px.red(), px.green(), px.blue(), px.alpha()] == ink)
+                })
+                .count() as u32
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn each_row_wears_its_work_or_personal_ink_on_a_tag_a_stripe_and_the_copy_icon() {
+    let pulls = PrCellData {
+        status: GithubStatus::Ok,
+        hint: None,
+        stale: false,
+        lists: vec![PrListData {
+            id: GithubList::Mine,
+            total: 3,
+            items: vec![
+                pr_row(1, Some(PrContext::Work)),
+                pr_row(2, Some(PrContext::Personal)),
+                pr_row(3, None),
+            ],
+        }],
+    };
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![CellData::PullRequests(pulls)]),
+        Hover {
+            active: Some(0),
+            ..Hover::default()
+        },
+    )
+    .expect("fits");
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    let tags: Vec<(&str, Color)> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, color, .. } if text == "WORK" || text == "PERSONAL" => {
+                Some((text.as_str(), *color))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tags, [("WORK", WORK_BLUE), ("PERSONAL", PERSONAL_VIOLET)]);
+    let copy_inks: Vec<Color> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::CopyIcon { color } => Some(*color),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(copy_inks, [WORK_BLUE, PERSONAL_VIOLET, MUTED_INK]);
+    let stripes: Vec<(Color, R)> = popover
+        .entries
+        .iter()
+        .filter_map(|(item, rect)| match item {
+            PopItem::Stripe { color } => Some((*color, *rect)),
+            _ => None,
+        })
+        .collect();
+    let rows: Vec<R> = popover
+        .zones
+        .iter()
+        .filter_map(|(zone, rect)| matches!(zone, Zone::OpenRow { .. }).then_some(*rect))
+        .collect();
+    assert_eq!(
+        stripes.iter().map(|(color, _)| *color).collect::<Vec<_>>(),
+        [WORK_BLUE, PERSONAL_VIOLET],
+        "a row whose owner was never read has no stripe"
+    );
+    for ((_, stripe), row) in stripes.iter().zip(&rows) {
+        assert_eq!(
+            (stripe.y, stripe.h),
+            (row.y, row.h),
+            "the stripe runs the whole row"
+        );
+        assert!(
+            stripe.x + stripe.w < row.x,
+            "and sits in the gutter, clear of the text"
+        );
+    }
+    let pixmap = render(&planned);
+    for ink in [WORK_BLUE, PERSONAL_VIOLET] {
+        assert!(
+            tallest_run(&pixmap, ink) >= 20,
+            "the painted popover shows a {ink:?} stripe"
+        );
+    }
 }

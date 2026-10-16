@@ -48,6 +48,7 @@ fn the_request_body_carries_the_document_and_every_search_string() {
         "mergeStateStatus",
         "mergeQueueEntry { position }",
         "autoMergeRequest { enabledAt }",
+        "repository { nameWithOwner isInOrganization }",
         "$first",
     ] {
         assert!(document.contains(needle), "{needle}");

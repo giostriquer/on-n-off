@@ -77,6 +77,14 @@ _Avoid_: shadow, isolated home (that is a sign-in's, removed once it is done)
 An action that changes which logins are saved or which one the provider's CLI uses: save, remove,
 use, sign out, sign in.
 
+### Pull requests
+
+**Pull request context**:
+Whether a pull request is work or personal. It is work when GitHub reports its repository in an
+organization, owned by one or a private fork of one's repository, and personal when a user account
+owns it. A pull request read before GitHub reported this has neither.
+_Avoid_: scope, workspace
+
 ### Usage
 
 **Transcript source**:

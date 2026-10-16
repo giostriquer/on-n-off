@@ -2,7 +2,7 @@ use super::model::ShowMode;
 use serde::Deserialize;
 
 pub const MAX_MESSAGE: usize = 262_144;
-pub const PROTOCOL_VERSION: u64 = 5;
+pub const PROTOCOL_VERSION: u64 = 6;
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]

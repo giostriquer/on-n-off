@@ -17,7 +17,7 @@ query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $m
 fragment pr on PullRequest {
   id number title url isDraft updatedAt headRefName baseRefName reviewDecision
   mergeable mergeStateStatus mergeQueueEntry { position } autoMergeRequest { enabledAt }
-  repository { nameWithOwner }
+  repository { nameWithOwner isInOrganization }
   author { login }
   commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
 }";

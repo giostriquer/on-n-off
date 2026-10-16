@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-public let protocolVersion = 5
+public let protocolVersion = 6
 public let maxSessions = 12
 
 public enum ProviderId: String, Codable, CaseIterable, Sendable {
@@ -386,6 +386,13 @@ public enum MergeKind: String, Codable, Sendable {
   }
 }
 
+public enum PrContext: String, Codable, Sendable {
+  case work, personal, unknown
+  public init(from decoder: Decoder) throws {
+    self = try decodeLenient(decoder, unknown: .unknown)
+  }
+}
+
 public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
   public let id: String
   public let number: UInt64
@@ -398,11 +405,12 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
   public let ci: CiState
   public let mergeKind: MergeKind?
   public let updatedAt: String
+  public let context: PrContext?
 
   public init(
     id: String, number: UInt64, title: String, url: String, repo: String, author: String,
     isDraft: Bool, reviewDecision: ReviewDecision?, ci: CiState, mergeKind: MergeKind?,
-    updatedAt: String
+    updatedAt: String, context: PrContext? = nil
   ) {
     self.id = id
     self.number = number
@@ -415,6 +423,7 @@ public struct PullRequest: Codable, Equatable, Identifiable, Sendable {
     self.ci = ci
     self.mergeKind = mergeKind
     self.updatedAt = updatedAt
+    self.context = context
   }
 
   public var passingWithConflicts: Bool { ci == .success && mergeKind == .conflicts }

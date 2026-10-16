@@ -100,6 +100,7 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
         merge_queue: merge_queue(&node["mergeQueueEntry"]),
         auto_merge: node["autoMergeRequest"].is_object(),
         merge_kind: None,
+        in_organization: node["repository"]["isInOrganization"].as_bool(),
     };
     pr.merge_kind = super::merge::classify(&pr);
     Some(pr)
