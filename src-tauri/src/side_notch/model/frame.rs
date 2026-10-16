@@ -1,5 +1,7 @@
 use super::{GithubList, NotchProvider, NotchSettings, PrContext};
-use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ReviewDecision};
+use crate::dto::{
+    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ReviewDecision,
+};
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
 
@@ -61,7 +63,36 @@ pub struct PrRowData {
     pub context: Option<PrContext>,
 }
 
-pub fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
+pub fn rail(
+    settings: &NotchSettings,
+    read: impl Fn(AgentId) -> (Option<NotchProvider>, Vec<LiveSession>),
+    pulls: Option<&GithubPrsDto>,
+    action_error: Option<String>,
+) -> RailData {
+    let mut cells: Vec<CellData> = settings
+        .rail_providers()
+        .into_iter()
+        .filter_map(|agent| {
+            let (reading, sessions) = read(agent);
+            reading.map(|cell| CellData::Provider(ProviderData { cell, sessions }))
+        })
+        .collect();
+    if settings.pull_requests.enabled {
+        if let Some(dto) = pulls {
+            cells.push(CellData::PullRequests(pr_cell(
+                dto,
+                &settings.pull_requests.selected_lists(),
+            )));
+        }
+    }
+    RailData {
+        settings: settings.clone(),
+        cells,
+        action_error,
+    }
+}
+
+fn pr_cell(dto: &GithubPrsDto, selected: &[GithubList]) -> PrCellData {
     PrCellData {
         status: dto.status,
         hint: dto.hint.clone(),
@@ -108,3 +139,6 @@ fn pr_row(pr: &GithubPrDto) -> Option<PrRowData> {
         context: PrContext::of(pr),
     })
 }
+
+#[cfg(test)]
+mod tests;
