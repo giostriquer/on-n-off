@@ -1,6 +1,7 @@
 use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ReviewDecision};
 use crate::side_notch::model::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::side_notch::sessions::LiveSession;
+use serde::Serialize;
 
 pub const MAX_PULL_REQUESTS: usize = 25;
 
@@ -23,7 +24,8 @@ pub struct ProviderData {
     pub sessions: Vec<LiveSession>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrCellData {
     pub status: GithubStatus,
     pub hint: Option<String>,
@@ -31,14 +33,16 @@ pub struct PrCellData {
     pub lists: Vec<PrListData>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrListData {
     pub id: GithubList,
     pub total: u64,
     pub items: Vec<PrRowData>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PrRowData {
     pub id: String,
     pub number: u64,
@@ -47,10 +51,13 @@ pub struct PrRowData {
     pub repo: String,
     pub author: String,
     pub is_draft: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub merge_kind: Option<MergeKind>,
     pub updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<PrContext>,
 }
 

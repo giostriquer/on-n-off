@@ -1,12 +1,7 @@
-use super::host::frame::{CellData, PrCellData, PrListData, PrRowData, ProviderData, RailData};
-use super::model::{
-    workspace_share_wording, GithubList, InnerRing, NotchProvider, NotchSnapshot, PrContext,
-    ShowMode,
-};
+use super::host::frame::{CellData, PrCellData, ProviderData, RailData};
+use super::model::{workspace_share_wording, InnerRing, NotchProvider, NotchSnapshot, ShowMode};
 use super::sessions::LiveSession;
-use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
-};
+use crate::dto::{AgentId, LimitWindowDto, LimitsStatus};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -61,7 +56,7 @@ struct Message<'a> {
     snapshot: &'a NotchSnapshot,
     providers: Vec<MessageProvider<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pull_requests: Option<NativePullRequests>,
+    pull_requests: Option<&'a PrCellData>,
     action_error: &'a Option<String>,
 }
 
@@ -122,83 +117,6 @@ impl From<&NotchProvider> for NativeProvider {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NativePullRequests {
-    status: GithubStatus,
-    hint: Option<String>,
-    stale: bool,
-    lists: Vec<NativePrList>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NativePrList {
-    id: GithubList,
-    total: u64,
-    items: Vec<NativePr>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NativePr {
-    id: String,
-    number: u64,
-    title: String,
-    url: String,
-    repo: String,
-    author: String,
-    is_draft: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    review_decision: Option<ReviewDecision>,
-    ci: CiState,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    merge_kind: Option<MergeKind>,
-    updated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    context: Option<PrContext>,
-}
-
-impl From<&PrCellData> for NativePullRequests {
-    fn from(cell: &PrCellData) -> Self {
-        Self {
-            status: cell.status,
-            hint: cell.hint.clone(),
-            stale: cell.stale,
-            lists: cell.lists.iter().map(NativePrList::from).collect(),
-        }
-    }
-}
-
-impl From<&PrListData> for NativePrList {
-    fn from(list: &PrListData) -> Self {
-        Self {
-            id: list.id,
-            total: list.total,
-            items: list.items.iter().map(NativePr::from).collect(),
-        }
-    }
-}
-
-impl From<&PrRowData> for NativePr {
-    fn from(row: &PrRowData) -> Self {
-        Self {
-            id: row.id.clone(),
-            number: row.number,
-            title: row.title.clone(),
-            url: row.url.clone(),
-            repo: row.repo.clone(),
-            author: row.author.clone(),
-            is_draft: row.is_draft,
-            review_decision: row.review_decision,
-            ci: row.ci,
-            merge_kind: row.merge_kind,
-            updated_at: row.updated_at.clone(),
-            context: row.context,
-        }
-    }
-}
-
 pub fn encode(
     sequence: u64,
     snapshot: &NotchSnapshot,
@@ -216,7 +134,7 @@ pub fn encode(
         })
         .collect();
     let pull_requests = frame.cells.iter().find_map(|cell| match cell {
-        CellData::PullRequests(cell) => Some(NativePullRequests::from(cell)),
+        CellData::PullRequests(cell) => Some(cell),
         CellData::Provider(_) => None,
     });
     serde_json::to_vec(&Message {

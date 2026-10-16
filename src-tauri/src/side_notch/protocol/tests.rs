@@ -1,4 +1,7 @@
 use super::*;
+use crate::dto::GithubStatus;
+use crate::side_notch::host::frame::PrListData;
+use crate::side_notch::model::GithubList;
 
 #[test]
 fn accepts_only_versioned_typed_actions() {
