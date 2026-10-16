@@ -74,7 +74,7 @@ fn the_rail_is_hidden_until_enabled_data_and_displays_agree() {
 }
 
 #[test]
-fn the_pointer_scale_is_the_selected_displays_and_1x_where_the_rail_cannot_show() {
+fn the_pointer_scale_is_the_selected_displays_and_1x_for_a_mirrored_or_duplicated_selection() {
     let mut machine = Machine::new();
     assert_eq!(machine.scale(), 1.0, "no settings yet");
     machine.accept(data(ShowMode::Always));
