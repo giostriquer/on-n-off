@@ -648,7 +648,7 @@ fn a_rejected_mint_login_is_signed_out_and_other_failures_fall_back() {
     );
     assert_eq!(rejected, Err(ServeFailure::SignedOut));
 
-    let home_data = root.join(".local").join("share").join("muse");
+    let home_data = crate::paths::muse_data_for(&root);
     let mut replies = happy_replies();
     replies[1]["result"]["museHome"] = json!(home_data.to_string_lossy());
     let network = read_current(
