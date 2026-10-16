@@ -2,9 +2,9 @@ import { useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
-import { agentRoot, configMcpCount, mcpConfigPath } from "$lib/catalog";
+import { configMcpCount } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
-import { providerBinary } from "$lib/providers";
+import { mcpReadOnlyNotice, providerBinary, providerPaths } from "$lib/providers";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
 import type { AgentId, AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
@@ -137,7 +137,8 @@ export function AgentConfig({
   onPickFolder,
 }: AgentConfigProps) {
   const [query, setQuery] = useState("");
-  const root = agentRoot(agent.id);
+  const paths = providerPaths(agent.id);
+  const root = paths.home;
   const pluginCount = tab?.plugins.length ?? 0;
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
@@ -174,7 +175,7 @@ export function AgentConfig({
     },
     {
       label: "MCP config",
-      value: mcpConfigPath(agent.id),
+      value: paths.mcpConfig,
       state: tab ? `${mcpCount} FOUND` : "NOT READ",
       ok: Boolean(tab),
     },
@@ -387,7 +388,7 @@ export function AgentConfig({
               ok={agent.installFolder}
             />
             <Capability label="Plugin toggle" detail={pluginToggleValue(agent.id)} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={agent.id !== "cursor" && agent.id !== "muse"} />
+            <Capability label="MCP toggle" detail={mcpToggleValue(agent.id)} ok={mcpReadOnlyNotice(agent.id) === null} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 

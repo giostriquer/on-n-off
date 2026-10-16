@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
-import { USAGE_PROVIDERS, providerLabel, providerNames } from "$lib/providers";
+import { USAGE_PROVIDERS, providerColor, providerLabel, providerNames } from "$lib/providers";
 import { foldModelsByDay, foldUsage, usagePricingNote } from "$lib/usageMerge";
 import { UsageCost } from "./UsageCost";
 import {
@@ -18,7 +18,6 @@ import {
 import type { UsageMetric } from "$lib/usageTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { Segmented } from "@/components/Segmented";
-import { providerColor } from "$lib/providerStyle";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
 import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
 

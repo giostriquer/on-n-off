@@ -1,6 +1,6 @@
 import { copy } from "./copy";
 import { isLocalOrigin, isPluginOrigin, isProjectOrigin } from "./project";
-import type { AgentId, AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
+import type { AgentTabDto, HookDto, McpServerDto, PluginDto, SkillDto } from "./types";
 
 export type Screen =
   | "overview"
@@ -312,51 +312,6 @@ export function masterAllOn(tab: AgentTabDto | null): boolean {
     skills.every((skill) => skill.enabled) &&
     mcps.every((server) => server.enabled)
   );
-}
-
-export function agentRoot(agentId: AgentId): string {
-  switch (agentId) {
-    case "claude":
-      return "~/.claude";
-    case "codex":
-      return "~/.codex";
-    case "antigravity":
-      return "~/.gemini";
-    case "cursor":
-      return "~/.cursor";
-    case "muse":
-      return "~/.local/share/muse";
-  }
-}
-
-export function mcpConfigPath(agentId: AgentId): string {
-  switch (agentId) {
-    case "claude":
-      return "~/.claude.json";
-    case "codex":
-      return "~/.codex/config.toml";
-    case "antigravity":
-      return "~/.gemini/config/mcp_config.json";
-    case "cursor":
-      return "~/.cursor/mcp.json";
-    case "muse":
-      return "~/.config/muse/settings.json";
-  }
-}
-
-export function scopeConfigPath(agentId: AgentId): string {
-  switch (agentId) {
-    case "claude":
-      return "~/.claude/settings.json";
-    case "codex":
-      return "~/.codex/config.toml";
-    case "antigravity":
-      return "~/.gemini/antigravity-cli/";
-    case "cursor":
-      return "~/.cursor/";
-    case "muse":
-      return "~/.config/muse/settings.json";
-  }
 }
 
 export function globalItemCount(tab: AgentTabDto | null | undefined): number {

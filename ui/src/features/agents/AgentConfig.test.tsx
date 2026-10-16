@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import { mcpConfigPath } from "$lib/catalog";
+import { providerPaths } from "$lib/providers";
 import type { AgentInfo, AgentTabDto, McpServerDto } from "$lib/types";
 import { AgentConfig } from "./AgentConfig";
 
@@ -48,7 +48,7 @@ it("counts only the servers in the MCP config file beside its path", () => {
   };
   render(<AgentConfig agent={claude} tab={tab} />);
 
-  const row = screen.getByTitle(mcpConfigPath("claude")).parentElement!;
+  const row = screen.getByTitle(providerPaths("claude").mcpConfig).parentElement!;
   expect(within(row).getByText("2 FOUND")).toBeInTheDocument();
 });
 

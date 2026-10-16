@@ -53,3 +53,92 @@ export function providerNames(ids: readonly AgentId[]): string {
 export function providerRecord<T>(value: (id: AgentId) => T): Record<AgentId, T> {
   return Object.fromEntries(PROVIDER_IDS.map((id) => [id, value(id)])) as Record<AgentId, T>;
 }
+
+type ProviderLook = {
+  readonly icon: string;
+  readonly bar: string;
+  readonly chart: { readonly light: string; readonly dark: string };
+};
+
+const LOOK: Readonly<Record<AgentId, ProviderLook>> = {
+  claude: { icon: "#d97757", bar: "#d97757", chart: { light: "#d9773a", dark: "#d97757" } },
+  codex: { icon: "var(--silkscreen)", bar: "var(--silkscreen)", chart: { light: "#2a2a2a", dark: "#ececec" } },
+  antigravity: { icon: "#3186ff", bar: "var(--mute)", chart: { light: "#6c727c", dark: "#8c939d" } },
+  cursor: { icon: "var(--silkscreen)", bar: "#7aa2ff", chart: { light: "#3b6dff", dark: "#7aa2ff" } },
+  muse: { icon: "#0082fb", bar: "#0082fb", chart: { light: "#0082fb", dark: "#0082fb" } },
+};
+
+export function providerColor(id: AgentId): string {
+  return LOOK[id].bar;
+}
+
+export function providerIconColor(id: AgentId): string {
+  return LOOK[id].icon;
+}
+
+export function providerChartColor(id: AgentId, dark: boolean): string {
+  return LOOK[id].chart[dark ? "dark" : "light"];
+}
+
+const MCP_READ_ONLY: Readonly<Record<AgentId, string | null>> = {
+  claude: null,
+  codex: null,
+  antigravity: null,
+  cursor:
+    "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
+  muse: "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.",
+};
+
+export function mcpReadOnlyNotice(id: AgentId): string | null {
+  return MCP_READ_ONLY[id];
+}
+
+export type ProviderPaths = {
+  readonly home: string;
+  readonly mcpConfig: string;
+  readonly scopeConfig: string;
+  readonly userSkills: string;
+  readonly projectSkills: string;
+};
+
+const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
+  claude: {
+    home: "~/.claude",
+    mcpConfig: "~/.claude.json",
+    scopeConfig: "~/.claude/settings.json",
+    userSkills: "~/.claude/skills",
+    projectSkills: ".claude/skills",
+  },
+  codex: {
+    home: "~/.codex",
+    mcpConfig: "~/.codex/config.toml",
+    scopeConfig: "~/.codex/config.toml",
+    userSkills: "~/.codex/skills",
+    projectSkills: ".codex/skills",
+  },
+  antigravity: {
+    home: "~/.gemini",
+    mcpConfig: "~/.gemini/config/mcp_config.json",
+    scopeConfig: "~/.gemini/antigravity-cli/",
+    userSkills: "~/.gemini/antigravity-cli/skills",
+    projectSkills: ".agents/skills",
+  },
+  cursor: {
+    home: "~/.cursor",
+    mcpConfig: "~/.cursor/mcp.json",
+    scopeConfig: "~/.cursor/",
+    userSkills: "~/.cursor/skills",
+    projectSkills: ".cursor/skills",
+  },
+  muse: {
+    home: "~/.local/share/muse",
+    mcpConfig: "~/.config/muse/settings.json",
+    scopeConfig: "~/.config/muse/settings.json",
+    userSkills: "~/.config/muse/skills",
+    projectSkills: ".agents/skills",
+  },
+};
+
+export function providerPaths(id: AgentId): ProviderPaths {
+  return PATHS[id];
+}

@@ -10,7 +10,6 @@ import {
 } from "react";
 import * as api from "$lib/api";
 import {
-  agentRoot,
   emptyTabDto,
   type LiveRow,
   type Screen,
@@ -19,7 +18,7 @@ import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
 import { visibleAgentIds } from "$lib/appSettings";
-import { PROVIDER_IDS, isAgentId, providerRecord } from "$lib/providers";
+import { PROVIDER_IDS, isAgentId, providerPaths, providerRecord } from "$lib/providers";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { FilteredTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
@@ -813,7 +812,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const { counts, drift, allOn } = catalogInventory;
   const live = catalogFilterView.live;
   const cliLine = currentAgent.cliOk
-    ? `${currentAgent.id} · ${agentRoot(currentAgent.id)}`
+    ? `${currentAgent.id} · ${providerPaths(currentAgent.id).home}`
     : `${currentAgent.id} · offline`;
   const masterNote = allOn
     ? `everything live on ${currentAgent.displayName}`

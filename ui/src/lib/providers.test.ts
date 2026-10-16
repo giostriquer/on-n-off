@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { PROVIDER_IDS, isAgentId, providerLabel, providerNames, providerRecord } from "./providers";
+import {
+  PROVIDER_IDS,
+  isAgentId,
+  providerChartColor,
+  providerColor,
+  providerIconColor,
+  providerLabel,
+  providerNames,
+  providerRecord,
+} from "./providers";
 
 describe("providers", () => {
   it("labels every provider for display", () => {
@@ -26,5 +35,18 @@ describe("providers", () => {
     for (const id of PROVIDER_IDS) expect(record[id]).toBe(`${id}!`);
     const lists = providerRecord(() => []);
     expect(lists.claude).not.toBe(lists.codex);
+  });
+
+  it.each([
+    ["claude", "#d97757", "#d97757", "#d9773a", "#d97757"],
+    ["codex", "var(--silkscreen)", "var(--silkscreen)", "#2a2a2a", "#ececec"],
+    ["antigravity", "var(--mute)", "#3186ff", "#6c727c", "#8c939d"],
+    ["cursor", "#7aa2ff", "var(--silkscreen)", "#3b6dff", "#7aa2ff"],
+    ["muse", "#0082fb", "#0082fb", "#0082fb", "#0082fb"],
+  ] as const)("paints %s's bars, icon and chart bands in light and dark", (id, bar, icon, light, dark) => {
+    expect(providerColor(id)).toBe(bar);
+    expect(providerIconColor(id)).toBe(icon);
+    expect(providerChartColor(id, false)).toBe(light);
+    expect(providerChartColor(id, true)).toBe(dark);
   });
 });
