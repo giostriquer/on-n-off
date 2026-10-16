@@ -255,8 +255,33 @@ fn a_signed_in_api_key_login_blocks_a_switch_and_is_left_alone() {
     fs::write(native.auth_file(), api_key).unwrap();
 
     assert!(native.read().unwrap().is_some());
-    assert!(switch_to_a_saved_login(&native).is_err());
+    assert_eq!(
+        switch_to_a_saved_login(&native),
+        Err("API key logins cannot be saved as subscription profiles.".into())
+    );
     assert_eq!(fs::read_to_string(native.auth_file()).unwrap(), api_key);
+}
+
+#[test]
+fn a_malformed_saved_login_is_refused_and_the_signed_in_one_left_alone() {
+    let dir = scratch_dir("muse-malformed-login");
+    let store = MuseNative::private(&dir);
+    store.write(Some(&login("you@example.com", "t1"))).unwrap();
+    let before = fs::read_to_string(store.auth_file()).unwrap();
+
+    for malformed in [
+        Login {
+            auth: json!("x"),
+            account: login("you@example.com", "t2").account,
+        },
+        Login {
+            auth: login("you@example.com", "t2").auth,
+            account: Value::Null,
+        },
+    ] {
+        assert_eq!(store.write(Some(&malformed)), Err(MALFORMED_LOGIN.into()));
+    }
+    assert_eq!(fs::read_to_string(store.auth_file()).unwrap(), before);
 }
 
 #[test]
@@ -416,7 +441,10 @@ mod keychain {
             });
 
         assert_eq!(read.unwrap().unwrap().auth, json!({"api_key": "k"}));
-        assert!(switched.is_err());
+        assert_eq!(
+            switched,
+            Err("API key logins cannot be saved as subscription profiles.".into())
+        );
         assert_eq!(fs::read_to_string(store.auth_file()).unwrap(), api_key);
         assert!(!sent
             .iter()
