@@ -52,10 +52,14 @@ fn the_intervals_are_the_ones_the_shared_reads_keep() {
         app.limits_interval(),
         crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
     );
-    assert_eq!(
-        app.settings_revision(),
-        crate::side_notch::config::revision()
-    );
+}
+
+#[test]
+fn the_notch_takes_settings_at_the_revision_they_were_saved_at() {
+    let (app, _) = production();
+    let saved = crate::side_notch::config::bump_revision();
+    assert_ne!(saved, 0);
+    assert_eq!(app.settings_revision(), saved);
 }
 
 #[test]
