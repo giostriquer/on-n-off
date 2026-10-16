@@ -128,6 +128,10 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
     assert!(
+        inks(&planned).contains(&("Sign in with the GitHub CLI.".to_string(), MUTED_INK)),
+        "an unreadable read shows its hint, muted"
+    );
+    assert!(
         !popover.entries.iter().any(
             |(item, _)| matches!(item, PopItem::Text { text, .. } if text.contains("stale row"))
         ),
@@ -451,11 +455,67 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     paused.message = Some("Refresh failed.".into());
     paused.reading.windows.clear();
 
-    let texts = popover_texts(projected(paused));
+    let (planned, _) = popover_render(projected(paused));
+    let inks = inks(&planned);
     assert!(
-        texts.contains(&"Refresh paused. Last observed values below.".to_string()),
-        "{texts:?}"
+        inks.contains(&("Refresh failed.".to_string(), MUTED_INK)),
+        "{inks:?}"
     );
+    assert!(
+        inks.contains(&(
+            "Refresh paused. Last observed values below.".to_string(),
+            WARN_AMBER
+        )),
+        "{inks:?}"
+    );
+}
+
+fn inks(planned: &Plan) -> Vec<(String, Color)> {
+    planned
+        .popover
+        .as_ref()
+        .expect("the popover is open")
+        .entries
+        .iter()
+        .filter_map(|(item, _)| match item {
+            PopItem::Text { text, color, .. } => Some((text.clone(), *color)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn each_badge_wears_the_ink_of_its_tone() {
+    let mut drafted = pr(1, "Fix one", "o/r");
+    drafted["isDraft"] = true.into();
+    drafted["mergeKind"] = "behind".into();
+    let mut rejected = pr(2, "Fix two", "o/r");
+    rejected["reviewDecision"] = "CHANGES_REQUESTED".into();
+    let mut approved = pr(3, "Fix three", "o/r");
+    approved["reviewDecision"] = "APPROVED".into();
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![pulls(vec![drafted, rejected, approved])]),
+        Hover {
+            active: Some(0),
+            ..Hover::default()
+        },
+    )
+    .expect("fits");
+    let inks = inks(&planned);
+    for badge in [
+        ("Draft", MUTED_INK),
+        ("Behind base", WARN_AMBER),
+        ("Changes requested", TRIP_RED),
+        ("Approved", LIVE_GREEN),
+    ] {
+        assert!(
+            inks.contains(&(badge.0.to_string(), badge.1)),
+            "{badge:?} in {inks:?}"
+        );
+    }
 }
 
 #[test]
