@@ -181,6 +181,39 @@ fn a_cli_that_answers_initialize_and_then_exits_unsuccessfully_keeps_the_closed_
 }
 
 #[test]
+fn a_request_to_a_cli_that_has_already_exited_is_closed_and_gets_the_guidance() {
+    let mut process = process(
+        &CliStub::new("acme").exit(2),
+        "json-line-write-exited",
+        LITE,
+    );
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = process.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(started.elapsed() < ANSWER_DEADLINE, "the stub never exited");
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    let error = process
+        .send(&json!({"id": 1, "method": "initialize", "params": {}}))
+        .unwrap_err();
+
+    assert!(
+        error
+            .message
+            .starts_with("Could not write to Acme server: "),
+        "{}",
+        error.message
+    );
+    assert_eq!(
+        explained(LITE, false, error, Some(status)),
+        "Acme CLI exited early; update it."
+    );
+}
+
+#[test]
 fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
     let message = explained(
         STRICT,

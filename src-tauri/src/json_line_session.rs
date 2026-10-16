@@ -314,14 +314,15 @@ impl Transport for Process {
             .stdin
             .as_mut()
             .ok_or_else(|| Failure::new(FailureKind::Closed, format!("{name} input is closed.")))?;
-        serde_json::to_writer(&mut *stdin, message).map_err(|error| {
+        let mut line = serde_json::to_vec(message).map_err(|error| {
             Failure::new(
                 FailureKind::Other,
                 format!("Could not encode {name} request: {error}"),
             )
         })?;
+        line.push(b'\n');
         stdin
-            .write_all(b"\n")
+            .write_all(&line)
             .and_then(|()| stdin.flush())
             .map_err(|error| {
                 Failure::new(
