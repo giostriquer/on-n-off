@@ -239,10 +239,7 @@ fn a_helper_that_breaks_or_goes_away_is_restarted_after_a_wait() {
     let later = at + Duration::from_secs(1);
     let helper = attach(&mut pipe, later);
     drop(helper.events);
-    assert_eq!(
-        received(&mut pipe, later).0,
-        Err("Native notch stopped unexpectedly. Retrying…".into())
-    );
+    assert_eq!(received(&mut pipe, later).0, Err(STOPPED.into()));
     assert_eq!(
         pipe.connect(later + Duration::from_millis(1_999)),
         Ok(Link::Closed)
@@ -297,4 +294,13 @@ fn frames_go_out_numbered_one_two_three() {
         helper.events.send(Ok(Action::Ack { sequence })).unwrap();
         assert_eq!(received(&mut pipe, at).1, [Inbound::Confirmed]);
     }
+}
+
+#[test]
+fn a_pipe_without_a_helper_neither_sends_nor_receives() {
+    let (mut pipe, _lifetime) = Pipe::new();
+    let at = Instant::now();
+    assert_eq!(received(&mut pipe, at).0, Err(STOPPED.into()));
+    assert_eq!(pipe.send(at, &snapshot(), frame()), Err(STOPPED.into()));
+    assert_eq!(pipe.sequence, 0, "nothing was numbered");
 }

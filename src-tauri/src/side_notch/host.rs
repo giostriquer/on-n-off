@@ -12,6 +12,8 @@ pub mod frame;
 
 use frame::{CellData, ProviderData, RailData};
 
+pub(super) const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
+
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const SESSIONS_INTERVAL: Duration = Duration::from_secs(10);
 const READ_DEADLINE: Duration = Duration::from_secs(60);

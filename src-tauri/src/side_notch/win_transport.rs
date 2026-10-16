@@ -1,14 +1,12 @@
 #![allow(unsafe_code)]
 
 use super::host::frame::RailData;
-use super::host::{self, Action, Inbound, Link, Transport};
+use super::host::{self, Action, Inbound, Link, Transport, STOPPED};
 use super::model::NotchSnapshot;
 use super::win_window::{WinAction, WindowMsg};
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::Instant;
 use tauri::AppHandle;
-
-const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
 
 #[derive(Default)]
 struct State {
@@ -39,22 +37,24 @@ impl host::Lifetime for Lifetime {
     }
 }
 
+struct Window {
+    messages: mpsc::Sender<WindowMsg>,
+    actions: mpsc::Receiver<WinAction>,
+}
+
 pub struct Overlay {
     app: AppHandle,
     lifetime: Arc<Lifetime>,
-    window: Option<mpsc::Sender<WindowMsg>>,
-    actions: mpsc::Receiver<WinAction>,
+    window: Option<Window>,
 }
 
 impl Overlay {
     pub fn new(app: AppHandle) -> (Self, Arc<Lifetime>) {
         let lifetime = Arc::new(Lifetime::default());
-        let (_, actions) = mpsc::channel();
         let overlay = Self {
             app,
             lifetime: lifetime.clone(),
             window: None,
-            actions,
         };
         (overlay, lifetime)
     }
@@ -101,22 +101,20 @@ impl Transport for Overlay {
             return Err("Native notch is shutting down.".into());
         }
         let (action_tx, actions) = mpsc::channel::<WinAction>();
-        let window = super::win_window::spawn(action_tx);
-        state.window = Some(window.clone());
+        let messages = super::win_window::spawn(action_tx);
+        state.window = Some(messages.clone());
         drop(state);
-        self.window = Some(window);
-        self.actions = actions;
+        self.window = Some(Window { messages, actions });
         Ok(Link::Opened)
     }
 
     fn receive(&mut self, _: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
-        let Some(window) = &self.window else {
-            return Ok(());
+        let actions: Vec<WinAction> = match &self.window {
+            Some(window) if window.messages.send(WindowMsg::Ping).is_ok() => {
+                window.actions.try_iter().collect()
+            }
+            _ => return Err(self.lost()),
         };
-        if window.send(WindowMsg::Ping).is_err() {
-            return Err(self.lost());
-        }
-        let actions: Vec<WinAction> = self.actions.try_iter().collect();
         inbound.extend(actions.into_iter().map(|action| self.answer(action)));
         Ok(())
     }
@@ -129,7 +127,7 @@ impl Transport for Overlay {
         let sent = self
             .window
             .as_ref()
-            .is_some_and(|window| window.send(WindowMsg::Data(frame)).is_ok());
+            .is_some_and(|window| window.messages.send(WindowMsg::Data(frame)).is_ok());
         if sent {
             Ok(())
         } else {
@@ -139,7 +137,7 @@ impl Transport for Overlay {
 
     fn close(&mut self) {
         if let Some(window) = self.window.take() {
-            let _ = window.send(WindowMsg::Shutdown);
+            let _ = window.messages.send(WindowMsg::Shutdown);
         }
         self.lifetime.state().window = None;
     }

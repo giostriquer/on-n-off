@@ -1,5 +1,5 @@
 use super::host::frame::RailData;
-use super::host::{self, Inbound, Link, Transport};
+use super::host::{self, Inbound, Link, Transport, STOPPED};
 use super::model::NotchSnapshot;
 use super::protocol::{decode_event, encode, Action, MAX_MESSAGE};
 use std::{
@@ -142,7 +142,7 @@ impl Transport for Pipe {
 
     fn receive(&mut self, now: Instant, inbound: &mut Vec<Inbound>) -> Result<(), String> {
         let Some(connection) = &self.connection else {
-            return Ok(());
+            return Err(STOPPED.into());
         };
         let failure = loop {
             let action = match connection.events.try_recv() {
@@ -167,9 +167,7 @@ impl Transport for Pipe {
                 Ok(Ok(Action::SetShow { show })) => host::Action::SetShow(show),
                 Ok(Err(error)) => break Some(error),
                 Err(mpsc::TryRecvError::Empty) => break None,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    break Some("Native notch stopped unexpectedly. Retrying…".to_string());
-                }
+                Err(mpsc::TryRecvError::Disconnected) => break Some(STOPPED.into()),
             };
             inbound.push(Inbound::Action(action));
         };
@@ -195,7 +193,7 @@ impl Transport for Pipe {
         frame: RailData,
     ) -> Result<(), String> {
         let Some(connection) = &self.connection else {
-            return Ok(());
+            return Err(STOPPED.into());
         };
         self.sequence += 1;
         match encode(self.sequence, snapshot, &frame).and_then(|message| connection.send(message)) {

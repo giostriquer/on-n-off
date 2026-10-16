@@ -1,7 +1,5 @@
 use super::*;
 
-const STOPPED: &str = "Native notch stopped unexpectedly. Retrying…";
-
 #[test]
 fn delivery_is_dirty_driven_with_a_slow_heartbeat() {
     let app = app_with(&[(AgentId::Claude, 10.0)]);
