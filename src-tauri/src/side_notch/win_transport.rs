@@ -42,17 +42,29 @@ struct Window {
     actions: mpsc::Receiver<WinAction>,
 }
 
+type Opener = Box<dyn Fn(&str) -> Result<(), String> + Send>;
+type Copier = fn(&str, &str) -> Result<(), String>;
+
 pub struct Overlay {
-    app: AppHandle,
+    open_url: Opener,
+    copy: Copier,
     lifetime: Arc<Lifetime>,
     window: Option<Window>,
 }
 
 impl Overlay {
     pub fn new(app: AppHandle) -> (Self, Arc<Lifetime>) {
+        Self::with(
+            Box::new(move |url| open_in_browser(&app, url)),
+            copy_review_request,
+        )
+    }
+
+    fn with(open_url: Opener, copy: Copier) -> (Self, Arc<Lifetime>) {
         let lifetime = Arc::new(Lifetime::default());
         let overlay = Self {
-            app,
+            open_url,
+            copy,
             lifetime: lifetime.clone(),
             window: None,
         };
@@ -71,24 +83,22 @@ impl Overlay {
             WinAction::OpenLimits => Inbound::Action(Action::OpenLimits),
             WinAction::OpenPullRequests => Inbound::Action(Action::OpenPullRequests),
             WinAction::SetShow(show) => Inbound::Action(Action::SetShow(show)),
-            WinAction::OpenUrl(url) => Inbound::Handled(self.open_url(&url)),
+            WinAction::OpenUrl(url) if crate::item_install::is_openable_url(&url) => {
+                Inbound::Handled((self.open_url)(&url))
+            }
+            WinAction::OpenUrl(url) => Inbound::Handled(Err(format!("refusing to open {url}"))),
             WinAction::CopyReviewRequest { title, url } => {
-                Inbound::Handled(copy_review_request(&title, &url))
+                Inbound::Handled((self.copy)(&title, &url))
             }
         }
     }
+}
 
-    fn open_url(&self, url: &str) -> Result<(), String> {
-        use tauri_plugin_opener::OpenerExt;
-        if crate::item_install::is_openable_url(url) {
-            self.app
-                .opener()
-                .open_url(url, None::<&str>)
-                .map_err(|error| error.to_string())
-        } else {
-            Err(format!("refusing to open {url}"))
-        }
-    }
+fn open_in_browser(app: &AppHandle, url: &str) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| error.to_string())
 }
 
 impl Transport for Overlay {
@@ -180,3 +190,6 @@ fn copy_review_request(title: &str, url: &str) -> Result<(), String> {
         result
     }
 }
+
+#[cfg(test)]
+mod tests;
