@@ -1,7 +1,7 @@
 #![allow(unsafe_code)]
 
 use super::host::frame::RailData;
-use super::model::{NotchSettings, ShowMode};
+use super::model::{selected_display, NotchSettings, ShowMode};
 use super::win_paint::{self, Hover, Plan};
 use crate::side_notch::model::Display;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -147,17 +147,11 @@ impl Machine {
     }
 
     pub fn scale(&self) -> f64 {
-        let Some(settings) = self.settings() else {
-            return 1.0;
-        };
-        let Some(id) = settings.display_id.as_deref() else {
-            return 1.0;
-        };
-        self.displays
-            .iter()
-            .find(|display| display.id == id)
-            .map(|display| display.scale)
-            .unwrap_or(1.0)
+        self.selected().map_or(1.0, |display| display.scale)
+    }
+
+    fn selected(&self) -> Option<&Display> {
+        selected_display(self.settings()?, &self.displays)
     }
 
     pub fn plan(&self) -> Option<Plan> {
@@ -611,14 +605,7 @@ fn window_position(hwnd: isize) -> (i32, i32) {
 }
 
 fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
-    let Some(settings) = machine.settings() else {
-        return false;
-    };
-    let Some(selected) = settings
-        .display_id
-        .as_deref()
-        .and_then(|id| machine.displays.iter().find(|display| display.id == id))
-    else {
+    let Some(selected) = machine.selected() else {
         return false;
     };
     let (mx, my, mw, mh) = (

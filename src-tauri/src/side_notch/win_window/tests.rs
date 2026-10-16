@@ -74,6 +74,25 @@ fn the_rail_is_hidden_until_enabled_data_and_displays_agree() {
 }
 
 #[test]
+fn the_pointer_scale_is_the_selected_displays_and_1x_where_the_rail_cannot_show() {
+    let mut machine = Machine::new();
+    assert_eq!(machine.scale(), 1.0, "no settings yet");
+    machine.accept(data(ShowMode::Always));
+    let mut scaled = display("d1", false);
+    scaled.scale = 1.5;
+    machine.set_displays(vec![scaled.clone()]);
+    assert_eq!(machine.scale(), 1.5);
+    let mut mirrored = scaled.clone();
+    mirrored.mirrored = true;
+    machine.set_displays(vec![mirrored]);
+    assert!(machine.plan().is_none());
+    assert_eq!(machine.scale(), 1.0, "a mirrored selection");
+    machine.set_displays(vec![scaled.clone(), scaled]);
+    assert!(machine.plan().is_none());
+    assert_eq!(machine.scale(), 1.0, "two displays with the selected id");
+}
+
+#[test]
 fn the_hover_strip_opens_the_rail_and_the_grace_closes_it() {
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::OnHover));
