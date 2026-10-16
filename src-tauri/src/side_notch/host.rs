@@ -404,13 +404,11 @@ impl<T: Transport, A: App> Host<T, A> {
     fn rail(&self) -> RailData {
         frame::rail(
             &self.snapshot.settings,
-            |agent| match RAIL_ORDER.iter().position(|known| *known == agent) {
-                Some(index) => (
-                    self.providers[index].value.clone(),
-                    self.sessions.value[index].clone(),
-                ),
-                None => (None, Vec::new()),
-            },
+            RAIL_ORDER
+                .into_iter()
+                .zip(&self.providers)
+                .zip(&self.sessions.value)
+                .map(|((agent, poll), sessions)| (agent, poll.value.clone(), sessions.clone())),
             self.pulls.value.as_ref(),
             self.action_error.clone(),
         )

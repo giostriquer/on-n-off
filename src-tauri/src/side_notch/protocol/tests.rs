@@ -1,6 +1,7 @@
 use super::*;
 use crate::side_notch::model::frame;
 use crate::side_notch::model::NotchSettings;
+use crate::side_notch::sessions::LiveSession;
 
 #[test]
 fn accepts_only_versioned_typed_actions() {
@@ -45,7 +46,10 @@ fn rejects_other_protocols_commands_and_unbounded_messages() {
     assert!(decode_event(&vec![b' '; MAX_MESSAGE + 1]).is_err());
 }
 
-fn encoded(settings: NotchSettings, reading: Option<NotchProvider>) -> serde_json::Value {
+fn encoded(
+    settings: NotchSettings,
+    reads: Vec<(AgentId, Option<NotchProvider>, Vec<LiveSession>)>,
+) -> serde_json::Value {
     let snapshot = NotchSnapshot {
         revision: 0,
         supported: true,
@@ -54,32 +58,30 @@ fn encoded(settings: NotchSettings, reading: Option<NotchProvider>) -> serde_jso
         displays: Vec::new(),
         error: None,
     };
-    let frame = frame::rail(
-        &snapshot.settings,
-        |_| (reading.clone(), Vec::new()),
-        None,
-        None,
-    );
+    let frame = frame::rail(&snapshot.settings, reads, None, None);
     serde_json::from_slice(&encode(1, &snapshot, &frame).unwrap()).unwrap()
 }
 
-fn sent_reading(entries: serde_json::Value) -> serde_json::Value {
+fn sent_reading(provider: AgentId, entries: serde_json::Value) -> serde_json::Value {
     let reading = NotchProvider::current(serde_json::from_value(entries).unwrap()).unwrap();
     let only = NotchSettings {
-        providers: vec![reading.provider],
+        providers: vec![provider],
         ..NotchSettings::default()
     };
-    let cell = encoded(only, Some(reading))["cells"][0].clone();
+    let cell = encoded(only, vec![(provider, Some(reading), Vec::new())])["cells"][0].clone();
     assert_eq!(cell["kind"], "provider");
     cell
 }
 
 #[test]
 fn sends_only_the_current_account_and_omits_account_identifiers() {
-    let cell = sent_reading(serde_json::json!([
-        {"provider":"claude","status":"ok","currentAccount":false,"plan":"remembered-plan","windows":[]},
-        {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[]}
-    ]));
+    let cell = sent_reading(
+        AgentId::Claude,
+        serde_json::json!([
+            {"provider":"claude","status":"ok","currentAccount":false,"plan":"remembered-plan","windows":[]},
+            {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[]}
+        ]),
+    );
     assert_eq!(cell["provider"], "claude");
     assert_eq!(cell["sessions"], serde_json::json!([]));
     let reading = &cell["reading"];
@@ -99,7 +101,7 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
 
 #[test]
 fn the_headline_and_the_inner_ring_travel_as_window_ids() {
-    let reading = sent_reading(serde_json::json!([
+    let reading = sent_reading(AgentId::Claude, serde_json::json!([
         {"provider":"claude","status":"ok","currentAccount":true,"windows":[
             {"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7.0,"observedAt":"2026-09-01T10:00:00Z"},
             {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13.0,"observedAt":"2026-09-01T10:00:00Z"}
@@ -115,7 +117,7 @@ fn the_headline_and_the_inner_ring_travel_as_window_ids() {
 
 #[test]
 fn a_business_members_credit_share_travels_worded_with_the_readers_meter() {
-    let reading = sent_reading(serde_json::json!([
+    let reading = sent_reading(AgentId::Codex, serde_json::json!([
         {"provider":"codex","status":"ok","currentAccount":true,"windows":[],
          "workspaceCredits":{"limit":"25000","used":"8000","usedPercent":40.0,"resetsAt":"2026-10-01T12:00:00+00:00","reached":false}}
     ]))["reading"]
@@ -137,7 +139,7 @@ fn every_cell_travels_in_rail_order_and_a_cell_not_read_yet_carries_only_its_not
         providers: vec![AgentId::Muse, AgentId::Claude],
         ..NotchSettings::default()
     };
-    let message = encoded(settings, None);
+    let message = encoded(settings, Vec::new());
     assert_eq!(message["version"], PROTOCOL_VERSION);
     assert_eq!(PROTOCOL_VERSION, 7);
     assert_eq!(message["sequence"], 1);

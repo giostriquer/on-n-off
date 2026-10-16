@@ -27,8 +27,8 @@ fn settings(lists: Vec<GithubList>) -> NotchSettings {
     settings
 }
 
-fn unread(_: AgentId) -> (Option<NotchProvider>, Vec<LiveSession>) {
-    (None, Vec::new())
+fn unread() -> Vec<(AgentId, Option<NotchProvider>, Vec<LiveSession>)> {
+    Vec::new()
 }
 
 fn pr_cell(frame: &RailData) -> &PrReading {
@@ -61,7 +61,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
 
     let frame = rail(
         &settings(vec![GithubList::Assigned, GithubList::Mine]),
-        unread,
+        unread(),
         Some(&dto),
         None,
     );
@@ -93,7 +93,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
 
     let frame = rail(
         &settings(vec![GithubList::ReviewRequested]),
-        unread,
+        unread(),
         Some(&dto),
         None,
     );
@@ -137,7 +137,12 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
         row(2, false.into()),
         row(3, serde_json::Value::Null),
     ]);
-    let frame = rail(&settings(vec![GithubList::Mine]), unread, Some(&dto), None);
+    let frame = rail(
+        &settings(vec![GithubList::Mine]),
+        unread(),
+        Some(&dto),
+        None,
+    );
     let rows = &pr_cell(&frame).lists[0].items;
     assert_eq!(
         rows.iter().map(|row| row.tag).collect::<Vec<_>>(),
@@ -165,7 +170,7 @@ fn the_pr_cell_is_there_only_while_it_is_on() {
     let dto = prs(vec![pr(1)]);
     let mut off = settings(vec![GithubList::Mine]);
     off.pull_requests.enabled = false;
-    let without = rail(&off, unread, Some(&dto), None);
+    let without = rail(&off, unread(), Some(&dto), None);
     assert_eq!(without.cells.len(), off.cell_count());
     assert!(without
         .cells
@@ -173,7 +178,7 @@ fn the_pr_cell_is_there_only_while_it_is_on() {
         .all(|cell| matches!(cell, CellData::Provider(_))));
     let on = rail(
         &settings(vec![GithubList::Mine]),
-        unread,
+        unread(),
         Some(&dto),
         Some("boom".into()),
     );
@@ -227,10 +232,7 @@ fn every_selected_provider_has_a_cell_in_rail_order_and_one_not_yet_read_is_chec
     selected.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Muse];
     let frame = rail(
         &selected,
-        |agent| match agent {
-            AgentId::Claude => (Some(claude()), vec![session.clone()]),
-            _ => (None, Vec::new()),
-        },
+        [(AgentId::Claude, Some(claude()), vec![session.clone()])],
         None,
         None,
     );
@@ -259,7 +261,12 @@ fn read(status: &str, stale: bool, mine: Vec<serde_json::Value>) -> PrReading {
         "assigned": {"total": 0, "items": []}
     }))
     .unwrap();
-    let frame = rail(&settings(vec![GithubList::Mine]), unread, Some(&dto), None);
+    let frame = rail(
+        &settings(vec![GithubList::Mine]),
+        unread(),
+        Some(&dto),
+        None,
+    );
     pr_cell(&frame).clone()
 }
 
@@ -320,7 +327,7 @@ fn a_pull_request_in_two_lists_is_one_segment_of_the_ring() {
     .unwrap();
     let frame = rail(
         &settings(vec![GithubList::Mine, GithubList::Assigned]),
-        unread,
+        unread(),
         Some(&dto),
         None,
     );
@@ -392,7 +399,7 @@ fn provider_cell_of(reading: Option<NotchProvider>) -> ProviderCell {
     let mut only = settings(vec![GithubList::Mine]);
     only.providers = vec![AgentId::Claude];
     only.pull_requests.enabled = false;
-    match rail(&only, |_| (reading.clone(), Vec::new()), None, None)
+    match rail(&only, [(AgentId::Claude, reading, Vec::new())], None, None)
         .cells
         .pop()
     {
@@ -477,7 +484,7 @@ fn a_provider_says_it_is_checking_until_read_and_when_its_refresh_paused() {
 fn pr_cell_of(dto: Option<&GithubPrsDto>) -> PrCell {
     let mut only = settings(vec![GithubList::Mine]);
     only.providers = Vec::new();
-    match rail(&only, unread, dto, None).cells.pop() {
+    match rail(&only, unread(), dto, None).cells.pop() {
         Some(CellData::PullRequests(cell)) => cell,
         other => panic!("a pull request cell, not {other:?}"),
     }
@@ -578,7 +585,7 @@ fn what_needs_attention_is_counted_once_per_pull_request() {
     .unwrap();
     let frame = rail(
         &settings(vec![GithubList::Mine, GithubList::ReviewRequested]),
-        unread,
+        unread(),
         Some(&dto),
         None,
     );

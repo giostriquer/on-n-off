@@ -418,7 +418,6 @@ pub fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
-    pub provider: AgentId,
     pub status: LimitsStatus,
     pub message: Option<String>,
     pub windows: Vec<LimitWindowDto>,
@@ -450,7 +449,6 @@ impl NotchProvider {
             .map(|window| window.id.clone());
         let inner_ring = inner_ring(card.provider, &windows, workspace_credits.as_ref());
         Some(Self {
-            provider: card.provider,
             status: card.status,
             message: card.message,
             windows,

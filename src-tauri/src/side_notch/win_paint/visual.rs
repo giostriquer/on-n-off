@@ -174,13 +174,12 @@ fn visual_dump() {
 
     let data = frame::rail(
         &settings,
-        |agent| match agent {
-            AgentId::Claude => (Some(claude.clone()), claude_sessions.clone()),
-            AgentId::Codex => (Some(codex.clone()), Vec::new()),
-            AgentId::Antigravity => (Some(antigravity.clone()), Vec::new()),
-            AgentId::Cursor => (Some(cursor.clone()), Vec::new()),
-            AgentId::Muse => (None, Vec::new()),
-        },
+        [
+            (AgentId::Claude, Some(claude), claude_sessions),
+            (AgentId::Codex, Some(codex), Vec::new()),
+            (AgentId::Antigravity, Some(antigravity), Vec::new()),
+            (AgentId::Cursor, Some(cursor), Vec::new()),
+        ],
         Some(&pulls),
         None,
     );

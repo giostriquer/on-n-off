@@ -38,10 +38,10 @@ fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsD
 }
 fn decided(
     settings: NotchSettings,
-    read: impl Fn(AgentId) -> (Option<NotchProvider>, Vec<LiveSession>),
+    reads: Vec<(AgentId, Option<NotchProvider>, Vec<LiveSession>)>,
     pulls: Option<&GithubPrsDto>,
 ) -> CellData {
-    frame::rail(&settings, read, pulls, None)
+    frame::rail(&settings, reads, pulls, None)
         .cells
         .pop()
         .expect("the model decided a cell")
@@ -57,7 +57,7 @@ fn projected(card: ProviderLimitsDto) -> ProviderCell {
         },
         ..settings()
     };
-    match decided(only, |_| (Some(reading.clone()), Vec::new()), None) {
+    match decided(only, vec![(provider, Some(reading), Vec::new())], None) {
         CellData::Provider(cell) => cell,
         CellData::PullRequests(_) => panic!("a provider cell"),
     }
@@ -87,7 +87,7 @@ fn pulls_read(
         providers: Vec::new(),
         ..settings()
     };
-    decided(only, |_| (None, Vec::new()), Some(&dto))
+    decided(only, Vec::new(), Some(&dto))
 }
 fn pulls(rows: Vec<serde_json::Value>) -> CellData {
     let total = rows.len();

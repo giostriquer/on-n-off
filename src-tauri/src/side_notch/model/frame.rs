@@ -5,6 +5,7 @@ use crate::dto::{
 };
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
+use std::collections::HashMap;
 
 pub const MAX_PULL_REQUESTS: usize = 25;
 pub const MAX_RING_SEGMENTS: usize = 24;
@@ -115,15 +116,19 @@ pub struct PrRow {
 
 pub fn rail(
     settings: &NotchSettings,
-    read: impl Fn(AgentId) -> (Option<NotchProvider>, Vec<LiveSession>),
+    reads: impl IntoIterator<Item = (AgentId, Option<NotchProvider>, Vec<LiveSession>)>,
     pulls: Option<&GithubPrsDto>,
     action_error: Option<String>,
 ) -> RailData {
+    let mut reads: HashMap<AgentId, (Option<NotchProvider>, Vec<LiveSession>)> = reads
+        .into_iter()
+        .map(|(provider, reading, sessions)| (provider, (reading, sessions)))
+        .collect();
     let mut cells: Vec<CellData> = settings
         .rail_providers()
         .into_iter()
         .map(|provider| {
-            let (reading, sessions) = read(provider);
+            let (reading, sessions) = reads.remove(&provider).unwrap_or_default();
             CellData::Provider(provider_cell(provider, reading, sessions))
         })
         .collect();

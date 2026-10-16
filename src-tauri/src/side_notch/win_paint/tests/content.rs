@@ -694,10 +694,7 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
     )]);
     let data = frame::rail(
         &selected,
-        |agent| match agent {
-            AgentId::Claude => (claude.clone(), Vec::new()),
-            _ => (None, Vec::new()),
-        },
+        [(AgentId::Claude, claude, Vec::new())],
         None,
         None,
     );

@@ -50,10 +50,7 @@ fn data(show: ShowMode) -> RailData {
     .expect("a signed-in account");
     frame::rail(
         &settings(show),
-        |agent| {
-            let reading = (agent == AgentId::Claude).then(|| claude.clone());
-            (reading, Vec::new())
-        },
+        [(AgentId::Claude, Some(claude), Vec::new())],
         None,
         None,
     )
