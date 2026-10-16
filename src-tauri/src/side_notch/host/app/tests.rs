@@ -90,9 +90,15 @@ fn the_notch_takes_settings_at_the_revision_they_were_saved_at() {
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let (app, _) = production();
+    assert_eq!(
+        app.settings_revision(),
+        crate::side_notch::config::revision()
+    );
     let saved = crate::side_notch::config::bump_revision();
-    assert_ne!(saved, 0);
     assert_eq!(app.settings_revision(), saved);
+    let saved_again = crate::side_notch::config::bump_revision();
+    assert_eq!(saved_again, saved + 1);
+    assert_eq!(app.settings_revision(), saved_again);
 }
 
 #[test]
