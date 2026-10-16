@@ -28,7 +28,9 @@ fn an_inline_device_token_is_loaded_with_its_email() {
         r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","user_email":" You@Example.com "}}}"#,
     );
     let login = LoginCache::new()
-        .login(&config, NOW, &no_keychain)
+        .login(&config, NOW, &|| {
+            panic!("an inline token never asks the Keychain")
+        })
         .expect("login");
     assert_eq!(bearer(&login), "Bearer device-token");
     assert_eq!(login.email.as_deref(), Some("You@Example.com"));
