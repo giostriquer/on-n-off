@@ -107,76 +107,6 @@ describe("Limits", () => {
     expect(within(muse).getByRole("meter", { name: "Weekly · all models" }).getAttribute("aria-valuenow")).toBe("22");
     expect(within(muse).getByRole("meter", { name: "5 hour · all models" }).getAttribute("aria-valuenow")).toBe("41");
     expect(within(muse).queryByRole("button", { name: /^Sign in/ })).toBeNull();
-    expect(within(muse).queryByRole("button", { name: /^More actions/ })).toBeNull();
-  });
-
-  async function claudeTags(widths: { line: number; name: number }) {
-    vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(widths.line);
-    vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(widths.name);
-    answer([okClaude({ plan: "max ×5" })], [okCodex()]);
-    const { unmount } = renderLimits();
-    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
-    const tags = within(claude).getByTestId("account-tags");
-    expect(within(tags).getByText("Max ×5")).toBeTruthy();
-    return { claude, tags, line: within(claude).getByTitle("me@claude.example").parentElement!, unmount };
-  }
-
-  it("lays an account's tags on its name's line when they fit there", async () => {
-    try {
-      const { tags, line } = await claudeTags({ line: 300, name: 120 });
-      expect(tags.parentElement).toBe(line);
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  it("moves an account's tags to their own row when its name is squeezed without a re-render", async () => {
-    const watching = new Map<Element, () => void>();
-    vi.stubGlobal("ResizeObserver", class {
-      constructor(private readonly changed: () => void) {}
-      observe(node: Element) { watching.set(node, this.changed); }
-      disconnect() { watching.clear(); }
-    });
-    try {
-      const { claude, tags, line, unmount } = await claudeTags({ line: 300, name: 120 });
-      expect(tags.parentElement).toBe(line);
-      vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(400);
-      act(() => watching.get(within(claude).getByTitle("me@claude.example"))?.());
-      expect(within(claude).getByTestId("account-tags").parentElement).toBe(claude.querySelector("header"));
-      unmount();
-      expect(watching.size, "every observer lets go of its nodes on unmount").toBe(0);
-    } finally {
-      vi.unstubAllGlobals();
-      vi.restoreAllMocks();
-    }
-  });
-
-  it("gives an account's tags their own row across the header when they do not fit beside its name", async () => {
-    try {
-      const { claude, tags, line } = await claudeTags({ line: 300, name: 400 });
-      expect(line.contains(tags)).toBe(false);
-      expect(tags.parentElement).toBe(claude.querySelector("header"));
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  it("draws the active account's dot beside its headline window, or in its header without one", async () => {
-    const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
-    answer([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);
-    renderLimits();
-    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
-    const beside = within(claude).getByRole("img", { name: "Active account" });
-    expect(within(beside.parentElement!).getByText("Weekly · all models")).toBeTruthy();
-    expect(claude.querySelector("header")!.contains(beside)).toBe(false);
-    expect(within(claude).queryByText("ACTIVE")).toBeNull();
-    expect(within(claude).getByText("Max ×5")).toBeTruthy();
-    const codex = card("Codex limits · work@codex.example");
-    const dots = within(codex).getAllByRole("img", { name: "Active account" });
-    expect(dots).toHaveLength(1);
-    expect(codex.querySelector("header")!.contains(dots[0])).toBe(true);
-    expect(within(codex).getByRole("meter", { name: "5 hour · all models" })).toBeTruthy();
-    expect(within(card("Codex limits · personal@codex.example")).queryByRole("img", { name: "Active account" })).toBeNull();
   });
 
   it("says under a row why it shows no reset", async () => {
@@ -201,7 +131,8 @@ describe("Limits", () => {
     expect(within(remembered).getByRole("button", { name: "Sign in" })).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByRole("group", {name: "Actions for personal@codex.example"})).toBeTruthy();
-    expect(screen.getByRole("button", {name: "Archive account"})).toHaveFocus();
+    expect(screen.getByRole("button", {name: "Check limits now"})).toHaveFocus();
+    expect(screen.getByRole("button", {name: "Archive account"})).toBeInTheDocument();
     expect(screen.getByRole("button", {name: "Remove account"})).toBeInTheDocument();
     fireEvent.keyDown(document.activeElement!, {key: "Escape"});
     expect(screen.queryByRole("group", {name: "Actions for personal@codex.example"})).toBeNull();
@@ -358,7 +289,9 @@ describe("Limits", () => {
     const current = card("Codex limits");
     expect(within(current).getByText("Sign in with `codex` to see subscription limits.")).toBeTruthy();
     expect(current.getAttribute("data-status")).toBe("signedOut");
-    expect(within(current).queryByRole("button", { name: /More actions|Sign in/ })).toBeNull();
+    expect(within(current).queryByRole("button", { name: /Sign in/ })).toBeNull();
+    fireEvent.click(within(current).getByRole("button", { name: "More actions for Codex" }));
+    expect(within(screen.getByRole("group", { name: "Actions for Codex" })).getAllByRole("button").map(item => item.textContent)).toEqual(["Check limits now"]);
   });
 
   it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {

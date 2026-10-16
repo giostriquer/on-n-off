@@ -35,6 +35,21 @@ export function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits
   };
 }
 
+export function okMuse(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+  return {
+    provider: "muse",
+    status: "ok",
+    account: { id: "email:you@muse.example", label: "you@muse.example" },
+    currentAccount: true,
+    plan: "wonder",
+    windows: [
+      { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 22, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 41, resetsAt: "2026-08-17T22:15:00Z", windowSeconds: 18_000, observedAt: NOW },
+    ],
+    ...overrides,
+  };
+}
+
 export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   return {
     provider: "codex",

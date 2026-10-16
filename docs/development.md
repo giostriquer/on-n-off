@@ -58,6 +58,14 @@ locates the subsystems. Module doc-comments explain their implementation.
   `LIMITS_CHECK_MINUTES` (`ui/src/lib/sharedReads/limits.ts`) is checked against
   `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
   keeps the fixture equal to `check_interval`.
+- A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
+  shell, header, tags, ⋯ menu and footer; a card adds only menu items and footer content. The menu
+  always starts with Check limits now, and the saved-login items come from `useAccountCardActions`,
+  which has none without an account manager. A per-provider card feature is a row in
+  `LIMITS_FEATURES` (`limitFeatures.ts`), never a `provider ===` branch: the table is keyed by the
+  catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and a
+  new header tag kind (`cardTags.ts`) fails both header renderers until each surface decides.
+  `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the

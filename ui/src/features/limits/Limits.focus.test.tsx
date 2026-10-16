@@ -66,7 +66,8 @@ describe("focus as an account leaves", () => {
     ["the previous card's, from the last card", [okCodex(), staleCodex(), spare], "spare@codex.example", "More actions for personal@codex.example"],
     ["the next card's, not the column's archived list", [okCodex(), staleCodex(), spare, staleCodex({ account: { id: "acct-old", label: "old@codex.example" }, archived: true })],
       "personal@codex.example", "More actions for spare@codex.example"],
-    ["Add account, with no other card's actions left", [signedOut, staleCodex()], "personal@codex.example", "Add account"],
+    ["the signed-out card's, whose menu still checks limits", [signedOut, staleCodex()], "personal@codex.example", "More actions for Codex"],
+    ["Add account, with no card left in the column", [staleCodex()], "personal@codex.example", "Add account"],
   ])("goes to %s when a card is removed from its menu", async (_, codex, label, target) => {
     answer([okClaude()], codex);
     renderLimits();

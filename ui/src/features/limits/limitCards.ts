@@ -11,11 +11,11 @@ import type {
   LimitsWorkspaceCredits,
   ProviderLimits,
 } from "$lib/limitsTypes";
-import type { AgentId } from "$lib/types";
-import { providerLabel } from "$lib/providers";
+import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { accountCards } from "./accountCards";
 import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { codexTermEnded } from "./codexSubscriptionTerm";
+import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
   presentLimitAccount,
@@ -38,7 +38,7 @@ export type CardFigures = {
   paidOffer: LimitsResetOffer | null;
 };
 
-export type CardSubscription = { provider: "codex"; accountId: string; current: boolean; term: LimitsSubscription | null };
+export type CardSubscription = { provider: LimitsProvider; accountId: string; current: boolean; term: LimitsSubscription | null };
 
 export type ForgetStep = { accountId: string; expectedEmail?: string };
 
@@ -47,12 +47,12 @@ export type CardAccount = {
   name: string;
   profile: SavedProfile | null;
   forget: ForgetStep[];
-  codexActions: ProviderLimits | null;
+  resetActions: ProviderLimits | null;
 };
 
 export type LimitCard = {
   key: string;
-  provider: AgentId;
+  provider: LimitsProvider;
   identity: {
     label: string;
     ariaLabel: string;
@@ -80,7 +80,7 @@ export type LimitCard = {
 };
 
 export type LimitCardsInput = {
-  provider: AgentId;
+  provider: LimitsProvider;
   entries: ProviderLimits[] | undefined;
   profiles: SavedProfile[];
   now: number;
@@ -116,7 +116,7 @@ function isCurrent(slot: Slot): boolean {
   return slot.reading ? slot.reading.currentAccount : slot.profile.active;
 }
 
-function orderSlots(slots: Slot[], provider: AgentId, now: number): Slot[] {
+function orderSlots(slots: Slot[], provider: LimitsProvider, now: number): Slot[] {
   const ranked = slots.map(slot => ({ slot, rank: cardRank(slot, provider, now) }));
   ranked.sort((a, b) => compare(a.rank[0], b.rank[0]) || compare(a.rank[1], b.rank[1]));
   return ranked.map(({ slot }) => slot);
@@ -124,7 +124,7 @@ function orderSlots(slots: Slot[], provider: AgentId, now: number): Slot[] {
 
 type CardRank = [group: number, within: number];
 
-function cardRank(slot: Slot, provider: AgentId, now: number): CardRank {
+function cardRank(slot: Slot, provider: LimitsProvider, now: number): CardRank {
   if (isCurrent(slot)) return [0, 0];
   const entry = slot.reading;
   const left = entry ? usageLeft(entry, now) : null;
@@ -141,9 +141,10 @@ const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnow
 
 type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 
-function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccounts: LegacyAccounts, now: number): LimitCard {
+function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, now: number): LimitCard {
   const { reading, profile } = slot;
   const name = providerLabel(provider);
+  const features = LIMITS_FEATURES[provider];
   const account = accountOf(slot);
   const current = isCurrent(slot);
   const label = profile?.email ?? account?.label ?? null;
@@ -153,7 +154,7 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const cardSubscription = subscription(provider, account?.id ?? null, current, reading);
   const active = !!account && (profile?.active ?? current);
-  const signIn = provider === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
+  const signIn = features.signInDeadline ? claudeSignIn(profile?.signInEndsAt, now) : null;
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null
     : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
@@ -170,13 +171,13 @@ function presentCard(slot: Slot, provider: AgentId, index: number, legacyAccount
       name: label ?? account.id,
       profile,
       forget: [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }) => ({ accountId: id, expectedEmail: email })), { accountId: account.id }],
-      codexActions: provider === "codex" ? reading : null,
+      resetActions: features.bankedResetActions ? reading : null,
     },
     plan: planLabel(reading?.plan, provider) || null,
     status: presentation.status,
     active,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, provider, now)),
+    rows: rest.map(window => presentRow(window, features.firstMessageSession, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
@@ -200,29 +201,29 @@ function subscriptionEnded(subscription: CardSubscription | null, now: number): 
 }
 
 function subscription(
-  provider: AgentId,
+  provider: LimitsProvider,
   accountId: string | null,
   current: boolean,
   reading: ProviderLimits | null,
 ): CardSubscription | null {
-  if (provider === "codex") return accountId === null ? null : { provider, accountId, current, term: reading?.subscription ?? null };
-  return null;
+  if (!LIMITS_FEATURES[provider].subscriptionTerm || accountId === null) return null;
+  return { provider, accountId, current, term: reading?.subscription ?? null };
 }
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {
   return { id: window.id, label: window.label, ...presentLimitWindow(window, now) };
 }
 
-function presentRow(window: LimitWindow, provider: AgentId, now: number): CardWindow {
+function presentRow(window: LimitWindow, firstMessageSession: boolean, now: number): CardWindow {
   const presented = presentWindow(window, now);
-  const awaitingFirstMessage = provider === "claude" && window.kind === "session"
+  const awaitingFirstMessage = firstMessageSession && window.kind === "session"
     && window.usedPercent === 0 && window.resetsAt == null;
   return { ...presented, note: presented.note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
 }
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };
 
-function figures(reading: ProviderLimits, provider: AgentId, now: number): CardFigures {
+function figures(reading: ProviderLimits, provider: LimitsProvider, now: number): CardFigures {
   const share = reading.workspaceCredits ?? null;
   const spent = reading.creditsSpent ?? null;
   const credits = reading.credits ?? null;
@@ -232,6 +233,6 @@ function figures(reading: ProviderLimits, provider: AgentId, now: number): CardF
     workspaceShare: share,
     creditsSpent: spent,
     bankedResets: banked,
-    paidOffer: provider === "codex" ? reading.resetOffer ?? null : null,
+    paidOffer: LIMITS_FEATURES[provider].paidResetOffer ? reading.resetOffer ?? null : null,
   };
 }

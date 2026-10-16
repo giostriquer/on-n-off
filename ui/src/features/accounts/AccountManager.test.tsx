@@ -3,21 +3,26 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Profiler } from "react";
 import { afterEach, it, expect, vi } from "vitest";
 import * as api from "$lib/api";
-import type { AccountsReading } from "$lib/accountTypes";
+import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { accountListQuery } from "$lib/sharedReads/accounts";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
-import { AccountCardActions } from "./AccountCardActions";
+import { CardMenu } from "@/features/limits/CardMenu";
+import { useAccountCardActions } from "./AccountCardActions";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
 const forget = vi.fn().mockResolvedValue(undefined);
 const archive = vi.fn().mockResolvedValue(undefined);
+function AccountCard({ profile }: { profile: SavedProfile }) {
+  const actions = useAccountCardActions({ accountId: profile.observationId, label: profile.email!, current: profile.active, profile, onForget: forget, onArchive: archive });
+  return <><header><CardMenu label={profile.email!} items={[...actions.items, ...actions.danger]} /></header><footer>{actions.footer}</footer></>;
+}
 function Cards() {
   const manager = useAccountManagement();
   return <>{manager?.query.data?.profiles.map(profile => <section key={profile.id} aria-label={profile.email ?? "account"}>
     <span>{profile.email}</span><span>{profile.category}</span>
-    <AccountCardActions accountId={profile.observationId} label={profile.email!} current={profile.active} profile={profile} onForget={forget} onArchive={archive} header={menu => <header>{menu}</header>} />
+    <AccountCard profile={profile} />
   </section>)}</>;
 }
 function setup({ preferences = false, onCommit, signedIn = false }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean } = {}) {

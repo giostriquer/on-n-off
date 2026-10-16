@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
 import type { LimitsCredits, LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { limitCards, limitColumn, type LimitCard } from "./limitCards";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
@@ -12,7 +13,7 @@ function saved(provider: AgentId, id: string, observationId: string, email: stri
   return { id, observationId, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
 }
 
-function cards(entries: ProviderLimits[] | undefined, profiles: SavedProfile[] = [], now = AT_NOW, provider: AgentId = entries?.[0]?.provider ?? "codex"): LimitCard[] {
+function cards(entries: ProviderLimits[] | undefined, profiles: SavedProfile[] = [], now = AT_NOW, provider = (entries?.[0]?.provider ?? "codex") as LimitsProvider): LimitCard[] {
   const shown = limitCards({ provider, entries, profiles, now });
   if (!shown) throw new Error("expected cards");
   return shown;
@@ -32,7 +33,7 @@ describe("which cards a provider shows", () => {
     expect(card).toEqual({
       key: "current-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
-      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], codexActions: null },
+      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], resetActions: null },
       plan: null, status: null, active: true, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
@@ -46,7 +47,7 @@ describe("which cards a provider shows", () => {
   it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
     const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example")], AT_NOW, "codex");
     expect(card).toMatchObject({
-      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", codexActions: null },
+      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", resetActions: null },
       subscription: { provider: "codex", accountId: "profile:unread", current: false, term: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
     });
@@ -93,7 +94,7 @@ describe("card order", () => {
       ...overrides,
     };
   }
-  const order = (entries: ProviderLimits[], profiles: SavedProfile[] = [], provider: AgentId = "claude") => labels(cards(entries, profiles, ORDER_NOW, provider));
+  const order = (entries: ProviderLimits[], profiles: SavedProfile[] = [], provider: LimitsProvider = "claude") => labels(cards(entries, profiles, ORDER_NOW, provider));
 
   it("puts the active account first even when it is out of usage", () => {
     const active = account("active", { session: [100, at(2)], weekly: [100, at(48)] }, { currentAccount: true });
@@ -371,7 +372,7 @@ describe("a card's figures", () => {
     const one = { availableCount: 1, nextExpiresAt: null };
     const two = { availableCount: 2, nextExpiresAt: null };
     const codex = cards([okCodex({ resetCredits: two }), staleCodex({ resetCredits: one })]);
-    expect(codex.map(card => [card.identity.label, card.figures.bankedResets, card.account?.codexActions != null])).toEqual([
+    expect(codex.map(card => [card.identity.label, card.figures.bankedResets, card.account?.resetActions != null])).toEqual([
       ["work@codex.example", two, true],
       ["personal@codex.example", one, true],
     ]);
@@ -475,7 +476,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf("codex", { needsLogin: true })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, entry, profile) => {
-    const shown = cards([entry], profile ? [profile] : [], AT_NOW, entry.provider);
+    const shown = cards([entry], profile ? [profile] : [], AT_NOW);
     expect(shown.find(card => card.account?.id === "profile:saved")?.archiveInsteadOfUse).toBe(expected);
   });
 });
