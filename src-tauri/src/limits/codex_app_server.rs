@@ -10,7 +10,7 @@ use crate::accounts::codex_store::CodexAccess;
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{AgentId, ResetCreditOutcome};
-use crate::json_line_session::{Failure, NotStarted, Peer, Request, Session};
+use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
 
 const APP_SERVER: Peer = Peer::jsonrpc_lite(
     "Codex app-server",
@@ -83,16 +83,22 @@ fn spend_reset_credit(
     start: impl FnOnce(&Path) -> Result<Session, String>,
 ) -> Result<ResetCreditOutcome, String> {
     reset_target_matches(identity(codex_home)?, account_id)?;
-    start(codex_home)?.run(|session| {
-        spend_in_session(
-            codex_home,
-            account_id,
-            idempotency_key,
-            how,
-            &identity,
-            session,
-        )
-    })
+    open_account(
+        start(codex_home)?,
+        codex_home,
+        false,
+        |_, account, conversation| {
+            spend_in_session(
+                codex_home,
+                account_id,
+                idempotency_key,
+                how,
+                &identity,
+                &account,
+                conversation,
+            )
+        },
+    )
 }
 
 fn spend_in_session(
@@ -101,10 +107,10 @@ fn spend_in_session(
     idempotency_key: &str,
     how: ResetSpend,
     identity: &impl Fn(&Path) -> Result<Option<(String, Value)>, String>,
-    session: &mut Session,
+    account: &AccountReadResponse,
+    conversation: &mut Conversation,
 ) -> Result<ResetCreditOutcome, Failure> {
-    let (_, account) = handshake(codex_home, false, session)?;
-    require_chatgpt(&account).map_err(|failure| {
+    require_chatgpt(account).map_err(|failure| {
         Failure::new(match failure {
             AppServerFailure::SignedOut => {
                 "Codex is not signed in, so there is no banked reset to use."
@@ -116,11 +122,11 @@ fn spend_in_session(
         .and_then(|current| reset_target_matches(current, account_id))
         .map_err(Failure::new)?;
     if let ResetSpend::Automatic { max_left_percent } = how {
-        let rate_limits = read_rate_limits(session)?;
+        let rate_limits = read_rate_limits(conversation)?;
         spend_allowed(&super::codex::parse_codex(&rate_limits), max_left_percent)
             .map_err(Failure::new)?;
     }
-    let response: ConsumeResetCreditResponse = session.request(
+    let response: ConsumeResetCreditResponse = conversation.request(
         Request::new(4, "account/rateLimitResetCredit/consume")
             .params(json!({"idempotencyKey": idempotency_key}))
             .when_missing(
@@ -169,9 +175,7 @@ fn read_with(
     let before = crate::accounts::codex_store::metadata(&expected_codex_home)
         .map_err(AppServerFailure::Failed)?;
     let session = start(&expected_codex_home)
-        .and_then(|session| {
-            session.run(|session| query_app_server(&expected_codex_home, force, session))
-        })
+        .and_then(|session| query_app_server(session, &expected_codex_home, force))
         .map_err(AppServerFailure::Failed)?;
     let (mut parsed, access) = normalize_app_server(session, before)?;
     after_identity(&mut parsed, access.as_ref());
@@ -199,32 +203,42 @@ fn begin(peer: Peer, command: Command) -> Result<Session, String> {
 }
 
 fn query_app_server(
+    session: Session,
     expected_codex_home: &Path,
     force: bool,
-    session: &mut Session,
-) -> Result<AppServerResult, Failure> {
-    let (codex_home, account) = handshake(expected_codex_home, force, session)?;
-    let rate_limits = read_rate_limits(session)?;
-    Ok(AppServerResult {
-        codex_home,
-        account,
-        rate_limits,
-    })
+) -> Result<AppServerResult, String> {
+    open_account(
+        session,
+        expected_codex_home,
+        force,
+        |codex_home, account, conversation| {
+            let rate_limits = read_rate_limits(conversation)?;
+            Ok(AppServerResult {
+                codex_home,
+                account,
+                rate_limits,
+            })
+        },
+    )
 }
 
-fn read_rate_limits(session: &mut Session) -> Result<super::codex::RateLimitsResponse, Failure> {
-    session.request(Request::new(3, "account/rateLimits/read").when_missing(
+fn read_rate_limits(
+    conversation: &mut Conversation,
+) -> Result<super::codex::RateLimitsResponse, Failure> {
+    conversation.request(Request::new(3, "account/rateLimits/read").when_missing(
         "Update Codex CLI to a version that supports subscription limits, then refresh here.",
     ))
 }
 
-fn handshake(
+fn open_account<T>(
+    session: Session,
     expected_codex_home: &Path,
     force: bool,
-    session: &mut Session,
-) -> Result<(PathBuf, AccountReadResponse), Failure> {
-    let initialize: InitializeResponse =
-        session.handshake(None, |initialize: &InitializeResponse| {
+    then: impl FnOnce(PathBuf, AccountReadResponse, &mut Conversation) -> Result<T, Failure>,
+) -> Result<T, String> {
+    session.run(
+        None,
+        |initialize: &InitializeResponse| {
             if crate::paths::equivalent(&initialize.codex_home, expected_codex_home) {
                 return Ok(());
             }
@@ -233,10 +247,13 @@ fn handshake(
                 initialize.codex_home.display(),
                 expected_codex_home.display()
             ))
-        })?;
-    let account =
-        session.request(Request::new(2, "account/read").params(json!({"refreshToken": force})))?;
-    Ok((initialize.codex_home, account))
+        },
+        |initialize, conversation| {
+            let account = conversation
+                .request(Request::new(2, "account/read").params(json!({"refreshToken": force})))?;
+            then(initialize.codex_home, account, conversation)
+        },
+    )
 }
 
 fn normalize_app_server(

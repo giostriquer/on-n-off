@@ -107,9 +107,12 @@ impl<'a> Request<'a> {
 }
 
 pub(crate) struct Session {
+    conversation: Conversation,
+}
+
+pub(crate) struct Conversation {
     peer: Peer,
     transport: Box<dyn Transport>,
-    initialized: bool,
 }
 
 impl Session {
@@ -119,32 +122,34 @@ impl Session {
 
     fn over(peer: Peer, transport: impl Transport + 'static) -> Self {
         Self {
-            peer,
-            transport: Box::new(transport),
-            initialized: false,
+            conversation: Conversation {
+                peer,
+                transport: Box::new(transport),
+            },
         }
     }
 
-    pub(crate) fn handshake<R: DeserializeOwned>(
-        &mut self,
+    pub(crate) fn run<R: DeserializeOwned, T>(
+        mut self,
         capabilities: Option<Value>,
         accept: impl FnOnce(&R) -> Result<(), String>,
-    ) -> Result<R, Failure> {
-        let mut params = json!({"clientInfo": {
-            "name": "on_n_off",
-            "title": "on-n-off",
-            "version": env!("CARGO_PKG_VERSION"),
-        }});
-        if let Some(capabilities) = capabilities {
-            params["capabilities"] = capabilities;
-        }
-        let answer = self.request(Request::new(1, "initialize").params(params))?;
-        self.initialized = true;
-        accept(&answer).map_err(Failure::new)?;
-        self.send(None, "initialized", json!({}))?;
-        Ok(answer)
+        talk: impl FnOnce(R, &mut Conversation) -> Result<T, Failure>,
+    ) -> Result<T, String> {
+        let conversation = &mut self.conversation;
+        let answer = match conversation.request(initialize(capabilities)) {
+            Ok(answer) => answer,
+            Err(failure) => {
+                let exit = conversation.transport.finish();
+                return Err(explained(conversation.peer, failure, exit));
+            }
+        };
+        let talked = conversation.open(answer, accept, talk);
+        conversation.transport.finish();
+        talked.map_err(|failure| failure.message)
     }
+}
 
+impl Conversation {
     pub(crate) fn request<R: DeserializeOwned>(&mut self, request: Request) -> Result<R, Failure> {
         self.send(Some(request.id), request.method, request.params)?;
         loop {
@@ -155,13 +160,15 @@ impl Session {
         }
     }
 
-    pub(crate) fn run<T>(
-        mut self,
-        talk: impl FnOnce(&mut Self) -> Result<T, Failure>,
-    ) -> Result<T, String> {
-        let talked = talk(&mut self);
-        let exit = self.transport.finish();
-        talked.map_err(|failure| explained(self.peer, self.initialized, failure, exit))
+    fn open<R, T>(
+        &mut self,
+        answer: R,
+        accept: impl FnOnce(&R) -> Result<(), String>,
+        talk: impl FnOnce(R, &mut Self) -> Result<T, Failure>,
+    ) -> Result<T, Failure> {
+        accept(&answer).map_err(Failure::new)?;
+        self.send(None, "initialized", json!({}))?;
+        talk(answer, self)
     }
 
     fn send(&mut self, id: Option<u64>, method: &str, params: Value) -> Result<(), Failure> {
@@ -176,6 +183,18 @@ impl Session {
         message.insert("params".to_string(), params);
         self.transport.send(&Value::Object(message))
     }
+}
+
+fn initialize(capabilities: Option<Value>) -> Request<'static> {
+    let mut params = json!({"clientInfo": {
+        "name": "on_n_off",
+        "title": "on-n-off",
+        "version": env!("CARGO_PKG_VERSION"),
+    }});
+    if let Some(capabilities) = capabilities {
+        params["capabilities"] = capabilities;
+    }
+    Request::new(1, "initialize").params(params)
 }
 
 fn answer<R: DeserializeOwned>(
@@ -209,8 +228,8 @@ fn answer<R: DeserializeOwned>(
     )))
 }
 
-fn explained(peer: Peer, initialized: bool, failure: Failure, exit: Option<ExitStatus>) -> String {
-    if !initialized && failure.closed && exit.is_some_and(|status| !status.success()) {
+fn explained(peer: Peer, failure: Failure, exit: Option<ExitStatus>) -> String {
+    if failure.closed && exit.is_some_and(|status| !status.success()) {
         return peer.exited_early.to_string();
     }
     failure.message

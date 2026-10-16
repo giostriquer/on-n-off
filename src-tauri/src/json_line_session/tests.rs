@@ -25,6 +25,17 @@ fn initialize_then(rest: impl IntoIterator<Item = Value>) -> Script {
     Script::new(std::iter::once(json!({"id": 1, "result": {}})).chain(rest))
 }
 
+fn opened<T>(
+    session: Session,
+    talk: impl FnOnce(&mut Conversation) -> Result<T, Failure>,
+) -> Result<T, String> {
+    session.run(
+        None,
+        |_: &Value| Ok(()),
+        |_, conversation| talk(conversation),
+    )
+}
+
 #[test]
 fn a_session_that_never_answers_times_out_and_stops_the_child() {
     let started = Instant::now();
@@ -146,9 +157,7 @@ fn an_unsuccessful_exit_before_initialize_is_answered_gets_the_peers_guidance() 
         panic!("the stub did not start");
     };
 
-    let error = session
-        .run(|session| session.handshake::<Value>(None, |_| Ok(())))
-        .unwrap_err();
+    let error = opened(session, |_| Ok(())).unwrap_err();
 
     assert_eq!(error, "Acme CLI exited early; update it.");
 }
@@ -163,12 +172,10 @@ fn a_cli_that_answers_initialize_and_then_exits_unsuccessfully_keeps_the_closed_
         panic!("the stub did not start");
     };
 
-    let error = session
-        .run(|session| {
-            session.handshake::<Value>(None, |_| Ok(()))?;
-            session.request::<Value>(Request::new(2, "acme/read"))
-        })
-        .unwrap_err();
+    let error = opened(session, |conversation| {
+        conversation.request::<Value>(Request::new(2, "acme/read"))
+    })
+    .unwrap_err();
 
     assert_eq!(error, "Acme server closed before returning limits.");
 }
@@ -201,7 +208,7 @@ fn a_request_to_a_cli_that_has_already_exited_is_closed_and_gets_the_guidance() 
         error.message
     );
     assert_eq!(
-        explained(LITE, false, error, Some(status)),
+        explained(LITE, error, Some(status)),
         "Acme CLI exited early; update it."
     );
 }
@@ -210,7 +217,6 @@ fn a_request_to_a_cli_that_has_already_exited_is_closed_and_gets_the_guidance() 
 fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
     let message = explained(
         STRICT,
-        false,
         Failure::closed("Could not write to Webapp serve: Broken pipe"),
         Some(exit_status(2)),
     );
@@ -223,7 +229,6 @@ fn an_unsuccessful_exit_does_not_hide_a_failure_other_than_a_closed_pipe() {
     assert_eq!(
         explained(
             LITE,
-            false,
             Failure::new("Acme server timed out."),
             Some(exit_status(2))
         ),
@@ -232,40 +237,33 @@ fn an_unsuccessful_exit_does_not_hide_a_failure_other_than_a_closed_pipe() {
 }
 
 #[test]
-fn a_peer_that_closes_after_initializing_or_exits_cleanly_keeps_its_own_message() {
+fn a_peer_that_closes_before_initializing_and_exits_cleanly_keeps_its_own_message() {
     let message = "Acme server closed before returning limits.";
 
     assert_eq!(
-        explained(LITE, true, Failure::closed(message), Some(exit_status(2))),
+        explained(LITE, Failure::closed(message), Some(exit_status(0))),
         message
     );
-    assert_eq!(
-        explained(LITE, false, Failure::closed(message), Some(exit_status(0))),
-        message
-    );
-    assert_eq!(
-        explained(LITE, false, Failure::closed(message), None),
-        message
-    );
+    assert_eq!(explained(LITE, Failure::closed(message), None), message);
 }
 
 #[test]
 fn a_request_waits_for_the_answer_with_its_id() {
-    let script = Script::new([
+    let script = initialize_then([
         json!({"method": "status/changed", "params": {}}),
         json!({"id": 9, "result": "someone else's"}),
         json!({"id": 2, "result": {"ok": true}}),
         json!({"id": 3, "result": "never read"}),
     ]);
 
-    let answer: Value = script
-        .session(LITE)
-        .run(|session| session.request(Request::new(2, "acme/read")))
-        .unwrap();
+    let answer: Value = opened(script.session(LITE), |conversation| {
+        conversation.request(Request::new(2, "acme/read"))
+    })
+    .unwrap();
 
     assert_eq!(answer, json!({"ok": true}));
     assert_eq!(
-        script.log(),
+        script.log()[3..],
         [
             Exchange::Sent(json!({"id": 2, "method": "acme/read", "params": {}})),
             Exchange::Received(json!({"method": "status/changed", "params": {}})),
@@ -282,10 +280,14 @@ fn a_lite_peer_gets_bare_lines_and_a_strict_peer_gets_jsonrpc_on_every_line() {
 
         script
             .session(peer)
-            .run(|session| {
-                session.handshake::<Value>(Some(json!({"acme": true})), |_| Ok(()))?;
-                session.request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
-            })
+            .run(
+                Some(json!({"acme": true})),
+                |_: &Value| Ok(()),
+                |_, conversation| {
+                    conversation
+                        .request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
+                },
+            )
             .unwrap();
 
         let lines: Vec<String> = script
@@ -311,10 +313,7 @@ fn a_lite_peer_gets_bare_lines_and_a_strict_peer_gets_jsonrpc_on_every_line() {
 fn a_handshake_without_capabilities_sends_only_the_client() {
     let script = initialize_then([]);
 
-    script
-        .session(LITE)
-        .run(|session| session.handshake::<Value>(None, |_| Ok(())))
-        .unwrap();
+    opened(script.session(LITE), |_| Ok(())).unwrap();
 
     assert_eq!(
         script.sent()[0]["params"],
@@ -329,18 +328,26 @@ fn a_handshake_without_capabilities_sends_only_the_client() {
 #[test]
 fn a_rejected_answer_ends_the_handshake_before_initialized_with_its_own_message() {
     let script = Script::new([json!({"id": 1, "result": {"home": "/elsewhere"}})]);
+    let talked = std::cell::Cell::new(false);
 
     let error = script
         .session(LITE)
-        .run(|session| {
-            session.handshake::<Value>(None, |answer| {
+        .run(
+            None,
+            |answer: &Value| {
                 Err(format!(
                     "Acme server used {}.",
                     answer["home"].as_str().unwrap()
                 ))
-            })
-        })
+            },
+            |_, _| {
+                talked.set(true);
+                Ok(())
+            },
+        )
         .unwrap_err();
+
+    assert!(!talked.get());
 
     assert_eq!(error, "Acme server used /elsewhere.");
     let methods: Vec<Value> = script
@@ -355,13 +362,10 @@ fn a_rejected_answer_ends_the_handshake_before_initialized_with_its_own_message(
 fn a_reader_can_reject_mid_session_with_its_own_message() {
     let script = initialize_then([]);
 
-    let error = script
-        .session(LITE)
-        .run(|session| {
-            session.handshake::<Value>(None, |_| Ok(()))?;
-            Err::<(), _>(Failure::new("The signed-in account changed."))
-        })
-        .unwrap_err();
+    let error = opened(script.session(LITE), |_| {
+        Err::<(), _>(Failure::new("The signed-in account changed."))
+    })
+    .unwrap_err();
 
     assert_eq!(error, "The signed-in account changed.");
 }
@@ -401,10 +405,10 @@ fn a_protocol_error_names_the_peer_the_method_and_the_code() {
             None => request,
         };
 
-        let error = Script::new([reply])
-            .session(LITE)
-            .run(|session| session.request::<Value>(request))
-            .unwrap_err();
+        let error = opened(initialize_then([reply]).session(LITE), |conversation| {
+            conversation.request::<Value>(request)
+        })
+        .unwrap_err();
 
         assert_eq!(error, expected);
     }
@@ -412,10 +416,11 @@ fn a_protocol_error_names_the_peer_the_method_and_the_code() {
 
 #[test]
 fn a_malformed_answer_names_the_peer_and_the_method() {
-    let error = Script::new([json!({"id": 2, "result": "many"})])
-        .session(STRICT)
-        .run(|session| session.request::<u32>(Request::new(2, "webapp/count")))
-        .unwrap_err();
+    let error = opened(
+        initialize_then([json!({"id": 2, "result": "many"})]).session(STRICT),
+        |conversation| conversation.request::<u32>(Request::new(2, "webapp/count")),
+    )
+    .unwrap_err();
 
     assert!(
         error.starts_with("Webapp serve `webapp/count` returned a malformed response: "),

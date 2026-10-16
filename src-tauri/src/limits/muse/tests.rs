@@ -5,9 +5,7 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 fn query(script: &Script) -> Result<ServeSession, String> {
-    script
-        .session(SERVE)
-        .run(|session| query_serve(&data_home(), session))
+    query_serve(script.session(SERVE), &data_home())
 }
 
 fn data_home() -> PathBuf {
@@ -217,9 +215,7 @@ fn serve(
 }
 
 fn read_failure(session: Session) -> String {
-    session
-        .run(|session| query_serve(&data_home(), session))
-        .unwrap_err()
+    query_serve(session, &data_home()).unwrap_err()
 }
 
 fn scripted(replies: Vec<Value>) -> Session {

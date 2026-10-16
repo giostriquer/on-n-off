@@ -12,9 +12,7 @@ fn typed<T: DeserializeOwned>(value: Value) -> T {
 }
 
 fn query(script: &Script, codex_home: &Path, force: bool) -> Result<AppServerResult, String> {
-    script
-        .session(APP_SERVER)
-        .run(|session| query_app_server(codex_home, force, session))
+    query_app_server(script.session(APP_SERVER), codex_home, force)
 }
 
 #[test]

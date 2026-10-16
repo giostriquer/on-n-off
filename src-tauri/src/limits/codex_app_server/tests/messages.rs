@@ -15,9 +15,7 @@ fn app_server(stub: CliStub, name: &str, timeout: Duration, line_limit: usize) -
 }
 
 fn read_failure(session: Session) -> String {
-    session
-        .run(|session| query_app_server(Path::new("/fixture/.codex"), false, session))
-        .unwrap_err()
+    query_app_server(session, Path::new("/fixture/.codex"), false).unwrap_err()
 }
 
 fn scripted(replies: Vec<Value>) -> Session {

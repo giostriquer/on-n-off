@@ -19,7 +19,7 @@ use crate::dto::{
     AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
     Reading,
 };
-use crate::json_line_session::{Failure, NotStarted, Peer, Request, Session};
+use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
 
 const SERVE: Peer = Peer::jsonrpc(
     "Muse serve",
@@ -82,8 +82,8 @@ enum ServeFailure {
     Failed(String),
 }
 
-fn query_serve(expected_data: &Path, session: &mut Session) -> Result<ServeSession, Failure> {
-    session.handshake(
+fn query_serve(session: Session, expected_data: &Path) -> Result<ServeSession, String> {
+    session.run(
         Some(json!({"experimentalApi": true, "userInputDialogs": false})),
         |initialize: &InitializeResult| {
             if !crate::paths::equivalent(&initialize.muse_home, expected_data) {
@@ -101,8 +101,12 @@ fn query_serve(expected_data: &Path, session: &mut Session) -> Result<ServeSessi
             }
             Ok(())
         },
-    )?;
-    let account: AccountState = session.request(Request::new(2, "account/read"))?;
+        |_, conversation| read_account_usage(conversation),
+    )
+}
+
+fn read_account_usage(conversation: &mut Conversation) -> Result<ServeSession, Failure> {
+    let account: AccountState = conversation.request(Request::new(2, "account/read"))?;
     if account.state != "accountLogin" {
         return Ok(ServeSession {
             account,
@@ -110,10 +114,10 @@ fn query_serve(expected_data: &Path, session: &mut Session) -> Result<ServeSessi
         });
     }
     let usage_read: UsageReadResult =
-        session.request(Request::new(3, "usage/read").when_missing(
+        conversation.request(Request::new(3, "usage/read").when_missing(
             "Update Muse to a version that reports subscription usage, then refresh here.",
         ))?;
-    let after: AccountState = session.request(Request::new(4, "account/read"))?;
+    let after: AccountState = conversation.request(Request::new(4, "account/read"))?;
     if after != account {
         return Err(Failure::new(
             "The signed-in Muse account changed while its usage was read.",
@@ -291,9 +295,7 @@ fn read_with(
 ) -> Result<Parsed, ServeFailure> {
     let config = crate::paths::muse_config_for(home);
     let data = crate::paths::muse_data_for(home);
-    let session = start(home, &config, &data)?
-        .run(|session| query_serve(&data, session))
-        .map_err(ServeFailure::Failed)?;
+    let session = query_serve(start(home, &config, &data)?, &data).map_err(ServeFailure::Failed)?;
     normalize(session)
 }
 
