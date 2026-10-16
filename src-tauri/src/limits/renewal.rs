@@ -90,9 +90,10 @@ static MEMO: PerAccount<LimitsSubscriptionDto> = PerAccount::new(Some(FRESH_FOR)
 pub(super) fn read_backed_off(
     access: &CodexAccess,
     url: &str,
+    interval: Duration,
     now: DateTime<Utc>,
 ) -> Option<LimitsSubscriptionDto> {
-    MEMO.read_backed_off(&access.observation_key, || {
+    MEMO.read_backed_off(&access.observation_key, interval, || {
         read(&access.token, &access.workspace_id, url, now)
     })
 }

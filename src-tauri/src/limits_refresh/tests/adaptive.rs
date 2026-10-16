@@ -369,3 +369,22 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
 
     assert_eq!(entries, [scoped]);
 }
+
+#[test]
+fn the_check_interval_the_ui_restates_is_the_one_every_consumer_keeps() {
+    let slowest = Duration::from_secs(30 * 60);
+    let check = check_interval(slowest);
+    assert!(
+        active_interval(&[quota(95.0, true)], slowest) >= check,
+        "a near-exhausted account is never due before the consumers check"
+    );
+    let cadence = serde_json::json!({ "checkSeconds": check.as_secs() });
+
+    assert_eq!(
+        cadence,
+        serde_json::from_str::<serde_json::Value>(include_str!("../fixtures/cadence.json"))
+            .unwrap(),
+        "src-tauri/src/limits_refresh/fixtures/cadence.json must read:\n{}",
+        serde_json::to_string_pretty(&cadence).unwrap()
+    );
+}

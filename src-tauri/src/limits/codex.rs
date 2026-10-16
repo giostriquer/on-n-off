@@ -484,11 +484,12 @@ fn backend_figures(
         .plan
         .as_deref()
         .is_some_and(credits_spent::is_codex_workspace_plan);
-    card.reading.credits_spent = access
-        .filter(|_| workspace)
-        .and_then(|access| credits_spent::read_backed_off(access, urls.credit_usage, now));
-    card.reading.subscription =
-        access.and_then(|access| renewal::read_backed_off(access, urls.subscriptions, now));
+    let interval = crate::limits_refresh::poll_interval();
+    card.reading.credits_spent = access.filter(|_| workspace).and_then(|access| {
+        credits_spent::read_backed_off(access, urls.credit_usage, interval, now)
+    });
+    card.reading.subscription = access
+        .and_then(|access| renewal::read_backed_off(access, urls.subscriptions, interval, now));
 }
 
 fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {

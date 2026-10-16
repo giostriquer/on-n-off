@@ -15,7 +15,8 @@ Claude Code's own usage report, never with the token. A Claude login still in th
 read could not move into its home, is never sent: its read fails until a later read moves it. Limits
 polls saved Codex accounts with access-only HTTP requests without changing the active native login,
 through Codex's Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads
-per provider run at once, with per-account backoff and provider retry-after handling. Rejected shared
+per provider run at once, with the Limits failure backoff per account
+(`limits_refresh::failure_backoff`) and provider retry-after handling. Rejected shared
 credentials, and logins that now sign in as a different account, wait for a changed generation and
 renew nothing.
 The previous numeric reading and its observation time remain visible, and every card a poll
