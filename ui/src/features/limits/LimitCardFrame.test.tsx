@@ -69,7 +69,7 @@ const MENUS: Record<LimitsProvider, { current: string[]; remembered: string[] }>
     current: ["Check limits now", "Edit category", "Banked reset alert", "Sign out"],
     remembered: ["Check limits now", "Edit category", "Archive account", "Banked reset alert", "Remove account"],
   },
-  muse: { current: ["Check limits now", "Edit category"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
+  muse: { current: ["Check limits now", "Edit category", "Sign out"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
 };
 
 describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {

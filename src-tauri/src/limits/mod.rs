@@ -18,6 +18,7 @@ mod snapshots;
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
 pub(crate) use codex::{read_saved_codex, same_reset_instant, CodexEndpoints};
+pub(crate) use muse::muse_identity;
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 

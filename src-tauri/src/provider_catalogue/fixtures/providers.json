@@ -25,7 +25,8 @@
   },
   "withSavedAccounts": {
     "claude": true,
-    "codex": true
+    "codex": true,
+    "muse": true
   },
   "providers": {
     "claude": {
@@ -68,7 +69,7 @@
       "binaryAliases": [],
       "limitsReader": true,
       "usage": "muse",
-      "savedAccounts": false
+      "savedAccounts": true
     }
   }
 }

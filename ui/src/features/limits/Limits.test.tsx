@@ -524,7 +524,7 @@ it("lays out one column per provider with limits, in tab order, and offers to ad
 
   fireEvent.click(screen.getByRole("button", {name: "Add account"}));
   const picker = screen.getByRole("group", {name: "Add account"});
-  expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Antigravity|Cursor|Muse)$/ }).map((button) => button.lastChild?.textContent)).toEqual(["Claude", "Codex"]);
+  expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Antigravity|Cursor|Muse)$/ }).map((button) => button.lastChild?.textContent)).toEqual(["Claude", "Codex", "Muse"]);
 });
 
 it.each(["claude", "codex"])("adds only the %s account selected in the shared picker", async provider => {

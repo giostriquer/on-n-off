@@ -59,7 +59,7 @@ const MUSE: ProviderLimits[] = [
   {
     provider: "muse",
     status: "ok",
-    account: { id: "email:you@example.com", label: "you@example.com" },
+    account: { id: "muse-1", label: "you@example.com" },
     currentAccount: true,
     plan: "wonder",
     windows: [
@@ -275,6 +275,7 @@ function archivedAccounts(): LimitsScenario {
 }
 
 function savedAccounts(agent: AgentId): AccountsReading {
+  if (agent === "muse") return savedMuseAccount();
   return {
     profiles: [
       { id: "personal", observationId: agent === "codex" ? "codex-1" : "claude-1", identity: { provider: agent, userId: "user-personal", workspaceId: "Personal workspace" }, label: "personal@example.com", email: "personal@example.com", category: null, savedAt: "2026-08-24T18:30:00Z", active: true, needsLogin: false },
@@ -282,6 +283,17 @@ function savedAccounts(agent: AgentId): AccountsReading {
     ],
     nativeObservationId: agent === "codex" ? "codex-1" : "claude-1",
     nativeAccount: { provider: agent, userId: "user-personal", workspaceId: "Personal workspace" },
+    recoveryRequired: false,
+    notice: null,
+  };
+}
+
+function savedMuseAccount(): AccountsReading {
+  const identity = { provider: "muse" as const, userId: "you@example.com", workspaceId: "" };
+  return {
+    profiles: [{ id: "muse-you", observationId: "muse-1", identity, label: "you@example.com", email: "you@example.com", category: null, savedAt: "2026-10-16T18:00:00Z", active: true, needsLogin: false }],
+    nativeObservationId: "muse-1",
+    nativeAccount: identity,
     recoveryRequired: false,
     notice: null,
   };

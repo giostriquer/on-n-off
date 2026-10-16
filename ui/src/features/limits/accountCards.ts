@@ -4,6 +4,15 @@ import { hasObservations } from "./limitPresentation";
 
 const emailKey = (email?: string | null) => email?.trim().toLowerCase() || null;
 
+function legacyIdOf(identity: SavedProfile["identity"]): string | null {
+  switch (identity.provider) {
+    case "codex": return identity.workspaceId;
+    case "claude": return identity.userId;
+    case "muse": return `email:${identity.userId}`;
+    default: return null;
+  }
+}
+
 export function accountCards(entries: ProviderLimits[], profiles: SavedProfile[]) {
   const replacements = profiles.flatMap(profile => {
     const email = emailKey(profile.email);
@@ -13,8 +22,7 @@ export function accountCards(entries: ProviderLimits[], profiles: SavedProfile[]
       entry.status === "ok" && hasObservations(entry) &&
       emailKey(entry.account.label) === email);
     if (!scoped?.account) return [];
-    const legacyId = profile.identity.provider === "codex" ? profile.identity.workspaceId :
-      profile.identity.provider === "claude" ? profile.identity.userId : null;
+    const legacyId = legacyIdOf(profile.identity);
     return legacyId ? [{ provider: profile.identity.provider, legacyId, email, scopedId: scoped.account.id }] : [];
   });
   const legacyAccounts = new Map<string, { id: string; email: string }[]>();

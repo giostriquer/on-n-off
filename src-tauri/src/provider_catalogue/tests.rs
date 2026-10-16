@@ -73,7 +73,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary_aliases: &[],
                     limits_reader: true,
                     usage: Some(UsageProvider::Muse),
-                    saved_accounts: false,
+                    saved_accounts: true,
                 },
             ),
         ]

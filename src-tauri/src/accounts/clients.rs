@@ -17,6 +17,7 @@ struct Process {
 pub(super) struct Client {
     pub(super) name: &'static str,
     pub(super) package_entry: &'static str,
+    pub(super) binary_prefix: Option<&'static str>,
     pub(super) blocks_activation: bool,
 }
 
@@ -192,7 +193,12 @@ fn client_name(process: &Process, client: &Client) -> Option<String> {
     let name = client.name;
     let file = process.executable.rsplit(['/', '\\']).next()?;
     let base = normalized(file);
-    if base == name || base == format!("{name}.exe") {
+    if base == name
+        || base == format!("{name}.exe")
+        || client
+            .binary_prefix
+            .is_some_and(|prefix| base.starts_with(prefix))
+    {
         return Some(file.to_owned());
     }
     let script = SCRIPT_HOSTS.contains(&base.as_str()) && launches_script(process, name);

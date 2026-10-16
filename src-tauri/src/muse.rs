@@ -339,6 +339,10 @@ fn muse_user_skill(
 }
 
 impl AgentAdapter for MuseAdapter {
+    fn supports_accounts(&self) -> bool {
+        true
+    }
+
     fn info(&self) -> AgentInfo {
         // `muse plugins marketplace add` needs a name the install sheet
         // does not collect, so git sources stay a terminal job.

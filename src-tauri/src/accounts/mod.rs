@@ -16,6 +16,7 @@ pub(crate) mod claude_store;
 pub(crate) mod codex;
 pub(crate) mod codex_store;
 mod keychain;
+mod muse;
 pub(crate) mod muse_store;
 #[cfg(all(target_os = "macos", test))]
 pub(crate) use keychain::with_real_keychain;
@@ -99,6 +100,7 @@ fn adapter(provider: AgentId) -> Result<&'static dyn Adapter, String> {
     match provider {
         AgentId::Claude => Ok(&claude::Claude),
         AgentId::Codex => Ok(&codex::Codex),
+        AgentId::Muse => Ok(&muse::Muse),
         _ => Err("Saved subscription profiles are not supported for this provider.".into()),
     }
 }
@@ -120,6 +122,9 @@ trait NativeAccount: Native {
 
 trait IsolatedSignIn: Native {
     fn sign_in(&self) -> std::process::Command;
+    fn sign_in_input(&self) -> Option<&'static [u8]> {
+        None
+    }
     fn first_usage(
         &self,
         dir: &Path,

@@ -65,6 +65,7 @@ impl super::Adapter for Codex {
         &Client {
             name: "codex",
             package_entry: "/@openai/codex/bin/codex.js",
+            binary_prefix: None,
             blocks_activation: true,
         }
     }

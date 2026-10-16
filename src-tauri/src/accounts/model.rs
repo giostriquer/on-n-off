@@ -43,6 +43,13 @@ pub(super) fn codex_fingerprint(access: Option<&Value>, refresh: Option<&Value>)
     fingerprint([None, None, access, refresh])
 }
 
+pub(super) fn muse_fingerprint(access: Option<&Value>, api_key: Option<&Value>) -> String {
+    crate::sha::sha256_hex(
+        &serde_json::to_vec(&[None, None, None, None, access, api_key])
+            .expect("serializable credential generation"),
+    )
+}
+
 fn fingerprint(slots: [Option<&Value>; 4]) -> String {
     crate::sha::sha256_hex(&serde_json::to_vec(&slots).expect("serializable credential generation"))
 }

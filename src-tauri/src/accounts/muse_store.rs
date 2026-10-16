@@ -8,9 +8,9 @@ use serde_json::Value;
 use super::model::AccessToken;
 
 #[cfg(target_os = "macos")]
-const KEYCHAIN_SERVICE: &str = "ai.meta.dev.credentials";
+pub(super) const KEYCHAIN_SERVICE: &str = "ai.meta.dev.credentials";
 #[cfg(target_os = "macos")]
-const KEYCHAIN_ACCOUNT: &str = "meta";
+pub(super) const KEYCHAIN_ACCOUNT: &str = "meta";
 
 pub(crate) struct MuseLogin {
     pub(crate) email: Option<String>,
