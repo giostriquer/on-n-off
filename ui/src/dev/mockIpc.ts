@@ -270,6 +270,8 @@ const handlers: Record<string, Handler> = {
     pendingLogins.delete(id);
   },
   read_limits: (args) => limits.readLimits(args.agentId),
+  read_account_categories: () => limits.readCategories(),
+  set_account_category: (args) => limits.setCategory(args.agentId, args.accountId, args.category),
   set_limits_archived: (args) => limits.setArchived(args.agentId, args.accountIds, args.archived),
   forget_limits_snapshot: (args) => limits.forgetSnapshot(args.agentId, args.accountId),
   read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),

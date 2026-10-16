@@ -97,8 +97,10 @@ fn category_survives_credential_updates_and_can_be_cleared() {
         auth: json!({"claudeAiOauth":{"refreshToken":"a1"}}),
         account: json!({"emailAddress":"a@example.com"}),
     };
-    let id = db.save(user.clone(), native.clone(), None).unwrap();
-    db.set_category(&id, "  Client A / research  ").unwrap();
+    db.save(user.clone(), native.clone(), None).unwrap();
+    let key = user.observation_key();
+    db.set_account_category(AgentId::Claude, &key, "  Client A / research  ")
+        .unwrap();
     native.auth["claudeAiOauth"]["refreshToken"] = json!("a2");
     native.account["emailAddress"] = json!("updated@example.com");
     db.save(user, native, None).unwrap();
@@ -112,12 +114,16 @@ fn category_survives_credential_updates_and_can_be_cleared() {
         loaded.profiles[0].category.as_deref(),
         Some("Client A / research")
     );
-    assert!(loaded.set_category(&id, &"x".repeat(101)).is_err());
+    assert!(loaded
+        .set_account_category(AgentId::Claude, &key, &"x".repeat(101))
+        .is_err());
     assert_eq!(
         loaded.profiles[0].category.as_deref(),
         Some("Client A / research")
     );
-    loaded.set_category(&id, "  ").unwrap();
+    loaded
+        .set_account_category(AgentId::Claude, &key, "  ")
+        .unwrap();
     store.persist(&loaded).unwrap();
     assert_eq!(store.load().unwrap().profiles[0].category, None);
 }

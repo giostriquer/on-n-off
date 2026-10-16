@@ -121,44 +121,6 @@ fn a_save_refused_by_a_pending_recovery_touches_no_native_lock_or_login() {
 }
 
 #[test]
-fn a_category_edit_persists_without_rejecting_sign_ins_in_flight() {
-    let harness = Harness::new();
-    let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
-    let sign_in = harness.sign_in();
-
-    harness
-        .accounts()
-        .set_category(&a, "  Client A / research ")
-        .unwrap();
-
-    assert_eq!(
-        harness.vault().profiles[0].category.as_deref(),
-        Some("Client A / research")
-    );
-    assert!(harness.vouches(&sign_in));
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
-}
-
-#[test]
-fn a_category_edit_is_allowed_during_a_pending_recovery_and_keeps_the_journal() {
-    let harness = Harness::new();
-    let target = harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
-    harness.interrupted(&target, Some(claude("a", "a1")));
-
-    harness
-        .accounts()
-        .set_category(&target, "Client B")
-        .unwrap();
-
-    let vault = harness.vault();
-    assert_eq!(vault.profiles[0].category.as_deref(), Some("Client B"));
-    assert_eq!(
-        vault.recovery().map(|journal| journal.target_id.as_str()),
-        Some(target.as_str())
-    );
-}
-
-#[test]
 fn removing_a_profile_excludes_its_account_from_remembering_and_rejects_sign_ins_in_flight() {
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));

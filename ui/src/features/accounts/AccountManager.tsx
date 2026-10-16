@@ -25,9 +25,9 @@ function useController(provider: AccountProvider) {
   async function refresh() {
     await accountChanged(client, provider);
   }
-  async function action(action: AccountAction, id?: string, value?: string, after?: () => Promise<void>) {
+  async function action(action: AccountAction, id?: string, after?: () => Promise<void>) {
     setBusy(action); setError(null);
-    try { await api.accountAction(provider, action, id, value); await after?.(); }
+    try { await api.accountAction(provider, action, id); await after?.(); }
     catch (error) { setError(parseInvokeError(error).message); throw error; }
     finally { try { await refresh(); } finally { setBusy(null); } }
   }
@@ -56,7 +56,7 @@ function useController(provider: AccountProvider) {
     }
   }
   async function removeAccount(profileId: string | undefined, forget: () => Promise<void>) {
-    if (profileId) await action("remove", profileId, undefined, forget);
+    if (profileId) await action("remove", profileId, forget);
     else await forget();
   }
   async function cancel() {

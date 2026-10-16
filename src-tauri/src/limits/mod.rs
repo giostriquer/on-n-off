@@ -121,7 +121,7 @@ pub fn forget_snapshot(
     agent: AgentId,
     account_id: &str,
     expected_email: Option<&str>,
-) -> Result<(), String> {
+) -> Result<Vec<String>, String> {
     let home = paths::user_home().map_err(|error| error.message)?;
     if let Some(email) = expected_email {
         return SnapshotStore::for_home(&home).forget_matching_email(agent, account_id, email);

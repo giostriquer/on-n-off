@@ -187,18 +187,28 @@ fn forgetting_an_account_unarchives_every_id_it_deletes() {
         )
         .unwrap();
 
-    store.forget(AgentId::Codex, "profile:a").unwrap();
+    assert_eq!(
+        store.forget(AgentId::Codex, "profile:a").unwrap(),
+        ["team", "profile:a"],
+        "the superseded legacy id, then the account"
+    );
     assert_eq!(
         store.archived(AgentId::Codex),
         set(&["profile:other", "legacy-b"])
     );
 
-    store
-        .forget_matching_email(AgentId::Codex, "legacy-b", "b@example.com")
-        .unwrap();
+    assert_eq!(
+        store
+            .forget_matching_email(AgentId::Codex, "legacy-b", "b@example.com")
+            .unwrap(),
+        ["legacy-b"]
+    );
     assert_eq!(store.archived(AgentId::Codex), set(&["profile:other"]));
 
-    store.forget(AgentId::Codex, "profile:other").unwrap();
+    assert_eq!(
+        store.forget(AgentId::Codex, "profile:other").unwrap(),
+        ["profile:other"]
+    );
     assert!(store.archived(AgentId::Codex).is_empty());
     let _ = fs::remove_dir_all(home);
 }
@@ -232,11 +242,21 @@ fn forgetting_legacy_history_by_its_email_unarchives_it_only_while_the_email_mat
     );
     assert_eq!(store.load(AgentId::Codex).len(), 1, "nothing forgotten");
 
-    store
-        .forget_matching_email(AgentId::Codex, "legacy-b", " B@Example.com ")
-        .unwrap();
+    assert_eq!(
+        store
+            .forget_matching_email(AgentId::Codex, "legacy-b", " B@Example.com ")
+            .unwrap(),
+        ["legacy-b"]
+    );
     assert_eq!(store.archived(AgentId::Codex), set(&["unreadable"]));
     assert!(store.load(AgentId::Codex).is_empty());
+    assert_eq!(
+        store
+            .forget_matching_email(AgentId::Codex, "legacy-b", "b@example.com")
+            .unwrap(),
+        ["legacy-b"],
+        "history already gone still names the id it forgot"
+    );
     let _ = fs::remove_dir_all(home);
 }
 

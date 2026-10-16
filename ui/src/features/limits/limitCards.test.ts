@@ -171,11 +171,17 @@ describe("card order", () => {
 });
 
 describe("a card's identity", () => {
-  it("is named by its saved profile's email and category, and is active as the profiles say", () => {
-    const shown = cards([okCodex({ account: { id: "acct-work", label: "old-label@codex.example" } }), staleCodex()], [
-      saved("codex", "work", "acct-work", "work@codex.example", { category: "Client A" }),
-      saved("codex", "personal", "acct-personal", "personal@codex.example", { active: true }),
-    ]);
+  it("is named by its saved profile's email and its account's category, and is active as the profiles say", () => {
+    const shown = limitCards({
+      provider: "codex",
+      entries: [okCodex({ account: { id: "acct-work", label: "old-label@codex.example" } }), staleCodex()],
+      profiles: [
+        saved("codex", "work", "acct-work", "work@codex.example", { category: "Stale copy" }),
+        saved("codex", "personal", "acct-personal", "personal@codex.example", { active: true, category: "Cleared since" }),
+      ],
+      categories: { "acct-work": "Client A", "acct-other": "Someone else" },
+      now: AT_NOW,
+    })!;
     expect(shown.map(({ identity, account, active }) => ({ ...identity, name: account?.name, active }))).toEqual([
       { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", active: false },
       { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", active: true },

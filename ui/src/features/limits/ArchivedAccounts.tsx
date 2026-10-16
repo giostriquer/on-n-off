@@ -5,7 +5,7 @@ import { parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/providers";
-import { removeAccountQuestion } from "./historyActions";
+import { removeAccountQuestion } from "./cardActions";
 import type { CardAccount, LimitCard } from "./limitCards";
 
 type RowAction = "unarchive" | "remove";

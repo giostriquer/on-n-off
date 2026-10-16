@@ -48,6 +48,11 @@ pub struct ProfileDto {
     #[serde(skip_serializing_if = "Option::is_none")]
     sign_in_ends_at: Option<String>,
 }
+#[derive(Default, Serialize)]
+#[serde(transparent)]
+pub struct CategoriesDto(
+    std::collections::BTreeMap<String, std::collections::BTreeMap<String, String>>,
+);
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AccountsDto {
@@ -267,8 +272,18 @@ pub fn unlock() -> Result<(), String> {
 pub fn save_current(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.save_current(provider)
 }
-pub fn set_category(id: &str, category: &str) -> Result<(), String> {
-    Accounts::live()?.set_category(id, category)
+pub fn categories() -> Result<CategoriesDto, String> {
+    Accounts::live()?.categories()
+}
+pub fn set_account_category(
+    provider: AgentId,
+    account_id: &str,
+    category: &str,
+) -> Result<Option<String>, String> {
+    Accounts::live()?.set_account_category(provider, account_id, category)
+}
+pub fn forget_categories(provider: AgentId, account_ids: &[String]) -> Result<(), String> {
+    Accounts::live()?.forget_categories(provider, account_ids)
 }
 pub fn remove(id: &str) -> Result<(), String> {
     Accounts::live()?.remove(id)
@@ -323,6 +338,11 @@ impl Accounts {
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
         let archived = crate::limits::archived(home, provider);
+        let categories = db
+            .categories()
+            .get(provider.key())
+            .cloned()
+            .unwrap_or_default();
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
         Ok(AccountsDto {
@@ -334,13 +354,13 @@ impl Accounts {
                     sign_in_ends_at: sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref()),
                     needs_login: p.needs_login(),
                     archived: archived.contains(&p.identity.observation_key()),
+                    category: categories.get(&p.identity.observation_key()).cloned(),
                     observation_id: p.identity.observation_key(),
                     active: current.as_ref() == Some(&p.identity),
                     id: p.id,
                     identity: p.identity,
                     label: p.label,
                     email: p.email,
-                    category: p.category,
                     saved_at: p.saved_at,
                     pending_activation: p.pending_activation,
                 })
@@ -394,11 +414,39 @@ impl Accounts {
         Ok(())
     }
 
-    fn set_category(&self, id: &str, category: &str) -> Result<(), String> {
-        store::Store::open(&self.home, false)?.change(store::ChangeKind::Metadata, |db| {
-            db.set_category(id, category)
-        })?;
+    fn categories(&self) -> Result<CategoriesDto, String> {
+        if !store::Store::vault_exists(&self.home) {
+            return Ok(CategoriesDto::default());
+        }
+        let db = store::Store::open_existing(&self.home)?.load()?;
+        Ok(CategoriesDto(db.categories().clone()))
+    }
+
+    fn set_account_category(
+        &self,
+        provider: AgentId,
+        account_id: &str,
+        category: &str,
+    ) -> Result<Option<String>, String> {
+        let stored = store::Store::open(&self.home, true)?
+            .change(store::ChangeKind::Metadata, |db| {
+                db.set_account_category(provider, account_id, category)
+            })?;
         self.notify.accounts();
+        Ok(stored)
+    }
+
+    fn forget_categories(&self, provider: AgentId, account_ids: &[String]) -> Result<(), String> {
+        if !store::Store::vault_exists(&self.home) {
+            return Ok(());
+        }
+        let changed = store::Store::open(&self.home, false)?
+            .change(store::ChangeKind::Metadata, |db| {
+                Ok(db.forget_categories(provider, account_ids))
+            })?;
+        if changed {
+            self.notify.accounts();
+        }
         Ok(())
     }
 

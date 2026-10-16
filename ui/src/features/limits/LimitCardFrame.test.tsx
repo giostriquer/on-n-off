@@ -11,9 +11,11 @@ const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 const setLimitsArchived = vi.hoisted(() => vi.fn());
+const readAccountCategories = vi.hoisted(() => vi.fn());
+const setAccountCategory = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/api", () => ({
-  readLimits, readAccounts, accountAction: vi.fn(), forgetLimitsSnapshot, setLimitsArchived,
+  readLimits, readAccounts, accountAction: vi.fn(), forgetLimitsSnapshot, setLimitsArchived, readAccountCategories, setAccountCategory,
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
@@ -53,6 +55,8 @@ beforeEach(() => {
   readLimits.mockReset();
   forgetLimitsSnapshot.mockReset().mockResolvedValue(undefined);
   setLimitsArchived.mockReset().mockResolvedValue(undefined);
+  readAccountCategories.mockReset().mockResolvedValue({});
+  setAccountCategory.mockReset().mockImplementation(async (_provider: LimitsProvider, _account: string, category: string) => category.trim() || null);
 });
 
 afterEach(() => {
@@ -60,12 +64,12 @@ afterEach(() => {
 });
 
 const MENUS: Record<LimitsProvider, { current: string[]; remembered: string[] }> = {
-  claude: { current: ["Check limits now", "Sign out"], remembered: ["Check limits now", "Archive account", "Remove account"] },
+  claude: { current: ["Check limits now", "Edit category", "Sign out"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
   codex: {
-    current: ["Check limits now", "Banked reset alert", "Sign out"],
-    remembered: ["Check limits now", "Archive account", "Banked reset alert", "Remove account"],
+    current: ["Check limits now", "Edit category", "Banked reset alert", "Sign out"],
+    remembered: ["Check limits now", "Edit category", "Archive account", "Banked reset alert", "Remove account"],
   },
-  muse: { current: ["Check limits now"], remembered: ["Check limits now", "Archive account", "Remove account"] },
+  muse: { current: ["Check limits now", "Edit category"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
 };
 
 describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
@@ -177,6 +181,111 @@ it("puts a saved login's items between Check limits now and the card's history i
   const card = await screen.findByRole("region", { name: "Codex limits · old@codex.example" });
   await waitFor(() => expect(within(card).getByRole("button", { name: "Use account" })).toBeInTheDocument());
   expect(openMenu(card, "old@codex.example")).toEqual(["Check limits now", "Edit category", "Sign in again", "Archive account", "Banked reset alert", "Remove account"]);
+});
+
+describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
+  const name = providerLabel(provider);
+  const accountId = (read: LimitsProvider) => CURRENT[read]().account!.id;
+
+  async function openEditor(region: HTMLElement) {
+    openMenu(region, label(provider));
+    fireEvent.click(within(region).getByRole("button", { name: "Edit category" }));
+    return within(region).getByRole("textbox", { name: "Category (optional)" });
+  }
+
+  it("is shown from the store kept per account, saved login or not", async () => {
+    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Client A / research", "another-account": "Elsewhere" } });
+    answer(read => [CURRENT[read]()]);
+    renderLimits();
+    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    expect(await within(current).findByText("Client A / research")).toBeInTheDocument();
+    expect(within(current).queryByText("Elsewhere")).toBeNull();
+  });
+
+  it("is edited from the menu without asking anything, and cleared by saving it blank, leaving other cards' categories", async () => {
+    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Old", [`${provider}-old`]: "Other card" } });
+    answer(read => [CURRENT[read](), remembered(read)]);
+    renderLimits();
+    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    const other = card(`${name} limits · ${oldLabel(provider)}`);
+    await within(current).findByText("Old");
+    const editor = await openEditor(current);
+    expect(within(current).getByRole("group", { name: "Edit account category" })).toContainElement(editor);
+    expect(editor).toHaveFocus();
+    expect(editor).toHaveValue("Old");
+    expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
+    fireEvent.change(editor, { target: { value: "  Research / client blue " } });
+    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
+    await waitFor(() => expect(setAccountCategory).toHaveBeenCalledWith(provider, accountId(provider), "  Research / client blue "));
+    expect(await within(current).findByText("Research / client blue")).toBeInTheDocument();
+    expect(within(other).getByText("Other card")).toBeInTheDocument();
+    expect(within(current).queryByRole("textbox")).toBeNull();
+    expect(within(current).getByRole("button", { name: `More actions for ${label(provider)}` })).toHaveFocus();
+
+    fireEvent.change(await openEditor(current), { target: { value: "" } });
+    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
+    await waitFor(() => expect(setAccountCategory).toHaveBeenLastCalledWith(provider, accountId(provider), ""));
+    await waitFor(() => expect(within(current).queryByText("Research / client blue")).toBeNull());
+  });
+
+  it("saves once at a time, and says why a category was not saved while keeping the editor open to retry", async () => {
+    let fail!: (reason: Error) => void;
+    setAccountCategory.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject; }));
+    answer(read => [CURRENT[read]()]);
+    renderLimits();
+    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    const editor = await openEditor(current);
+    expect(editor).toHaveValue("");
+    fireEvent.change(editor, { target: { value: "Work" } });
+    const save = within(current).getByRole("button", { name: "Save category" });
+    fireEvent.click(save);
+    await waitFor(() => expect(save).toBeDisabled());
+    fireEvent.click(save);
+    expect(setAccountCategory).toHaveBeenCalledTimes(1);
+    await act(async () => fail(new Error("the vault is locked")));
+    expect(within(current).getByRole("alert")).toHaveTextContent("the vault is locked");
+    expect(within(current).getByRole("textbox", { name: "Category (optional)" })).toHaveValue("Work");
+    expect(save).toBeEnabled();
+    expect(within(current).queryByText("Work", { selector: "div" })).toBeNull();
+  });
+
+  it("still offers the card and its editor when the categories cannot be read", async () => {
+    readAccountCategories.mockRejectedValue(new Error("the vault is locked"));
+    answer(read => [CURRENT[read]()]);
+    renderLimits();
+    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
+    await waitFor(() => expect(readAccountCategories).toHaveBeenCalled());
+    const editor = await openEditor(current);
+    expect(editor).toHaveValue("");
+    fireEvent.change(editor, { target: { value: "Work" } });
+    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
+    await waitFor(() => expect(setAccountCategory).toHaveBeenCalledWith(provider, accountId(provider), "Work"));
+    await waitFor(() => expect(within(current).queryByRole("textbox")).toBeNull());
+    expect(within(current).queryByRole("alert")).toBeNull();
+  });
+});
+
+it("does not steal focus when a category save finishes after its editor was dismissed", async () => {
+  let finish!: () => void;
+  setAccountCategory.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; }));
+  answer(read => [CURRENT[read]()]);
+  renderLimits();
+  const current = await screen.findByRole("region", { name: `Muse limits · ${label("muse")}` });
+  openMenu(current, label("muse"));
+  fireEvent.click(within(current).getByRole("button", { name: "Edit category" }));
+  fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
+  const trigger = within(current).getByRole("button", { name: `More actions for ${label("muse")}` });
+  fireEvent.pointerDown(document.body);
+  const outside = document.createElement("button");
+  document.body.append(outside);
+  outside.focus();
+  try {
+    await act(async () => finish());
+    await waitFor(() => expect(trigger).toHaveAttribute("aria-expanded", "false"));
+    expect(outside).toHaveFocus();
+  } finally {
+    outside.remove();
+  }
 });
 
 describe("card header", () => {
