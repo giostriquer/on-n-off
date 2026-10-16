@@ -803,9 +803,7 @@ fn popover_entries(
                     y += line_h(10.5, TextWeight::Regular) + v(6.0);
                 }
                 for row in &list.items {
-                    let tag = row
-                        .tag
-                        .map(|tag| (tag.label.to_uppercase(), tone_color(tag.tone)));
+                    let ink = row.tag.map(|tag| tone_color(tag.tone));
                     let title_size = v(11.0);
                     let copy_w = v(20.0);
                     let lines = wrap_lines(
@@ -835,7 +833,7 @@ fn popover_entries(
                         if line_index == 0 {
                             entries.push((
                                 PopItem::CopyIcon {
-                                    color: tag.as_ref().map_or(MUTED_INK, |(_, ink)| *ink),
+                                    color: ink.unwrap_or(MUTED_INK),
                                 },
                                 R::new(x + inner_w - copy_w, y, copy_w, copy_h),
                             ));
@@ -851,36 +849,17 @@ fn popover_entries(
                     }
                     y += v(2.0);
                     let repo_size = v(10.0);
-                    let mut line_x = x;
                     let badge_limit = x + inner_w - v(7.0) - v(10.0);
-                    if let Some((label, ink)) = &tag {
-                        let tag_size = v(9.5);
-                        text_entry(
-                            &mut entries,
-                            line_x,
-                            y,
-                            inner_w,
-                            line_h(9.5, TextWeight::Semibold),
-                            label.clone(),
-                            tag_size,
-                            TextWeight::Semibold,
-                            *ink,
-                            false,
-                        );
-                        line_x +=
-                            measure_weight(label, tag_size, TextWeight::Semibold, display_scale)
-                                + v(5.0);
-                    }
                     let repo = ellipsize(
                         &format!("{} #{}", row.repo, row.number),
-                        badge_limit - line_x,
+                        badge_limit - x,
                         repo_size,
                         TextWeight::Regular,
                         display_scale,
                     );
                     text_entry(
                         &mut entries,
-                        line_x,
+                        x,
                         y,
                         inner_w,
                         line_h(10.0, TextWeight::Regular),
@@ -890,7 +869,7 @@ fn popover_entries(
                         MUTED_INK,
                         false,
                     );
-                    line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
+                    let mut line_x = x + measure_text(&repo, repo_size, display_scale) + v(8.0);
                     for badge in &row.badges {
                         let badge_size = v(9.5);
                         let badge_w = measure_weight(
@@ -931,7 +910,7 @@ fn popover_entries(
                         inner_w,
                         y + line_h(10.0, TextWeight::Regular) - row_top,
                     );
-                    if let Some((_, ink)) = tag {
+                    if let Some(ink) = ink {
                         entries.push((
                             PopItem::Stripe { color: ink },
                             R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
@@ -1126,7 +1105,7 @@ const CREDITS_INK: Color = [168, 176, 186, 255];
 const CREDITS_TRACK: Color = [38, 41, 45, 255];
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 const WORK_BLUE: Color = [96, 165, 250, 255];
-const PERSONAL_VIOLET: Color = [192, 132, 252, 255];
+const PERSONAL_LAVENDER: Color = [170, 155, 215, 255];
 
 fn tone_color(tone: Tone) -> Color {
     match tone {
@@ -1135,7 +1114,7 @@ fn tone_color(tone: Tone) -> Color {
         Tone::Red => TRIP_RED,
         Tone::Amber => WARN_AMBER,
         Tone::Work => WORK_BLUE,
-        Tone::Personal => PERSONAL_VIOLET,
+        Tone::Personal => PERSONAL_LAVENDER,
     }
 }
 

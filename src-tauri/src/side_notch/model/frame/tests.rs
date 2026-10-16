@@ -167,6 +167,79 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
 }
 
 #[test]
+fn only_the_viewers_own_personal_repository_loses_its_owner() {
+    let personal = Some(PrContext::Personal);
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, Some("octocat")),
+        "dotfiles"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, Some("OctoCat")),
+        "dotfiles",
+        "GitHub logins ignore case"
+    );
+    assert_eq!(
+        repo_label("alice/dotfiles", personal, Some("octocat")),
+        "alice/dotfiles",
+        "someone else's personal repository keeps its owner"
+    );
+    assert_eq!(
+        repo_label("octocat/webapp", Some(PrContext::Work), Some("octocat")),
+        "octocat/webapp",
+        "the viewer's fork of an organization's repository is work and keeps its owner"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", None, Some("octocat")),
+        "octocat/dotfiles",
+        "an unread owner keeps the full name"
+    );
+    assert_eq!(
+        repo_label("octocat/dotfiles", personal, None),
+        "octocat/dotfiles",
+        "without the viewer's login the owner stays"
+    );
+}
+
+#[test]
+fn the_viewers_own_personal_repository_is_named_without_its_owner() {
+    let row = |number: u64, repo: &str, in_organization: serde_json::Value| {
+        let mut row = pr(number);
+        row["repo"] = repo.into();
+        row["url"] = format!("https://github.com/{repo}/pull/{number}").into();
+        row["inOrganization"] = in_organization;
+        row
+    };
+    let mut dto = prs(vec![
+        row(1, "acme/webapp", true.into()),
+        row(2, "octocat/dotfiles", false.into()),
+        row(3, "alice/dotfiles", false.into()),
+        row(4, "octocat/webapp", true.into()),
+        row(5, "octocat/notes", serde_json::Value::Null),
+    ]);
+    dto.data.viewer = Some("octocat".into());
+    let frame = rail(
+        &settings(vec![GithubList::Mine]),
+        unread(),
+        Some(&dto),
+        None,
+    );
+    assert_eq!(
+        pr_cell(&frame).lists[0]
+            .items
+            .iter()
+            .map(|row| row.repo.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "acme/webapp",
+            "dotfiles",
+            "alice/dotfiles",
+            "octocat/webapp",
+            "octocat/notes"
+        ]
+    );
+}
+
+#[test]
 fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
     let displays = [Display {
         id: "main".into(),
