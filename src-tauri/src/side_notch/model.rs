@@ -247,10 +247,8 @@ impl RailMetrics {
         let count = count as f64;
         count * self.cell_length + (count - 1.0).max(0.0) * self.cell_spacing + 2.0 * self.inset
     }
-}
 
-#[cfg(any(target_os = "windows", test))]
-impl RailMetrics {
+    #[cfg(any(target_os = "windows", test))]
     pub fn ear(&self) -> f64 {
         self.inset
     }
