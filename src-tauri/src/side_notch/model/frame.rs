@@ -1,6 +1,7 @@
 use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
-    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, ReviewDecision,
+    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitsStatus, MergeKind,
+    ReviewDecision,
 };
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
@@ -25,12 +26,38 @@ pub enum CellData {
 pub struct ProviderCell {
     pub provider: AgentId,
     pub reading: Option<NotchProvider>,
+    pub notice: Option<Notice>,
+    pub paused: Option<Notice>,
     pub sessions: Vec<LiveSession>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PrCell {
     pub reading: Option<PrReading>,
+    pub notice: Option<Notice>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Tone {
+    Muted,
+    Green,
+    Red,
+    Amber,
+    Work,
+    Personal,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct Notice {
+    pub text: String,
+    pub tone: Tone,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct Badge {
+    pub label: &'static str,
+    pub tone: Tone,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -59,6 +86,8 @@ pub struct PrSegment {
 #[serde(rename_all = "camelCase")]
 pub struct PrList {
     pub id: GithubList,
+    #[serde(skip)]
+    pub title: &'static str,
     pub total: u64,
     pub items: Vec<PrRow>,
 }
@@ -81,6 +110,10 @@ pub struct PrRow {
     pub updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context: Option<PrContext>,
+    #[serde(skip)]
+    pub badges: Vec<Badge>,
+    #[serde(skip)]
+    pub tag: Option<Badge>,
 }
 
 pub fn rail(
@@ -94,17 +127,14 @@ pub fn rail(
         .into_iter()
         .map(|provider| {
             let (reading, sessions) = read(provider);
-            CellData::Provider(ProviderCell {
-                provider,
-                reading,
-                sessions,
-            })
+            CellData::Provider(provider_cell(provider, reading, sessions))
         })
         .collect();
     if settings.pull_requests.enabled {
-        cells.push(CellData::PullRequests(PrCell {
-            reading: pulls.map(|dto| pr_reading(dto, &settings.pull_requests.selected_lists())),
-        }));
+        cells.push(CellData::PullRequests(pr_cell(
+            pulls,
+            &settings.pull_requests.selected_lists(),
+        )));
     }
     RailData {
         settings: settings.clone(),
@@ -113,9 +143,74 @@ pub fn rail(
     }
 }
 
+fn provider_cell(
+    provider: AgentId,
+    reading: Option<NotchProvider>,
+    sessions: Vec<LiveSession>,
+) -> ProviderCell {
+    let (notice, paused) = match &reading {
+        Some(reading) if reading.status != LimitsStatus::Ok => (
+            Some(muted(
+                reading
+                    .message
+                    .clone()
+                    .unwrap_or_else(|| "Usage unavailable.".into()),
+            )),
+            (!reading.windows.is_empty() || reading.workspace_credits.is_some()).then(|| Notice {
+                text: "Refresh paused. Last observed values below.".into(),
+                tone: Tone::Amber,
+            }),
+        ),
+        Some(reading) if !reading.windows.is_empty() || reading.message.is_some() => (None, None),
+        _ => (Some(muted("Checking usage…".into())), None),
+    };
+    ProviderCell {
+        provider,
+        reading,
+        notice,
+        paused,
+        sessions,
+    }
+}
+
+fn muted(text: String) -> Notice {
+    Notice {
+        text,
+        tone: Tone::Muted,
+    }
+}
+
+fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
+    let Some(dto) = dto else {
+        return PrCell {
+            reading: None,
+            notice: Some(muted("Checking pull requests…".into())),
+        };
+    };
+    let reading = pr_reading(dto, selected);
+    let notice = dto
+        .hint
+        .clone()
+        .filter(|_| dto.status != GithubStatus::Ok)
+        .map(|text| Notice {
+            text,
+            tone: if reading.readable {
+                Tone::Amber
+            } else {
+                Tone::Muted
+            },
+        });
+    PrCell {
+        reading: Some(reading),
+        notice,
+    }
+}
+
 fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
+    let readable = dto.status == GithubStatus::Ok || dto.stale;
     let lists: Vec<PrList> = selected
         .iter()
+        .filter(|_| readable)
         .map(|list| {
             let source = match list {
                 GithubList::Mine => &dto.data.mine,
@@ -124,6 +219,7 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
             };
             PrList {
                 id: *list,
+                title: list_title(*list),
                 total: source.total,
                 items: source
                     .items
@@ -134,7 +230,6 @@ fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
             }
         })
         .collect();
-    let readable = dto.status == GithubStatus::Ok || dto.stale;
     let mut seen = std::collections::BTreeSet::new();
     let rows: Vec<&PrRow> = lists
         .iter()
@@ -182,7 +277,49 @@ fn pr_row(pr: &GithubPrDto) -> Option<PrRow> {
         merge_kind: pr.merge_kind,
         updated_at: pr.updated_at.clone(),
         context: PrContext::of(pr),
+        badges: badges(pr),
+        tag: PrContext::of(pr).map(tag),
     })
+}
+
+fn list_title(list: GithubList) -> &'static str {
+    match list {
+        GithubList::Mine => "Mine",
+        GithubList::ReviewRequested => "Review requested",
+        GithubList::Assigned => "Assigned",
+    }
+}
+
+fn badges(pr: &GithubPrDto) -> Vec<Badge> {
+    let badge = |label, tone| Badge { label, tone };
+    let draft = pr.is_draft.then(|| badge("Draft", Tone::Muted));
+    let review = match pr.review_decision {
+        Some(ReviewDecision::Approved) => Some(badge("Approved", Tone::Green)),
+        Some(ReviewDecision::ChangesRequested) => Some(badge("Changes requested", Tone::Red)),
+        Some(ReviewDecision::ReviewRequired) | None => None,
+    };
+    let merge = pr.merge_kind.map(|kind| match kind {
+        MergeKind::Conflicts => badge("Conflicts", Tone::Red),
+        MergeKind::Queued => badge("Queued", Tone::Green),
+        MergeKind::AutoMerge => badge("Auto-merge", Tone::Muted),
+        MergeKind::Ready => badge("Ready to merge", Tone::Green),
+        MergeKind::Behind => badge("Behind base", Tone::Amber),
+        MergeKind::Blocked => badge("Blocked", Tone::Amber),
+    });
+    [draft, review, merge].into_iter().flatten().collect()
+}
+
+fn tag(context: PrContext) -> Badge {
+    match context {
+        PrContext::Work => Badge {
+            label: "Work",
+            tone: Tone::Work,
+        },
+        PrContext::Personal => Badge {
+            label: "Personal",
+            tone: Tone::Personal,
+        },
+    }
 }
 
 #[cfg(test)]

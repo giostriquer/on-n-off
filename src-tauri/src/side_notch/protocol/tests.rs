@@ -67,6 +67,8 @@ fn sent_provider(entries: serde_json::Value) -> serde_json::Value {
     encoded(vec![CellData::Provider(ProviderCell {
         provider: reading.provider,
         reading: Some(reading),
+        notice: None,
+        paused: None,
         sessions: Vec::new(),
     })])["providers"][0]
         .clone()
@@ -143,10 +145,12 @@ fn pull_requests_travel_only_with_a_pull_request_cell() {
             segments: Vec::new(),
             lists: vec![PrList {
                 id: GithubList::Assigned,
+                title: "Assigned",
                 total: 0,
                 items: Vec::new(),
             }],
         }),
+        notice: None,
     })]);
     assert_eq!(
         message["pullRequests"],

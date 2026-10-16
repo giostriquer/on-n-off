@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::{
-    GithubPrsDto, LimitWindowKind, LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading,
+    GithubPrsDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+    Reading,
 };
 use crate::side_notch::model::frame::{self, ProviderCell};
 use crate::side_notch::model::{Display, NotchProvider, NotchPullRequests, NotchSettings};

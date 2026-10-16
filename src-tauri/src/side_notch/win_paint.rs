@@ -6,14 +6,12 @@ mod text;
 use super::model::{
     layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display,
     workspace_share_note, workspace_share_renewed, workspace_share_window, workspace_share_wording,
-    Edge, GithubList, InnerRing, Layout, NotchSettings, PrContext, RailMetrics, ShowMode,
+    Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode,
 };
-use crate::dto::{
-    AgentId, CiState, GithubStatus, LimitWindowDto, LimitsStatus, MergeKind, ReviewDecision,
-};
+use crate::dto::{AgentId, CiState, LimitWindowDto};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
-use super::model::frame::{CellData, PrRow, PrSegment, RailData};
+use super::model::frame::{CellData, PrSegment, RailData, Tone};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -98,14 +96,6 @@ pub struct Hover {
     pub rail_open: bool,
     pub active: Option<usize>,
     pub cap_hovered: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Badge {
-    Muted,
-    Green,
-    Red,
-    Amber,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -248,38 +238,6 @@ fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
         InnerRing::Fable { .. } => (FABLE_ORANGE, FABLE_TRACK),
         InnerRing::WorkspaceShare => (CREDITS_INK, CREDITS_TRACK),
     }
-}
-
-fn list_title(list: GithubList) -> &'static str {
-    match list {
-        GithubList::Mine => "Mine",
-        GithubList::ReviewRequested => "Review requested",
-        GithubList::Assigned => "Assigned",
-    }
-}
-
-fn row_badges(row: &PrRow) -> Vec<(String, Badge)> {
-    let mut badges = Vec::new();
-    if row.is_draft {
-        badges.push(("Draft".into(), Badge::Muted));
-    }
-    match row.review_decision {
-        Some(ReviewDecision::Approved) => badges.push(("Approved".into(), Badge::Green)),
-        Some(ReviewDecision::ChangesRequested) => {
-            badges.push(("Changes requested".into(), Badge::Red))
-        }
-        _ => {}
-    }
-    match row.merge_kind {
-        Some(MergeKind::Conflicts) => badges.push(("Conflicts".into(), Badge::Red)),
-        Some(MergeKind::Queued) => badges.push(("Queued".into(), Badge::Green)),
-        Some(MergeKind::AutoMerge) => badges.push(("Auto-merge".into(), Badge::Muted)),
-        Some(MergeKind::Ready) => badges.push(("Ready to merge".into(), Badge::Green)),
-        Some(MergeKind::Behind) => badges.push(("Behind base".into(), Badge::Amber)),
-        Some(MergeKind::Blocked) => badges.push(("Blocked".into(), Badge::Amber)),
-        None => {}
-    }
-    badges
 }
 
 fn cell_content(data: &CellData) -> CellContent {
@@ -536,13 +494,9 @@ fn popover_entries(
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
             let reading = provider.reading.as_ref();
-            if let Some(reading) = reading.filter(|reading| reading.status != LimitsStatus::Ok) {
-                let message = reading
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Usage unavailable.".into());
+            if let Some(notice) = &provider.notice {
                 for line in wrap_lines(
-                    &message,
+                    &notice.text,
                     inner_w,
                     v(11.0),
                     TextWeight::Regular,
@@ -558,42 +512,26 @@ fn popover_entries(
                         line,
                         v(11.0),
                         TextWeight::Regular,
-                        MUTED_INK,
+                        tone_color(notice.tone),
                         false,
                     );
                     y += line_h(11.0, TextWeight::Regular);
                 }
-                if !reading.windows.is_empty() || reading.workspace_credits.is_some() {
-                    text_entry(
-                        &mut entries,
-                        x,
-                        y,
-                        inner_w,
-                        line_h(10.0, TextWeight::Regular),
-                        "Refresh paused. Last observed values below.".into(),
-                        v(10.0),
-                        TextWeight::Regular,
-                        WARN_AMBER,
-                        false,
-                    );
-                    y += line_h(10.0, TextWeight::Regular) + v(4.0);
-                }
-            } else if reading
-                .is_none_or(|reading| reading.windows.is_empty() && reading.message.is_none())
-            {
+            }
+            if let Some(paused) = &provider.paused {
                 text_entry(
                     &mut entries,
                     x,
                     y,
                     inner_w,
-                    line_h(11.0, TextWeight::Regular),
-                    "Checking usage…".into(),
-                    v(11.0),
+                    line_h(10.0, TextWeight::Regular),
+                    paused.text.clone(),
+                    v(10.0),
                     TextWeight::Regular,
-                    MUTED_INK,
+                    tone_color(paused.tone),
                     false,
                 );
-                y += line_h(11.0, TextWeight::Regular);
+                y += line_h(10.0, TextWeight::Regular) + v(4.0);
             }
 
             struct Block {
@@ -801,42 +739,40 @@ fn popover_entries(
             );
             y += line_h(13.0, TextWeight::Semibold) + spacing;
 
-            if let Some(pulls) = &cell.reading {
-                let readable = pulls.readable;
-                if pulls.hint.is_some() && pulls.status != GithubStatus::Ok {
-                    let color = if readable { WARN_AMBER } else { MUTED_INK };
-                    for line in wrap_lines(
-                        pulls.hint.as_deref().unwrap_or(""),
+            if let Some(notice) = &cell.notice {
+                for line in wrap_lines(
+                    &notice.text,
+                    inner_w,
+                    v(11.0),
+                    TextWeight::Regular,
+                    display_scale,
+                    4,
+                ) {
+                    text_entry(
+                        &mut entries,
+                        x,
+                        y,
                         inner_w,
+                        line_h(11.0, TextWeight::Regular),
+                        line,
                         v(11.0),
                         TextWeight::Regular,
-                        display_scale,
-                        4,
-                    ) {
-                        text_entry(
-                            &mut entries,
-                            x,
-                            y,
-                            inner_w,
-                            line_h(11.0, TextWeight::Regular),
-                            line,
-                            v(11.0),
-                            TextWeight::Regular,
-                            color,
-                            false,
-                        );
-                        y += line_h(11.0, TextWeight::Regular);
-                    }
-                    y += v(4.0);
+                        tone_color(notice.tone),
+                        false,
+                    );
+                    y += line_h(11.0, TextWeight::Regular);
                 }
-                for list in pulls.lists.iter().filter(|_| readable) {
+                y += v(4.0);
+            }
+            if let Some(pulls) = &cell.reading {
+                for list in &pulls.lists {
                     text_entry(
                         &mut entries,
                         x,
                         y,
                         inner_w,
                         line_h(9.5, TextWeight::Semibold),
-                        list_title(list.id).to_uppercase(),
+                        list.title.to_uppercase(),
                         v(9.5),
                         TextWeight::Semibold,
                         MUTED_INK,
@@ -875,7 +811,9 @@ fn popover_entries(
                         y += line_h(10.5, TextWeight::Regular) + v(6.0);
                     }
                     for row in &list.items {
-                        let context = row.context.map(context_tag);
+                        let tag = row
+                            .tag
+                            .map(|tag| (tag.label.to_uppercase(), tone_color(tag.tone)));
                         let title_size = v(11.0);
                         let copy_w = v(20.0);
                         let lines = wrap_lines(
@@ -905,7 +843,7 @@ fn popover_entries(
                             if line_index == 0 {
                                 entries.push((
                                     PopItem::CopyIcon {
-                                        color: context.map_or(MUTED_INK, |(_, ink)| ink),
+                                        color: tag.as_ref().map_or(MUTED_INK, |(_, ink)| *ink),
                                     },
                                     R::new(x + inner_w - copy_w, y, copy_w, copy_h),
                                 ));
@@ -928,7 +866,7 @@ fn popover_entries(
                         let repo_size = v(10.0);
                         let mut line_x = x;
                         let badge_limit = x + inner_w - v(7.0) - v(10.0);
-                        if let Some((tag, ink)) = context {
+                        if let Some((label, ink)) = &tag {
                             let tag_size = v(9.5);
                             text_entry(
                                 &mut entries,
@@ -936,15 +874,18 @@ fn popover_entries(
                                 y,
                                 inner_w,
                                 line_h(9.5, TextWeight::Semibold),
-                                tag.into(),
+                                label.clone(),
                                 tag_size,
                                 TextWeight::Semibold,
-                                ink,
+                                *ink,
                                 false,
                             );
-                            line_x +=
-                                measure_weight(tag, tag_size, TextWeight::Semibold, display_scale)
-                                    + v(5.0);
+                            line_x += measure_weight(
+                                label,
+                                tag_size,
+                                TextWeight::Semibold,
+                                display_scale,
+                            ) + v(5.0);
                         }
                         let repo = ellipsize(
                             &format!("{} #{}", row.repo, row.number),
@@ -966,10 +907,10 @@ fn popover_entries(
                             false,
                         );
                         line_x += measure_text(&repo, repo_size, display_scale) + v(8.0);
-                        for (badge, color) in row_badges(row) {
+                        for badge in &row.badges {
                             let badge_size = v(9.5);
                             let badge_w = measure_weight(
-                                &badge,
+                                badge.label,
                                 badge_size,
                                 TextWeight::Medium,
                                 display_scale,
@@ -983,10 +924,10 @@ fn popover_entries(
                                 y,
                                 inner_w,
                                 line_h(9.5, TextWeight::Medium),
-                                badge.clone(),
+                                badge.label.into(),
                                 badge_size,
                                 TextWeight::Medium,
-                                badge_color(color),
+                                tone_color(badge.tone),
                                 false,
                             );
                             line_x += badge_w + v(6.0);
@@ -1006,7 +947,7 @@ fn popover_entries(
                             inner_w,
                             y + line_h(10.0, TextWeight::Regular) - row_top,
                         );
-                        if let Some((_, ink)) = context {
+                        if let Some((_, ink)) = tag {
                             entries.push((
                                 PopItem::Stripe { color: ink },
                                 R::new(x - v(8.0), row_rect.y, v(2.0), row_rect.h),
@@ -1022,20 +963,6 @@ fn popover_entries(
                     }
                     y += v(8.0);
                 }
-            } else {
-                text_entry(
-                    &mut entries,
-                    x,
-                    y,
-                    inner_w,
-                    line_h(11.0, TextWeight::Regular),
-                    "Checking pull requests…".into(),
-                    v(11.0),
-                    TextWeight::Regular,
-                    MUTED_INK,
-                    false,
-                );
-                y += line_h(11.0, TextWeight::Regular);
             }
         }
     }
@@ -1218,10 +1145,14 @@ const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
 const WORK_BLUE: Color = [96, 165, 250, 255];
 const PERSONAL_VIOLET: Color = [192, 132, 252, 255];
 
-fn context_tag(context: PrContext) -> (&'static str, Color) {
-    match context {
-        PrContext::Work => ("WORK", WORK_BLUE),
-        PrContext::Personal => ("PERSONAL", PERSONAL_VIOLET),
+fn tone_color(tone: Tone) -> Color {
+    match tone {
+        Tone::Muted => MUTED_INK,
+        Tone::Green => LIVE_GREEN,
+        Tone::Red => TRIP_RED,
+        Tone::Amber => WARN_AMBER,
+        Tone::Work => WORK_BLUE,
+        Tone::Personal => PERSONAL_VIOLET,
     }
 }
 
@@ -1249,15 +1180,6 @@ fn ci_color(ci: CiState) -> Color {
         CiState::Failure | CiState::Error => TRIP_RED,
         CiState::Pending => WARN_AMBER,
         CiState::None => UNREADABLE_INK,
-    }
-}
-
-fn badge_color(badge: Badge) -> Color {
-    match badge {
-        Badge::Muted => MUTED_INK,
-        Badge::Green => LIVE_GREEN,
-        Badge::Red => TRIP_RED,
-        Badge::Amber => WARN_AMBER,
     }
 }
 

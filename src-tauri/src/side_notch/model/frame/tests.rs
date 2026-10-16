@@ -1,5 +1,7 @@
 use super::*;
-use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, MergeKind, Reading, ReviewDecision};
+use crate::dto::{
+    CiState, LimitWindowDto, LimitWindowKind, LimitsStatus, MergeKind, Reading, ReviewDecision,
+};
 use crate::side_notch::sessions::SessionStatus;
 
 fn pr(number: u64) -> serde_json::Value {
@@ -70,8 +72,14 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
     assert_eq!(cell.hint.as_deref(), Some("Read a minute ago."));
     assert!(cell.stale);
     assert_eq!(
-        cell.lists.iter().map(|list| list.id).collect::<Vec<_>>(),
-        [GithubList::Mine, GithubList::Assigned],
+        cell.lists
+            .iter()
+            .map(|list| (list.id, list.title))
+            .collect::<Vec<_>>(),
+        [
+            (GithubList::Mine, "Mine"),
+            (GithubList::Assigned, "Assigned")
+        ],
         "the lists in their own order, review requests not selected"
     );
     assert_eq!(cell.lists[0].total, 30);
@@ -93,6 +101,7 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
         Some(&dto),
         None,
     );
+    assert_eq!(pr_cell(&frame).lists[0].title, "Review requested");
     let row = &pr_cell(&frame).lists[0].items[..];
     assert_eq!(
         row,
@@ -109,6 +118,17 @@ fn the_pr_cell_keeps_only_the_selected_lists_capped_and_on_github() {
             merge_kind: Some(MergeKind::Ready),
             updated_at: "2026-09-01T10:00:00Z".into(),
             context: None,
+            badges: vec![
+                Badge {
+                    label: "Approved",
+                    tone: Tone::Green
+                },
+                Badge {
+                    label: "Ready to merge",
+                    tone: Tone::Green
+                },
+            ],
+            tag: None,
         }]
     );
 }
@@ -130,6 +150,21 @@ fn each_row_is_work_or_personal_and_an_unread_owner_neither() {
     assert_eq!(
         rows.iter().map(|row| row.context).collect::<Vec<_>>(),
         [Some(PrContext::Work), Some(PrContext::Personal), None]
+    );
+    assert_eq!(
+        rows.iter().map(|row| row.tag).collect::<Vec<_>>(),
+        [
+            Some(Badge {
+                label: "Work",
+                tone: Tone::Work
+            }),
+            Some(Badge {
+                label: "Personal",
+                tone: Tone::Personal
+            }),
+            None
+        ],
+        "the tag both notches draw, in its context's ink"
     );
     assert!(
         rows.iter().all(|row| row.review_decision.is_none()),
@@ -317,5 +352,211 @@ fn a_pull_request_in_two_lists_is_one_segment_of_the_ring() {
             },
         ],
         "one segment per pull request, as the count is"
+    );
+}
+
+#[test]
+fn each_row_carries_its_badges_in_order_with_their_tones() {
+    let badges = |draft: bool, review: Option<&str>, merge: Option<&str>| {
+        let mut row = pr(1);
+        row["isDraft"] = draft.into();
+        row["reviewDecision"] = serde_json::to_value(review).unwrap();
+        row["mergeKind"] = serde_json::to_value(merge).unwrap();
+        read("ok", false, vec![row]).lists[0].items[0]
+            .badges
+            .iter()
+            .map(|badge| (badge.label, badge.tone))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        badges(true, Some("APPROVED"), Some("conflicts")),
+        [
+            ("Draft", Tone::Muted),
+            ("Approved", Tone::Green),
+            ("Conflicts", Tone::Red)
+        ]
+    );
+    assert_eq!(
+        badges(false, Some("CHANGES_REQUESTED"), Some("queued")),
+        [("Changes requested", Tone::Red), ("Queued", Tone::Green)]
+    );
+    assert_eq!(
+        badges(false, Some("REVIEW_REQUIRED"), Some("autoMerge")),
+        [("Auto-merge", Tone::Muted)],
+        "a review still required is no badge"
+    );
+    assert_eq!(
+        badges(false, None, Some("ready")),
+        [("Ready to merge", Tone::Green)]
+    );
+    assert_eq!(
+        badges(false, None, Some("behind")),
+        [("Behind base", Tone::Amber)]
+    );
+    assert_eq!(
+        badges(false, None, Some("blocked")),
+        [("Blocked", Tone::Amber)]
+    );
+    assert_eq!(badges(false, None, None), []);
+}
+
+fn provider_cell_of(reading: Option<NotchProvider>) -> ProviderCell {
+    let mut only = settings(vec![GithubList::Mine]);
+    only.providers = vec![AgentId::Claude];
+    only.pull_requests.enabled = false;
+    match rail(&only, |_| (reading.clone(), Vec::new()), None, None)
+        .cells
+        .pop()
+    {
+        Some(CellData::Provider(cell)) => cell,
+        other => panic!("a provider cell, not {other:?}"),
+    }
+}
+
+fn reported(status: LimitsStatus, message: Option<&str>, reading: Reading) -> NotchProvider {
+    let mut card = crate::limits::signed_in_card(AgentId::Claude, "acct", reading);
+    card.status = status;
+    card.message = message.map(str::to_owned);
+    NotchProvider::current(vec![card]).expect("a signed-in account")
+}
+
+type Said<'a> = Option<(&'a str, Tone)>;
+
+fn said(notice: &Option<Notice>) -> Said<'_> {
+    notice
+        .as_ref()
+        .map(|notice| (notice.text.as_str(), notice.tone))
+}
+
+fn notices(cell: &ProviderCell) -> (Said<'_>, Said<'_>) {
+    (said(&cell.notice), said(&cell.paused))
+}
+
+#[test]
+fn a_provider_says_it_is_checking_until_read_and_when_its_refresh_paused() {
+    let windows = claude().windows;
+    let paused = Some(("Refresh paused. Last observed values below.", Tone::Amber));
+    assert_eq!(
+        notices(&provider_cell_of(None)),
+        (Some(("Checking usage…", Tone::Muted)), None)
+    );
+    assert_eq!(
+        notices(&provider_cell_of(Some(claude()))),
+        (None, None),
+        "a reading that is fine says nothing above its windows"
+    );
+    let failed = provider_cell_of(Some(reported(
+        LimitsStatus::Failed,
+        Some("Claude Code reported no usage."),
+        Reading {
+            windows: windows.clone(),
+            ..Reading::default()
+        },
+    )));
+    assert_eq!(
+        notices(&failed),
+        (
+            Some(("Claude Code reported no usage.", Tone::Muted)),
+            paused
+        )
+    );
+    assert_eq!(
+        notices(&provider_cell_of(Some(reported(
+            LimitsStatus::SignedOut,
+            None,
+            Reading::default()
+        )))),
+        (Some(("Usage unavailable.", Tone::Muted)), None),
+        "nothing observed, so nothing is last observed"
+    );
+    let share_only = reported(
+        LimitsStatus::Failed,
+        Some("Refresh failed."),
+        Reading {
+            workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
+                limit: "25000".into(),
+                used: "8000".into(),
+                used_percent: 32.0,
+                resets_at: None,
+                reached: false,
+            }),
+            ..Reading::default()
+        },
+    );
+    assert_eq!(notices(&provider_cell_of(Some(share_only))).1, paused);
+}
+
+fn pr_cell_of(dto: Option<&GithubPrsDto>) -> PrCell {
+    let mut only = settings(vec![GithubList::Mine]);
+    only.providers = Vec::new();
+    match rail(&only, unread, dto, None).cells.pop() {
+        Some(CellData::PullRequests(cell)) => cell,
+        other => panic!("a pull request cell, not {other:?}"),
+    }
+}
+
+fn reported_pulls(status: &str, hint: Option<&str>, stale: bool) -> GithubPrsDto {
+    serde_json::from_value(serde_json::json!({
+        "status": status, "hint": hint, "stale": stale, "scope": [],
+        "mine": {"total": 1, "items": [pr(1)]},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .unwrap()
+}
+
+#[test]
+fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_reads_hint() {
+    let checking = pr_cell_of(None);
+    assert_eq!(checking.reading, None);
+    assert_eq!(
+        checking.notice,
+        Some(Notice {
+            text: "Checking pull requests…".into(),
+            tone: Tone::Muted
+        })
+    );
+
+    let stale = pr_cell_of(Some(&reported_pulls(
+        "rateLimited",
+        Some("Showing the pull requests read at 10:00."),
+        true,
+    )));
+    assert_eq!(
+        stale.notice,
+        Some(Notice {
+            text: "Showing the pull requests read at 10:00.".into(),
+            tone: Tone::Amber
+        }),
+        "a stale read warns over the rows it still shows"
+    );
+    assert_eq!(stale.reading.expect("read").lists[0].items.len(), 1);
+
+    let unreadable = pr_cell_of(Some(&reported_pulls(
+        "ghNotLoggedIn",
+        Some("Sign in with the GitHub CLI."),
+        false,
+    )));
+    assert_eq!(
+        unreadable.notice,
+        Some(Notice {
+            text: "Sign in with the GitHub CLI.".into(),
+            tone: Tone::Muted
+        })
+    );
+    let reading = unreadable.reading.expect("read");
+    assert!(!reading.readable);
+    assert!(reading.lists.is_empty(), "an unreadable read shows no rows");
+    assert_eq!(reading.count, 0);
+
+    assert_eq!(
+        pr_cell_of(Some(&reported_pulls(
+            "ok",
+            Some("Read a minute ago."),
+            false
+        )))
+        .notice,
+        None,
+        "a read that is fine keeps its hint to itself"
     );
 }
