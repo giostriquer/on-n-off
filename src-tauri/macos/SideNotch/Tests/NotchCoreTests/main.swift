@@ -174,28 +174,9 @@ final class NotchTests {
     expectEqual(session(0).isWorking, false)
   }
 
-  func testRailFramesFollowTheSelectedUUIDOnEveryEdge() {
-    let displays = [display("external"), display("retina", x: -1728)]
-    expectEqual(
-      notchRailFrame(settings: rail("retina"), displays: displays),
-      CGRect(x: -76, y: 336.5, width: 76, height: 477))
-    expectEqual(
-      notchRailFrame(settings: rail("retina", edge: .left), displays: displays.reversed()),
-      CGRect(x: -1728, y: 336.5, width: 76, height: 477))
-    expectEqual(
-      notchRailFrame(settings: rail("external", edge: .top), displays: displays),
-      CGRect(x: 618, y: 33, width: 492, height: 73))
-    expectEqual(
-      notchRailFrame(settings: rail("external", edge: .bottom), displays: displays),
-      CGRect(x: 618, y: 33 + 1084 - 73, width: 492, height: 73))
-  }
-
-  func testTheRailShrinksWithFewerProvidersAndHidesWithoutAnyOrWithoutRoom() {
-    let displays = [display("main")]
+  func testTheRailOrdersItsProvidersAndCountsThePullRequestCell() {
     let two = rail("main", providers: [.cursor, .claude, .claude])
     expectEqual(two.railProviders, [.claude, .cursor])
-    expectEqual(notchRailFrame(settings: two, displays: displays)?.height, 234)
-    expectNil(notchRailFrame(settings: rail("main", providers: []), displays: displays))
     let defaults = Settings(enabled: true, displayId: "main")
     expectEqual(defaults.railProviders, [.claude, .codex, .muse, .antigravity, .cursor])
     expectEqual(defaults.pullRequests.enabled, true)
@@ -204,25 +185,80 @@ final class NotchTests {
     expectEqual(
       PullRequestSettings(enabled: true, lists: [.assigned, .mine, .assigned]).selectedLists,
       [.mine, .assigned])
-    expectEqual(
-      notchRailFrame(settings: rail("main", providers: [], pullRequests: true), displays: displays)?
-        .height, 73 + 80)
-    let short = Display(
-      id: "short", name: "LG", x: 0, y: 0, width: 1920, height: 300, workY: 30, workHeight: 270,
-      scale: 1, mirrored: false)
-    expectNil(notchRailFrame(settings: rail("short"), displays: [short]))
   }
 
-  func testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback() {
-    let selected = rail("chosen")
-    for displays in [
-      [display("other")], [display("chosen", mirrored: true)],
-      [display("chosen"), display("chosen")],
-    ] {
-      expectNil(notchRailFrame(settings: selected, displays: displays))
-      expectNil(notchPillFrame(settings: selected, displays: displays))
+  func testTheRailCountsThePullRequestCellAndEachProviderOnce() {
+    let displays = [display("main")]
+    let cases: [(Settings, Int, Double)] = [
+      (rail("main", providers: [], pullRequests: true), 1, 73 + 80),
+      (rail("main", pullRequests: true), 6, 6 * 73 + 5 * 8 + 80),
+      (rail("main", providers: [.cursor, .claude, .claude]), 2, 234),
+    ]
+    for (settings, cells, height) in cases {
+      expectEqual(settings.railCells.count, cells)
+      expectEqual(
+        notchRailFrame(settings: settings, displays: displays).map { Double($0.height) }, height)
     }
-    expectNil(notchRailFrame(settings: Settings(), displays: [display("chosen")]))
+  }
+
+  func testRailFramesAndPillsMatchTheSharedCases() throws {
+    let fixture = try RailFixture.load()
+    expectEqual(fixture.rails.isEmpty, false)
+    let main = RailFixture.Screen(
+      id: "main", x: nil, width: nil, workY: nil, workHeight: nil, scale: nil, mirrored: nil)
+    for (index, entry) in fixture.rails.enumerated() {
+      let area = fixture.workArea
+      let displays = (entry.displays ?? [main]).map { screen in
+        Display(
+          id: screen.id, name: screen.id, x: screen.x ?? 0, y: 0, width: screen.width ?? area.width,
+          height: area.height, workY: screen.workY ?? area.workY,
+          workHeight: screen.workHeight ?? area.workHeight, scale: screen.scale ?? entry.scale,
+          mirrored: screen.mirrored ?? false)
+      }
+      let settings = Settings(
+        enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size,
+        providers: Array(railProviderOrder.prefix(entry.cells ?? railProviderOrder.count)),
+        pullRequests: PullRequestSettings(enabled: false, lists: [.mine]))
+      expectPixels(
+        notchRailFrame(settings: settings, displays: displays).map(pixels), entry.rail,
+        scale: entry.scale, "rail case \(index)")
+      expectPixels(
+        notchPillFrame(settings: settings, displays: displays).map(pixels), entry.pill,
+        scale: entry.scale, "pill case \(index)")
+    }
+  }
+
+  func testRailMetricsMatchTheSharedCases() throws {
+    let fixture = try RailFixture.load()
+    expectEqual(fixture.metrics.isEmpty, false)
+    for entry in fixture.metrics {
+      let layout = railLayout(size: entry.size, displayScale: entry.scale, edge: .right)
+      expectPixels(
+        [
+          layout.thickness, layout.cellLength, layout.cellSpacing, layout.inset, layout.cellPadding,
+          layout.contentSpacing, layout.iconSlot, layout.labelHeight, layout.ringStroke,
+          layout.innerRingStroke, layout.innerRingInset, layout.glyphSize,
+        ],
+        [
+          entry.thickness, entry.cellLength, entry.cellSpacing, entry.inset, entry.cellPadding,
+          entry.contentSpacing, entry.iconSlot, entry.labelHeight, entry.ringStroke,
+          entry.innerRingStroke, entry.innerRingInset, entry.glyphSize,
+        ], scale: entry.scale, "\(entry.size) at \(entry.scale)x")
+      let across = railLayout(size: entry.size, displayScale: entry.scale, edge: .top)
+      expectEqual([across.thickness, across.cellLength], [layout.cellLength, layout.thickness])
+      for (edge, cells) in [(Edge.right, entry.rightCells), (.top, entry.topCells)] {
+        expectEqual(cells.isEmpty, false)
+        let frames = railCellFrames(
+          edge: edge, layout: railLayout(size: entry.size, displayScale: entry.scale, edge: edge),
+          count: cells.count)
+        expectEqual(frames.count, cells.count)
+        for (index, (frame, cell)) in zip(frames, cells).enumerated() {
+          expectPixels(
+            pixels(frame), cell, scale: entry.scale,
+            "\(edge) cell \(index) of \(entry.size) at \(entry.scale)x")
+        }
+      }
+    }
   }
 
   func testSettingsDecodeTheHostDocumentAndRejectUnknownProviders() throws {
@@ -256,39 +292,6 @@ final class NotchTests {
     }
   }
 
-  func testPresetsScaleTheWholeRailOnThePixelGrid() {
-    let displays = [display("main", scale: 1)]
-    for (size, scale) in [
-      (NotchSize.compact, 0.875), (NotchSize.standard, 1.0), (NotchSize.large, 1.125),
-    ] {
-      let settings = rail("main", size: size)
-      let frame = notchRailFrame(settings: settings, displays: displays)
-      expectEqual(frame.map { Double($0.width) }, (76 * scale).rounded())
-      let layout = railLayout(size: size, displayScale: 1, edge: .right)
-      expectEqual(frame.map { Double($0.height) }, layout.length(count: 5))
-      for value in [frame?.minX, frame?.minY, frame?.width, frame?.height] {
-        expectEqual(value, value?.rounded())
-      }
-    }
-  }
-
-  func testPillsHugTheEdgeCentredOnTheRail() {
-    let displays = [display("main", scale: 1)]
-    for edge in [Edge.left, .right, .top, .bottom] {
-      let settings = rail("main", edge: edge)
-      let rail = notchRailFrame(settings: settings, displays: displays)!
-      let pill = notchPillFrame(settings: settings, displays: displays)!
-      expectEqual(rail.contains(pill), true)
-      switch edge {
-      case .left: expectEqual(pill.minX, rail.minX)
-      case .right: expectEqual(pill.maxX, rail.maxX)
-      case .top: expectEqual(pill.minY, rail.minY)
-      case .bottom: expectEqual(pill.maxY, rail.maxY)
-      }
-      expectEqual(edge.isVertical ? pill.midY : pill.midX, edge.isVertical ? rail.midY : rail.midX)
-    }
-  }
-
   func testCellsTileTheRailAndPopoversStayInsideTheWorkArea() {
     let main = display("main", scale: 1)
     let layout = railLayout(size: .standard, displayScale: 1, edge: .right)
@@ -297,8 +300,10 @@ final class NotchTests {
     expectEqual(cells[0].minY, layout.ear)
     expectEqual(cells[3].maxY, layout.length(count: 4) - layout.ear)
     let bar = railLayout(size: .standard, displayScale: 1, edge: .top)
-    expectEqual(bar.thickness, 73)
-    expectEqual(railCellFrames(edge: .top, layout: bar, count: 2)[1].minX, 40 + 76 + 8)
+    expectEqual(bar.thickness, layout.cellLength)
+    expectEqual(
+      railCellFrames(edge: .top, layout: bar, count: 2)[1].minX,
+      bar.inset + bar.cellLength + bar.cellSpacing)
     expectEqual(cells[0].minY, layout.length(count: 4) - cells[3].maxY)
 
     let railFrame = notchRailFrame(settings: rail("main"), displays: [main])!
@@ -479,6 +484,68 @@ final class NotchTests {
 }
 
 var failures = 0
+
+struct RailFixture: Decodable {
+  struct WorkArea: Decodable {
+    let width, height, workY, workHeight: Double
+  }
+  struct Screen: Decodable {
+    let id: String
+    let x, width, workY, workHeight, scale: Double?
+    let mirrored: Bool?
+  }
+  struct Rail: Decodable {
+    let displays: [Screen]?
+    let scale: Double
+    let size: NotchSize
+    let edge: Edge
+    let cells: Int?
+    let enabled: Bool?
+    let rail: [Double]?
+    let pill: [Double]?
+  }
+  struct Metrics: Decodable {
+    let scale: Double
+    let size: NotchSize
+    let thickness, cellLength, cellSpacing, inset, cellPadding, contentSpacing, iconSlot: Double
+    let labelHeight, ringStroke, innerRingStroke, innerRingInset, glyphSize: Double
+    let rightCells, topCells: [[Double]]
+  }
+  let workArea: WorkArea
+  let rails: [Rail]
+  let metrics: [Metrics]
+
+  static func load() throws -> RailFixture {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .appendingPathComponent("rail-cases.json")
+    return try JSONDecoder().decode(RailFixture.self, from: Data(contentsOf: url))
+  }
+}
+
+func pixels(_ frame: CGRect) -> [Double] {
+  [Double(frame.minX), Double(frame.minY), Double(frame.width), Double(frame.height)]
+}
+
+@MainActor
+func expectPixels(
+  _ points: [Double]?, _ expected: [Double]?, scale: Double, _ label: String, line: Int = #line
+) {
+  let actual = points.map { $0.map { $0 * scale } }
+  let matches: Bool
+  switch (actual, expected) {
+  case (nil, nil): matches = true
+  case let (actual?, expected?):
+    matches =
+      actual.count == expected.count
+      && zip(actual, expected).allSatisfy { abs($0 - $1) < 0.000_001 }
+  default: matches = false
+  }
+  if !matches {
+    failures += 1
+    let shown = (String(describing: actual), String(describing: expected))
+    print("FAIL line \(line): \(label) \(shown.0) != \(shown.1)")
+  }
+}
 @MainActor
 func expectEqual<T: Equatable>(_ actual: T, _ expected: T, line: Int = #line) {
   if actual != expected {
@@ -510,12 +577,11 @@ checks.testAPausedAccountWithOnlyAShareStillHasObservedValues()
 checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
-checks.testRailFramesFollowTheSelectedUUIDOnEveryEdge()
-checks.testTheRailShrinksWithFewerProvidersAndHidesWithoutAnyOrWithoutRoom()
-checks.testMissingMirroredAmbiguousAndDisabledDisplaysHideWithoutFallback()
+checks.testTheRailOrdersItsProvidersAndCountsThePullRequestCell()
+checks.testTheRailCountsThePullRequestCellAndEachProviderOnce()
+try checks.testRailFramesAndPillsMatchTheSharedCases()
+try checks.testRailMetricsMatchTheSharedCases()
 try checks.testSettingsDecodeTheHostDocumentAndRejectUnknownProviders()
-checks.testPresetsScaleTheWholeRailOnThePixelGrid()
-checks.testPillsHugTheEdgeCentredOnTheRail()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
 try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
@@ -524,5 +590,5 @@ try checks.testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSay
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("22 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

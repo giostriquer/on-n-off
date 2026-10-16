@@ -25,6 +25,6 @@ let package = Package(
       ]),
     .executableTarget(
       name: "NotchCoreChecks", dependencies: ["NotchCore"], path: "Tests/NotchCoreTests",
-      swiftSettings: concurrencyChecks),
+      exclude: ["rail-cases.json"], swiftSettings: concurrencyChecks),
   ]
 )

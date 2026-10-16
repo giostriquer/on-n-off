@@ -6,23 +6,6 @@ use crate::dto::{
 };
 use serde::{Deserialize, Serialize};
 
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_WIDTH: f64 = 76.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_HEIGHT: f64 = ICON_SLOT + CONTENT_SPACING + LABEL_HEIGHT + 2.0 * CELL_PADDING;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const ICON_SLOT: f64 = 46.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const CONTENT_SPACING: f64 = 3.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const LABEL_HEIGHT: f64 = 22.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-const CELL_PADDING: f64 = 1.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const CELL_SPACING: f64 = 8.0;
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub const RAIL_INSET: f64 = 40.0;
-
 pub use crate::provider_catalogue::RAIL_ORDER;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
@@ -36,7 +19,7 @@ pub enum NotchSize {
 
 impl NotchSize {
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    fn scale(self) -> f64 {
+    pub fn scale(self) -> f64 {
         match self {
             Self::Compact => 0.875,
             Self::Standard => 1.0,
@@ -57,7 +40,7 @@ pub enum Edge {
 
 impl Edge {
     #[cfg(any(target_os = "macos", target_os = "windows", test))]
-    fn is_vertical(self) -> bool {
+    pub fn is_vertical(self) -> bool {
         matches!(self, Self::Left | Self::Right)
     }
 }
@@ -228,10 +211,84 @@ pub struct Layout {
     pub height: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-pub fn rail_length(count: usize, cell: f64) -> f64 {
-    let count = count as f64;
-    count * cell + (count - 1.0).max(0.0) * CELL_SPACING + 2.0 * RAIL_INSET
+pub struct RailMetrics {
+    pub thickness: f64,
+    pub cell_length: f64,
+    pub cell_spacing: f64,
+    pub inset: f64,
+    #[cfg(any(target_os = "windows", test))]
+    pub cell: CellMetrics,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg(any(target_os = "windows", test))]
+pub struct CellMetrics {
+    pub padding: f64,
+    pub content_spacing: f64,
+    pub icon_slot: f64,
+    pub label_height: f64,
+    pub ring_stroke: f64,
+    pub inner_ring_stroke: f64,
+    pub inner_ring_inset: f64,
+    pub glyph: f64,
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl RailMetrics {
+    pub fn length(&self, count: usize) -> f64 {
+        let count = count as f64;
+        count * self.cell_length + (count - 1.0).max(0.0) * self.cell_spacing + 2.0 * self.inset
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    pub fn ear(&self) -> f64 {
+        self.inset
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn rail_metrics(size: NotchSize, display_scale: f64, edge: Edge) -> RailMetrics {
+    let value = |points: f64| pixel_aligned(points * size.scale(), display_scale);
+    let cell_padding = value(1.0);
+    let content_spacing = value(3.0);
+    let icon_slot = value(46.0);
+    let label_height = value(22.0);
+    let cell_width = value(76.0);
+    let cell_height = icon_slot + label_height + content_spacing + 2.0 * cell_padding;
+    let vertical = edge.is_vertical();
+    RailMetrics {
+        thickness: if vertical { cell_width } else { cell_height },
+        cell_length: if vertical { cell_height } else { cell_width },
+        cell_spacing: value(8.0),
+        inset: value(40.0),
+        #[cfg(any(target_os = "windows", test))]
+        cell: CellMetrics {
+            padding: cell_padding,
+            content_spacing,
+            icon_slot,
+            label_height,
+            ring_stroke: value(4.0),
+            inner_ring_stroke: value(3.0),
+            inner_ring_inset: value(6.0),
+            glyph: value(24.0),
+        },
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+pub fn selected_display<'a>(
+    settings: &NotchSettings,
+    displays: &'a [Display],
+) -> Option<&'a Display> {
+    let id = settings.display_id.as_deref()?;
+    let mut matches = displays.iter().filter(|display| display.id == id);
+    let display = matches.next()?;
+    if matches.next().is_some() || display.mirrored {
+        return None;
+    }
+    Some(display)
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -243,16 +300,11 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
     if count == 0 {
         return None;
     }
-    let id = settings.display_id.as_deref()?;
-    let mut matches = displays.iter().filter(|display| display.id == id);
-    let display = matches.next()?;
-    if matches.next().is_some() || display.mirrored {
-        return None;
-    }
-    let scale = settings.size.scale();
+    let display = selected_display(settings, displays)?;
+    let metrics = rail_metrics(settings.size, display.scale, settings.edge);
     let vertical = settings.edge.is_vertical();
-    let thickness = if vertical { CELL_WIDTH } else { CELL_HEIGHT } * scale;
-    let length = rail_length(count, if vertical { CELL_HEIGHT } else { CELL_WIDTH }) * scale;
+    let thickness = metrics.thickness;
+    let length = metrics.length(count);
     let aligned = |value: f64| pixel_aligned(value, display.scale);
     if vertical {
         if length > display.work_height {
@@ -283,8 +335,70 @@ pub fn layout(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> 
     }
 }
 
+#[cfg(any(target_os = "windows", test))]
+pub fn rail_cell_frames(edge: Edge, metrics: &RailMetrics, count: usize) -> Vec<Layout> {
+    (0..count)
+        .map(|index| {
+            let offset =
+                metrics.inset + index as f64 * (metrics.cell_length + metrics.cell_spacing);
+            if edge.is_vertical() {
+                Layout {
+                    x: 0.0,
+                    y: offset,
+                    width: metrics.thickness,
+                    height: metrics.cell_length,
+                }
+            } else {
+                Layout {
+                    x: offset,
+                    y: 0.0,
+                    width: metrics.cell_length,
+                    height: metrics.thickness,
+                }
+            }
+        })
+        .collect()
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub fn pill_frame(settings: &NotchSettings, displays: &[Display]) -> Option<Layout> {
+    let rail = layout(settings, displays)?;
+    let display = selected_display(settings, displays)?;
+    let value = |points: f64| pixel_aligned(points * settings.size.scale(), display.scale);
+    let thickness = value(6.0);
+    let length = value(120.0).min(if settings.edge.is_vertical() {
+        rail.height
+    } else {
+        rail.width
+    });
+    let mid_x = rail.x + rail.width / 2.0;
+    let mid_y = rail.y + rail.height / 2.0;
+    let (x, y, width, height) = match settings.edge {
+        Edge::Left => (rail.x, mid_y - length / 2.0, thickness, length),
+        Edge::Right => (
+            rail.x + rail.width - thickness,
+            mid_y - length / 2.0,
+            thickness,
+            length,
+        ),
+        Edge::Top => (mid_x - length / 2.0, rail.y, length, thickness),
+        Edge::Bottom => (
+            mid_x - length / 2.0,
+            rail.y + rail.height - thickness,
+            length,
+            thickness,
+        ),
+    };
+    Some(Layout {
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
-fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
+pub fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
     let scale = if display_scale.is_finite() && display_scale > 0.0 {
         display_scale
     } else {

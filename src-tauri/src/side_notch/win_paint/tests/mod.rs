@@ -5,6 +5,7 @@ use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
 use crate::side_notch::sessions::LiveSession;
 
 mod content;
+mod geometry;
 mod layout;
 mod render;
 

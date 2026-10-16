@@ -1,6 +1,7 @@
 use super::*;
 
 mod projection;
+mod rail;
 
 fn display(id: &str, x: f64, scale: f64) -> Display {
     Display {
@@ -32,61 +33,6 @@ fn settings(id: &str, edge: Edge) -> NotchSettings {
 }
 
 #[test]
-fn follows_the_selected_uuid_across_reordering_and_mixed_scales() {
-    let displays = vec![
-        display("external", 0.0, 1.0),
-        display("retina", -1728.0, 2.0),
-    ];
-    assert_eq!(
-        layout(&settings("retina", Edge::Right), &displays),
-        Some(Layout {
-            x: -76.0,
-            y: 336.5,
-            width: 76.0,
-            height: 477.0
-        })
-    );
-    let reversed: Vec<_> = displays.into_iter().rev().collect();
-    assert_eq!(
-        layout(&settings("retina", Edge::Left), &reversed),
-        Some(Layout {
-            x: -1728.0,
-            y: 336.5,
-            width: 76.0,
-            height: 477.0
-        })
-    );
-}
-
-#[test]
-fn never_falls_back_to_another_display_when_the_selection_is_missing_or_mirrored() {
-    let mut current = settings("missing", Edge::Left);
-    let mut displays = vec![display("other", 0.0, 1.0)];
-    assert_eq!(layout(&current, &displays), None);
-    current.display_id = Some("other".into());
-    displays[0].mirrored = true;
-    assert_eq!(layout(&current, &displays), None);
-}
-
-#[test]
-fn top_and_bottom_edges_center_a_horizontal_rail_inside_the_work_area() {
-    let displays = [display("main", 100.0, 2.0)];
-    let top = layout(&settings("main", Edge::Top), &displays).unwrap();
-    assert_eq!(
-        top,
-        Layout {
-            x: 100.0 + (1728.0 - 492.0) / 2.0,
-            y: 33.0,
-            width: 492.0,
-            height: 73.0
-        }
-    );
-    let bottom = layout(&settings("main", Edge::Bottom), &displays).unwrap();
-    assert_eq!(bottom.y, 33.0 + 1084.0 - 73.0);
-    assert_eq!(bottom.x, top.x);
-}
-
-#[test]
 fn muse_follows_codex_even_when_other_integrations_are_selected() {
     let mut selected = settings("main", Edge::Right);
     selected.providers = vec![
@@ -97,30 +43,37 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
         AgentId::Claude,
     ];
     assert_eq!(selected.rail_providers(), RAIL_ORDER);
-}
-
-#[test]
-fn the_rail_shrinks_with_fewer_providers_and_hides_without_any() {
-    let displays = [display("main", 0.0, 1.0)];
-    let mut current = settings("main", Edge::Right);
-    current.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude];
-    assert_eq!(current.rail_providers(), [AgentId::Claude, AgentId::Cursor]);
-    assert_eq!(layout(&current, &displays).unwrap().height, 234.0);
-    current.providers.clear();
-    assert_eq!(layout(&current, &displays), None);
-}
-
-#[test]
-fn a_rail_that_does_not_fit_stays_hidden_instead_of_overflowing() {
-    let mut small = display("small", 0.0, 1.0);
-    small.work_height = 300.0;
+    selected.providers = vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude];
     assert_eq!(
-        layout(&settings("small", Edge::Right), &[small.clone()]),
-        None
+        selected.rail_providers(),
+        [AgentId::Claude, AgentId::Cursor]
     );
-    small.width = 300.0;
-    small.work_height = 1000.0;
-    assert_eq!(layout(&settings("small", Edge::Top), &[small]), None);
+}
+
+#[test]
+fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
+    let displays = [display("main", 0.0, 2.0)];
+    for (providers, pull_requests, cells, height) in [
+        (vec![], true, 1, 73.0 + 80.0),
+        (RAIL_ORDER.to_vec(), true, 6, 6.0 * 73.0 + 5.0 * 8.0 + 80.0),
+        (
+            vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude],
+            false,
+            2,
+            234.0,
+        ),
+    ] {
+        let mut current = settings("main", Edge::Right);
+        current.providers = providers;
+        current.pull_requests.enabled = pull_requests;
+        let case = format!("{:?} with the cell {pull_requests}", current.providers);
+        assert_eq!(current.cell_count(), cells, "{case}");
+        assert_eq!(
+            layout(&current, &displays).map(|rail| rail.height),
+            Some(height),
+            "{case}"
+        );
+    }
 }
 
 #[test]
@@ -148,7 +101,7 @@ fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let displays = [display("main", 0.0, 1.0)];
     assert_eq!(
         layout(&current, &displays).unwrap().height,
-        rail_length(6, CELL_HEIGHT)
+        rail_metrics(NotchSize::Standard, 1.0, Edge::Right).length(6)
     );
     let json = serde_json::to_value(&current).unwrap();
     assert_eq!(json["pullRequests"]["enabled"], true);
@@ -182,14 +135,6 @@ fn the_document_the_ui_checks_its_notch_settings_against_is_the_one_rust_writes(
     assert_eq!(
         serde_json::from_str::<NotchSettings>(fixture).unwrap(),
         settings
-    );
-}
-
-#[test]
-fn remains_hidden_until_explicitly_enabled() {
-    assert_eq!(
-        layout(&NotchSettings::default(), &[display("main", 0.0, 1.0)]),
-        None
     );
 }
 
@@ -248,61 +193,6 @@ fn the_snapshot_reports_liquid_glass_for_the_running_macos() {
     let version = String::from_utf8(output.stdout).unwrap();
     let major: isize = version.trim().split('.').next().unwrap().parse().unwrap();
     assert_eq!(super::super::liquid_glass(), liquid_glass_on(major));
-}
-
-#[test]
-fn presets_scale_the_whole_rail() {
-    let displays = [display("main", 0.0, 1.0)];
-    for (size, scale) in [
-        (NotchSize::Compact, 0.875),
-        (NotchSize::Standard, 1.0),
-        (NotchSize::Large, 1.125),
-    ] {
-        let mut current = settings("main", Edge::Right);
-        current.size = size;
-        let rail = layout(&current, &displays).unwrap();
-        assert_eq!(rail.width, CELL_WIDTH * scale);
-        assert_eq!(rail.height, rail_length(5, CELL_HEIGHT) * scale);
-    }
-}
-
-#[test]
-fn the_rail_lands_on_whole_device_pixels() {
-    let displays = vec![Display {
-        id: "d1".into(),
-        name: "d1".into(),
-        x: 0.0,
-        y: 0.0,
-        width: 1920.0,
-        height: 1080.0,
-        work_y: 0.0,
-        work_height: 1032.0,
-        scale: 1.0,
-        mirrored: false,
-    }];
-    let settings = NotchSettings {
-        enabled: true,
-        display_id: Some("d1".into()),
-        ..NotchSettings::default()
-    };
-    let frame = layout(&settings, &displays).expect("fits");
-    assert_eq!(
-        frame.y.fract(),
-        0.0,
-        "the rail starts on a pixel: {}",
-        frame.y
-    );
-    assert_eq!(frame.x.fract(), 0.0, "and so does its edge: {}", frame.x);
-
-    let mut scaled = displays.clone();
-    scaled[0].scale = 1.5;
-    let frame = layout(&settings, &scaled).expect("fits");
-    assert_eq!(
-        (frame.y * 1.5).fract(),
-        0.0,
-        "aligned to the display grid, not to points: {}",
-        frame.y
-    );
 }
 
 #[test]
