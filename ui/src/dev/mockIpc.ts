@@ -5,6 +5,7 @@ import { limitsScenario } from "./limitsFixtures";
 import { unknownScenario } from "./scenarioNames";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
+import rustSettings from "../../../src-tauri/src/settings/fixtures/app-settings.json";
 
 type Handler = (args: Record<string, unknown>) => unknown;
 
@@ -52,6 +53,12 @@ let settings: AppSettings = {
     ? { "codex-1": { label: "you@example.com", maxLeftPercent: 5, minHoursToRenewal: 24, automatic: true } }
     : {},
 };
+
+function savedLikeRust(sent: Record<string, unknown>): AppSettings {
+  return Object.fromEntries(
+    Object.keys(rustSettings).filter((key) => key in sent).map((key) => [key, sent[key]]),
+  ) as AppSettings;
+}
 
 let pendingSpends: PendingResetSpend[] = scenario === "bankedResetsAuto"
   ? [{ accountId: "codex-1", dueAt: "2026-08-24T20:08:00Z" }]
@@ -229,7 +236,7 @@ const handlers: Record<string, Handler> = {
   updater_build_info: () => ({ enabled: false, installerKind: null, target: null }),
   load_app_settings: () => settings,
   save_app_settings: (args) => {
-    settings = args.settings as AppSettings;
+    settings = savedLikeRust(args.settings as Record<string, unknown>);
     return settings;
   },
   request_notification_permission: () => true,
