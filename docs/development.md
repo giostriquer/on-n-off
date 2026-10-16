@@ -20,6 +20,9 @@ locates the subsystems. Module doc-comments explain their implementation.
 - File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`
   leaves the lock with any child another thread spawned until that child execs.
 - Fake CLIs in tests: `cli_stub.rs`.
+- The side notch's supervisor: `side_notch/host.rs`, on both platforms. A platform difference goes
+  in its `Transport` (`transport.rs` for the macOS helper, `win_transport.rs` for the Windows
+  window), never in a second loop ([why](architecture/side-notch.md#one-host-two-transports)).
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop
   ([why](architecture/shared-reads.md)).
