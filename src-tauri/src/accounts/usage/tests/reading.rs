@@ -12,6 +12,7 @@ fn saved(provider: AgentId, auth: serde_json::Value) -> Profile {
 
 fn refused(url: &str) -> SavedReadUrls<'_> {
     SavedReadUrls {
+        muse: url,
         codex: crate::limits::CodexEndpoints {
             usage: url,
             reset_credits: url,
@@ -86,6 +87,7 @@ fn a_saved_codex_login_is_read_from_the_usage_body_with_its_own_token() {
     );
     p.login.as_mut().unwrap().account = serde_json::Value::Null;
     let urls = SavedReadUrls {
+        muse: &url,
         codex: crate::limits::CodexEndpoints {
             usage: &usage,
             ..refused(&url).codex

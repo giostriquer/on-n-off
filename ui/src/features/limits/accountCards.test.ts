@@ -57,3 +57,17 @@ it("reconciles Claude using its user ID and normalizes display emails", () => {
   const old = { ...legacy, provider: "claude" as const, account: { id: "user", label: profile.email } };
   expect(accountCards([claude, old], [{ ...profile, observationId: "profile:claude", identity: { ...profile.identity, provider: "claude" } }]).entries).toEqual([claude]);
 });
+it("folds a saved Muse login's email-keyed history into its scoped card", () => {
+  const muse: SavedProfile = {
+    ...profile, id: "saved-muse", observationId: "profile:muse-you", email: "You@Example.com",
+    identity: { provider: "muse", userId: "you@example.com", workspaceId: "" },
+  };
+  const scopedMuse: ProviderLimits = { ...scoped, provider: "muse", account: { id: muse.observationId, label: "you@example.com" } };
+  const emailHistory: ProviderLimits = { ...legacy, provider: "muse", account: { id: "email:you@example.com", label: "you@example.com" } };
+  const otherEmail: ProviderLimits = { ...emailHistory, account: { id: "email:other@example.com", label: "other@example.com" } };
+
+  const shown = accountCards([scopedMuse, emailHistory, otherEmail], [muse]);
+
+  expect(shown.entries).toEqual([scopedMuse, otherEmail]);
+  expect(shown.legacyAccounts.get(muse.observationId)).toEqual([{ id: "email:you@example.com", email: "you@example.com" }]);
+});

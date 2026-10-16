@@ -9,8 +9,9 @@ locates the subsystems. Module doc-comments explain their implementation.
 - Provider differences: `AgentAdapter`. Update `PROVIDERS.md` in the same change. Saved accounts
   are the exception: everything an account change does differently per provider — the native
   store, a login's shape, sign-in, preflight, clients — goes through the accounts seam
-  (`accounts::Adapter`, implemented in `accounts/claude.rs` and `accounts/codex.rs` over
-  `accounts/{claude,codex}_store.rs`), never through `AgentAdapter`, which accounts reach only
+  (`accounts::Adapter`, implemented in `accounts/claude.rs`, `accounts/codex.rs` and
+  `accounts/muse.rs` over `accounts/{claude,codex,muse}_store.rs`), never through `AgentAdapter`,
+  which accounts reach only
   through `supports_accounts`.
 - A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
   from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. In the UI

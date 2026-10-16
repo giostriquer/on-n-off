@@ -1,7 +1,7 @@
 # Account profiles
 
 `accounts/` implements opt-in saved subscription logins and explicit activation in the default
-native Claude/Codex CLI store. It adds no proxy, request router, inference traffic or automatic
+native Claude/Codex/Muse CLI store. It adds no proxy, request router, inference traffic or automatic
 account rotation.
 
 ## Ownership
@@ -154,10 +154,10 @@ The epoch and the recovery journal are private to the store.
 
 ## Provider adapters
 
-Everything account code does differently for Claude and Codex sits behind one accounts-local seam,
+Everything account code does differently for Claude, Codex and Muse sits behind one accounts-local seam,
 separate from the catalog's `AgentAdapter` (which accounts touch only through
 `supports_accounts`, the IPC gate). `accounts::adapter` is the one place that tells the providers
-apart; it gives the provider's `Adapter`, `claude::Claude` or `codex::Codex`, and generic account
+apart; it gives the provider's `Adapter`, `claude::Claude`, `codex::Codex` or `muse::Muse`, and generic account
 code asks that rather than which provider it has. An adapter:
 
 - resolves the provider's native stores, which the operations reach through the `Accounts`
@@ -227,16 +227,45 @@ the signed-in Codex login only through `codex_store`'s projections.
 
 Muse is the second exception, also the user's decision (2026-10-16). `accounts/muse_store.rs`
 reads Muse Code's signed-in device login, inline in its `auth.json` or else its macOS Keychain
-item, and yields only the access token, as `model::AccessToken`, and the login's email, which
-also names the account when Limits falls back to `muse serve`. Its one caller is the Muse Limits
-read (`limits/muse.rs`), which sends one POST per read to the key-mint endpoint the CLI calls
-itself (`limits/muse/mint.rs`) and keeps only the quota fields of the answer. on-n-off never
-writes, renews or saves a Muse login, and Muse has no saved accounts.
+item. For the Muse Limits read (`limits/muse.rs`) it yields only the access token, as
+`model::AccessToken`, and the login's email, which also names the account when Limits falls back
+to `muse serve`; that read sends one POST per read to the key-mint endpoint the CLI calls itself
+(`limits/muse/mint.rs`) and keeps only the quota fields of the answer. Saved accounts use the
+same store for whole logins, as the next paragraph describes.
+
+Muse saved accounts are a later decision of the same day, reversing "Muse has no saved accounts"
+because every provider should offer the same account actions. `accounts/muse.rs` is the third
+adapter. A Muse login's identity is its lowercased `user_email` (Muse's `auth.json` carries no user
+id); its secret is `{access_token, api_key}` and the rest of `providers.meta` is its
+metadata. Muse 1.4.10 stores the signed-in login either inline in
+`auth.json` (file backend, Windows) or in the macOS Keychain item `ai.meta.dev.credentials` /
+`meta` with `storage: "keychain"` metadata; neither holds a refresh token, so a Muse login never
+renews and on-n-off never renews one: an expired saved login asks for Sign in again.
+`accounts/muse_store.rs` owns both files: one parse of `auth.json` (an inline secret, else the
+Keychain item when the metadata says `storage: "keychain"` or the login is OAuth), one Keychain
+lookup and one writer. The lookup is cached in memory by `auth.json`'s path, content and
+modification time, and the cache keeps only the parsed `{access_token, api_key}`; a store that
+cannot reach the Keychain (Windows, a disposable QA home, a saved login's home) never reads it
+from the cache. A denied lookup is an error for accounts, never "no login". A login with any
+credential is a login: an API-key login fails identification, so a switch is refused rather than
+overwriting it. Every store yields the same saved secret,
+`{access_token, api_key}`. Activation writes it back to the store Muse already uses: the same
+Keychain item through `/usr/bin/security`, keeping its `secret_schema_version` (1 when there is
+no item yet), or inline; `auth.json` is replaced atomically with other providers' entries kept,
+as Codex's credential file is, without Muse's `.auth.json.lock` (Muse never renews, and a switch
+beside a running Muse asks first). A malformed document or item is refused, never repaired.
+A saved, non-active Muse login lives in its own home under `accounts/homes/`, run with `HOME`,
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `TBH_CREDENTIAL_BACKEND=file`, so its login stays inline in
+that home's `auth.json` and never touches the global Keychain item (verified 2026-10-16 with a
+real `muse login`); its usage is one key-mint read with that home's token, and the home is removed
+as a directory, never with `muse logout`. Sign-in runs `muse login` in an isolated home of that
+shape and presses Enter for it. Running `muse-bin-*` processes keep their login, so a switch
+beside one asks first, as Codex does.
 
 ## Operations
 
 - **Remember accounts on this device** is off by default. One global opt-in enables a background
-  check for native Claude/Codex logins about every 30 seconds, independently of notification settings.
+  check for native Claude/Codex/Muse logins about every 30 seconds, independently of notification settings.
   Unchanged saved logins and pending reauthentication are skipped. A new/changed native login is
   verified before saving; no native activation occurs. Codex's verification can let app-server,
   the native renewal owner, renew an expired login; Claude's is local and accepts an expired one,
@@ -462,15 +491,15 @@ app boot do not prove these live operations. Full CI belongs to the PR, not loca
 A vault that cannot be read right now is a retryable IPC error for the subscription read, not an
 absent date.
 
-Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude and Codex;
+Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude, Codex and Muse;
 each card owns its usage, subscription date, primary action and optional category. The card frame
 (`LimitCardFrame`) owns each card's ⋯ menu and always offers Check limits now; account management
 adds the saved-login items and the footer's primary action through `useAccountCardActions`, and
 Limits adds Edit category on every card with an account and Archive account and Remove account on
 every remembered card (`useCardActions`).
-Remove account removes a saved login first when there is one, as the archived list does. A
-provider without saved accounts (Muse) keeps the menu, and its remembered cards' Archive account
-and Remove account act on their usage history only. Saved identities
+Remove account removes a saved login first when there is one, as the archived list does; on a
+card with no saved login, Archive account and Remove account act on its usage history only.
+Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.

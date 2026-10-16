@@ -10,7 +10,7 @@ app for Windows and macOS.
 ## Features
 
 - **Plugins, skills, and MCP servers** — see what's installed and enable or disable items where supported.
-- **Accounts** — save Claude and Codex logins, switch accounts, and optionally remember new sign-ins automatically.
+- **Accounts** — save Claude, Codex and Muse logins, switch accounts, and optionally remember new sign-ins automatically.
 - **Usage and limits** — view usage estimates, subscription limits, and reset times for Claude, Codex, and Muse.
 - **Pull requests** — follow your GitHub reviews, CI checks, and merge status.
 - **Side notch** — keep usage and pull requests visible at the edge of your screen.

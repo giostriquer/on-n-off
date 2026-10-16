@@ -65,6 +65,7 @@ impl super::Adapter for Claude {
         &Client {
             name: "claude",
             package_entry: "/@anthropic-ai/claude-code/cli.js",
+            binary_prefix: None,
             blocks_activation: false,
         }
     }

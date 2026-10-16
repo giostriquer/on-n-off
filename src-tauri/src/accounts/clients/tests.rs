@@ -278,3 +278,25 @@ fn a_refusal_names_every_running_client() {
     );
     assert_eq!(closed(&[]), Ok(()));
 }
+
+#[test]
+fn recognizes_the_versioned_muse_binary_the_launcher_runs_and_nothing_merely_alike() {
+    for (executable, args) in [
+        (
+            "/Users/me/.local/bin/muse-bin-1.4.10-R6427.1",
+            "muse-bin-1.4.10-R6427.1 serve",
+        ),
+        ("/Users/me/.local/bin/muse", "muse"),
+    ] {
+        assert!(is_client(executable, args, AgentId::Muse), "{executable}");
+    }
+    for (executable, args) in [
+        (
+            "/Applications/MuseScore 4.app/Contents/MacOS/mscore",
+            "mscore",
+        ),
+        ("/usr/local/bin/musebox", "musebox"),
+    ] {
+        assert!(!is_client(executable, args, AgentId::Muse), "{executable}");
+    }
+}

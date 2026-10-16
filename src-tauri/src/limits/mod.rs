@@ -18,6 +18,7 @@ mod snapshots;
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
 pub(crate) use codex::{read_saved_codex, same_reset_instant, CodexEndpoints};
+pub(crate) use muse::mint::read_saved as read_saved_muse;
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 
@@ -293,11 +294,13 @@ impl From<HttpError> for SavedReadError {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
     pub(crate) codex: CodexEndpoints<'a>,
+    pub(crate) muse: &'a str,
 }
 
 impl SavedReadUrls<'static> {
     pub(crate) const LIVE: Self = Self {
         codex: codex::CODEX,
+        muse: muse::mint::KEY_ENDPOINT,
     };
 }
 
@@ -321,10 +324,10 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
     LimitsAccountDto {
         id: identity.observation_key(),
         label,
-        legacy_id: Some(if identity.provider == AgentId::Codex {
-            identity.workspace_id.clone()
-        } else {
-            identity.user_id.clone()
+        legacy_id: Some(match identity.provider {
+            AgentId::Codex => identity.workspace_id.clone(),
+            AgentId::Muse => format!("email:{}", identity.user_id),
+            _ => identity.user_id.clone(),
         }),
     }
 }

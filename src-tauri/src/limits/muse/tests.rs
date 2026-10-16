@@ -7,6 +7,12 @@ use crate::json_line_session::Script;
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
+fn scoped_you() -> String {
+    crate::accounts::muse_store::identity("you@example.com")
+        .unwrap()
+        .observation_key()
+}
+
 fn query(script: &Script) -> Result<ServeAnswers, String> {
     query_serve(script.session(SERVE), &data_home())
 }
@@ -76,7 +82,8 @@ fn handshake_requests_the_experimental_api_and_reads_usage() {
     );
 
     let account = parsed.account.expect("account");
-    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.id, scoped_you());
+    assert_eq!(account.legacy_id.as_deref(), Some("email:you@example.com"));
     assert_eq!(account.label.as_deref(), Some("You@Example.com"));
     assert_eq!(parsed.reading.plan.as_deref(), Some("wonder"));
     assert_eq!(parsed.reading.windows.len(), 2);
@@ -171,8 +178,8 @@ fn unobserved_usage_keeps_the_account_on_a_failed_card() {
     let card = finish_read(normalize(answers, None));
     assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(
-        card.account.as_ref().map(|account| account.id.as_str()),
-        Some("email:you@example.com")
+        card.account.as_ref().map(|account| account.id.clone()),
+        Some(scoped_you())
     );
     assert!(
         card.message
@@ -463,7 +470,8 @@ fn window_of(parsed: &Parsed, kind: LimitWindowKind) -> &LimitWindowDto {
 fn a_mint_response_normalizes_to_the_same_card_as_serve() {
     let parsed = mint_reading(mint_body());
     let account = parsed.account.as_ref().expect("account");
-    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.id, scoped_you());
+    assert_eq!(account.legacy_id.as_deref(), Some("email:you@example.com"));
     assert_eq!(account.label.as_deref(), Some("You@Example.com"));
     assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
     assert_eq!(parsed.reading.windows.len(), 2);
@@ -707,7 +715,7 @@ fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
     .expect("mint reading")
     .account
     .expect("account");
-    assert_eq!(minted.id, "email:you@example.com");
+    assert_eq!(minted.id, scoped_you());
     for serve_label in ["Display Name", "Other@Example.org"] {
         let mut replies = happy_replies();
         replies[1]["result"]["museHome"] =
@@ -758,6 +766,7 @@ fn the_serve_label_names_the_account_only_without_an_auth_login() {
     )
     .expect("serve read");
     let account = read.account.expect("account");
-    assert_eq!(account.id, "email:you@example.com");
+    assert_eq!(account.id, scoped_you());
+    assert_eq!(account.legacy_id.as_deref(), Some("email:you@example.com"));
     assert_eq!(account.label.as_deref(), Some("You@Example.com"));
 }

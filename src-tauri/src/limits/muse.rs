@@ -17,7 +17,7 @@ use crate::dto::{
 };
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
 
-mod mint;
+pub(super) mod mint;
 
 const SERVE: Peer = Peer::jsonrpc(
     "Muse serve",
@@ -199,14 +199,16 @@ fn normalize(
 }
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
-    LimitsAccountDto {
-        legacy_id: None,
-        id: label
-            .as_deref()
-            .filter(|label| label.contains('@'))
-            .map(|label| format!("email:{}", label.to_lowercase()))
-            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
-        label,
+    match label
+        .as_deref()
+        .and_then(crate::accounts::muse_store::identity)
+    {
+        Some(identity) => super::scoped_account(&identity, label),
+        None => LimitsAccountDto {
+            legacy_id: None,
+            id: super::DEFAULT_ACCOUNT.to_string(),
+            label,
+        },
     }
 }
 

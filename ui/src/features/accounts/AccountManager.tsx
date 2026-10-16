@@ -77,7 +77,8 @@ const Controllers = createContext<Record<AccountProvider, ReturnType<typeof useC
 export function AccountControllers({ children }: { children: ReactNode }) {
   const claude = useController("claude");
   const codex = useController("codex");
-  return <Controllers.Provider value={{ claude, codex }}>{children}</Controllers.Provider>;
+  const muse = useController("muse");
+  return <Controllers.Provider value={{ claude, codex, muse }}>{children}</Controllers.Provider>;
 }
 export function useAccountControllers() {
   const controllers = useContext(Controllers);

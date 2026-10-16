@@ -118,9 +118,9 @@ it("re-reads both account lists, the Codex subscription dates and that provider'
   const card = await screen.findByRole("region", { name: "person@example.com" });
   const others = [["limits", "codex"], ["limits", "claude"], ["subscription", "codex", "profile:billing-a"], ["github", "prs"], ["reset-spends"]];
   for (const key of others) client.setQueryData(key, []);
-  expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"]]);
+  expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"], ["muse"]]);
   fireEvent.click(within(card).getByRole("button", { name: "Use account" }));
-  await waitFor(() => expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"], ["claude"], ["codex"]]));
+  await waitFor(() => expect(vi.mocked(api.readAccounts).mock.calls).toEqual([["claude"], ["codex"], ["muse"], ["claude"], ["codex"], ["muse"]]));
   expect(others.map(key => client.getQueryState(key)?.isInvalidated)).toEqual([true, false, true, false, false]);
 });
 it("re-reads the account lists and the remembering preference, not the subscription dates, when automatic saving changes", async () => {

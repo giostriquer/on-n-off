@@ -114,3 +114,30 @@ fn a_sign_in_home_of_a_provider_without_saved_profiles_is_left_alone() {
     assert!(harness.clients.asked.borrow().is_empty());
     assert!(harness.native.isolated.borrow().is_empty());
 }
+
+#[cfg(unix)]
+#[test]
+fn the_sign_in_gets_the_input_its_provider_asks_for_and_nothing_otherwise() {
+    for (input, completes) in [(&b"\n"[..], true), (&b""[..], false)] {
+        let harness = Harness::new();
+        *harness.native.signed_in.borrow_mut() = Some(claude("b", "b1"));
+        harness.native.sign_in_needs_a_line.set(true);
+        harness.native.sign_in_input.set(input);
+
+        let added = harness.accounts().add(AgentId::Claude, operation(), None);
+
+        assert_eq!(added.is_ok(), completes, "{input:?}: {added:?}");
+    }
+}
+
+#[test]
+fn claude_and_codex_sign_ins_are_sent_no_input() {
+    for provider in [AgentId::Claude, AgentId::Codex] {
+        let dir = crate::paths::scratch_dir("sign-in-no-input");
+        let isolated = crate::accounts::adapter(provider)
+            .unwrap()
+            .isolated(&dir)
+            .unwrap();
+        assert!(isolated.sign_in_input().is_empty(), "{provider:?}");
+    }
+}

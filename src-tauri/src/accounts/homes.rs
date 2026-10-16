@@ -14,6 +14,20 @@ fn root(home: &Path) -> PathBuf {
     home.join(".on-n-off/accounts/homes")
 }
 
+pub(super) fn remove(
+    dir: &Path,
+    locks: Box<dyn super::transaction::NativeGuard>,
+) -> Result<(), String> {
+    let removed = match std::fs::remove_dir_all(dir) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+            Err("Cannot remove the saved account's home.".into())
+        }
+        _ => Ok(()),
+    };
+    drop(locks);
+    removed
+}
+
 pub(super) fn dir(home: &Path, id: &str) -> Result<PathBuf, String> {
     uuid::Uuid::parse_str(id).map_err(|_| "Invalid saved account home.")?;
     Ok(root(home).join(id))

@@ -36,15 +36,19 @@ pub(crate) trait LoginView {
 }
 
 pub(super) fn claude_fingerprint(access: Option<&Value>, refresh: Option<&Value>) -> String {
-    fingerprint([access, refresh, None, None])
+    fingerprint(&[access, refresh, None, None])
 }
 
 pub(super) fn codex_fingerprint(access: Option<&Value>, refresh: Option<&Value>) -> String {
-    fingerprint([None, None, access, refresh])
+    fingerprint(&[None, None, access, refresh])
 }
 
-fn fingerprint(slots: [Option<&Value>; 4]) -> String {
-    crate::sha::sha256_hex(&serde_json::to_vec(&slots).expect("serializable credential generation"))
+pub(super) fn muse_fingerprint(access: Option<&Value>, api_key: Option<&Value>) -> String {
+    fingerprint(&[None, None, None, None, access, api_key])
+}
+
+fn fingerprint(slots: &[Option<&Value>]) -> String {
+    crate::sha::sha256_hex(&serde_json::to_vec(slots).expect("serializable credential generation"))
 }
 
 pub fn string<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, String> {

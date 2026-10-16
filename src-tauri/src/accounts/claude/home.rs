@@ -53,13 +53,6 @@ impl Home for ClaudeHome {
 
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {
         IsolatedSignIn::clean(&self.store)?;
-        let removed = match fs::remove_dir_all(&self.dir) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                Err("Cannot remove the saved account's home.".into())
-            }
-            _ => Ok(()),
-        };
-        drop(locks);
-        removed
+        super::super::homes::remove(&self.dir, locks)
     }
 }

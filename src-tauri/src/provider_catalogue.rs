@@ -67,7 +67,7 @@ impl AgentId {
                 binary_aliases: &[],
                 limits_reader: true,
                 usage: Some(UsageProvider::Muse),
-                saved_accounts: false,
+                saved_accounts: true,
             },
         }
     }

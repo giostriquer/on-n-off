@@ -2,11 +2,12 @@ use serde::Deserialize;
 use serde_json::json;
 
 use super::{account_dto, session_label, window, ServeFailure};
-use crate::accounts::model::AccessToken;
-use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
-use crate::limits::Parsed;
+use crate::accounts::model::{AccessToken, Identity};
+use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
+use crate::http::HttpError;
+use crate::limits::{saved_card, Parsed, SavedReadError, SavedReadUrls};
 
-pub(super) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
+pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
 
 const DEFAULT_ROLLING_MINS: u64 = 300;
 
@@ -20,6 +21,8 @@ pub(super) struct MintResponse {
     subs_tier_name: String,
     #[serde(default)]
     subs_usage: Option<SubsUsage>,
+    #[serde(default)]
+    user_email: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -43,6 +46,10 @@ struct MintWindow {
 }
 
 pub(super) fn fetch(url: &str, token: &AccessToken) -> Option<MintResponse> {
+    fetch_saved(url, token).ok()
+}
+
+fn fetch_saved(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError> {
     let authorization = token.authorization();
     let value = crate::http::post_json_headers(
         url,
@@ -51,9 +58,34 @@ pub(super) fn fetch(url: &str, token: &AccessToken) -> Option<MintResponse> {
             ("X-Api-Version", "1.0.0"),
         ],
         &json!({}),
-    )
-    .ok()?;
-    serde_json::from_value(value).ok()
+    )?;
+    serde_json::from_value(value)
+        .map_err(|_| HttpError::Parse("Unreadable Muse key answer.".into()))
+}
+
+pub(crate) fn read_saved(
+    identity: &Identity,
+    token: &AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    let response = fetch_saved(urls.muse, token)?;
+    let email = response
+        .user_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|email| !email.is_empty());
+    if email.is_some_and(|email| email.to_lowercase() != identity.user_id) {
+        return Err(SavedReadError::OtherAccount);
+    }
+    match normalize(email.map(str::to_string), &response) {
+        Some(Ok(parsed)) => saved_card(identity, parsed),
+        Some(Err(_)) => Err(SavedReadError::Unavailable(
+            "This Muse subscription is inactive or awaiting payment.",
+        )),
+        None => Err(SavedReadError::Unavailable(
+            "Muse shows no recent usage for this account.",
+        )),
+    }
 }
 
 pub(super) fn normalize(
@@ -138,3 +170,6 @@ fn resets_at_ms(value: &MintWindow) -> i64 {
         .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
         .map_or(0, |seconds| (seconds * 1000.0) as i64)
 }
+
+#[cfg(test)]
+mod tests;

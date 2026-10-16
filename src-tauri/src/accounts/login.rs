@@ -177,15 +177,18 @@ impl super::Accounts {
                 .map_err(|_| "Cannot record isolated sign-in ownership.")?,
         )?;
         let result: Result<(), String> = (|| {
-            let child = isolated
+            let mut child = isolated
                 .sign_in()
-                .stdin(Stdio::null())
+                .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .map_err(|_| {
                     "Could not start official sign-in. Check the provider CLI installation."
                 })?;
+            if let Some(mut stdin) = child.stdin.take() {
+                let _ = std::io::Write::write_all(&mut stdin, isolated.sign_in_input());
+            }
             match crate::process::wait_with_cancellation(child,Duration::from_secs(300),||canceled.load(Ordering::Acquire)){
    Ok(crate::process::CommandOutcome::Exited{success:true,..})=>{},
    _=>return Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into())
