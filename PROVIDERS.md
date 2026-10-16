@@ -189,7 +189,7 @@ adapter assumes today (change the adapter and this file together).
    extend the catalogue's table test with the row.
 2. Home in `paths.rs`. Adapter behind `AgentAdapter`; resolve the CLI via
    `cli_locate::resolve_provider_cli`. A fact the row turns on needs its behaviour too, where
-   the compiler already asks for an arm: a Limits reader (`limits::read_limits_in`, its read
+   the compiler already asks for an arm: a Limits reader (`limits::limits_reader`, its read
    lock, `limits_refresh::cache_for`), a `UsageProvider` variant with its parser and transcript
    directories, an `accounts::Adapter`. The agreement tests over `AgentId::ALL` fail while a
    fact and its behaviour disagree.

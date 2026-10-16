@@ -45,6 +45,17 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
 }
 
 #[test]
+fn a_provider_has_a_limits_reader_exactly_when_the_catalogue_says_so() {
+    for id in AgentId::ALL {
+        assert_eq!(
+            limits_reader(id).is_some(),
+            id.facts().limits_reader,
+            "{id:?}"
+        );
+    }
+}
+
+#[test]
 fn every_provider_with_a_limits_reader_has_a_read_lock_of_its_own() {
     for (i, a) in crate::provider_catalogue::WITH_LIMITS
         .into_iter()
@@ -299,7 +310,7 @@ fn probe_real_home_limits() {
 
 fn print_real_home_limits() {
     let home = crate::paths::probe_home();
-    for provider in [AgentId::Claude, AgentId::Codex, AgentId::Muse] {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
         for dto in read_limits_at(provider, false, &home) {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
