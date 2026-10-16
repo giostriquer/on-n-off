@@ -187,6 +187,20 @@ final class NotchTests {
       [.mine, .assigned])
   }
 
+  func testTheRailCountsThePullRequestCellAndEachProviderOnce() {
+    let displays = [display("main")]
+    let cases: [(Settings, Int, Double)] = [
+      (rail("main", providers: [], pullRequests: true), 1, 73 + 80),
+      (rail("main", pullRequests: true), 6, 6 * 73 + 5 * 8 + 80),
+      (rail("main", providers: [.cursor, .claude, .claude]), 2, 234),
+    ]
+    for (settings, cells, height) in cases {
+      expectEqual(settings.railCells.count, cells)
+      expectEqual(
+        notchRailFrame(settings: settings, displays: displays).map { Double($0.height) }, height)
+    }
+  }
+
   func testRailFramesAndPillsMatchTheSharedCases() throws {
     let fixture = try RailFixture.load()
     expectEqual(fixture.rails.isEmpty, false)
@@ -551,6 +565,7 @@ checks.testAPausedRingSaysItsReadingIsTheLastObserved()
 checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
 checks.testSessionAgesReadLikeTheReferenceApp()
 checks.testTheRailOrdersItsProvidersAndCountsThePullRequestCell()
+checks.testTheRailCountsThePullRequestCellAndEachProviderOnce()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
 try checks.testRailMetricsMatchTheSharedCases()
 try checks.testSettingsDecodeTheHostDocumentAndRejectUnknownProviders()
@@ -562,5 +577,5 @@ try checks.testPullRequestsSayWhetherTheyAreWorkOrPersonalAndAnUnknownContextSay
 checks.testConflictBandRequiresPassingCIAndMergeConflicts()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("20 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

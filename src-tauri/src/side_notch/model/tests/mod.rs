@@ -60,6 +60,32 @@ fn muse_follows_codex_even_when_other_integrations_are_selected() {
 }
 
 #[test]
+fn the_rail_counts_the_pull_request_cell_and_each_provider_once() {
+    let displays = [display("main", 0.0, 2.0)];
+    for (providers, pull_requests, cells, height) in [
+        (vec![], true, 1, 73.0 + 80.0),
+        (RAIL_ORDER.to_vec(), true, 6, 6.0 * 73.0 + 5.0 * 8.0 + 80.0),
+        (
+            vec![AgentId::Cursor, AgentId::Claude, AgentId::Claude],
+            false,
+            2,
+            234.0,
+        ),
+    ] {
+        let mut current = settings("main", Edge::Right);
+        current.providers = providers;
+        current.pull_requests.enabled = pull_requests;
+        let case = format!("{:?} with the cell {pull_requests}", current.providers);
+        assert_eq!(current.cell_count(), cells, "{case}");
+        assert_eq!(
+            layout(&current, &displays).map(|rail| rail.height),
+            Some(height),
+            "{case}"
+        );
+    }
+}
+
+#[test]
 fn the_pull_request_cell_is_on_by_default_with_only_the_users_own_list() {
     let defaults = NotchSettings::default();
     assert!(defaults.pull_requests.enabled);
