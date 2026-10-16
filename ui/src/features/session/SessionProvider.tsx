@@ -18,7 +18,7 @@ import {
 import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
-import { ALL_AGENTS, DEFAULT_APP_SETTINGS, visibleAgentIds } from "$lib/appSettings";
+import { ALL_AGENTS, visibleAgentIds } from "$lib/appSettings";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { FilteredTab } from "$lib/filterTab";
 import { mergeProjects, projectFromPath, projectLabel, sameProjectPath } from "$lib/project";
@@ -491,7 +491,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         api.listAgents(),
       ]);
       setFlags(mergeFlags(nextFlags.status === "fulfilled" ? nextFlags.value : null));
-      showVisibleAgent((nextSettings.status === "fulfilled" ? nextSettings.value : DEFAULT_APP_SETTINGS).hiddenAgents);
+      if (nextSettings.status === "fulfilled") {
+        showVisibleAgent(nextSettings.value.hiddenAgents);
+      }
       if (nextAgents.status === "fulfilled") {
         setAgents(overlayAgents(nextAgents.value));
       } else {
