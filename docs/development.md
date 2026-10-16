@@ -16,8 +16,8 @@ locates the subsystems. Module doc-comments explain their implementation.
   and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
   `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.
 - App settings: read and change them through `useAppSettings()` (`ui/src/lib/useAppSettings.tsx`),
-  with `patch`, never by saving a spread of a rendered copy
-  ([why](architecture/README.md#app-settings)). A new setting goes in `AppSettings` in
+  with `patch`, never by saving a spread of a rendered copy, and change a list or map field with an
+  updater over the latest document ([why](architecture/README.md#app-settings)). A new setting goes in `AppSettings` in
   `settings.rs` with a serde default, in `every_setting_away_from_its_default` and the fixtures
   under `src-tauri/src/settings/fixtures/`, then in the TypeScript `AppSettings` and
   `DEFAULT_APP_SETTINGS`; the contract tests on each side fail until both have it.

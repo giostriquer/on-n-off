@@ -339,7 +339,10 @@ own, so they share its code and never its state.
 - **One patch path, in order.** Every caller changes settings with `patch`, a partial document or
   an updater given the latest one. Loads and saves run one at a time in the order asked, and each
   change is applied to the document the save before it returned, so two quick changes both land
-  and a load never overwrites a newer save.
+  and a load answers with what every change asked before it saved. A change to a list or a map
+  (hidden providers, binary paths, GitHub scopes, a reset alert turned off in Settings) is an
+  updater, so two quick edits to the same one both land too. Limits' reset-alert form still hands
+  over the whole map it rendered.
 - **Defaults are a placeholder.** `DEFAULT_APP_SETTINGS` is shown until the first load answers. A
   change made before then waits for it, and one made after a failed load reads the document first
   and fails rather than save the placeholder over the user's file.
