@@ -418,8 +418,12 @@ fn a_read_that_fails_decides_nothing_and_the_spend_keeps_waiting() {
 
 #[test]
 fn with_nothing_watched_the_waiting_spends_and_the_state_are_forgotten_once() {
-    let mut monitor = Monitor::new(automatic_only());
+    let mut monitor = Monitor::new(AppSettings {
+        limit_notifications: true,
+        ..automatic_only()
+    });
     monitor.schedule_a_spend();
+    assert!(!monitor.state.providers.is_empty() && !monitor.state.reset_alerts.is_empty());
 
     for _ in 0..2 {
         tauri::async_runtime::block_on(rest(&monitor.io, &monitor.waiting, &mut monitor.state));
@@ -427,6 +431,8 @@ fn with_nothing_watched_the_waiting_spends_and_the_state_are_forgotten_once() {
 
     assert_eq!(monitor.io.effects(), [Effect::Saved]);
     assert!(monitor.state.providers.is_empty() && monitor.state.reset_alerts.is_empty());
+    let saved = monitor.io.saved.borrow().clone().unwrap();
+    assert!(saved.providers.is_empty() && saved.reset_alerts.is_empty());
     assert!(listed(&monitor).is_empty());
 }
 
