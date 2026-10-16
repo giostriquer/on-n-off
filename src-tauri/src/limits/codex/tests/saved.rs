@@ -18,7 +18,10 @@ fn read_at(
     let token = crate::accounts::model::string(auth, "/tokens/access_token")
         .map(AccessToken::new)
         .expect("the fixture's access token");
-    let urls = SavedReadUrls { codex };
+    let urls = SavedReadUrls {
+        codex,
+        ..SavedReadUrls::LIVE
+    };
     read_saved_codex(identity, token, &urls)
 }
 

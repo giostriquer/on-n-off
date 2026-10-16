@@ -199,16 +199,30 @@ fn normalize(
 }
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
-    LimitsAccountDto {
-        legacy_id: None,
-        id: label
-            .as_deref()
-            .filter(|label| label.contains('@'))
-            .map(|label| format!("email:{}", label.to_lowercase()))
-            .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
-        label,
+    match label
+        .as_deref()
+        .filter(|label| label.contains('@'))
+        .map(muse_identity)
+    {
+        Some(identity) => super::scoped_account(&identity, label),
+        None => LimitsAccountDto {
+            legacy_id: None,
+            id: super::DEFAULT_ACCOUNT.to_string(),
+            label,
+        },
     }
 }
+
+pub(crate) fn muse_identity(email: &str) -> crate::accounts::model::Identity {
+    crate::accounts::model::Identity {
+        provider: AgentId::Muse,
+        user_id: email.trim().to_lowercase(),
+        workspace_id: String::new(),
+    }
+}
+
+pub(crate) const KEY_ENDPOINT: &str = mint::KEY_ENDPOINT;
+pub(crate) use mint::read_saved;
 
 fn session_label(minutes: u64) -> String {
     if minutes > 0 && minutes.is_multiple_of(60) {

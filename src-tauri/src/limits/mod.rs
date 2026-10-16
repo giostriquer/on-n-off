@@ -293,12 +293,22 @@ impl From<HttpError> for SavedReadError {
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
     pub(crate) codex: CodexEndpoints<'a>,
+    pub(crate) muse: &'a str,
 }
 
 impl SavedReadUrls<'static> {
     pub(crate) const LIVE: Self = Self {
         codex: codex::CODEX,
+        muse: muse::KEY_ENDPOINT,
     };
+}
+
+pub(crate) fn read_saved_muse(
+    identity: &Identity,
+    token: &crate::accounts::model::AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<ProviderLimitsDto, SavedReadError> {
+    muse::read_saved(identity, token, urls.muse)
 }
 
 fn saved_card(
@@ -321,10 +331,10 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
     LimitsAccountDto {
         id: identity.observation_key(),
         label,
-        legacy_id: Some(if identity.provider == AgentId::Codex {
-            identity.workspace_id.clone()
-        } else {
-            identity.user_id.clone()
+        legacy_id: Some(match identity.provider {
+            AgentId::Codex => identity.workspace_id.clone(),
+            AgentId::Muse => format!("email:{}", identity.user_id),
+            _ => identity.user_id.clone(),
         }),
     }
 }
