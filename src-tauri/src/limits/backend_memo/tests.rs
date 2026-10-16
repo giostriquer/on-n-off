@@ -1,5 +1,4 @@
 use super::*;
-use crate::limits_refresh::failure_backoff;
 use std::cell::Cell;
 
 const INTERVAL: Duration = Duration::from_secs(60);
@@ -68,7 +67,7 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
     let after = Instant::now();
     let (until, count) = memo.backoff_of("a").unwrap();
     assert_eq!(count, 3, "another failure once the wait ran out counts on");
-    let wait = failure_backoff(INTERVAL, 3);
+    let wait = INTERVAL * 4;
     assert!(
         until >= before + wait && until <= after + wait,
         "and waits the longer delay from then"
@@ -85,10 +84,9 @@ fn a_failure_holds_the_account_back_doubling_each_time_and_a_success_clears_it()
 }
 
 #[test]
-fn a_backend_figure_that_keeps_failing_waits_the_limits_failure_backoff_at_the_interval_it_is_given(
-) {
+fn a_backend_figure_that_keeps_failing_waits_one_two_four_then_sixteen_intervals() {
     for interval in [INTERVAL, Duration::from_secs(300)] {
-        for failures in [1, 2, 3, 5] {
+        for (failures, intervals) in [(1, 1), (2, 2), (3, 4), (5, 16)] {
             let memo: PerAccount<u8> = PerAccount::new(None);
             if failures > 1 {
                 memo.failed_before("a", failures - 1);
@@ -98,7 +96,7 @@ fn a_backend_figure_that_keeps_failing_waits_the_limits_failure_backoff_at_the_i
             assert_eq!(memo.read_backed_off("a", interval, &fail), None);
             let end = Instant::now();
             let (until, count) = memo.backoff_of("a").unwrap();
-            let wait = failure_backoff(interval, failures);
+            let wait = (interval * intervals).min(Duration::from_secs(3600));
             assert_eq!(count, failures);
             assert!(
                 until >= start + wait && until <= end + wait,

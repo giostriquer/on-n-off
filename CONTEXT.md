@@ -61,7 +61,8 @@ _Avoid_: auto-reset
 How long a Limits read waits after failing before it is made again: its poll interval doubled for
 each failure in a row, at most sixteen intervals and never more than an hour. The signed-in
 account's read, each saved profile and each Codex backend figure count their own failures; a
-success starts the count over.
+success starts the count over. A backend figure starts one doubling behind the others: one
+interval after its first failure, where they wait two.
 _Avoid_: retry delay, cooldown
 
 ### Accounts

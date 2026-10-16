@@ -85,11 +85,9 @@ impl<T: Clone> PerAccount<T> {
                 }
             }
             None => {
-                let count = entry
-                    .failure
-                    .map_or(1, |(_, count)| count.saturating_add(1));
-                let delay = crate::limits_refresh::failure_backoff(interval, count);
-                entry.failure = Some((Instant::now() + delay, count));
+                let failures_before = entry.failure.map_or(0, |(_, count)| count);
+                let delay = crate::limits_refresh::failure_backoff(interval, failures_before);
+                entry.failure = Some((Instant::now() + delay, failures_before.saturating_add(1)));
             }
         }
         answer

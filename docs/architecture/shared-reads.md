@@ -30,13 +30,16 @@ after a reset, that account returns to the configured interval. Saved profiles k
 configured cadence. Extra native reads retain saved cards and announce the replacement as usual.
 
 A read that fails waits the Limits **failure backoff** before it is made again
-(`limits_refresh::failure_backoff`): its interval doubled for each failure in a row, the last one
-included, at most sixteen intervals and never more than an hour; a success starts the count
-over. Each read keeps its own count and passes its own interval: a provider's native read (the
-cache's freshness, `cache_is_fresh`), each saved profile's poll (`accounts/usage.rs`, which also
-waits out a Retry-After that is longer), and each Codex backend figure, per account
-(`limits/backend_memo.rs`). So a failing native read never delays the other provider, and a
-failing figure never delays the usage read it rides on. A forced read bypasses the native
+(`limits_refresh::failure_backoff`): its interval doubled for each failure in a row, at most
+sixteen intervals and never more than an hour; a success starts the count over. Each read keeps
+its own count and passes its own interval: a provider's native read (the cache's freshness,
+`cache_is_fresh`) and each saved profile's poll (`accounts/usage.rs`, which also waits out a
+Retry-After that is longer) count the failure they just had, so the first one waits two intervals.
+Each Codex backend figure, per account (`limits/backend_memo.rs`), counts only the failures before
+its latest one, as it was specified when it was added: it waits one interval after its first
+failure in a row, half what the other reads wait at each later step, until both reach sixteen
+intervals or the hour. So a failing native read never delays the other provider, and a failing
+figure never delays the usage read it rides on. A forced read bypasses the native
 backoff but not a saved profile's after a failure, nor a backend figure's.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot.
