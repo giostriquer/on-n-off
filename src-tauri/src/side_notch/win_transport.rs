@@ -50,6 +50,7 @@ pub struct Overlay {
     copy: Copier,
     lifetime: Arc<Lifetime>,
     window: Option<Window>,
+    delivered: bool,
 }
 
 impl Overlay {
@@ -67,12 +68,14 @@ impl Overlay {
             copy,
             lifetime: lifetime.clone(),
             window: None,
+            delivered: false,
         };
         (overlay, lifetime)
     }
 
     fn lost(&mut self) -> String {
         self.window = None;
+        self.delivered = false;
         self.lifetime.state().window = None;
         STOPPED.into()
     }
@@ -125,6 +128,9 @@ impl Transport for Overlay {
             }
             _ => return Err(self.lost()),
         };
+        if std::mem::take(&mut self.delivered) {
+            inbound.push(Inbound::Confirmed);
+        }
         inbound.extend(actions.into_iter().map(|action| self.answer(action)));
         Ok(())
     }
@@ -139,6 +145,7 @@ impl Transport for Overlay {
             .as_ref()
             .is_some_and(|window| window.messages.send(WindowMsg::Data(frame)).is_ok());
         if sent {
+            self.delivered = true;
             Ok(())
         } else {
             Err(self.lost())
@@ -149,6 +156,7 @@ impl Transport for Overlay {
         if let Some(window) = self.window.take() {
             let _ = window.messages.send(WindowMsg::Shutdown);
         }
+        self.delivered = false;
         self.lifetime.state().window = None;
     }
 

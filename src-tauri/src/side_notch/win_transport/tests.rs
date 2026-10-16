@@ -157,3 +157,24 @@ fn quitting_shuts_the_window_and_no_other_opens() {
     );
     assert!(lifetime.state().window.is_none());
 }
+
+#[test]
+fn a_frame_the_window_took_is_confirmed_once() {
+    let (mut overlay, _lifetime, _) = overlay();
+    let screen = show(&mut overlay);
+    let mut inbound = Vec::new();
+    assert_eq!(overlay.receive(Instant::now(), &mut inbound), Ok(()));
+    assert!(inbound.is_empty(), "nothing was sent yet");
+
+    overlay.send(Instant::now(), &snapshot(), frame()).unwrap();
+    screen.actions.send(WinAction::Refresh).unwrap();
+    assert_eq!(overlay.receive(Instant::now(), &mut inbound), Ok(()));
+    assert_eq!(
+        inbound,
+        [Inbound::Confirmed, Inbound::Action(Action::Refresh)]
+    );
+
+    inbound.clear();
+    assert_eq!(overlay.receive(Instant::now(), &mut inbound), Ok(()));
+    assert!(inbound.is_empty());
+}

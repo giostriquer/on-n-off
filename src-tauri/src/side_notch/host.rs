@@ -35,7 +35,6 @@ pub(super) enum Inbound {
     Action(Action),
     #[cfg(any(target_os = "windows", test))]
     Handled(Result<(), String>),
-    #[cfg(any(target_os = "macos", test))]
     Confirmed,
 }
 
@@ -325,7 +324,6 @@ impl<T: Transport, A: App> Host<T, A> {
                 self.action_error = result.err();
                 self.delivery.mark_dirty();
             }
-            #[cfg(any(target_os = "macos", test))]
             Inbound::Confirmed => self.runtime_error = None,
         }
     }
