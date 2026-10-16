@@ -25,14 +25,14 @@ export function accountPreferenceQuery() {
   return queryOptions({ queryKey: [...ACCOUNTS, "preferences"], queryFn: () => api.readAccountPreferences(), retry: false });
 }
 
-export function codexSubscriptionQuery(accountId: string, refresh = true) {
+export function codexSubscriptionQuery(accountId: string, poll = true) {
   return queryOptions({
     queryKey: [...CODEX_SUBSCRIPTIONS, accountId],
     queryFn: () => api.readCodexSubscription(accountId),
     staleTime: DAY_MS,
     refetchOnMount: "always",
     gcTime: DAY_MS,
-    refetchInterval: refresh ? DAY_MS : false,
+    refetchInterval: poll ? DAY_MS : false,
     refetchIntervalInBackground: false,
   });
 }
