@@ -13,10 +13,9 @@ and the data on both, and both draw the same rail and popovers from the same lay
 `host.rs` is the only supervisor, on both platforms. It owns the settings snapshot the notch is
 drawn for, a poll per provider and one each for sessions and pull requests, the actions both
 notches report (refresh, open Limits or Pull requests, show on hover), the status it emits as
-`side-notch-changed`, and the one projection of what it read into the rail frame (`RailData`): the
-selected providers that have been read, in rail order, with their sessions, then the pull request
-cell when it is on and has been read, each list keeping at most 25 rows and only those on
-github.com, each row with its context. The frame and that projection are `host/frame.rs`; the
+`side-notch-changed`, and the rail frame (`RailData`) it hands its transport. It does not decide
+what the frame holds: it gives the notch model what its polls last read (`frame::rail`, below) and
+sends what comes back. The
 Tauri side, the supervisor thread and the app the host reads through (`Production`, which opens
 windows and emits through the `AppHandle`), is `host/app.rs`. The host keeps no interval of its
 own: it asks `Production` for the limits check interval and the pull request interval at every
@@ -27,7 +26,7 @@ are saved.
 What differs between the platforms is how a frame reaches the pixels and how actions come back.
 That is the `Transport` the host is given, and it is the only thing that differs:
 
-- **macOS, `transport.rs` (`Pipe`).** Starts the helper, sends each frame as one protocol-6 line
+- **macOS, `transport.rs` (`Pipe`).** Starts the helper, sends each frame as one protocol-7 line
   (`protocol::encode`) and waits for its ack before sending the next. A helper that fails to start,
   exits or acks nothing for 10 s is started again after a wait of 1 s, doubling to 30 s; new
   settings try again at once, and an ack after 30 s up, or turning the notch off, sets the wait back
@@ -53,9 +52,74 @@ Things that are easy to get wrong:
   retrying on macOS, an action the transport carried out on Windows.
 - **The host's rules are tested on every OS** through a fake transport and a fake `App`
   (`host/tests/`), the seam that stands for the reads, the settings store and the windows it opens.
-  `host/tests/wire.rs` pins the exact bytes the helper receives; `transport/tests.rs` the pipe's
-  acks, waits and frame numbers; `host/app/tests.rs` that `Production` follows the shared reads'
-  own revisions and intervals; `win_transport/tests.rs`, on Windows only, the overlay.
+  `host/tests/wire.rs` pins the exact bytes the helper receives (the golden message, under
+  [Protocol 7](#protocol-7)); `model/frame/tests.rs` what each cell shows; `transport/tests.rs`
+  the pipe's acks, waits and frame numbers; `host/app/tests.rs` that `Production` follows the
+  shared reads' own revisions and intervals; `win_transport/tests.rs`, on Windows only, the
+  overlay.
+
+## What each cell shows is decided once
+
+`side_notch/model/frame.rs` (`frame::rail`) decides the whole frame, for both notches: which cells
+the rail has, in what order, and everything each one says that does not depend on the clock. The
+macOS helper and the Windows painter only draw it. They used to decide much of it twice, and
+disagreed: the Windows ring drew a pull request that sat in two lists twice, and the Windows rail
+drew only the cells that had been read into the first slots of a rail sized for all of them.
+
+- **The cells.** One per selected provider, in rail order (`RAIL_ORDER`), then the pull request
+  cell when it is on. A provider without a current-account reading, not read yet or read without
+  one, keeps its slot as a checking cell: no reading, a dash, and "Checking usage…" in its
+  popover. The pull request cell is checking until its first read ("Checking pull requests…").
+  So the rail is always as long as its cells, and the helper never derives its cells from the
+  settings.
+- **A provider cell**: its reading (from `NotchProvider::current`, below), its sessions, a notice
+  (the reading's message, else "Usage unavailable.", when the read is not `ok`) and, when that
+  reading still has windows or a workspace share, the amber "Refresh paused. Last observed values
+  below." A reading that is `ok` says nothing above its windows, even without any.
+- **The pull request cell**: whether the read is readable (`ok`, or stale), the hint as its notice
+  when the read is not `ok` (amber over rows it still shows, muted when it shows none), and, only
+  when readable, the lists in their own order with their titles, at most 25 rows each and only rows
+  on github.com. The ring has one segment per pull request across the lists, at most 24, a passing
+  pull request with merge conflicts marked as such, and its figure is the count of distinct pull
+  requests. The attention counts the macOS cell speaks (conflicts, failing CI, changes requested,
+  ready to merge) count each pull request once too.
+- **Each row's badges** (Draft, Approved, Changes requested, Conflicts, Queued, Auto-merge, Ready to
+  merge, Behind base, Blocked) and **its tag**, each a label and a tone. A tone names an ink, never
+  a colour: muted, green, red, amber, work, personal; each drawer keeps its own inks for them.
+
+What each provider cell's reading holds is decided in `model.rs` (`NotchProvider::current`), from
+the current account's card:
+
+- **The windows**, in the card's order: weekly, then session, then per model. The popover lists
+  them so, as the Limits screen does. Codex's hidden buckets never arrive: the limits reader drops
+  them (see the Codex row of `PROVIDERS.md`).
+- **The headline window**, by id: the weekly window. The cell's outer ring and figure show it
+  whatever the card's status, as its Limits card does: an account whose refresh is paused keeps
+  its last reading, which the macOS cell's label and both popovers call last observed. An account
+  without a weekly window shows a dash, never its session.
+- **The inner ring**: Claude's Fable weekly window, by id, or a Codex business member's
+  workspace-credit share, chosen the same way. The share's meter is the
+  limits reader's `used_percent`; its amounts are worded once in `model.rs`
+  (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
+  reset.
+
+Each pull request row's context is decided the same way, by `PrContext::of` from GitHub's
+`isInOrganization`: work for an organization's repository, personal for a user's. It reaches the
+drawers as the row's tag (Work or Personal, in the work or personal tone). Both popovers draw it as
+a WORK or PERSONAL tag before the repository, a stripe down the row's leading edge and a copy icon
+in the same ink, so a review request is not pasted into the wrong channel. A row read before
+GitHub reported its owner has no tag and draws none of them.
+
+What stays with each drawer is what depends on the clock, since they redraw between reads (a
+window's percent now, its reset note, a session's age, the percent under a provider's ring), and
+what is only style: provider names and marks, the inks of each tone, list titles and tags set in
+capitals, the CI dot's colour, "Nothing open." and "N of M". The review request copied from a row is
+still worded by each drawer. Accessibility strings stay in the helper, built from the decided
+fields.
+
+A drawer never decides what a cell says. A new badge, notice or rule goes in `model/frame.rs` and
+reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the
+order it receives them, so rail order lives in `RAIL_ORDER` alone.
 
 ## On macOS
 
@@ -66,7 +130,7 @@ flowchart LR
         host["host.rs<br/><i>the one supervisor</i>"]
         pipe["transport.rs · protocol.rs<br/><i>the pipe transport</i>"]
         sess["sessions.rs<br/><i>~/.claude/sessions/*.json +<br/>recent Codex rollouts, read-only</i>"]
-        model["model.rs<br/><i>layout, mirrored ·<br/>each cell's rings</i>"]
+        model["model.rs · model/frame.rs<br/><i>layout, mirrored ·<br/>what each cell shows</i>"]
     end
 
     subgraph helper["on-n-off-notch — owns the pixels"]
@@ -86,33 +150,32 @@ flowchart LR
     model -.->|"same pure layout,<br/>checked by NotchCoreChecks"| core
 ```
 
-What each provider cell shows is decided once, in `model.rs` (`NotchProvider::current`), from the
-current account's card, and both notches only draw it:
+### Protocol 7
 
-- **The windows**, in the card's order: weekly, then session, then per model. The popover lists
-  them so, as the Limits screen does. Codex's hidden buckets never arrive: the limits reader drops
-  them (see the Codex row of `PROVIDERS.md`).
-- **The headline window**, by id: the weekly window. The cell's outer ring and figure show it
-  whatever the card's status, as its Limits card does: an account whose refresh is paused keeps
-  its last reading, which the macOS cell's label and both popovers call last observed. An account
-  without a weekly window shows a dash, never its session.
-- **The inner ring**: Claude's Fable weekly window, by id, or a Codex business member's
-  workspace-credit share, chosen the same way. The share's meter is the
-  limits reader's `used_percent`; its amounts are worded once in `model.rs`
-  (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
-  reset.
+The helper receives the frame as one line: `version` 7, `sequence`, `snapshot` (the
+settings and displays), `cells` in rail order and `actionError`. Each cell has a `kind`:
 
-Each pull request row's context is decided the same way, by `PrContext::of` from GitHub's
-`isInOrganization`: work for an organization's repository, personal for a user's. Both popovers
-draw it as a WORK or PERSONAL tag before the repository, a stripe down the row's leading edge and a
-copy icon in the same ink, so a review request is not pasted into the wrong channel. A row read
-before GitHub reported its owner draws none of them.
+- `provider`: `provider`, `reading` (absent while checking: `status`, `message`, `windows`,
+  `headlineWindowId`, `innerRing`, `workspaceCredits`), `notice`, `paused` (each a `text` and a
+  `tone`, absent when there is none) and `sessions`.
+- `pullRequests`: `reading` (absent while checking: `readable`, `count`, `segments` of `ci` and
+  `passingWithConflicts`, `attention`, `lists` of `id`, `title`, `total` and `items`, each row with
+  its `badges` and optional `tag`, each a `label` and a `tone`) and `notice`.
 
-The macOS helper receives these over the pipe (`headlineWindowId`, `innerRing`, each row's
-`context`; protocol version 6) and refuses a message naming a window it did not send; the Windows
-painter gets them in memory.
-What depends on the clock stays with each, since they redraw between reads: a window's percent now
-and its reset note.
+The helper refuses another version, a message naming a window it did not send, two cells with the
+same id, more than 24 segments or 25 rows a list, a row off github.com, and, while the notch is on,
+cells that do not fill the rail its settings lay out. It skips a cell whose provider it does not
+know, and drops that provider from the settings it decodes, rather than refusing the whole message:
+the helper ships inside the bundle, so this only matters between builds, but one unknown provider
+used to blank the notch. An unknown tone draws muted; an unknown CI state draws as no checks.
+
+One message is the contract both sides check:
+`macos/SideNotch/Tests/NotchCoreTests/host-message.json`. `host/tests/wire.rs` drives the host
+through a representative frame (a read provider, a paused one, a checking one, a stale pull request
+read with a pull request in two lists) and asserts that the encoder's bytes are that file, key for
+key; `NotchCoreChecks` decodes the same file and asserts every decided field. A field renamed or
+dropped on one side fails that side's check. To change the protocol, change the encoder and the
+Swift models, regenerate the file from the encoder, and update both assertions.
 
 Things that are easy to get wrong:
 
@@ -174,12 +237,12 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
 non-activating `tao` window per selected display and presents it with `UpdateLayeredWindow`;
-`win_paint.rs` draws the rail (from `model.rs`'s metrics and frames), the marks and the popovers
-into a tiny-skia pixmap; `win_displays.rs` enumerates monitors; and `win_transport.rs` is the
-host's Windows transport, in-process channels where macOS has pipes. The display is chosen by
-device name rather than UUID, and the same rule holds — a disconnected or mirrored selection
-hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the settings card says
-so on older builds.
+`win_paint.rs` draws the rail (from `model.rs`'s metrics and frames, and the cells `model/frame.rs`
+decided), the marks and the popovers into a tiny-skia pixmap; `win_displays.rs` enumerates monitors;
+and `win_transport.rs` is the host's Windows transport, in-process channels where macOS has pipes.
+The display is chosen by device name rather than UUID, and the same rule holds — a disconnected or
+mirrored selection hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the
+settings card says so on older builds.
 
 `OS.md` carries the Windows behaviours that decide whether this works at all — the bare `WS_POPUP`
 style, per-pixel-alpha hit testing, the pointer poll that stands in for the `CursorMoved` events
