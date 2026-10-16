@@ -95,6 +95,8 @@ export function mcpReadOnlyNotice(id: AgentId): string | null {
 
 export type ProviderPaths = {
   readonly home: string;
+  readonly pluginDirs: string;
+  readonly skillDirs: string;
   readonly mcpConfig: string;
   readonly scopeConfig: string;
   readonly userSkills: string;
@@ -104,6 +106,8 @@ export type ProviderPaths = {
 const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
   claude: {
     home: "~/.claude",
+    pluginDirs: "~/.claude/plugins",
+    skillDirs: "~/.claude/plugins · user skills",
     mcpConfig: "~/.claude.json",
     scopeConfig: "~/.claude/settings.json",
     userSkills: "~/.claude/skills",
@@ -111,6 +115,8 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
   },
   codex: {
     home: "~/.codex",
+    pluginDirs: "~/.codex/plugins",
+    skillDirs: "~/.codex/skills · ~/.agents/skills",
     mcpConfig: "~/.codex/config.toml",
     scopeConfig: "~/.codex/config.toml",
     userSkills: "~/.codex/skills",
@@ -118,6 +124,8 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
   },
   antigravity: {
     home: "~/.gemini",
+    pluginDirs: "~/.gemini/config/plugins · antigravity-cli/plugins",
+    skillDirs: "~/.gemini/antigravity-cli/skills · .agents/skills",
     mcpConfig: "~/.gemini/config/mcp_config.json",
     scopeConfig: "~/.gemini/antigravity-cli/",
     userSkills: "~/.gemini/antigravity-cli/skills",
@@ -125,6 +133,8 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
   },
   cursor: {
     home: "~/.cursor",
+    pluginDirs: "~/.cursor/plugins",
+    skillDirs: "~/.cursor/skills · .cursor/skills",
     mcpConfig: "~/.cursor/mcp.json",
     scopeConfig: "~/.cursor/",
     userSkills: "~/.cursor/skills",
@@ -132,6 +142,8 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
   },
   muse: {
     home: "~/.local/share/muse",
+    pluginDirs: "~/.local/share/muse/plugins",
+    skillDirs: "~/.config/muse/skills · ~/.agents/skills",
     mcpConfig: "~/.config/muse/settings.json",
     scopeConfig: "~/.config/muse/settings.json",
     userSkills: "~/.config/muse/skills",
