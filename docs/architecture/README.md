@@ -107,7 +107,7 @@ the real explanation. What follows is only enough to know which one you want.
 
 | Subsystem | What it does | Notable |
 | --- | --- | --- |
-| `{claude,codex,antigravity,cursor}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference belongs here. Layout per provider is in `PROVIDERS.md`. |
+| `{claude,codex,antigravity,cursor,muse}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference in behaviour belongs here; each provider's static facts are its row in `provider_catalogue.rs`. Layout per provider is in `PROVIDERS.md`. |
 | `scanner.rs`, `plugin_meta.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. |
 | `usage/` | Token and cost aggregation from transcripts, and the usage kept after they are deleted | Read-only on agent homes. See below. |
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
@@ -332,6 +332,31 @@ gone nothing can rebuild it.
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
+| `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every provider list is drawn from it. See below. |
+
+### Provider catalogue
+
+`AgentId::ALL` lists every provider in tab order, and `AgentId::facts` gives each one row: key,
+display name, binary and aliases, rail rank, whether a fresh notch shows it, whether it has a
+Limits reader, which `UsageProvider` reads its transcripts, and whether it offers saved accounts.
+The row is one exhaustive `match`, so a new provider does not compile without one; nothing in
+Rust makes a list name every variant, so a test walks the variants serde declares and requires
+each in `ALL` once. Lists a const context needs are computed at compile time: `RAIL_ORDER`
+places each row at its rail rank and refuses a rank that is taken or out of range, and
+`WITH_LIMITS` and `WITH_SAVED_ACCOUNTS` keep `ALL`'s order. A provider string decoded by hand
+(scan-cache rows, aggregate keys, CLI names) goes through `AgentId::from_key`,
+`UsageProvider::from_key` or `AgentId::from_binary`, and one none of them knows is skipped, never
+taken for another provider. Settings, folded usage and IPC decode providers through serde, whose
+lowercase name a test holds equal to the row's key.
+
+The catalogue is data. Code that does something different per provider stays an exhaustive
+`match` in its own module (the Limits reader and its locks and caches, `accounts::adapter`,
+transcript directories, session readers, homes, colours), and an agreement test over `ALL` fails
+when a fact and that code disagree.
+
+The notch's provider default has two values, kept as found: `NotchSettings::default()` shows the
+providers marked for a fresh notch (Claude, Codex, Muse), while a stored notch document with no
+`providers` field shows every provider in rail order.
 
 ## Where the state lives
 
@@ -363,6 +388,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
+| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists drawn from them there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`) and the lookups `AgentId::from_key` and `AgentId::from_binary`; Usage reads its rows through `UsageProvider::all` and `UsageProvider::from_key` (`usage/transcripts.rs`) |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Provider.headline` |

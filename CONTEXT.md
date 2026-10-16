@@ -8,6 +8,14 @@ Where each term lives in code: the Glossary in
 
 ## Language
 
+### Providers
+
+**Provider catalogue**:
+Every provider on-n-off knows, in tab order, with one row of facts about each: its key, names and
+CLI, its place on the side notch, and which of Limits, Usage and saved accounts it has. Every list
+of providers the app keeps is drawn from it.
+_Avoid_: registry, provider list
+
 ### Limits
 
 **Quota window**:

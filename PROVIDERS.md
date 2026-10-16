@@ -2,8 +2,9 @@
 
 One section per provider: home folder, CLI, plugin layout, skills, MCP config, and what the app may
 mutate. Adapters live in `src-tauri/src/{claude,codex,antigravity,cursor,muse}.rs`; keep provider quirks
-there behind `AgentAdapter`. Everything the app writes goes through `ConfigIo` (backup → atomic
-replace → validate → rollback). Agent homes are real user data — see AGENTS.md "Constraints".
+there behind `AgentAdapter`. Each provider's static facts (key, names, binaries, which screens it
+has) are one row of the provider catalogue, `src-tauri/src/provider_catalogue.rs`. Everything the
+app writes goes through `ConfigIo` (backup → atomic replace → validate → rollback). Agent homes are real user data — see AGENTS.md "Constraints".
 
 Legend: **verified** = observed on a real machine or in the provider's docs; **code** = what the
 adapter assumes today (change the adapter and this file together).
@@ -176,8 +177,20 @@ adapter assumes today (change the adapter and this file together).
 
 ## When adding a provider
 
-1. Add the `AgentId` variant, `binary_name`, `display_name`, home in `paths.rs`.
-2. Adapter behind `AgentAdapter`; resolve the CLI via `cli_locate::resolve_provider_cli`.
+1. Add the `AgentId` variant and its row in the provider catalogue (`provider_catalogue.rs`):
+   the variant does not compile until `AgentId::facts` has a row, and
+   `every_declared_provider_is_in_the_catalogue_once` fails until it is in `AgentId::ALL`, whose
+   position is its tab. The row states its key (the serde name settings, snapshots and the UI
+   use), display name, CLI binary and any binary aliases, `rail_rank` on the side notch, whether
+   a fresh notch shows it, whether it has a Limits reader, which `UsageProvider` reads its
+   transcripts (if any) and whether it offers saved accounts. Every provider list derives from
+   these rows; nothing else needs a list edited. Extend the catalogue's table test with the row.
+2. Home in `paths.rs`. Adapter behind `AgentAdapter`; resolve the CLI via
+   `cli_locate::resolve_provider_cli`. A fact the row turns on needs its behaviour too, where
+   the compiler already asks for an arm: a Limits reader (`limits::read_limits_in`, its read
+   lock, `limits_refresh::cache_for`), a `UsageProvider` variant with its parser and transcript
+   directories, an `accounts::Adapter`. The agreement tests over `AgentId::ALL` fail while a
+   fact and its behaviour disagree.
 3. Every write through `ConfigIo`; a regression test with a temp home (`paths::scratch_dir`) before the change.
 4. Document the layout here, and mark what is verified vs assumed.
 
