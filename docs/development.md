@@ -10,8 +10,7 @@ locates the subsystems. Module doc-comments explain their implementation.
   are the exception: everything an account change does differently per provider — the native
   store, a login's shape, sign-in, preflight, clients — goes through the accounts seam
   (`accounts::Adapter`, implemented in `accounts/claude.rs`, `accounts/codex.rs` and
-  `accounts/muse.rs`, over `accounts/{claude,codex}_store.rs` and Muse's own store in
-  `accounts/muse.rs`), never through `AgentAdapter`,
+  `accounts/muse.rs` over `accounts/{claude,codex,muse}_store.rs`), never through `AgentAdapter`,
   which accounts reach only
   through `supports_accounts`.
 - A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn

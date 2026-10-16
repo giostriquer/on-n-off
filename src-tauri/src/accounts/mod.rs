@@ -122,8 +122,8 @@ trait NativeAccount: Native {
 
 trait IsolatedSignIn: Native {
     fn sign_in(&self) -> std::process::Command;
-    fn sign_in_input(&self) -> Option<&'static [u8]> {
-        None
+    fn sign_in_input(&self) -> &'static [u8] {
+        b""
     }
     fn first_usage(
         &self,

@@ -79,6 +79,8 @@ pub(super) struct NativeState {
     pub resolved: RefCell<Vec<AgentId>>,
     pub signed_in: RefCell<Option<Login>>,
     pub sign_in_exit: Cell<i32>,
+    pub sign_in_input: Cell<&'static [u8]>,
+    pub sign_in_needs_a_line: Cell<bool>,
     pub isolated: RefCell<Vec<(AgentId, PathBuf)>>,
     pub cleaned: Cell<usize>,
     pub homes: Option<Arc<Homes>>,
@@ -272,10 +274,19 @@ impl Native for FakeIsolated {
 }
 impl IsolatedSignIn for FakeIsolated {
     fn sign_in(&self) -> std::process::Command {
+        #[cfg(unix)]
+        if self.0 .0.sign_in_needs_a_line.get() {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", "IFS= read -r _line || exit 1"]);
+            return command;
+        }
         crate::cli_stub::CliStub::new("official-sign-in")
             .exit(self.0 .0.sign_in_exit.get())
             .cli(&self.1.join("bin"))
             .command()
+    }
+    fn sign_in_input(&self) -> &'static [u8] {
+        self.0 .0.sign_in_input.get()
     }
     fn first_usage(&self, _: &Path, _: &Identity) -> Option<crate::dto::ProviderLimitsDto> {
         None

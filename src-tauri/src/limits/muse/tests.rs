@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 fn scoped_you() -> String {
-    muse_identity("you@example.com").observation_key()
+    crate::accounts::muse_store::identity("you@example.com")
+        .unwrap()
+        .observation_key()
 }
 
 fn query(script: &Script) -> Result<ServeAnswers, String> {

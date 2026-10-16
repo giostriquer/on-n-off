@@ -17,7 +17,7 @@ use crate::dto::{
 };
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
 
-mod mint;
+pub(super) mod mint;
 
 const SERVE: Peer = Peer::jsonrpc(
     "Muse serve",
@@ -201,8 +201,7 @@ fn normalize(
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
     match label
         .as_deref()
-        .filter(|label| label.contains('@'))
-        .map(muse_identity)
+        .and_then(crate::accounts::muse_store::identity)
     {
         Some(identity) => super::scoped_account(&identity, label),
         None => LimitsAccountDto {
@@ -212,17 +211,6 @@ fn account_dto(label: Option<String>) -> LimitsAccountDto {
         },
     }
 }
-
-pub(crate) fn muse_identity(email: &str) -> crate::accounts::model::Identity {
-    crate::accounts::model::Identity {
-        provider: AgentId::Muse,
-        user_id: email.trim().to_lowercase(),
-        workspace_id: String::new(),
-    }
-}
-
-pub(crate) const KEY_ENDPOINT: &str = mint::KEY_ENDPOINT;
-pub(crate) use mint::read_saved;
 
 fn session_label(minutes: u64) -> String {
     if minutes > 0 && minutes.is_multiple_of(60) {

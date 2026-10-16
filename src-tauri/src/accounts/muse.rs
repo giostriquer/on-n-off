@@ -1,6 +1,7 @@
 use super::{
     clients::Client,
     model::{self, AccessToken, Identity, LoginView},
+    muse_store::{self, Keychain, SystemKeychain, SIGNED_IN},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -8,8 +9,8 @@ use super::{
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
 use crate::http::HttpError;
-use crate::limits::{SavedReadError, SavedReadUrls};
-use serde_json::{json, Map, Value};
+use crate::limits::{read_saved_muse, SavedReadError, SavedReadUrls};
+use serde_json::{Map, Value};
 use std::{
     ffi::OsString,
     fs,
@@ -20,9 +21,6 @@ use std::{
 
 const ENV_CREDENTIALS: [&str; 1] = ["META_API_KEY"];
 const OVERRIDES: [&str; 3] = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "MUSE_AUTH_PATH"];
-const SECRETS: [&str; 2] = ["access_token", "api_key"];
-#[cfg(target_os = "macos")]
-use super::muse_store::{KEYCHAIN_ACCOUNT, KEYCHAIN_SERVICE};
 
 pub(super) struct Muse;
 
@@ -66,7 +64,7 @@ impl super::Adapter for Muse {
         let token = MuseView::of(login)
             .access_token()
             .ok_or(HttpError::Unauthorized)?;
-        crate::limits::read_saved_muse(identity, &token, urls)
+        read_saved_muse(identity, &token, urls)
     }
 
     fn homes(&self) -> Option<super::HomeAt> {
@@ -79,7 +77,7 @@ pub(super) struct MuseNative {
     private_home: Option<PathBuf>,
     custom: bool,
     keychain: bool,
-    key_url: &'static str,
+    urls: SavedReadUrls<'static>,
 }
 
 impl MuseNative {
@@ -101,7 +99,7 @@ impl MuseNative {
             private_home: None,
             custom: !disposable && OVERRIDES.iter().any(|name| lookup(name).is_some()),
             keychain: cfg!(target_os = "macos") && !disposable,
-            key_url: SavedReadUrls::LIVE.muse,
+            urls: SavedReadUrls::LIVE,
         })
     }
 
@@ -118,7 +116,7 @@ impl MuseNative {
             private_home: Some(dir.to_path_buf()),
             custom: true,
             keychain: false,
-            key_url: SavedReadUrls::LIVE.muse,
+            urls: SavedReadUrls::LIVE,
         }
     }
 
@@ -142,6 +140,12 @@ impl MuseNative {
         command
     }
 
+    fn logout_command(&self) -> Command {
+        let mut command = self.command();
+        command.arg("logout");
+        command
+    }
+
     fn preflight_in(&self, env: &dyn Fn(&str) -> Option<OsString>) -> Result<(), String> {
         if self.custom {
             return Err(CUSTOM_HOME.into());
@@ -150,84 +154,30 @@ impl MuseNative {
         native::refuse_env_credentials(&ENV_CREDENTIALS, env)
     }
 
-    fn document(&self) -> Result<Value, String> {
-        let document = native::read_json(&self.auth_file())?;
-        if document.is_object() {
-            Ok(document)
-        } else {
-            Err("The Muse login document is malformed. It has not been changed.".into())
-        }
+    fn keychain(&self) -> Option<&'static dyn Keychain> {
+        self.keychain.then_some(&SystemKeychain as &dyn Keychain)
     }
 
-    fn keychain_bundle(&self) -> Result<Option<Value>, String> {
-        #[cfg(target_os = "macos")]
-        if self.keychain {
-            return super::keychain::find_password(KEYCHAIN_SERVICE, Some(KEYCHAIN_ACCOUNT))?
-                .map(|raw| {
-                    serde_json::from_str(raw.trim()).map_err(|_| {
-                        "The Muse Keychain login is malformed. It has not been changed.".to_string()
-                    })
-                })
-                .transpose();
-        }
-        Ok(None)
-    }
-
-    fn put_keychain(&self, bundle: Option<&Value>) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
-        if self.keychain {
-            return match bundle {
-                Some(bundle) => super::keychain::write(
-                    KEYCHAIN_SERVICE,
-                    KEYCHAIN_ACCOUNT,
-                    &serde_json::to_vec(bundle).map_err(|_| "Cannot encode the Muse login.")?,
-                ),
-                None => super::keychain::delete(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT),
-            };
-        }
-        let _ = bundle;
-        Ok(())
-    }
-
-    fn write_document(&self, document: &Value) -> Result<(), String> {
-        let file = self.auth_file();
-        if fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink()) {
-            return Err("Refusing to replace a linked Muse login file.".into());
-        }
-        let bytes =
-            serde_json::to_vec_pretty(document).map_err(|_| "Cannot encode the Muse login.")?;
-        super::vault::atomic_write(&file, &bytes)
+    fn token(&self) -> Option<AccessToken> {
+        let login = self.read().ok()??;
+        MuseView::of(&login).access_token()
     }
 }
 
 impl Native for MuseNative {
     fn read(&self) -> Result<Option<Login>, String> {
-        let document = self.document()?;
-        let Some(meta) = document
-            .pointer("/providers/meta")
-            .and_then(Value::as_object)
-        else {
-            return Ok(None);
+        let lookup = || match self.keychain() {
+            Some(keychain) => keychain.read(),
+            None => Err(
+                "Muse keeps this login in the Keychain, which on-n-off cannot reach here.".into(),
+            ),
         };
-        let inline = model::string(&Value::Object(meta.clone()), "/access_token").is_ok();
-        let auth = if inline {
-            secret(meta.get("access_token"), meta.get("api_key"), None)
-        } else if meta.get("storage").and_then(Value::as_str) == Some("keychain") {
-            match self.keychain_bundle()? {
-                Some(bundle) => secret(
-                    bundle.get("access_token"),
-                    bundle.get("api_key"),
-                    bundle.get("secret_schema_version"),
-                ),
-                None => return Ok(None),
-            }
-        } else {
-            Value::Object(Map::new())
-        };
-        Ok(Some(Login {
-            auth,
-            account: Value::Object(metadata(meta)),
-        }))
+        Ok(SIGNED_IN
+            .native(&self.config, &lookup)?
+            .map(|native| Login {
+                auth: Value::Object(native.secret),
+                account: Value::Object(native.metadata),
+            }))
     }
 
     fn identify(&self, login: &Login) -> Result<Identity, String> {
@@ -235,49 +185,14 @@ impl Native for MuseNative {
     }
 
     fn write(&self, login: Option<&Login>) -> Result<(), String> {
-        let mut document = self.document()?;
-        let providers = document
-            .as_object_mut()
-            .ok_or("The Muse login document is malformed.")?
-            .entry("providers")
-            .or_insert_with(|| json!({}))
-            .as_object_mut()
-            .ok_or("The Muse login document is malformed.")?;
-        let Some(login) = login else {
-            providers.remove("meta");
-            self.put_keychain(None)?;
-            return self.write_document(&document);
-        };
-        let mut meta = login.account.as_object().cloned().unwrap_or_default();
-        for name in SECRETS.iter().chain(&["storage"]) {
-            meta.remove(*name);
-        }
-        if self.keychain {
-            let version = self
-                .keychain_bundle()?
-                .and_then(|bundle| bundle.get("secret_schema_version").cloned())
-                .or_else(|| login.auth.get("secret_schema_version").cloned())
-                .unwrap_or_else(|| json!(1));
-            self.put_keychain(Some(&secret(
-                login.auth.get("access_token"),
-                login.auth.get("api_key"),
-                Some(&version),
-            )))?;
-            meta.insert("storage".into(), json!("keychain"));
-        } else {
-            for name in SECRETS {
-                if let Some(value) = login.auth.get(name) {
-                    meta.insert(name.into(), value.clone());
-                }
-            }
-        }
-        providers.insert("meta".into(), Value::Object(meta));
-        document
-            .as_object_mut()
-            .ok_or("The Muse login document is malformed.")?
-            .entry("schema_version")
-            .or_insert_with(|| json!(1));
-        self.write_document(&document)
+        let empty = Map::new();
+        let parts = login.map(|login| {
+            (
+                login.account.as_object().unwrap_or(&empty),
+                login.auth.as_object().unwrap_or(&empty),
+            )
+        });
+        SIGNED_IN.write(&self.config, self.keychain(), parts)
     }
 
     fn verify(&self) -> Result<(), String> {
@@ -286,11 +201,7 @@ impl Native for MuseNative {
         let token = MuseView::of(&login)
             .access_token()
             .ok_or("The Muse login has no access token.")?;
-        let urls = SavedReadUrls {
-            muse: self.key_url,
-            ..SavedReadUrls::LIVE
-        };
-        match crate::limits::read_saved_muse(&identity, &token, &urls) {
+        match read_saved_muse(&identity, &token, &self.urls) {
             Ok(_) | Err(SavedReadError::Unavailable(_)) => Ok(()),
             Err(SavedReadError::OtherAccount) => {
                 Err("Muse answered for a different account. Sign in again.".into())
@@ -308,9 +219,7 @@ impl NativeAccount for MuseNative {
     }
 
     fn logout(&self) -> Result<(), String> {
-        let mut command = self.command();
-        command.arg("logout");
-        native::run(&mut command, Duration::from_secs(45)).map(|_| ())
+        native::run(&mut self.logout_command(), Duration::from_secs(45)).map(|_| ())
     }
 
     fn subscription(&self) -> Result<Option<Identity>, String> {
@@ -328,14 +237,12 @@ impl IsolatedSignIn for MuseNative {
         command
     }
 
-    fn sign_in_input(&self) -> Option<&'static [u8]> {
-        Some(b"\n")
+    fn sign_in_input(&self) -> &'static [u8] {
+        b"\n"
     }
 
     fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
-        let login = self.read().ok()??;
-        let token = MuseView::of(&login).access_token()?;
-        crate::limits::read_saved_muse(identity, &token, &SavedReadUrls::LIVE).ok()
+        read_saved_muse(identity, &self.token()?, &self.urls).ok()
     }
 
     fn clean(&self) -> Result<(), String> {
@@ -382,19 +289,8 @@ impl Home for MuseHome {
     }
 
     fn read_usage(&self, identity: &Identity) -> Result<ProviderLimitsDto, SavedReadError> {
-        let login = self
-            .store
-            .read()
-            .map_err(|_| SavedReadError::Unavailable("Cannot read the saved Muse login."))?
-            .ok_or(HttpError::Unauthorized)?;
-        let token = MuseView::of(&login)
-            .access_token()
-            .ok_or(HttpError::Unauthorized)?;
-        let urls = SavedReadUrls {
-            muse: self.store.key_url,
-            ..SavedReadUrls::LIVE
-        };
-        crate::limits::read_saved_muse(identity, &token, &urls)
+        let token = self.store.token().ok_or(HttpError::Unauthorized)?;
+        read_saved_muse(identity, &token, &self.store.urls)
     }
 
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline> {
@@ -402,37 +298,8 @@ impl Home for MuseHome {
     }
 
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {
-        let removed = match fs::remove_dir_all(&self.dir) {
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
-                Err("Cannot remove the saved account's home.".into())
-            }
-            _ => Ok(()),
-        };
-        drop(locks);
-        removed
+        super::homes::remove(&self.dir, locks)
     }
-}
-
-fn secret(access: Option<&Value>, api_key: Option<&Value>, version: Option<&Value>) -> Value {
-    let mut secret = Map::new();
-    for (name, value) in [
-        ("access_token", access),
-        ("api_key", api_key),
-        ("secret_schema_version", version),
-    ] {
-        if let Some(value) = value.filter(|value| !value.is_null()) {
-            secret.insert(name.into(), value.clone());
-        }
-    }
-    Value::Object(secret)
-}
-
-fn metadata(meta: &Map<String, Value>) -> Map<String, Value> {
-    let mut metadata = meta.clone();
-    for name in SECRETS.iter().chain(&["storage"]) {
-        metadata.remove(*name);
-    }
-    metadata
 }
 
 pub(crate) struct MuseView<'a> {
@@ -465,11 +332,10 @@ impl LoginView for MuseView<'_> {
             return Err("API key logins cannot be saved as subscription profiles.".into());
         }
         model::string(self.auth, "/access_token")?;
-        let email = self
-            .email()
-            .filter(|email| email.contains('@'))
-            .ok_or("This Muse login has no account email, so it cannot be saved.")?;
-        Ok(crate::limits::muse_identity(&email))
+        self.email()
+            .as_deref()
+            .and_then(muse_store::identity)
+            .ok_or_else(|| "This Muse login has no account email, so it cannot be saved.".into())
     }
 
     fn email(&self) -> Option<String> {

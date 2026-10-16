@@ -239,9 +239,16 @@ id); its secret is `{access_token, api_key, secret_schema_version}` and the rest
 `providers.meta` is its metadata. Muse 1.4.10 stores the signed-in login either inline in
 `auth.json` (file backend, Windows) or in the macOS Keychain item `ai.meta.dev.credentials` /
 `meta` with `storage: "keychain"` metadata; neither holds a refresh token, so a Muse login never
-renews and on-n-off never renews one: an expired saved login asks for Sign in again. Activation
-writes the secret back to the same Keychain item (keeping its `secret_schema_version`) through
-`/usr/bin/security` and the metadata to `auth.json` atomically, other providers' entries kept.
+renews and on-n-off never renews one: an expired saved login asks for Sign in again.
+`accounts/muse_store.rs` owns both files: one parse of `auth.json` (an inline token, else the
+Keychain item when the metadata says `storage: "keychain"` or the login is OAuth), one Keychain
+lookup cached by `auth.json`'s content and modification time (a denied lookup is an error for
+accounts, never "no login"), and one writer. Every store yields the same saved secret,
+`{access_token, api_key}`. Activation writes it back to the store Muse already uses: the same
+Keychain item through `/usr/bin/security`, keeping its `secret_schema_version` (1 when there is
+no item yet), or inline; `auth.json` is replaced atomically with other providers' entries kept,
+as Codex's credential file is, without Muse's `.auth.json.lock` (Muse never renews, and a switch
+beside a running Muse asks first). A malformed document or item is refused, never repaired.
 A saved, non-active Muse login lives in its own home under `accounts/homes/`, run with `HOME`,
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `TBH_CREDENTIAL_BACKEND=file`, so its login stays inline in
 that home's `auth.json` and never touches the global Keychain item (verified 2026-10-16 with a

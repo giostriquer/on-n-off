@@ -1,56 +1,166 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
-use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Map, Value};
 
-use super::model::AccessToken;
+use super::model::{AccessToken, Identity};
+use crate::dto::AgentId;
 
 #[cfg(target_os = "macos")]
-pub(super) const KEYCHAIN_SERVICE: &str = "ai.meta.dev.credentials";
+const KEYCHAIN_SERVICE: &str = "ai.meta.dev.credentials";
 #[cfg(target_os = "macos")]
-pub(super) const KEYCHAIN_ACCOUNT: &str = "meta";
+const KEYCHAIN_ACCOUNT: &str = "meta";
+const SECRETS: [&str; 2] = ["access_token", "api_key"];
+const DEFAULT_SCHEMA_VERSION: i64 = 1;
+const MALFORMED: &str = "The Muse login document is malformed. It has not been changed.";
+const MALFORMED_ITEM: &str = "The Muse Keychain login is malformed. It has not been changed.";
 
 pub(crate) struct MuseLogin {
     pub(crate) email: Option<String>,
     pub(crate) token: Option<AccessToken>,
 }
 
-#[derive(Default, Deserialize)]
-struct CliAuth {
-    #[serde(default)]
-    providers: HashMap<String, CliProvider>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Storage {
+    Inline,
+    Keychain,
 }
 
-#[derive(Default, Deserialize)]
-struct CliProvider {
-    #[serde(default)]
-    mechanism: String,
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    user_email: Option<String>,
-    #[serde(default)]
-    expires_at: Option<Value>,
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct NativeLogin {
+    pub(super) metadata: Map<String, Value>,
+    pub(super) secret: Map<String, Value>,
+    pub(super) storage: Storage,
 }
 
-#[derive(Deserialize)]
-struct KeychainBundle {
-    #[serde(default)]
-    access_token: Option<String>,
+pub(super) trait Keychain {
+    fn read(&self) -> Result<Option<String>, String>;
+    fn write(&self, raw: &[u8]) -> Result<(), String>;
+    fn delete(&self) -> Result<(), String>;
 }
 
-struct Stored {
-    email: Option<String>,
-    token: Option<String>,
+pub(super) struct SystemKeychain;
+
+impl Keychain for SystemKeychain {
+    fn read(&self) -> Result<Option<String>, String> {
+        #[cfg(target_os = "macos")]
+        return super::keychain::find_password(KEYCHAIN_SERVICE, Some(KEYCHAIN_ACCOUNT));
+        #[cfg(not(target_os = "macos"))]
+        Ok(None)
+    }
+
+    fn write(&self, raw: &[u8]) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        return super::keychain::write(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, raw);
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = raw;
+            Err("This platform has no Keychain.".into())
+        }
+    }
+
+    fn delete(&self) -> Result<(), String> {
+        #[cfg(target_os = "macos")]
+        return super::keychain::delete(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+        #[cfg(not(target_os = "macos"))]
+        Ok(())
+    }
+}
+
+pub(crate) fn identity(email: &str) -> Option<Identity> {
+    let email = email.trim();
+    email.contains('@').then(|| Identity {
+        provider: AgentId::Muse,
+        user_id: email.to_lowercase(),
+        workspace_id: String::new(),
+    })
+}
+
+struct Meta {
+    metadata: Map<String, Value>,
+    inline: Map<String, Value>,
+    storage: Option<Storage>,
     expires_at: Option<i64>,
 }
 
+impl Meta {
+    fn email(&self) -> Option<String> {
+        non_empty(self.metadata.get("user_email").and_then(Value::as_str))
+    }
+}
+
+fn document(text: &str) -> Result<Map<String, Value>, String> {
+    match serde_json::from_str(text) {
+        Ok(Value::Object(document)) => Ok(document),
+        _ => Err(MALFORMED.into()),
+    }
+}
+
+fn meta_of(document: &Map<String, Value>) -> Option<Meta> {
+    let meta = document.get("providers")?.get("meta")?.as_object()?;
+    let metadata: Map<String, Value> = meta
+        .iter()
+        .filter(|(name, _)| !SECRETS.contains(&name.as_str()) && name.as_str() != "storage")
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let inline = secret_of(meta);
+    let storage = if inline.contains_key("access_token") {
+        Some(Storage::Inline)
+    } else if meta.get("storage").and_then(Value::as_str) == Some("keychain")
+        || meta.get("mechanism").and_then(Value::as_str) == Some("oauth")
+    {
+        Some(Storage::Keychain)
+    } else {
+        None
+    };
+    Some(Meta {
+        expires_at: meta.get("expires_at").and_then(Value::as_i64),
+        metadata,
+        inline,
+        storage,
+    })
+}
+
+fn secret_of(source: &Map<String, Value>) -> Map<String, Value> {
+    SECRETS
+        .iter()
+        .filter_map(|name| {
+            let value = non_empty(source.get(*name).and_then(Value::as_str))?;
+            Some(((*name).to_string(), Value::String(value)))
+        })
+        .collect()
+}
+
+fn bundle(raw: &str) -> Result<Map<String, Value>, String> {
+    match serde_json::from_str(raw.trim()) {
+        Ok(Value::Object(bundle)) => Ok(bundle),
+        _ => Err(MALFORMED_ITEM.into()),
+    }
+}
+
+fn read_auth(config: &Path) -> Result<Option<(String, String)>, String> {
+    let path = config.join("auth.json");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Cannot read the Muse login.".into()),
+    };
+    let modified = std::fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |at| at.as_nanos());
+    let stamp = format!("{}:{modified}", crate::sha::sha256_hex(text.as_bytes()));
+    Ok(Some((text, stamp)))
+}
+
+type Lookup = Result<Option<String>, String>;
+type Fields = Map<String, Value>;
+
 struct Cached {
     config: PathBuf,
-    auth_digest: String,
-    stored: Option<Stored>,
+    stamp: String,
+    lookup: Lookup,
 }
 
 pub(crate) struct LoginCache(Mutex<Option<Cached>>);
@@ -60,82 +170,162 @@ impl LoginCache {
         Self(Mutex::new(None))
     }
 
+    fn keychain(&self, config: &Path, stamp: &str, lookup: &dyn Fn() -> Lookup) -> Lookup {
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(cached) = cache
+            .as_ref()
+            .filter(|cached| cached.config == config && cached.stamp == stamp)
+        {
+            return cached.lookup.clone();
+        }
+        let answer = lookup();
+        *cache = Some(Cached {
+            config: config.to_path_buf(),
+            stamp: stamp.to_string(),
+            lookup: answer.clone(),
+        });
+        answer
+    }
+
+    fn forget(&self) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
     pub(crate) fn login(
         &self,
         config: &Path,
         now_secs: i64,
-        keychain: &dyn Fn() -> Option<String>,
+        lookup: &dyn Fn() -> Lookup,
     ) -> Option<MuseLogin> {
-        let text = std::fs::read_to_string(config.join("auth.json")).ok()?;
-        let auth_digest = crate::sha::sha256_hex(text.as_bytes());
-        if let Some(login) = self.cached(config, &auth_digest, now_secs) {
-            return login;
-        }
-        let stored = stored_login(&text, now_secs, keychain);
-        let login = stored.as_ref().map(|stored| current(stored, now_secs));
-        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(Cached {
-            config: config.to_path_buf(),
-            auth_digest,
-            stored,
-        });
-        login
-    }
-
-    fn cached(&self, config: &Path, auth_digest: &str, now_secs: i64) -> Option<Option<MuseLogin>> {
-        let cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let cached = cache.as_ref()?;
-        (cached.config == config && cached.auth_digest == auth_digest).then(|| {
-            cached
-                .stored
-                .as_ref()
-                .map(|stored| current(stored, now_secs))
+        let (text, stamp) = read_auth(config).ok()??;
+        let meta = meta_of(&document(&text).ok()?)?;
+        let live = meta
+            .expires_at
+            .is_none_or(|expires_at| expires_at > now_secs);
+        let token = match meta.storage.filter(|_| live) {
+            Some(Storage::Inline) => token_of(&meta.inline),
+            Some(Storage::Keychain) => self
+                .keychain(config, &stamp, lookup)
+                .ok()
+                .flatten()
+                .and_then(|raw| bundle(&raw).ok())
+                .and_then(|bundle| token_of(&bundle)),
+            None => None,
+        };
+        Some(MuseLogin {
+            email: meta.email(),
+            token: token.map(|token| AccessToken::new(&token)),
         })
     }
-}
 
-fn current(stored: &Stored, now_secs: i64) -> MuseLogin {
-    let live = stored
-        .expires_at
-        .is_none_or(|expires_at| expires_at > now_secs);
-    MuseLogin {
-        email: stored.email.clone(),
-        token: stored
-            .token
-            .as_deref()
-            .filter(|_| live)
-            .map(AccessToken::new),
+    pub(super) fn native(
+        &self,
+        config: &Path,
+        lookup: &dyn Fn() -> Lookup,
+    ) -> Result<Option<NativeLogin>, String> {
+        let Some((text, stamp)) = read_auth(config)? else {
+            return Ok(None);
+        };
+        let Some(meta) = meta_of(&document(&text)?) else {
+            return Ok(None);
+        };
+        let secret = match meta.storage {
+            None => return Ok(None),
+            Some(Storage::Inline) => meta.inline,
+            Some(Storage::Keychain) => match self.keychain(config, &stamp, lookup)? {
+                Some(raw) => secret_of(&bundle(&raw)?),
+                None => return Ok(None),
+            },
+        };
+        if !secret.contains_key("access_token") {
+            return Ok(None);
+        }
+        Ok(Some(NativeLogin {
+            metadata: meta.metadata,
+            secret,
+            storage: meta.storage.unwrap_or(Storage::Inline),
+        }))
+    }
+
+    pub(super) fn write(
+        &self,
+        config: &Path,
+        keychain: Option<&dyn Keychain>,
+        login: Option<(&Fields, &Fields)>,
+    ) -> Result<(), String> {
+        let file = config.join("auth.json");
+        if std::fs::symlink_metadata(&file).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Err("Refusing to replace a linked Muse login file.".into());
+        }
+        let mut document = match read_auth(config)? {
+            Some((text, _)) => document(&text)?,
+            None => Map::new(),
+        };
+        let target =
+            meta_of(&document)
+                .and_then(|meta| meta.storage)
+                .unwrap_or(if keychain.is_some() {
+                    Storage::Keychain
+                } else {
+                    Storage::Inline
+                });
+        let reachable = || {
+            keychain
+                .ok_or("Muse keeps this login in the Keychain, which on-n-off cannot reach here.")
+        };
+        let providers = document
+            .entry("providers")
+            .or_insert_with(|| json!({}))
+            .as_object_mut()
+            .ok_or(MALFORMED)?;
+        match login {
+            None => {
+                providers.remove("meta");
+                if target == Storage::Keychain {
+                    reachable()?.delete()?;
+                }
+            }
+            Some((metadata, secret)) => {
+                let mut meta: Map<String, Value> = metadata
+                    .iter()
+                    .filter(|(name, _)| {
+                        !SECRETS.contains(&name.as_str()) && name.as_str() != "storage"
+                    })
+                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .collect();
+                let secret = secret_of(secret);
+                match target {
+                    Storage::Keychain => {
+                        let keychain = reachable()?;
+                        let version = match keychain.read()? {
+                            Some(raw) => bundle(&raw)?.get("secret_schema_version").cloned(),
+                            None => None,
+                        }
+                        .unwrap_or_else(|| json!(DEFAULT_SCHEMA_VERSION));
+                        let mut item = secret;
+                        item.insert("secret_schema_version".into(), version);
+                        keychain.write(
+                            &serde_json::to_vec(&item)
+                                .map_err(|_| "Cannot encode the Muse login.")?,
+                        )?;
+                        meta.insert("storage".into(), json!("keychain"));
+                    }
+                    Storage::Inline => meta.extend(secret),
+                }
+                providers.insert("meta".into(), Value::Object(meta));
+                document.entry("schema_version").or_insert_with(|| json!(1));
+            }
+        }
+        let bytes =
+            serde_json::to_vec_pretty(&document).map_err(|_| "Cannot encode the Muse login.")?;
+        let written = super::vault::atomic_write(&file, &bytes);
+        self.forget();
+        written
     }
 }
 
-fn stored_login(
-    text: &str,
-    now_secs: i64,
-    keychain: &dyn Fn() -> Option<String>,
-) -> Option<Stored> {
-    let auth: CliAuth = serde_json::from_str(text).ok()?;
-    let meta = auth.providers.get("meta")?;
-    let expires_at = meta.expires_at.as_ref().and_then(Value::as_i64);
-    let token = if expires_at.is_some_and(|expires_at| expires_at <= now_secs) {
-        None
-    } else {
-        match non_empty(meta.access_token.as_deref()) {
-            Some(token) => Some(token),
-            None if meta.mechanism == "oauth" => {
-                keychain().as_deref().and_then(bundle_access_token)
-            }
-            None => None,
-        }
-    };
-    Some(Stored {
-        email: non_empty(meta.user_email.as_deref()),
-        token,
-        expires_at,
-    })
-}
-
-fn bundle_access_token(value: &str) -> Option<String> {
-    let bundle: KeychainBundle = serde_json::from_str(value.trim()).ok()?;
-    non_empty(bundle.access_token.as_deref())
+fn token_of(source: &Map<String, Value>) -> Option<String> {
+    non_empty(source.get("access_token").and_then(Value::as_str))
 }
 
 fn non_empty(value: Option<&str>) -> Option<String> {
@@ -145,23 +335,11 @@ fn non_empty(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-static SIGNED_IN: LoginCache = LoginCache::new();
+pub(super) static SIGNED_IN: LoginCache = LoginCache::new();
 
 pub(crate) fn signed_in(config: &Path) -> Option<MuseLogin> {
     let now_secs = chrono::Utc::now().timestamp();
-    SIGNED_IN.login(config, now_secs, &keychain_secret)
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_secret() -> Option<String> {
-    super::keychain::find_password(KEYCHAIN_SERVICE, Some(KEYCHAIN_ACCOUNT))
-        .ok()
-        .flatten()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn keychain_secret() -> Option<String> {
-    None
+    SIGNED_IN.login(config, now_secs, &|| SystemKeychain.read())
 }
 
 #[cfg(test)]

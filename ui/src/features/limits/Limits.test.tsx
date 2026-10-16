@@ -527,7 +527,7 @@ it("lays out one column per provider with limits, in tab order, and offers to ad
   expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Antigravity|Cursor|Muse)$/ }).map((button) => button.lastChild?.textContent)).toEqual(["Claude", "Codex", "Muse"]);
 });
 
-it.each(["claude", "codex"])("adds only the %s account selected in the shared picker", async provider => {
+it.each(["claude", "codex", "muse"])("adds only the %s account selected in the shared picker", async provider => {
   answer([okClaude()], [okCodex()]);
   renderLimits();
   const add = screen.getByRole("button", {name: "Add account"});
@@ -541,7 +541,7 @@ it.each(["claude", "codex"])("adds only the %s account selected in the shared pi
   fireEvent.blur(preference, { relatedTarget: null });
   expect(screen.getByRole("group", {name: "Add account"})).toBe(picker);
   await waitFor(() => expect(accountAction).toHaveBeenCalledWith("codex", "remember"));
-  fireEvent.click(within(picker).getByRole("button", {name: provider === "claude" ? "Claude" : "Codex"}));
+  fireEvent.click(within(picker).getByRole("button", {name: {claude: "Claude", codex: "Codex", muse: "Muse"}[provider]}));
   await waitFor(() => expect(addAccount).toHaveBeenCalledWith(provider, expect.any(String), undefined));
   expect(addAccount).toHaveBeenCalledTimes(1);
   expect(screen.queryByRole("group", {name: "Add account"})).toBeNull();

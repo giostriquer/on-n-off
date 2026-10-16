@@ -5,9 +5,9 @@ use super::{account_dto, session_label, window, ServeFailure};
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
-use crate::limits::{saved_card, Parsed, SavedReadError};
+use crate::limits::{saved_card, Parsed, SavedReadError, SavedReadUrls};
 
-pub(super) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
+pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
 
 const DEFAULT_ROLLING_MINS: u64 = 300;
 
@@ -66,9 +66,9 @@ fn fetch_saved(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError
 pub(crate) fn read_saved(
     identity: &Identity,
     token: &AccessToken,
-    url: &str,
+    urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let response = fetch_saved(url, token)?;
+    let response = fetch_saved(urls.muse, token)?;
     let email = response
         .user_email
         .as_deref()
