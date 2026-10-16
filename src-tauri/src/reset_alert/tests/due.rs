@@ -392,3 +392,19 @@ fn a_poll_tells_its_notify_only_offers_before_the_spends_it_schedules() {
     );
     assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
 }
+
+#[test]
+fn the_next_spend_due_is_the_earliest_of_those_waiting() {
+    let for_account = |account: &str| Offer {
+        account_id: account.into(),
+        ..offer()
+    };
+    let mut waiting = Waiting::default();
+    waiting.schedule(&[for_account("middle")], minutes_after_now(3));
+    waiting.schedule(&[for_account("latest")], minutes_after_now(7));
+    waiting.schedule(&[for_account("earliest")], now());
+
+    assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
+    assert!(!waiting.any_due(minutes_after_now(10) - chrono::Duration::seconds(1)));
+    assert!(waiting.any_due(minutes_after_now(10)));
+}
