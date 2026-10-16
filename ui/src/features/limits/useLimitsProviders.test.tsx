@@ -63,6 +63,28 @@ describe("limits refresh policy", () => {
     await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(4));
     expect(calls.readLimits).toHaveBeenLastCalledWith("codex", false);
   });
+
+  it("makes a refresh asked during a first read once that read answers, and leaves no force behind for an announcement", async () => {
+    calls.listeners.clear();
+    const first = deferred<ProviderLimits[]>();
+    let claudeReads = 0;
+    calls.readLimits.mockReset().mockImplementation((provider: AgentId) =>
+      provider === "claude" && ++claudeReads === 1 ? first.promise : Promise.resolve(reading(provider)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(() => useLimitsProviders(5), { wrapper });
+    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
+
+    act(() => hook.result.current.refresh());
+    await act(async () => first.resolve(reading("claude")));
+    await waitFor(() => expect(calls.readLimits.mock.calls.filter(([provider]) => provider === "claude")).toEqual([["claude", false], ["claude", true]]));
+
+    for (const listener of calls.listeners) listener({ source: "limits:claude" });
+    await waitFor(() => expect(calls.readLimits.mock.calls.filter(([provider]) => provider === "claude")).toEqual([["claude", false], ["claude", true], ["claude", false]]));
+    client.clear();
+  });
 });
 
 function reading(provider: AgentId, windows: LimitWindow[] = [WEEKLY]): ProviderLimits[] {

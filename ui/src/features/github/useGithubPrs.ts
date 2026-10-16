@@ -1,6 +1,6 @@
-import { useRef } from "react";
-import { keepPreviousData, queryOptions, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, queryOptions, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
+import { readForced } from "$lib/sharedReads/forcedRead";
 import { useSharedRead } from "$lib/useSharedRead";
 import type { GithubPrs } from "$lib/githubTypes";
 
@@ -19,18 +19,11 @@ export function githubQueryOptions(pollSeconds: number, read: () => Promise<Gith
 }
 
 export function useGithubPrs(pollSeconds: number) {
-  const forceRef = useRef(false);
-  const query = useQuery(
-    githubQueryOptions(pollSeconds, () => {
-      const force = forceRef.current;
-      forceRef.current = false;
-      return api.readGithubPrs(force);
-    }),
-  );
+  const client = useQueryClient();
+  const query = useQuery(githubQueryOptions(pollSeconds, () => api.readGithubPrs(false)));
   useSharedRead("github:prs");
   function refresh() {
-    forceRef.current = true;
-    void query.refetch();
+    void readForced(client, ["github", "prs"], (force) => api.readGithubPrs(force)).catch(() => undefined);
   }
   return { query, loading: query.isFetching, now: Date.now(), refresh };
 }

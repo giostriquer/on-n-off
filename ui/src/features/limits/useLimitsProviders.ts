@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import { keepPreviousData, useQuery, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { keepPreviousData, useQuery, useQueryClient, type QueryClient, type UseQueryResult } from "@tanstack/react-query";
 import * as api from "$lib/api";
+import { readForced } from "$lib/sharedReads/forcedRead";
 import { useSharedRead } from "$lib/useSharedRead";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
@@ -23,14 +24,10 @@ function useProviderLimits(
   provider: SharedLimitsProvider,
   pollMinutes: LimitsPollMinutes,
 ): ProviderQuery {
-  const forceRef = useRef(false);
+  const client = useQueryClient();
   const query = useQuery({
     queryKey: ["limits", provider],
-    queryFn: () => {
-      const force = forceRef.current;
-      forceRef.current = false;
-      return api.readLimits(provider, force);
-    },
+    queryFn: () => api.readLimits(provider, false),
     staleTime: limitsRefreshMs(pollMinutes),
     refetchInterval: limitsRefreshMs(pollMinutes),
     refetchIntervalInBackground: false,
@@ -39,8 +36,7 @@ function useProviderLimits(
   });
   useSharedRead(`limits:${provider}`);
   function refresh() {
-    forceRef.current = true;
-    void query.refetch();
+    void forceLimits(client, provider).catch(() => undefined);
   }
   return { provider, query, refresh };
 }
@@ -69,22 +65,10 @@ export function useLimitsProviders(pollMinutes: LimitsPollMinutes = 5) {
   return { providers, loading, now, refresh };
 }
 
+function forceLimits(client: QueryClient, provider: SharedLimitsProvider) {
+  return readForced(client, ["limits", provider], (force) => api.readLimits(provider, force));
+}
+
 export async function refreshLimits(client: QueryClient) {
-  await Promise.allSettled((["claude", "codex", "muse"] as const).map(async provider => {
-    const queryKey = ["limits", provider];
-    let existing = client.getQueryCache().find({ queryKey, exact: true });
-    while (existing?.state.fetchStatus === "fetching" && existing.promise) {
-      await existing.promise.catch(() => {});
-      existing = client.getQueryCache().find({ queryKey, exact: true });
-    }
-    let forceNextRead = true;
-    return client.fetchQuery({
-      queryKey, staleTime: 0,
-      queryFn: () => {
-        const force = forceNextRead;
-        forceNextRead = false;
-        return api.readLimits(provider, force);
-      },
-    });
-  }));
+  await Promise.allSettled((["claude", "codex", "muse"] as const).map((provider) => forceLimits(client, provider)));
 }

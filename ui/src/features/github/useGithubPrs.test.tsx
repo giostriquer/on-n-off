@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { GithubPrs } from "$lib/githubTypes";
 import type { SharedReadChanged } from "$lib/types";
 import { githubQueryOptions, useGithubPrs } from "./useGithubPrs";
 
@@ -40,5 +41,26 @@ describe("githubQueryOptions", () => {
 
     await waitFor(() => expect(calls.readGithubPrs).toHaveBeenCalledTimes(2));
     expect(calls.readGithubPrs).toHaveBeenLastCalledWith(false);
+  });
+
+  it("makes a refresh asked during the first read once that read answers, and leaves no force behind for an announcement", async () => {
+    calls.listeners.clear();
+    let answerFirst!: (prs: GithubPrs) => void;
+    calls.readGithubPrs.mockReset()
+      .mockReturnValueOnce(new Promise<GithubPrs>((resolve) => { answerFirst = resolve; }))
+      .mockResolvedValue({ status: "ok" });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const hook = renderHook(() => useGithubPrs(60), { wrapper });
+    await waitFor(() => expect(calls.readGithubPrs).toHaveBeenCalledTimes(1));
+
+    act(() => hook.result.current.refresh());
+    await act(async () => answerFirst({ status: "ok" } as GithubPrs));
+    await waitFor(() => expect(calls.readGithubPrs.mock.calls).toEqual([[false], [true]]));
+
+    for (const listener of calls.listeners) listener({ source: "github:prs" });
+    await waitFor(() => expect(calls.readGithubPrs.mock.calls).toEqual([[false], [true], [false]]));
   });
 });
