@@ -161,8 +161,8 @@ fn provider_cell(
                 tone: Tone::Amber,
             }),
         ),
-        Some(reading) if !reading.windows.is_empty() || reading.message.is_some() => (None, None),
-        _ => (Some(muted("Checking usage…".into())), None),
+        Some(_) => (None, None),
+        None => (Some(muted("Checking usage…".into())), None),
     };
     ProviderCell {
         provider,

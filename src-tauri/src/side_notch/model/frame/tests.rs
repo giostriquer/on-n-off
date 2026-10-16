@@ -560,3 +560,13 @@ fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_read
         "a read that is fine keeps its hint to itself"
     );
 }
+
+#[test]
+fn a_provider_that_was_read_is_not_checking_even_without_windows() {
+    let empty = reported(LimitsStatus::Ok, None, Reading::default());
+    assert_eq!(
+        notices(&provider_cell_of(Some(empty))),
+        (None, None),
+        "the read answered; it just reported no windows"
+    );
+}
