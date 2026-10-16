@@ -52,13 +52,14 @@ fn an_offer_is_spent_ten_minutes_later_under_its_own_key() {
     let waiting = scheduled();
     let spend = &waiting.0["acct"];
 
-    assert_eq!(spend.account_id, "acct");
+    assert_eq!(spend.account_id(), "acct");
     assert_eq!(spend.cycle, at(RENEWS));
     assert_eq!(spend.due_at, minutes_after_now(10));
-    assert!(!spend.idempotency_key.is_empty());
+    assert_eq!(spend.idempotency_key(), spend.idempotency_key);
+    assert!(uuid::Uuid::parse_str(spend.idempotency_key()).is_ok());
     assert_ne!(
-        spend.idempotency_key,
-        scheduled().0["acct"].idempotency_key,
+        spend.idempotency_key(),
+        scheduled().0["acct"].idempotency_key(),
         "two spends share a key"
     );
 }
@@ -390,4 +391,20 @@ fn a_poll_tells_its_notify_only_offers_before_the_spends_it_schedules() {
         ]
     );
     assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
+}
+
+#[test]
+fn the_next_spend_due_is_the_earliest_of_those_waiting() {
+    let for_account = |account: &str| Offer {
+        account_id: account.into(),
+        ..offer()
+    };
+    let mut waiting = Waiting::default();
+    waiting.schedule(&[for_account("middle")], minutes_after_now(3));
+    waiting.schedule(&[for_account("latest")], minutes_after_now(7));
+    waiting.schedule(&[for_account("earliest")], now());
+
+    assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
+    assert!(!waiting.any_due(minutes_after_now(10) - chrono::Duration::seconds(1)));
+    assert!(waiting.any_due(minutes_after_now(10)));
 }

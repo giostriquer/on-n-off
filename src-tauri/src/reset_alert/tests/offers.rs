@@ -189,7 +189,12 @@ fn a_new_weekly_cycle_can_be_offered_again() {
 
 #[test]
 fn a_reset_that_may_have_lapsed_is_not_offered() {
-    for (expires, offers) in [("2026-10-01T11:00:00Z", 0), ("2026-10-03T00:00:00Z", 1)] {
+    for (expires, offers) in [
+        ("2026-10-01T11:00:00Z", 0),
+        (NOW, 0),
+        ("2026-10-01T12:00:01Z", 1),
+        ("2026-10-03T00:00:00Z", 1),
+    ] {
         let lapsing = |observed_at| {
             let mut card = card("acct", 95.0, RENEWS, observed_at, 1);
             card.reading.reset_credits.as_mut().unwrap().next_expires_at = Some(expires.into());
@@ -361,4 +366,31 @@ fn a_saved_cycle_that_does_not_read_as_a_time_is_another_cycle() {
         .collect();
 
     assert_eq!(offers, [0, 1]);
+}
+
+#[test]
+fn the_notification_counts_hours_under_a_day_and_days_from_a_full_day() {
+    let renewing = |hours: i64, minutes: i64| Offer {
+        account_id: "acct".into(),
+        account_label: None,
+        left_percent: 2.0,
+        renews_at: now() + chrono::Duration::hours(hours) + chrono::Duration::minutes(minutes),
+        automatic: false,
+    };
+
+    for (hours, minutes, renews) in [
+        (-1, 0, "0h"),
+        (0, 59, "0h"),
+        (23, 59, "23h"),
+        (24, 0, "1d 0h"),
+        (49, 30, "2d 1h"),
+    ] {
+        assert_eq!(
+            renewing(hours, minutes).notice(now()).1,
+            format!(
+                "Codex has 2% of its limit left and renews in {renews}. Open on-n-off to use a banked reset."
+            ),
+            "{hours}h {minutes}m"
+        );
+    }
 }
