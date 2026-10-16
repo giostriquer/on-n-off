@@ -189,7 +189,12 @@ fn a_new_weekly_cycle_can_be_offered_again() {
 
 #[test]
 fn a_reset_that_may_have_lapsed_is_not_offered() {
-    for (expires, offers) in [("2026-10-01T11:00:00Z", 0), ("2026-10-03T00:00:00Z", 1)] {
+    for (expires, offers) in [
+        ("2026-10-01T11:00:00Z", 0),
+        (NOW, 0),
+        ("2026-10-01T12:00:01Z", 1),
+        ("2026-10-03T00:00:00Z", 1),
+    ] {
         let lapsing = |observed_at| {
             let mut card = card("acct", 95.0, RENEWS, observed_at, 1);
             card.reading.reset_credits.as_mut().unwrap().next_expires_at = Some(expires.into());
