@@ -1,11 +1,11 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, SharedReadChanged } from "$lib/types";
-import { SharedReads } from "$lib/useSharedRead";
-import { refreshLimits, useLimitsProviders } from "./useLimitsProviders";
+import { SharedReads } from "./announcements";
+import { LIMITS_PROVIDERS, limitsQuery, refreshLimits } from "./limits";
 
 const calls = vi.hoisted(() => ({
   readLimits: vi.fn(),
@@ -19,16 +19,23 @@ vi.mock("$lib/api", () => ({
   },
 }));
 
+function windowWith(client: QueryClient) {
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
+  );
+}
+
+function useEveryProvider(pollMinutes: 5 | 30) {
+  return LIMITS_PROVIDERS.map((provider) => useQuery(limitsQuery(provider, pollMinutes)));
+}
+
 describe("limits refresh policy", () => {
   it("checks the shared cache every five minutes even with a slower default", async () => {
     vi.useFakeTimers();
     calls.listeners.clear();
     calls.readLimits.mockReset().mockResolvedValue([]);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
-    );
-    const hook = renderHook(() => useLimitsProviders(30), { wrapper });
+    const hook = renderHook(() => useEveryProvider(30), { wrapper: windowWith(client) });
     try {
       await act(() => vi.advanceTimersByTimeAsync(1));
       expect(calls.readLimits.mock.calls).toEqual([["claude", false], ["codex", false], ["muse", false]]);
@@ -42,49 +49,6 @@ describe("limits refresh policy", () => {
       client.clear();
       vi.useRealTimers();
     }
-  });
-
-  it("picks up a read another surface already made, unforced, without waiting out the interval", async () => {
-    calls.listeners.clear();
-    calls.readLimits.mockReset().mockResolvedValue([]);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
-    );
-    renderHook(() => useLimitsProviders(5), { wrapper });
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
-    expect(calls.readLimits.mock.calls).toEqual([
-      ["claude", false],
-      ["codex", false],
-      ["muse", false],
-    ]);
-
-    for (const listener of calls.listeners) listener({ source: "limits:codex" });
-
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(4));
-    expect(calls.readLimits).toHaveBeenLastCalledWith("codex", false);
-  });
-
-  it("makes a refresh asked during a first read once that read answers, and leaves no force behind for an announcement", async () => {
-    calls.listeners.clear();
-    const first = deferred<ProviderLimits[]>();
-    let claudeReads = 0;
-    calls.readLimits.mockReset().mockImplementation((provider: AgentId) =>
-      provider === "claude" && ++claudeReads === 1 ? first.promise : Promise.resolve(reading(provider)));
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const wrapper = ({ children }: { children: ReactNode }) => (
-      <QueryClientProvider client={client}><SharedReads />{children}</QueryClientProvider>
-    );
-    const hook = renderHook(() => useLimitsProviders(5), { wrapper });
-    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
-
-    act(() => hook.result.current.refresh());
-    await act(async () => first.resolve(reading("claude")));
-    await waitFor(() => expect(calls.readLimits.mock.calls.filter(([provider]) => provider === "claude")).toEqual([["claude", false], ["claude", true]]));
-
-    for (const listener of calls.listeners) listener({ source: "limits:claude" });
-    await waitFor(() => expect(calls.readLimits.mock.calls.filter(([provider]) => provider === "claude")).toEqual([["claude", false], ["claude", true], ["claude", false]]));
-    client.clear();
   });
 });
 
@@ -100,6 +64,29 @@ function deferred<T>() {
 }
 
 describe("refreshLimits", () => {
+  it("makes a refresh asked during a first read once that read answers, and leaves no force behind for an announcement", async () => {
+    calls.listeners.clear();
+    const first = deferred<ProviderLimits[]>();
+    let claudeReads = 0;
+    calls.readLimits.mockReset().mockImplementation((provider: AgentId) =>
+      provider === "claude" && ++claudeReads === 1 ? first.promise : Promise.resolve(reading(provider)));
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderHook(() => useEveryProvider(5), { wrapper: windowWith(client) });
+    await waitFor(() => expect(calls.readLimits).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(calls.listeners.size).toBe(1));
+
+    let refreshed: Promise<void> | undefined;
+    act(() => { refreshed = refreshLimits(client); });
+    await act(async () => first.resolve(reading("claude")));
+    await act(async () => { await refreshed; });
+    const claude = () => calls.readLimits.mock.calls.filter(([provider]) => provider === "claude");
+    expect(claude()).toEqual([["claude", false], ["claude", true]]);
+
+    for (const listener of calls.listeners) listener({ source: "limits:claude" });
+    await waitFor(() => expect(claude()).toEqual([["claude", false], ["claude", true], ["claude", false]]));
+    client.clear();
+  });
+
   it("does not retain forced reads when no Limits screen is mounted", async () => {
     calls.readLimits.mockReset().mockImplementation((provider: AgentId) => Promise.resolve(reading(provider)));
     const client = new QueryClient({defaultOptions: {queries: {retry: false}}});

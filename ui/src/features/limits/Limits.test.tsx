@@ -3,8 +3,8 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
-import { SharedReads } from "$lib/useSharedRead";
-import { refreshLimits } from "./useLimitsProviders";
+import { SharedReads } from "$lib/sharedReads/announcements";
+import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 

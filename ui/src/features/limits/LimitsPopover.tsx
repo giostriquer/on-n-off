@@ -11,8 +11,9 @@ import { applyStoredTheme } from "$lib/theme";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/usageMerge";
+import { refetchStaleLimits } from "$lib/sharedReads/limits";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
-import { limitsRefreshMs, useLimitsProviders } from "./useLimitsProviders";
+import { useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
   const queryClient = useQueryClient();
@@ -40,15 +41,7 @@ export function LimitsPopover() {
     void api
       .onLimitsPopoverOpened(() => {
         applyStoredTheme();
-        void loadSettings().then(({ settings: latest }) =>
-          queryClient.refetchQueries({
-            queryKey: ["limits"],
-            type: "active",
-            predicate: (query) =>
-              query.state.dataUpdatedAt > 0 &&
-              Date.now() - query.state.dataUpdatedAt >= limitsRefreshMs(latest.limitsPollMinutes),
-          }),
-        );
+        void loadSettings().then(({ settings: latest }) => refetchStaleLimits(queryClient, latest.limitsPollMinutes));
       })
       .then((stop) => {
         if (disposed) {

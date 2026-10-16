@@ -3,7 +3,8 @@ import { render, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { SharedReadChanged } from "$lib/types";
-import { usePendingResetSpends } from "$lib/usePendingResetSpends";
+import { useQuery } from "@tanstack/react-query";
+import { pendingResetSpendsQuery } from "$lib/sharedReads/resetSpends";
 import { App } from "./App";
 
 const announcements = vi.hoisted(() => new Set<(change: SharedReadChanged) => void>());
@@ -28,7 +29,7 @@ vi.mock("@/features/updater/UpdateProvider", () => ({
 }));
 
 function Screen() {
-  usePendingResetSpends();
+  useQuery(pendingResetSpendsQuery());
   return null;
 }
 

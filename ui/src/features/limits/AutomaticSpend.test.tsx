@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatClock } from "$lib/limitsFormat";
-import { SharedReads } from "$lib/useSharedRead";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import { AutomaticSpend } from "./AutomaticSpend";
 
 const pendingResetSpends = vi.hoisted(() => vi.fn());

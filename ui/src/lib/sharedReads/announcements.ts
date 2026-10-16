@@ -2,24 +2,25 @@ import { useEffect } from "react";
 import { useQueryClient, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { SharedReadSource } from "$lib/types";
+import { accountsAnnouncements } from "./accounts";
+import { githubPrsAnnouncements } from "./githubPrs";
+import { limitsAnnouncements } from "./limits";
+import { resetSpendsAnnouncements } from "./resetSpends";
 
-export const PENDING_RESET_SPENDS_KEY: QueryKey = ["reset-spends"];
-
-const QUERY_KEYS: Record<SharedReadSource, readonly QueryKey[]> = {
-  accounts: [["accounts"], ["subscription", "codex"]],
-  "limits:claude": [["limits", "claude"]],
-  "limits:codex": [["limits", "codex"]],
-  "limits:muse": [["limits", "muse"]],
-  "github:prs": [["github", "prs"]],
-  "limits:reset-spends": [PENDING_RESET_SPENDS_KEY],
-};
+export const SHARED_READ_KEYS = {
+  ...accountsAnnouncements,
+  ...limitsAnnouncements,
+  ...githubPrsAnnouncements,
+  ...resetSpendsAnnouncements,
+} satisfies Record<SharedReadSource, readonly QueryKey[]>;
 
 export function connectSharedReads(client: QueryClient): () => void {
   let disposed = false;
   let stop: (() => void) | undefined;
   void api
     .onSharedReadChanged((change) => {
-      for (const queryKey of QUERY_KEYS[change.source] ?? []) {
+      const keys: readonly QueryKey[] = SHARED_READ_KEYS[change.source] ?? [];
+      for (const queryKey of keys) {
         void client.invalidateQueries({ queryKey });
       }
     })

@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { lazy, Suspense, useLayoutEffect } from "react";
 const LimitsPopover = lazy(() => import("@/features/limits/LimitsPopover").then(module => ({ default: module.LimitsPopover })));
 import { AppSettingsProvider } from "$lib/useAppSettings";
-import { SharedReads } from "$lib/useSharedRead";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import { App } from "./App";
 
 const popoverQueryClient = new QueryClient({

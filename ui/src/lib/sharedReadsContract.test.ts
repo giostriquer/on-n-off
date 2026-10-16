@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import rustSharedReads from "../../../src-tauri/src/read_revision/fixtures/shared-reads.json";
 import { onSharedReadChanged } from "./api";
+import { SHARED_READ_KEYS } from "./sharedReads/announcements";
 import type { SharedReadChanged, SharedReadSource } from "./types";
 
 const listen = vi.hoisted(() => vi.fn());
@@ -12,6 +13,12 @@ describe("the announcements Rust sends", () => {
   it("name exactly the sources the UI's type names, in the payload shape it reads", () => {
     expectTypeOf<SharedReadSource>().toEqualTypeOf<keyof Announced>();
     expectTypeOf<keyof SharedReadChanged>().toEqualTypeOf<keyof Announced[keyof Announced]>();
+  });
+
+  it("each have the queries the UI reads them through, and the UI has queries for no other source", () => {
+    expectTypeOf<keyof typeof SHARED_READ_KEYS>().toEqualTypeOf<keyof Announced>();
+    expect(Object.keys(SHARED_READ_KEYS).sort()).toEqual(Object.keys(rustSharedReads.announcements).sort());
+    for (const keys of Object.values(SHARED_READ_KEYS)) expect(keys.length).toBeGreaterThan(0);
   });
 
   it("arrive under the event the UI listens to, each payload handed on as it came", async () => {
