@@ -38,7 +38,7 @@ impl Offer {
 }
 
 impl WaitingSpend {
-    pub fn kept_notice(&self, why: Kept) -> Notice {
+    pub(super) fn kept_notice(&self, why: Kept) -> Notice {
         let why = match why {
             Kept::NotNeeded => "no longer needs it, or is no longer signed in",
             Kept::Late => "could not be checked in time",

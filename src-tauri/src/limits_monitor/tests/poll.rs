@@ -7,7 +7,7 @@ use crate::settings::AppSettings;
 enum Effect {
     Read(Vec<(AgentId, bool)>),
     Saved,
-    Spent(String, ResetSpend),
+    Spent(String, SpendShare),
     Told(String, String),
 }
 
@@ -63,11 +63,11 @@ impl Io for Fake {
     async fn spend(
         &self,
         spend: &WaitingSpend,
-        how: ResetSpend,
+        share: SpendShare,
     ) -> Result<ResetCreditOutcome, String> {
         self.log
             .borrow_mut()
-            .push(Effect::Spent(spend.account_id().to_string(), how));
+            .push(Effect::Spent(spend.account_id().to_string(), share));
         self.keys
             .borrow_mut()
             .push(spend.idempotency_key().to_string());
@@ -130,8 +130,8 @@ impl Monitor {
         self.io.effects();
     }
 
-    fn share(&self) -> ResetSpend {
-        ResetSpend::Automatic(self.settings.reset_alerts["acct-codex"].spend_share())
+    fn share(&self) -> SpendShare {
+        self.settings.reset_alerts["acct-codex"].spend_share()
     }
 }
 
@@ -233,6 +233,40 @@ fn a_notify_only_offer_is_told_after_the_limits_and_nothing_waits() {
         ]
     );
     assert!(listed(&monitor).is_empty());
+}
+
+#[test]
+fn a_spend_scheduled_is_told_after_the_limits() {
+    let mut monitor = Monitor::new(AppSettings {
+        limit_notifications: true,
+        ..automatic_only()
+    });
+    monitor
+        .poll(
+            "2026-08-19T13:00:00Z",
+            vec![codex_with_a_reset(95.0, "2026-08-19T12:00:00Z")],
+        )
+        .unwrap();
+    monitor.io.effects();
+
+    monitor
+        .poll(
+            "2026-08-19T13:00:00Z",
+            vec![codex_with_a_reset(100.0, "2026-08-19T12:10:00Z")],
+        )
+        .unwrap();
+
+    assert_eq!(
+        monitor.io.effects()[1..],
+        [
+            Effect::Saved,
+            told("Codex limit reached", "Weekly · all models reached 100% usage · you@example.com"),
+            told(
+                "Codex: using a banked reset in 10 minutes",
+                "you@example.com has 0% of its limit left. Cancel on the account's card in on-n-off to keep the reset."
+            ),
+        ]
+    );
 }
 
 #[test]

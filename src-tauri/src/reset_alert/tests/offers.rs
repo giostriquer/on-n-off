@@ -18,7 +18,7 @@ fn offered(
     alerts: &HashMap<String, ResetAlert>,
 ) -> usize {
     let plan = poll(memory, std::slice::from_ref(card), alerts);
-    plan.notices.len() + plan.automatic.len()
+    plan.offered.told.len() + plan.offered.automatic.len()
 }
 
 fn two_polls(
@@ -57,16 +57,20 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
             renews_at: at(RENEWS),
             automatic,
         };
-        let expected = if automatic {
-            Plan {
+        let offered = if automatic {
+            Offered {
+                told: Vec::new(),
                 automatic: vec![offer],
-                ..Plan::default()
             }
         } else {
-            Plan {
-                notices: vec![offer.notice(now())],
-                ..Plan::default()
+            Offered {
+                told: vec![offer.notice(now())],
+                automatic: Vec::new(),
             }
+        };
+        let expected = Plan {
+            offered,
+            due: Vec::new(),
         };
         assert_eq!(polls[1], expected, "automatic: {automatic}");
         assert_eq!(

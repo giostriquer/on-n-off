@@ -28,6 +28,16 @@ fn scheduled() -> Waiting {
     waiting
 }
 
+const NOT_NEEDED: &str = "no longer needs it, or is no longer signed in";
+const LATE: &str = "could not be checked in time";
+
+fn kept(why: &str) -> Due {
+    Due::Kept((
+        "Codex: banked reset not used".to_string(),
+        format!("you@example.com {why}, so it was kept."),
+    ))
+}
+
 fn falls_due(
     waiting: &mut Waiting,
     readings: &[ProviderLimitsDto],
@@ -80,10 +90,7 @@ fn at_its_time_a_reset_still_needed_is_spent_and_leaves_the_queue() {
         minutes_after_now(10),
     );
 
-    assert_eq!(
-        due,
-        [Due::Spend(expected, ResetSpend::Automatic(SpendShare(5)))]
-    );
+    assert_eq!(due, [Due::Spend(expected, SpendShare(5))]);
     assert!(waiting.0.is_empty());
 }
 
@@ -99,10 +106,7 @@ fn a_spend_is_held_to_its_alerts_lower_share() {
     );
 
     assert!(
-        matches!(
-            due.as_slice(),
-            [Due::Spend(_, ResetSpend::Automatic(SpendShare(3)))]
-        ),
+        matches!(due.as_slice(), [Due::Spend(_, SpendShare(3))]),
         "{due:?}"
     );
 }
@@ -117,11 +121,10 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
         ("another account is signed in", vec![someone_else]),
     ] {
         let mut waiting = scheduled();
-        let expected = waiting.0["acct"].clone();
 
         let due = falls_due(&mut waiting, &readings, &automatic(), minutes_after_now(10));
 
-        assert_eq!(due, [Due::Kept(expected, Kept::NotNeeded)], "{why}");
+        assert_eq!(due, [kept(NOT_NEEDED)], "{why}");
         assert!(waiting.0.is_empty(), "{why}");
     }
 }
@@ -152,7 +155,6 @@ fn nobody_signed_in_keeps_the_reset() {
         signed_out.status = status;
         signed_out.account = None;
         let mut waiting = scheduled();
-        let expected = waiting.0["acct"].clone();
 
         let due = falls_due(
             &mut waiting,
@@ -161,7 +163,7 @@ fn nobody_signed_in_keeps_the_reset() {
             minutes_after_now(10),
         );
 
-        assert_eq!(due, [Due::Kept(expected, Kept::NotNeeded)], "{status:?}");
+        assert_eq!(due, [kept(NOT_NEEDED)], "{status:?}");
     }
 }
 
@@ -185,11 +187,10 @@ fn without_a_live_read_a_spend_waits() {
 fn a_spend_found_late_is_kept() {
     for readings in [vec![live(96.0, RENEWS)], Vec::new()] {
         let mut waiting = scheduled();
-        let expected = waiting.0["acct"].clone();
 
         let due = falls_due(&mut waiting, &readings, &automatic(), minutes_after_now(26));
 
-        assert_eq!(due, [Due::Kept(expected, Kept::Late)]);
+        assert_eq!(due, [kept(LATE)]);
         assert!(waiting.0.is_empty());
     }
 }
@@ -363,4 +364,30 @@ fn a_spend_whose_reset_time_reads_a_second_or_two_apart_is_still_made() {
             "{renews}: {due:?}"
         );
     }
+}
+
+#[test]
+fn a_poll_tells_its_notify_only_offers_before_the_spends_it_schedules() {
+    let mut waiting = Waiting::default();
+    let offered = Offered {
+        told: vec![(
+            "Codex: a banked reset is available".to_string(),
+            "told".to_string(),
+        )],
+        automatic: vec![offer()],
+    };
+
+    let notices = offered.commit(&mut waiting, now());
+
+    assert_eq!(
+        notices
+            .iter()
+            .map(|(title, _)| title.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "Codex: a banked reset is available",
+            "Codex: using a banked reset in 10 minutes"
+        ]
+    );
+    assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
 }

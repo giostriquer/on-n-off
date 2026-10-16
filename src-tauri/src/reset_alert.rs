@@ -124,7 +124,7 @@ struct LowReading {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Offer {
+struct Offer {
     account_id: String,
     account_label: Option<String>,
     left_percent: f64,
@@ -146,19 +146,24 @@ pub struct WaitingSpend {
 
 #[derive(Debug, Default, PartialEq)]
 pub struct Plan {
-    pub notices: Vec<Notice>,
-    pub automatic: Vec<Offer>,
+    pub offered: Offered,
     pub due: Vec<Due>,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct Offered {
+    told: Vec<Notice>,
+    automatic: Vec<Offer>,
 }
 
 #[derive(Debug, PartialEq)]
 pub enum Due {
-    Spend(WaitingSpend, ResetSpend),
-    Kept(WaitingSpend, Kept),
+    Spend(WaitingSpend, SpendShare),
+    Kept(Notice),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Kept {
+enum Kept {
     NotNeeded,
     Late,
 }
@@ -176,9 +181,19 @@ pub fn plan(
         .into_iter()
         .partition(|offer| offer.automatic);
     Plan {
-        notices: told.iter().map(|offer| offer.notice(now)).collect(),
-        automatic,
+        offered: Offered {
+            told: told.iter().map(|offer| offer.notice(now)).collect(),
+            automatic,
+        },
         due,
+    }
+}
+
+impl Offered {
+    pub fn commit(self, waiting: &mut Waiting, now: DateTime<Utc>) -> Vec<Notice> {
+        let mut notices = self.told;
+        notices.extend(waiting.schedule(&self.automatic, now));
+        notices
     }
 }
 
@@ -327,7 +342,7 @@ impl Waiting {
             .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))
             .map(|(account, spend)| {
                 if late(&spend) {
-                    return Due::Kept(spend, Kept::Late);
+                    return Due::Kept(spend.kept_notice(Kept::Late));
                 }
                 let deciding_alert = match codex {
                     CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
@@ -339,14 +354,14 @@ impl Waiting {
                     CodexNow::NobodySignedIn | CodexNow::Unknown => None,
                 };
                 match deciding_alert {
-                    Some(alert) => Due::Spend(spend, ResetSpend::Automatic(alert.spend_share())),
-                    None => Due::Kept(spend, Kept::NotNeeded),
+                    Some(alert) => Due::Spend(spend, alert.spend_share()),
+                    None => Due::Kept(spend.kept_notice(Kept::NotNeeded)),
                 }
             })
             .collect()
     }
 
-    pub fn schedule(&mut self, offers: &[Offer], now: DateTime<Utc>) -> Vec<Notice> {
+    fn schedule(&mut self, offers: &[Offer], now: DateTime<Utc>) -> Vec<Notice> {
         for offer in offers {
             let spend = WaitingSpend {
                 account_id: offer.account_id.clone(),

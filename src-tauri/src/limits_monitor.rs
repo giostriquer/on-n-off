@@ -15,7 +15,9 @@ use crate::dto::{
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 use crate::read_revision::{announce, Source};
-use crate::reset_alert::{self, AlertMemory, Due, Notice, ResetSpend, Waiting, WaitingSpend};
+use crate::reset_alert::{
+    self, AlertMemory, Due, Notice, Plan, ResetSpend, SpendShare, Waiting, WaitingSpend,
+};
 
 const DISABLED_WAKE_MINUTES: u16 = 60;
 const MONITOR_STATE_SCHEMA_VERSION: u8 = 2;
@@ -133,7 +135,7 @@ trait Io {
     async fn spend(
         &self,
         spend: &WaitingSpend,
-        how: ResetSpend,
+        share: SpendShare,
     ) -> Result<ResetCreditOutcome, String>;
     fn notify(&self, notice: Notice);
     fn now(&self) -> DateTime<Utc>;
@@ -171,12 +173,16 @@ impl Io for App {
     async fn spend(
         &self,
         spend: &WaitingSpend,
-        how: ResetSpend,
+        share: SpendShare,
     ) -> Result<ResetCreditOutcome, String> {
         let account_id = spend.account_id().to_string();
         let idempotency_key = spend.idempotency_key().to_string();
         async_runtime::spawn_blocking(move || {
-            crate::limits_refresh::consume_codex_reset_credit(&account_id, &idempotency_key, how)
+            crate::limits_refresh::consume_codex_reset_credit(
+                &account_id,
+                &idempotency_key,
+                ResetSpend::Automatic(share),
+            )
         })
         .await
         .unwrap_or_else(|error| Err(format!("The banked reset could not be used: {error}")))
@@ -289,7 +295,7 @@ async fn poll_once(
     let readings = io.read(reads).await?;
     let previous = state.clone();
     let mut notices = limit_notices(state, &readings, settings);
-    let plan = waiting.change(|waiting| {
+    let Plan { offered, due } = waiting.change(|waiting| {
         reset_alert::plan(
             &mut state.reset_alerts,
             waiting,
@@ -302,16 +308,15 @@ async fn poll_once(
     if saved.is_err() {
         *state = previous;
     } else {
-        notices.extend(plan.notices);
-        notices.extend(waiting.change(|waiting| waiting.schedule(&plan.automatic, io.now())));
+        notices.extend(waiting.change(|waiting| offered.commit(waiting, io.now())));
         for notice in notices {
             io.notify(notice);
         }
     }
-    for due in plan.due {
+    for due in due {
         let notice = match due {
-            Due::Spend(spend, how) => spend.outcome_notice(&io.spend(&spend, how).await),
-            Due::Kept(spend, why) => spend.kept_notice(why),
+            Due::Spend(spend, share) => spend.outcome_notice(&io.spend(&spend, share).await),
+            Due::Kept(notice) => notice,
         };
         io.notify(notice);
     }
