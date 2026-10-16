@@ -126,6 +126,17 @@ describe("the Settings route", () => {
     await waitFor(() => expect(toggle).toHaveAttribute("aria-pressed", "true"));
   });
 
+  it("keeps a setting Rust has and this screen does not know through a save", async () => {
+    const fromRust = { ...LOADED, futureSetting: "kept" } as AppSettings;
+    api.loadAppSettings.mockResolvedValue(fromRust);
+    const user = userEvent.setup();
+    await renderSettings();
+
+    await user.click(await screen.findByRole("button", { name: "Keep on-n-off running in the tray when the window is closed" }));
+
+    expect(lastSaved()).toEqual({ ...fromRust, closeToTray: true });
+  });
+
   it("saves automatic updates, limit notifications and the poll interval the same way", async () => {
     const user = userEvent.setup();
     await renderSettings();

@@ -63,6 +63,18 @@ describe("the app settings document", () => {
     expect(document.state()).toEqual({ settings: normalised, loaded: true });
   });
 
+  it("passes a setting it has no type for through a save, as Rust sent it", async () => {
+    const fromRust = { ...LOADED, limitsPollMinutes: 30, futureSetting: { level: 2 } } as AppSettings;
+    const { transport, document } = rust(fromRust);
+
+    await document.load();
+    expect(document.state().settings).toEqual(fromRust);
+    await document.patch({ closeToTray: true });
+
+    expect(transport.save).toHaveBeenCalledWith({ ...fromRust, closeToTray: true });
+    expect(document.state().settings).toEqual({ ...fromRust, closeToTray: true });
+  });
+
   it("hands an updater the document to change", async () => {
     const { transport, document } = rust({ ...LOADED, hiddenAgents: ["cursor"] });
     await document.load();

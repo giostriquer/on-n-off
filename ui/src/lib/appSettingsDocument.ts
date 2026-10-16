@@ -1,4 +1,4 @@
-import { DEFAULT_APP_SETTINGS, mergeAppSettings } from "./appSettings";
+import { DEFAULT_APP_SETTINGS } from "./appSettings";
 import type { AppSettings } from "./types";
 
 export type AppSettingsChange = Partial<AppSettings> | ((latest: AppSettings) => Partial<AppSettings>);
@@ -28,7 +28,7 @@ export function createAppSettingsDocument(transport: AppSettingsTransport): AppS
   const failureListeners = new Set<(error: unknown) => void>();
 
   function hold(settings: AppSettings) {
-    current = { settings: mergeAppSettings(settings), loaded: true };
+    current = { settings, loaded: true };
     for (const listener of listeners) listener();
   }
 
