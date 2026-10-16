@@ -13,6 +13,11 @@ pub fn revision() -> u64 {
     REVISION.current()
 }
 
+#[cfg(all(test, any(target_os = "macos", target_os = "windows")))]
+pub fn bump_revision() -> u64 {
+    REVISION.bump()
+}
+
 fn path() -> Result<PathBuf, String> {
     crate::paths::user_home()
         .map(|home| home.join(".on-n-off").join("side-notch.json"))

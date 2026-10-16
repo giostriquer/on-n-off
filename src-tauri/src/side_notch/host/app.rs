@@ -3,7 +3,7 @@ use crate::dto::{AgentId, GithubPrsDto, ProviderLimitsDto};
 use crate::side_notch::model::{NotchSettings, NotchSnapshot};
 use crate::side_notch::sessions::LiveSession;
 use std::{
-    sync::{Arc, Condvar, Mutex},
+    sync::{atomic::AtomicU64, Arc, Condvar, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -85,24 +85,33 @@ pub fn add_runtime_error(app: &AppHandle, snapshot: &mut NotchSnapshot) {
 
 fn supervise(app: AppHandle, controller: &Controller, transport: impl Transport) {
     let mut host = Host::new(
-        Production(app),
+        Production::new(app),
         transport,
         initial_snapshot(),
         Instant::now(),
     );
     while !controller.lifetime.stopped() {
-        if let Ok(mut desired) = controller.desired.lock() {
-            if let Some(next) = desired.take() {
-                host.desire(next);
-            }
-        }
-        host.tick(Instant::now());
-        if let Ok(mut error) = controller.error.lock() {
-            *error = host.runtime_error();
-        }
-        host.publish();
-        controller.wait(host.enabled().then_some(Duration::from_millis(100)));
+        let wait = step(controller, &mut host, Instant::now());
+        controller.wait(wait);
     }
+}
+
+fn step<T: Transport, A: App>(
+    controller: &Controller,
+    host: &mut Host<T, A>,
+    now: Instant,
+) -> Option<Duration> {
+    if let Ok(mut desired) = controller.desired.lock() {
+        if let Some(next) = desired.take() {
+            host.desire(next);
+        }
+    }
+    host.tick(now);
+    if let Ok(mut error) = controller.error.lock() {
+        *error = host.runtime_error();
+    }
+    host.publish();
+    host.enabled().then_some(Duration::from_millis(100))
 }
 
 fn initial_snapshot() -> NotchSnapshot {
@@ -134,7 +143,21 @@ pub(super) trait Shell: Clone + Send + 'static {
 }
 
 #[derive(Clone)]
-pub(super) struct Production<S>(S);
+pub(super) struct Production<S> {
+    shell: S,
+    limits_poll: &'static AtomicU64,
+    pull_requests_poll: &'static AtomicU64,
+}
+
+impl<S> Production<S> {
+    fn new(shell: S) -> Self {
+        Self {
+            shell,
+            limits_poll: &crate::limits_refresh::POLL_SECONDS,
+            pull_requests_poll: &crate::github::POLL_SECONDS,
+        }
+    }
+}
 
 impl<S: Shell> App for Production<S> {
     fn read_limits(&self, agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
@@ -146,7 +169,9 @@ impl<S: Shell> App for Production<S> {
     }
 
     fn limits_interval(&self) -> Duration {
-        crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval())
+        crate::limits_refresh::check_interval(crate::limits_refresh::poll_interval_in(
+            self.limits_poll,
+        ))
     }
 
     fn read_pull_requests(&self, force: bool) -> (GithubPrsDto, u64) {
@@ -158,7 +183,7 @@ impl<S: Shell> App for Production<S> {
     }
 
     fn pull_requests_interval(&self) -> Duration {
-        crate::github::poll_interval()
+        crate::github::poll_interval_in(self.pull_requests_poll)
     }
 
     fn read_sessions(&self, agent: AgentId) -> Vec<LiveSession> {
@@ -172,7 +197,7 @@ impl<S: Shell> App for Production<S> {
     }
 
     fn open(&self, page: Page) -> Result<(), String> {
-        self.0.open(page)
+        self.shell.open(page)
     }
 
     fn settings_revision(&self) -> u64 {
@@ -188,7 +213,7 @@ impl<S: Shell> App for Production<S> {
     }
 
     fn publish(&self, status: &NotchSnapshot) {
-        self.0.emit(status);
+        self.shell.emit(status);
     }
 }
 

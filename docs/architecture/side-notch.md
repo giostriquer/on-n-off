@@ -19,8 +19,10 @@ cell when it is on and has been read, each list keeping at most 25 rows and only
 github.com, each row with its context. The frame and that projection are `host/frame.rs`; the
 Tauri side, the supervisor thread and the app the host reads through (`Production`, which opens
 windows and emits through the `AppHandle`), is `host/app.rs`. The host keeps no interval of its
-own: it asks for the limits check interval and `github::poll_interval` at every check, both held
-in memory and replaced when settings are saved.
+own: it asks `Production` for the limits check interval and the pull request interval at every
+check. Both come from the settings once, are then held in memory (`settings::remembered_seconds`
+over `limits_refresh::POLL_SECONDS` and `github::POLL_SECONDS`), and are replaced when settings
+are saved.
 
 What differs between the platforms is how a frame reaches the pixels and how actions come back.
 That is the `Transport` the host is given, and it is the only thing that differs:
