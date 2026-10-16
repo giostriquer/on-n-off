@@ -352,6 +352,12 @@ final class NotchTests {
     expectEqual(decoded.cells.map(\.id), [RailCell.provider(.claude)])
     expectEqual(providerCell(decoded)?.notice, Notice(text: "Checking usage…", tone: .muted))
     expectEqual(decoded.snapshot.settings.cellCount, 1)
+    let muse = claude.replacingOccurrences(of: "\"provider\":\"claude\"", with: "\"provider\":\"muse\"")
+    let reordered = try HostMessage.decode(
+      Data(
+        rail.replacingOccurrences(of: "[\"gemini\",\"claude\"]", with: "[\"claude\",\"muse\"]")
+          .replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(muse),\(claude)]").utf8))
+    expectEqual(reordered.cells.map(\.id), [RailCell.provider(.muse), .provider(.claude)])
     expectThrows(
       try HostMessage.decode(
         Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(claude),\(claude)]").utf8)))
