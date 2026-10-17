@@ -324,7 +324,7 @@ fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDt
     LimitsAccountDto {
         id: identity.observation_key(),
         label,
-        legacy_id: Some(identity.legacy_key()),
+        legacy_id: identity.legacy_key(),
     }
 }
 

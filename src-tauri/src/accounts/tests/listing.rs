@@ -71,6 +71,17 @@ fn a_pending_recovery_is_reported_only_to_the_provider_it_belongs_to() {
 }
 
 #[test]
+fn each_provider_names_the_history_its_saved_accounts_replace() {
+    let key = |provider| identity(provider, "you@example.com", "team").legacy_key();
+
+    assert_eq!(key(AgentId::Claude).as_deref(), Some("you@example.com"));
+    assert_eq!(key(AgentId::Codex).as_deref(), Some("team"));
+    assert_eq!(key(AgentId::Muse).as_deref(), Some("email:you@example.com"));
+    assert_eq!(key(AgentId::Antigravity), None);
+    assert_eq!(key(AgentId::Cursor), None);
+}
+
+#[test]
 fn listing_names_the_history_each_profile_replaces() {
     let harness = Harness::new();
     harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));

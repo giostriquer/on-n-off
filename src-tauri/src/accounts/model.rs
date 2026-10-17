@@ -62,11 +62,12 @@ impl Identity {
             .expect("serializable identity");
         format!("{PROFILE_KEY_PREFIX}{}", crate::sha::sha256_hex(&tuple))
     }
-    pub fn legacy_key(&self) -> String {
+    pub fn legacy_key(&self) -> Option<String> {
         match self.provider {
-            AgentId::Codex => self.workspace_id.clone(),
-            AgentId::Muse => format!("email:{}", self.user_id),
-            _ => self.user_id.clone(),
+            AgentId::Claude => Some(self.user_id.clone()),
+            AgentId::Codex => Some(self.workspace_id.clone()),
+            AgentId::Muse => Some(format!("email:{}", self.user_id)),
+            AgentId::Antigravity | AgentId::Cursor => None,
         }
     }
     pub fn is_profile_key(key: &str) -> bool {

@@ -80,3 +80,8 @@ it("folds the history the saved profile names as its legacy id, never one rebuil
   expect(shown.entries).toEqual([scoped, legacy]);
   expect(shown.legacyAccounts.get(profile.observationId)).toEqual([{ id: "renamed-team", email: profile.email }]);
 });
+it("folds nothing into a saved profile that names no legacy history", () => {
+  const { legacyId: _, ...unnamed } = profile;
+
+  expect(accountCards([scoped, legacy], [unnamed]).entries).toEqual([scoped, legacy]);
+});

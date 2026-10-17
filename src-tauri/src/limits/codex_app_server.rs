@@ -273,24 +273,27 @@ fn normalize_app_server(
         ));
     }
     let metadata = before;
-    let legacy_id = metadata.as_ref().and_then(|(id, claims)| {
+    let identity = metadata.as_ref().and_then(|(_, claims)| {
         let workspace = claims.get("chatgpt_account_id")?.as_str()?;
-        (id != workspace).then(|| workspace.to_owned())
+        crate::accounts::codex_store::saved_identity(workspace, claims)
     });
-    let account_id = metadata
-        .map(|(id, _)| id)
-        .or_else(|| {
-            email
-                .as_deref()
-                .map(|email| format!("email:{}", email.to_lowercase()))
-        })
-        .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string());
-    let parsed = Parsed {
-        account: Some(crate::dto::LimitsAccountDto {
-            legacy_id,
-            id: account_id,
+    let account = match identity {
+        Some(identity) => super::scoped_account(&identity, email),
+        None => crate::dto::LimitsAccountDto {
+            legacy_id: None,
+            id: metadata
+                .map(|(id, _)| id)
+                .or_else(|| {
+                    email
+                        .as_deref()
+                        .map(|email| format!("email:{}", email.to_lowercase()))
+                })
+                .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
             label: email,
-        }),
+        },
+    };
+    let parsed = Parsed {
+        account: Some(account),
         reading,
     };
     Ok((parsed, access))

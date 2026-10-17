@@ -36,7 +36,8 @@ use transaction::{Native, NativeGuard};
 pub struct ProfileDto {
     id: String,
     observation_id: String,
-    legacy_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    legacy_id: Option<String>,
     identity: model::Identity,
     label: String,
     email: Option<String>,

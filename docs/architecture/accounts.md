@@ -514,10 +514,11 @@ accounts that share an email are told apart by their plan badge when usage repor
 optional category otherwise.
 When a saved profile has an actual scoped usage observation, the card list also suppresses its
 legacy observation using the verified provider, legacy identity key and matching email. The
-legacy key has one owner, `Identity::legacy_key` (Codex: the workspace id; Claude: the user id;
-Muse: `email:` and the lowercased email). Rust puts it on the scoped card's `legacyId` and on the
-listed profile's `legacyId`, and the UI join reads the profile's. So the join does not depend on
-the snapshot's optional `legacyId`, which older app versions can drop when rewriting history. It does not transfer old quotas or delete history, and preserves current
+legacy key has one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for
+Claude, `email:` and the lowercased email for Muse, and none for providers without saved
+accounts. Every scoped card, the current Codex card included, and every listed profile carry it
+as `legacyId`; the UI join reads the profile's. So the join does not depend on the snapshot's
+optional `legacyId`, which older app versions can drop when rewriting history. It does not transfer old quotas or delete history, and preserves current
 legacy observations and accounts without a verified scoped replacement.
 The confirmed Remove account action retains that association and explicitly forgets matched
 legacy history before its scoped snapshot, so the next read cannot resurrect the removed card.
