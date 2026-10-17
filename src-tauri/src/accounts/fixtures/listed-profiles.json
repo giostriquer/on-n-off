@@ -1,0 +1,20 @@
+{
+  "claude": {
+    "identity": {
+      "provider": "claude",
+      "userId": "a",
+      "workspaceId": "team"
+    },
+    "observationId": "profile:5ce69446677556b45138a8a4dc9e6a265a15e075c2a4675d238e776f81d4ceca",
+    "legacyId": "a"
+  },
+  "codex": {
+    "identity": {
+      "provider": "codex",
+      "userId": "c",
+      "workspaceId": "team"
+    },
+    "observationId": "profile:65c7f55bd430a6c9fa78072f2dc78bf7c344827a49aa35e5a499960fc9639eb8",
+    "legacyId": "team"
+  }
+}

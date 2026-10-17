@@ -300,6 +300,22 @@ fn every_subscription_note_keeps_its_wire_name() {
 }
 
 #[test]
+fn a_scoped_card_takes_its_legacy_id_from_its_identitys_rule() {
+    let identity = |provider, user: &str, workspace: &str| crate::accounts::model::Identity {
+        provider,
+        user_id: user.into(),
+        workspace_id: workspace.into(),
+    };
+    for saved in [
+        identity(AgentId::Claude, "a", "team"),
+        identity(AgentId::Codex, "c", "team"),
+        identity(AgentId::Muse, "you@example.com", ""),
+    ] {
+        assert_eq!(scoped_account(&saved, None).legacy_id, saved.legacy_key());
+    }
+}
+
+#[test]
 #[ignore = "real-home network probe; not part of CI"]
 fn probe_real_home_limits() {
     #[cfg(target_os = "macos")]

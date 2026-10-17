@@ -513,11 +513,10 @@ fn merge(
                 Some(card) => (card.provider, card.account.clone(), card.current_account),
                 None => (
                     profile.identity.provider,
-                    Some(crate::dto::LimitsAccountDto {
-                        id: key,
-                        label: profile.email.clone(),
-                        legacy_id: None,
-                    }),
+                    Some(crate::limits::scoped_account(
+                        &profile.identity,
+                        profile.email.clone(),
+                    )),
                     false,
                 ),
             };

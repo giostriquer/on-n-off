@@ -36,6 +36,8 @@ use transaction::{Native, NativeGuard};
 pub struct ProfileDto {
     id: String,
     observation_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    legacy_id: Option<String>,
     identity: model::Identity,
     label: String,
     email: Option<String>,
@@ -361,6 +363,7 @@ impl Accounts {
                     archived: archived.contains(&p.identity.observation_key()),
                     category: categories.get(&p.identity.observation_key()).cloned(),
                     observation_id: p.identity.observation_key(),
+                    legacy_id: p.identity.legacy_key(),
                     active: current.as_ref() == Some(&p.identity),
                     id: p.id,
                     identity: p.identity,

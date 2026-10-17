@@ -513,10 +513,14 @@ Card headers never display workspace IDs. Saved profiles keep their verified wor
 accounts that share an email are told apart by their plan badge when usage reports one, and by the
 optional category otherwise.
 When a saved profile has an actual scoped usage observation, the card list also suppresses its
-legacy observation using the verified provider, legacy identity key and matching email. This
-join does not depend on the snapshot's optional `legacyId`, which older app versions can drop
-when rewriting history. It does not transfer old quotas or delete history, and preserves current
-legacy observations and accounts without a verified scoped replacement.
+legacy observation using the verified provider, legacy identity key and matching email. The
+legacy key has one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for
+Claude, `email:` and the lowercased email for Muse, and none for providers without saved
+accounts. Every scoped card, the current Codex card and a saved account's failed first read
+included, and every listed profile carry it as `legacyId`; the UI join reads the profile's. So
+the join does not depend on the snapshot's optional `legacyId`, which older app versions can
+drop when rewriting history. It does not transfer old quotas or delete history, and preserves
+current legacy observations and accounts without a verified scoped replacement.
 The confirmed Remove account action retains that association and explicitly forgets matched
 legacy history before its scoped snapshot, so the next read cannot resurrect the removed card.
 Legacy deletion passes an optional expected email through the existing Forget command. Storage

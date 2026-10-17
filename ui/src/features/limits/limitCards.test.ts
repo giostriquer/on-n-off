@@ -10,7 +10,7 @@ import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixture
 const AT_NOW = Date.parse(NOW);
 
 function saved(provider: AgentId, id: string, observationId: string, email: string, overrides: Partial<SavedProfile> = {}): SavedProfile {
-  return { id, observationId, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
+  return { id, observationId, legacyId: id, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
 }
 
 function cards(entries: ProviderLimits[] | undefined, profiles: SavedProfile[] = [], now = AT_NOW, provider = (entries?.[0]?.provider ?? "codex") as LimitsProvider): LimitCard[] {
@@ -55,13 +55,13 @@ describe("which cards a provider shows", () => {
 
   it("keeps an unverified legacy card beside its saved login", () => {
     const shown = cards([okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false })],
-      [saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } })]);
+      [saved("codex", "saved", "profile:user-team", "shared@example.com", { legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" } })]);
     expect(labels(shown)).toEqual(["shared@example.com", "shared@example.com"]);
     expect(shown.map(card => [card.account?.id, card.empty?.reason ?? null])).toEqual([["team", null], ["profile:user-team", "usageUnavailable"]]);
   });
 
   it("reconciles legacy cards from a saved identity when an older app drops the snapshot alias, and forgets the legacy history first", () => {
-    const profile = saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } });
+    const profile = saved("codex", "saved", "profile:user-team", "shared@example.com", { legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" } });
     const scoped = okCodex({ account: { id: "profile:user-team", label: "shared@example.com" }, currentAccount: false,
       windows: [{ id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 0, observedAt: NOW }] });
     const legacy = okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false });
@@ -207,7 +207,7 @@ describe("a card's identity", () => {
     const workspaces = [["personal", "ws-personal-7f3a", "prolite"], ["business", "ws-business-9c1e", "business"]] as const;
     const shown = cards(
       workspaces.map(([id, , plan], index) => okCodex({ account: { id: `profile:${id}`, label: "shared@example.com" }, currentAccount: index === 0, plan })),
-      workspaces.map(([id, workspaceId], index) => saved("codex", id, `profile:${id}`, "shared@example.com", { identity: { provider: "codex", userId: "same-user", workspaceId }, active: index === 0 })),
+      workspaces.map(([id, workspaceId], index) => saved("codex", id, `profile:${id}`, "shared@example.com", { legacyId: workspaceId, identity: { provider: "codex", userId: "same-user", workspaceId }, active: index === 0 })),
     );
     expect(shown.map(card => [card.identity.label, card.plan])).toEqual([["shared@example.com", "Pro ×5"], ["shared@example.com", "Business"]]);
     for (const card of shown) expect(JSON.stringify([card.identity, card.plan, card.headline, card.rows])).not.toMatch(/ws-personal-7f3a|ws-business-9c1e/);
@@ -436,7 +436,7 @@ describe("archived accounts", () => {
   });
 
   it("archives a card with the legacy history merged into it, whose ids it takes along", () => {
-    const profile = saved("codex", "saved", "profile:user-team", "shared@example.com", { identity: { provider: "codex", userId: "user", workspaceId: "team" } });
+    const profile = saved("codex", "saved", "profile:user-team", "shared@example.com", { legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" } });
     const scoped = okCodex({ account: { id: "profile:user-team", label: "shared@example.com" }, currentAccount: false, archived: true });
     const legacy = okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false, archived: true });
     const shown = column([signedIn, scoped, legacy], [profile]);

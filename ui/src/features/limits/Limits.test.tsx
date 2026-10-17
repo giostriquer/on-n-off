@@ -450,7 +450,7 @@ it("reads every card's categories again when the account lists are announced", a
 
 it("places switching on the account usage card without a second account manager", async()=>{
  answer([okClaude()], [okCodex(),staleCodex()]);
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  readAccountCategories.mockResolvedValue({codex:{"acct-personal":"Personal"}});
  renderLimits();
  const personal=await screen.findByRole("region",{name:"Codex limits · personal@codex.example"});
@@ -464,7 +464,7 @@ it("places switching on the account usage card without a second account manager"
 
 it("keeps saved accounts available when usage cannot be read, never merges by email, and never shows workspace ids", async () => {
  answer([okClaude()], Promise.reject(new Error("usage offline")));
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["ws-personal-7f3a","ws-business-9c1e"].map(id=>({id,observationId:`profile:${id}`,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["ws-personal-7f3a","ws-business-9c1e"].map(id=>({id,observationId:`profile:${id}`,legacyId:id,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  const cards=await screen.findAllByRole("region",{name:"Codex limits · shared@example.com"});
  expect(cards).toHaveLength(2);
@@ -487,7 +487,7 @@ it("does not let an old current card save or sign out a different native account
 it("keeps old account controls disabled until the post-switch account read finishes", async () => {
  answer([okClaude()], [okCodex(), staleCodex()]);
  const next = deferred<unknown>();
- const accounts={profiles:[{id:"saved-personal",observationId:"acct-personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",savedAt:NOW,active:false,needsLogin:false}],nativeObservationId:"acct-work",nativeAccount:{provider:"codex",userId:"work",workspaceId:"work"},recoveryRequired:false,notice:null};
+ const accounts={profiles:[{id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",savedAt:NOW,active:false,needsLogin:false}],nativeObservationId:"acct-work",nativeAccount:{provider:"codex",userId:"work",workspaceId:"work"},recoveryRequired:false,notice:null};
  let codexReads=0;
  readAccounts.mockImplementation(async(provider:string)=>provider==="codex"?(++codexReads===1?accounts:next.promise):{profiles:[],nativeAccount:null,recoveryRequired:false,notice:null});
  renderLimits();
@@ -562,7 +562,7 @@ it("queues an explicit reload behind an in-flight background check", async () =>
 });
 
 it("removes reconciled legacy history with the saved card so refresh cannot resurrect it", async () => {
- const profile = {id:"saved",observationId:"profile:user-team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
+ const profile = {id:"saved",observationId:"profile:user-team",legacyId:"team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
  let profiles = [profile];
  let history = [okCodex({account:{id:profile.observationId,label:profile.email},currentAccount:false}),okCodex({account:{id:"team",label:profile.email},currentAccount:false}),staleCodex()];
  readLimits.mockImplementation(async(provider:string)=>provider==="codex"?history:provider==="claude"?[okClaude()]:[]);
@@ -661,7 +661,7 @@ it("quietly identifies last-known usage and reveals the reason on focus", async 
 });
 
 it("shows the copy the card model gives an empty card", async () => {
-  const saved = (id: string) => ({ id, observationId: `profile:${id}`, identity: { provider: "codex", userId: id, workspaceId: id }, email: `${id}@codex.example`, label: `${id}@codex.example`, savedAt: NOW, active: false, needsLogin: false });
+  const saved = (id: string) => ({ id, observationId: `profile:${id}`, legacyId: id, identity: { provider: "codex", userId: id, workspaceId: id }, email: `${id}@codex.example`, label: `${id}@codex.example`, savedAt: NOW, active: false, needsLogin: false });
   answer([okClaude({ windows: [], account: null })], [okCodex(), okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null })]);
   readAccounts.mockImplementation(async (provider: string) => ({ profiles: provider === "codex" ? [saved("unread"), saved("empty")] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   renderLimits();
@@ -711,7 +711,7 @@ describe("archiving", () => {
   });
 
   it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
-    const unread = { id: "unread", observationId: "profile:unread", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
+    const unread = { id: "unread", observationId: "profile:unread", legacyId: "team", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
     answer([okClaude()], [okCodex()]);
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [unread] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
     const { client } = renderLimits();
@@ -802,7 +802,7 @@ describe("archiving", () => {
   });
 
   it("removes an archived account as Remove account does: the saved login, then its history first", async () => {
-    const profile = { id: "saved", observationId: "profile:user-team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
+    const profile = { id: "saved", observationId: "profile:user-team", legacyId: "team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
     let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true }),
       okCodex({ account: { id: "team", label: profile.email }, currentAccount: false, archived: true })];
     readLimits.mockImplementation(async (provider: AgentId) => provider === "codex" ? history : provider === "claude" ? [okClaude()] : []);
@@ -836,7 +836,7 @@ describe("archiving", () => {
   });
 
   function answerLapsed(others: ProviderLimits[] = []) {
-    const profile = { id: "lapsed", observationId: "acct-personal", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
+    const profile = { id: "lapsed", observationId: "acct-personal", legacyId: "team", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
     answer([okClaude()], [okCodex(), lapsed, ...others]);
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));

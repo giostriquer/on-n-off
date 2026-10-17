@@ -71,6 +71,48 @@ fn a_pending_recovery_is_reported_only_to_the_provider_it_belongs_to() {
 }
 
 #[test]
+fn each_provider_names_the_history_its_saved_accounts_replace() {
+    let key = |provider| identity(provider, "you@example.com", "team").legacy_key();
+
+    assert_eq!(key(AgentId::Claude).as_deref(), Some("you@example.com"));
+    assert_eq!(key(AgentId::Codex).as_deref(), Some("team"));
+    assert_eq!(key(AgentId::Muse).as_deref(), Some("email:you@example.com"));
+    assert_eq!(key(AgentId::Antigravity), None);
+    assert_eq!(key(AgentId::Cursor), None);
+}
+
+#[test]
+fn listing_names_the_history_each_profile_replaces() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
+
+    let wire = |provider| {
+        let listed = harness.accounts().list(provider).unwrap();
+        let profile = &serde_json::to_value(&listed).unwrap()["profiles"][0];
+        serde_json::json!({
+            "identity": profile["identity"],
+            "observationId": profile["observationId"],
+            "legacyId": profile["legacyId"],
+        })
+    };
+    let written = serde_json::json!({
+        "claude": wire(AgentId::Claude),
+        "codex": wire(AgentId::Codex),
+    });
+
+    assert_eq!(written["claude"]["legacyId"], "a");
+    assert_eq!(written["codex"]["legacyId"], "team");
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(include_str!("../fixtures/listed-profiles.json"))
+            .unwrap(),
+        "src-tauri/src/accounts/fixtures/listed-profiles.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
+    );
+}
+
+#[test]
 fn listing_says_which_profiles_are_archived() {
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));

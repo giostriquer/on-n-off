@@ -152,20 +152,20 @@ pub(super) fn write(config_home: &Path, auth: Option<&Value>) -> Result<(), Stri
     target(config_home)?.write(auth)
 }
 
-pub(crate) fn observation_key(workspace: &str, claims: &Value) -> String {
-    claims
+pub(crate) fn claims_identity(claims: &Value) -> Option<model::Identity> {
+    let user = claims
         .get("chatgpt_user_id")
         .and_then(Value::as_str)
-        .filter(|v| !v.trim().is_empty())
-        .map(|user| {
-            model::Identity {
-                provider: crate::dto::AgentId::Codex,
-                user_id: user.into(),
-                workspace_id: workspace.into(),
-            }
-            .observation_key()
-        })
-        .unwrap_or_else(|| workspace.into())
+        .filter(|v| !v.trim().is_empty())?;
+    Some(model::Identity {
+        provider: crate::dto::AgentId::Codex,
+        user_id: user.into(),
+        workspace_id: claims.get("chatgpt_account_id")?.as_str()?.into(),
+    })
+}
+
+pub(crate) fn observation_key(workspace: &str, claims: &Value) -> String {
+    claims_identity(claims).map_or_else(|| workspace.into(), |identity| identity.observation_key())
 }
 
 pub(crate) fn metadata(config_home: &Path) -> Result<Option<Metadata>, String> {
