@@ -11,6 +11,20 @@ fn inactive_results_never_replace_the_active_account() {
     assert_eq!(entries, before);
 }
 
+#[test]
+fn a_failed_first_read_still_names_the_history_its_profile_replaces() {
+    let profile = profile();
+    let mut entries = vec![];
+
+    merge(&mut entries, &profile, Some(Err("first".into())));
+
+    let account = entries[0].account.clone().unwrap();
+    assert_eq!(account.id, profile.identity.observation_key());
+    assert!(profile.identity.legacy_key().is_some());
+    assert_eq!(account.legacy_id, profile.identity.legacy_key());
+    assert_eq!(account.label, profile.email);
+}
+
 fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
     profile.identity.provider = AgentId::Codex;
     serde_json::from_value(json!({

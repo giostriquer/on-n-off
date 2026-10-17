@@ -320,7 +320,7 @@ fn saved_card(
     Ok(dto)
 }
 
-fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDto {
+pub(crate) fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDto {
     LimitsAccountDto {
         id: identity.observation_key(),
         label,

@@ -273,10 +273,9 @@ fn normalize_app_server(
         ));
     }
     let metadata = before;
-    let identity = metadata.as_ref().and_then(|(_, claims)| {
-        let workspace = claims.get("chatgpt_account_id")?.as_str()?;
-        crate::accounts::codex_store::saved_identity(workspace, claims)
-    });
+    let identity = metadata
+        .as_ref()
+        .and_then(|(_, claims)| crate::accounts::codex_store::claims_identity(claims));
     let account = match identity {
         Some(identity) => super::scoped_account(&identity, email),
         None => crate::dto::LimitsAccountDto {
