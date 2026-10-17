@@ -300,7 +300,7 @@ fn every_subscription_note_keeps_its_wire_name() {
 }
 
 #[test]
-fn a_scoped_card_names_the_legacy_id_its_saved_profile_lists() {
+fn a_scoped_card_takes_its_legacy_id_from_its_identitys_rule() {
     let identity = |provider, user: &str, workspace: &str| crate::accounts::model::Identity {
         provider,
         user_id: user.into(),

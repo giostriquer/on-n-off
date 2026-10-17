@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
+import rustProfiles from "../../../../src-tauri/src/accounts/fixtures/listed-profiles.json";
 import { accountCards } from "./accountCards";
 import { presentLimitAccount } from "./limitPresentation";
 
@@ -84,4 +85,11 @@ it("folds nothing into a saved profile that names no legacy history", () => {
   const { legacyId: _, ...unnamed } = profile;
 
   expect(accountCards([scoped, legacy], [unnamed]).entries).toEqual([scoped, legacy]);
+});
+it.each(Object.entries(rustProfiles))("folds %s history by the legacy id Rust lists on the profile", (_, wire) => {
+  const listed: SavedProfile = { ...profile, ...wire, identity: wire.identity as SavedProfile["identity"] };
+  const card: ProviderLimits = { ...scoped, provider: listed.identity.provider, account: { id: wire.observationId, label: profile.email } };
+  const old: ProviderLimits = { ...legacy, provider: listed.identity.provider, account: { id: wire.legacyId, label: profile.email } };
+
+  expect(accountCards([card, old], [listed]).entries).toEqual([card]);
 });

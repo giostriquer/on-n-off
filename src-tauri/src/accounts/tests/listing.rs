@@ -87,13 +87,29 @@ fn listing_names_the_history_each_profile_replaces() {
     harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
     harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
 
-    let legacy_of = |provider| {
+    let wire = |provider| {
         let listed = harness.accounts().list(provider).unwrap();
-        serde_json::to_value(&listed).unwrap()["profiles"][0]["legacyId"].clone()
+        let profile = &serde_json::to_value(&listed).unwrap()["profiles"][0];
+        serde_json::json!({
+            "identity": profile["identity"],
+            "observationId": profile["observationId"],
+            "legacyId": profile["legacyId"],
+        })
     };
+    let written = serde_json::json!({
+        "claude": wire(AgentId::Claude),
+        "codex": wire(AgentId::Codex),
+    });
 
-    assert_eq!(legacy_of(AgentId::Claude), "a");
-    assert_eq!(legacy_of(AgentId::Codex), "team");
+    assert_eq!(written["claude"]["legacyId"], "a");
+    assert_eq!(written["codex"]["legacyId"], "team");
+    assert_eq!(
+        written,
+        serde_json::from_str::<serde_json::Value>(include_str!("../fixtures/listed-profiles.json"))
+            .unwrap(),
+        "src-tauri/src/accounts/fixtures/listed-profiles.json must read:\n{}",
+        serde_json::to_string_pretty(&written).unwrap()
+    );
 }
 
 #[test]
