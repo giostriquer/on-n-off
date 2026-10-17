@@ -174,7 +174,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
 
 it("puts a saved login's items between Check limits now and the card's history items", async () => {
   const old = okCodex({ currentAccount: false, account: { id: "codex-old", label: "old@codex.example" } });
-  const profile = { id: "saved-old", observationId: "codex-old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, needsLogin: false };
+  const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, needsLogin: false };
   readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   answer(read => read === "codex" ? [okCodex(), old] : [CURRENT[read]()]);
   renderLimits();

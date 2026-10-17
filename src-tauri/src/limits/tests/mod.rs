@@ -336,3 +336,24 @@ fn print_real_home_limits() {
         }
     }
 }
+
+#[test]
+fn a_scoped_card_names_the_legacy_id_its_saved_profile_lists() {
+    let identity = |provider, user: &str, workspace: &str| crate::accounts::model::Identity {
+        provider,
+        user_id: user.into(),
+        workspace_id: workspace.into(),
+    };
+    let muse = identity(AgentId::Muse, "you@example.com", "");
+    for saved in [
+        identity(AgentId::Claude, "a", "team"),
+        identity(AgentId::Codex, "c", "team"),
+        muse.clone(),
+    ] {
+        assert_eq!(
+            scoped_account(&saved, None).legacy_id,
+            Some(saved.legacy_key())
+        );
+    }
+    assert_eq!(muse.legacy_key(), "email:you@example.com");
+}

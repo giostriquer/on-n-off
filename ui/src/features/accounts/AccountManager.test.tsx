@@ -25,7 +25,7 @@ function Cards() {
 }
 function setup({ preferences = false, onCommit, signedIn = false }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
-  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
+  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", legacyId: "team", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

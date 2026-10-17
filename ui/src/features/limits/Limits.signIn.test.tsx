@@ -24,7 +24,7 @@ const at = (days: number) => new Date(Date.parse(NOW) + days * DAY).toISOString(
 
 function profile(overrides: Partial<SavedProfile>): SavedProfile {
   return {
-    id: "saved-me", observationId: "uuid-1", identity: { provider: "claude", userId: "me", workspaceId: "team" },
+    id: "saved-me", observationId: "uuid-1", legacyId: "me", identity: { provider: "claude", userId: "me", workspaceId: "team" },
     label: "me@claude.example", email: "me@claude.example", savedAt: NOW, active: true, needsLogin: false, ...overrides,
   };
 }

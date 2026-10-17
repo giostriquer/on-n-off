@@ -5,7 +5,7 @@ import { accountCards } from "./accountCards";
 import { presentLimitAccount } from "./limitPresentation";
 
 const profile: SavedProfile = {
-  id: "saved", observationId: "profile:user-team", identity: { provider: "codex", userId: "user", workspaceId: "team" },
+  id: "saved", observationId: "profile:user-team", legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" },
   email: "person@example.com", label: "person@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false,
 };
 const scoped: ProviderLimits = {
@@ -55,11 +55,11 @@ it("does not infer identity from email without a saved profile", () => {
 it("reconciles Claude using its user ID and normalizes display emails", () => {
   const claude = { ...scoped, provider: "claude" as const, account: { id: "profile:claude", label: " Person@Example.com " } };
   const old = { ...legacy, provider: "claude" as const, account: { id: "user", label: profile.email } };
-  expect(accountCards([claude, old], [{ ...profile, observationId: "profile:claude", identity: { ...profile.identity, provider: "claude" } }]).entries).toEqual([claude]);
+  expect(accountCards([claude, old], [{ ...profile, observationId: "profile:claude", legacyId: "user", identity: { ...profile.identity, provider: "claude" } }]).entries).toEqual([claude]);
 });
 it("folds a saved Muse login's email-keyed history into its scoped card", () => {
   const muse: SavedProfile = {
-    ...profile, id: "saved-muse", observationId: "profile:muse-you", email: "You@Example.com",
+    ...profile, id: "saved-muse", observationId: "profile:muse-you", legacyId: "email:you@example.com", email: "You@Example.com",
     identity: { provider: "muse", userId: "you@example.com", workspaceId: "" },
   };
   const scopedMuse: ProviderLimits = { ...scoped, provider: "muse", account: { id: muse.observationId, label: "you@example.com" } };
@@ -70,4 +70,13 @@ it("folds a saved Muse login's email-keyed history into its scoped card", () => 
 
   expect(shown.entries).toEqual([scopedMuse, otherEmail]);
   expect(shown.legacyAccounts.get(muse.observationId)).toEqual([{ id: "email:you@example.com", email: "you@example.com" }]);
+});
+it("folds the history the saved profile names as its legacy id, never one rebuilt from its identity", () => {
+  const renamed = { ...profile, legacyId: "renamed-team" };
+  const named = { ...legacy, account: { id: "renamed-team", label: profile.email } };
+
+  const shown = accountCards([scoped, named, legacy], [renamed]);
+
+  expect(shown.entries).toEqual([scoped, legacy]);
+  expect(shown.legacyAccounts.get(profile.observationId)).toEqual([{ id: "renamed-team", email: profile.email }]);
 });

@@ -71,6 +71,21 @@ fn a_pending_recovery_is_reported_only_to_the_provider_it_belongs_to() {
 }
 
 #[test]
+fn listing_names_the_history_each_profile_replaces() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Codex, "c", "team"), codex("c", "c1"));
+
+    let legacy_of = |provider| {
+        let listed = harness.accounts().list(provider).unwrap();
+        serde_json::to_value(&listed).unwrap()["profiles"][0]["legacyId"].clone()
+    };
+
+    assert_eq!(legacy_of(AgentId::Claude), "a");
+    assert_eq!(legacy_of(AgentId::Codex), "team");
+}
+
+#[test]
 fn listing_says_which_profiles_are_archived() {
     let harness = Harness::new();
     let a = harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));

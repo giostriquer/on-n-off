@@ -7,7 +7,7 @@ import { limitColumn, type CardAccount, type LimitCard } from "./limitCards";
 import { NOW, okCodex, staleCodex } from "./readingFixtures";
 
 const unread: SavedProfile = {
-  id: "unread", observationId: "profile:unread", identity: { provider: "codex", userId: "unread", workspaceId: "team" },
+  id: "unread", observationId: "profile:unread", legacyId: "team", identity: { provider: "codex", userId: "unread", workspaceId: "team" },
   email: "unread@codex.example", label: "unread@codex.example", category: "Client B", savedAt: NOW, active: false, needsLogin: false, archived: true,
 };
 
