@@ -22,7 +22,9 @@ test("--layout runs exactly the Limits card and popover header scenes", async ()
     "limits-sign-in-1024",
     "limits-sign-in-1120",
     "limits-sign-in-1440",
+    "limits-saved-paused-1280",
     "limits-popover",
+    "popover-saved-paused",
     "popover-archived",
   ]);
   for (const scene of SCENES.filter((candidate) => candidate.limitsColumns || candidate.popoverHeaders)) {

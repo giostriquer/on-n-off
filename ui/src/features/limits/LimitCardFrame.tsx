@@ -40,7 +40,7 @@ function CardHeader({ card, provider, title, now, menu }: { card: LimitCard | nu
   const updatedAt = card?.freshness.updatedAt;
   const { beside, line, name, tags: tagsRow } = useTagsBeside();
   const tags = (
-    <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center justify-end gap-1.5 whitespace-nowrap empty:hidden ${beside ? "ml-auto" : "col-[2/-1] mt-1"}`}>
+    <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center gap-1.5 whitespace-nowrap empty:hidden ${beside ? "ml-auto" : "col-[2/-1] mt-1"}`}>
       {card && cardTags(card).map(tag => <HeaderTag key={tag.kind} tag={tag} now={now} />)}
     </div>
   );

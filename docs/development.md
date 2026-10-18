@@ -71,13 +71,15 @@ locates the subsystems. Module doc-comments explain their implementation.
   catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and
   reusing a feature means reusing that implementation. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
-  provider icon, the name's column and the actions (the active dot and ⋯). Its tags are attached
-  at the right: on the name's line, ending before the actions, when `useTagsBeside` measures that
-  they fit, and otherwise on their own row under the name, ending at the header's right edge.
-  The category starts under the name and its tags and runs to the header's right edge. The tray
-  popover's header puts its tags at the right too. `scripts/ui-shots.mjs` checks these rules:
-  `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues` in
-  every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
+  provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
+  order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.
+  When `useTagsBeside` measures that they fit, they sit on the name's line, attached at the right
+  and ending before the actions; otherwise they all move to their own row, starting under the
+  name in the same order. The category starts under the name and its tags and runs to the
+  header's right edge. The tray popover's header puts its tags at the right, in the same order.
+  `scripts/ui-shots.mjs` checks these rules, and that tags on one line sit one gap apart in their
+  order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
+  in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
   verification).
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.

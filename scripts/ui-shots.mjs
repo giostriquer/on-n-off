@@ -83,6 +83,7 @@ function accountHeaderIssues(element) {
       issues.push(`account header control leaves the name's line: ${control.getAttribute("aria-label") ?? control.tagName} on ${title.textContent}`);
     }
   }
+  let packing = null;
   if (tagRects.length > 0) {
     const gap = node => parseFloat(getComputedStyle(node).columnGap) || 0;
     const range = document.createRange();
@@ -91,22 +92,19 @@ function accountHeaderIssues(element) {
     const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + gap(tags) * (tagRects.length - 1);
     const fits = name.left + nameWidth + gap(line) + tagsWidth <= column.right - 1;
     const inline = tagRects.every(rect => rect.top < name.bottom && rect.bottom > name.top);
-    if (fits && !inline) {
-      issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
+    const left = Math.min(...tagRects.map(rect => rect.left));
+    const right = Math.max(...tagRects.map(rect => rect.right));
+    const top = Math.min(...tagRects.map(rect => rect.top));
+    if (inline) {
+      if (title.scrollWidth > title.clientWidth + 0.5) issues.push(`account tags beside the name truncate it: ${title.textContent}`);
+      if (Math.abs(right - column.right) > 1) issues.push(`account tags beside the name are not attached at the header's right: ${title.textContent}`);
+    } else {
+      if (fits) issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
+      if (Math.abs(left - column.left) > 1) issues.push(`account tags on their own row do not start under the name: ${title.textContent}`);
+      if (right > contentRight + 1) issues.push(`account tags on their own row reach past the header's right edge: ${title.textContent}`);
+      if (top < name.bottom - 1) issues.push(`account tags on their own row are not under the name: ${title.textContent}`);
     }
-    if (inline && title.scrollWidth > title.clientWidth + 0.5) {
-      issues.push(`account tags beside the name truncate it: ${title.textContent}`);
-    }
-    const rightEdge = inline ? column.right : contentRight;
-    if (Math.abs(Math.max(...tagRects.map(rect => rect.right)) - rightEdge) > 1) {
-      issues.push(`account tags are not attached at the header's right: ${title.textContent}`);
-    }
-    if (!inline && Math.min(...tagRects.map(rect => rect.left)) < column.left - 1) {
-      issues.push(`account tags on their own row reach left of the name: ${title.textContent}`);
-    }
-    if (!inline && Math.min(...tagRects.map(rect => rect.top)) < name.bottom - 1) {
-      issues.push(`account tags on their own row are not under the name: ${title.textContent}`);
-    }
+    packing = { label: title.textContent, gap: gap(tags), rects: tagRects.map(({ left, right, top, bottom }) => ({ left, right, top, bottom })) };
   }
   const category = element.querySelector('[data-testid="account-category"]');
   if (category) {
@@ -119,7 +117,7 @@ function accountHeaderIssues(element) {
       issues.push(`account category does not run to the header's right edge: ${title.textContent}`);
     }
   }
-  return { measured: true, issues };
+  return { measured: true, issues, packing };
 }
 
 function popoverHeaderIssues(element) {
@@ -127,13 +125,21 @@ function popoverHeaderIssues(element) {
   const label = row?.querySelector(".truncate");
   const tags = [...(row?.children ?? [])].filter(child => child !== label && child.getBoundingClientRect().width > 0);
   if (!label || tags.length === 0) return { measured: false, issues: [] };
-  const right = Math.max(...tags.map(tag => tag.getBoundingClientRect().right));
-  return {
-    measured: true,
-    issues: Math.abs(right - row.getBoundingClientRect().right) > 1
-      ? [`popover account tags are not attached at the header's right: ${label.textContent}`]
-      : [],
-  };
+  const rects = tags.map(tag => tag.getBoundingClientRect());
+  const issues = [];
+  if (Math.abs(Math.max(...rects.map(rect => rect.right)) - row.getBoundingClientRect().right) > 1) {
+    issues.push(`popover account tags are not attached at the header's right: ${label.textContent}`);
+  }
+  const packing = { label: label.textContent, gap: parseFloat(getComputedStyle(row).columnGap) || 0, rects: rects.map(({ left, right, top, bottom }) => ({ left, right, top, bottom })) };
+  return { measured: true, issues, packing };
+}
+
+function packedInOrder({ rects, gap }) {
+  return rects.every((rect, index) => {
+    const previous = rects[index - 1];
+    if (!previous || previous.top >= rect.bottom || rect.top >= previous.bottom) return true;
+    return Math.abs(rect.left - previous.right - gap) <= 1;
+  });
 }
 
 async function runScene(browser, scene) {
@@ -218,6 +224,7 @@ async function headerProblems(headers, check, nothingMeasured) {
     const result = await header.evaluate(check);
     if (result.measured) measured += 1;
     problems.push(...result.issues);
+    if (result.packing && !packedInOrder(result.packing)) problems.push(`header tags are not packed in their order: ${result.packing.label}`);
   }
   return measured === 0 ? [...problems, nothingMeasured] : problems;
 }
