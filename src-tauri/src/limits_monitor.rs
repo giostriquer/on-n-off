@@ -466,7 +466,7 @@ fn reset_detected(
     before: &WindowObservation,
     used_percent: f64,
     resets_at: Option<&str>,
-    observed_at: chrono::DateTime<chrono::FixedOffset>,
+    incoming_at: chrono::DateTime<chrono::FixedOffset>,
 ) -> bool {
     let previous = before
         .resets_at
@@ -475,7 +475,7 @@ fn reset_detected(
     let timestamp_advanced = previous
         .zip(resets_at.and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()))
         .is_some_and(|(previous, current)| current > previous);
-    let reset_passed = previous.is_some_and(|previous| previous <= observed_at);
+    let reset_passed = previous.is_some_and(|previous| previous <= incoming_at);
     let drop = before.used_percent - used_percent;
 
     (timestamp_advanced || reset_passed) && drop > 0.5

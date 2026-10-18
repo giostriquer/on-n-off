@@ -180,7 +180,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     status: presentation.status,
     active,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, features.firstMessageSession !== null, now)),
+    rows: rest.map(window => presentRow(window, features.firstMessageSession === "claude", now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
