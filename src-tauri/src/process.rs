@@ -18,7 +18,8 @@ pub(crate) fn wait_with_deadline(
     timeout: Duration,
 ) -> std::io::Result<CommandOutcome> {
     let stdout = child.stdout.take().map(read_pipe);
-    wait(child, stdout, timeout, || false, || {})
+    let stderr = child.stderr.take().map(read_pipe);
+    wait(child, stdout, stderr, timeout, || false, || {})
 }
 
 pub(crate) fn wait_with_cancellation(
@@ -29,8 +30,9 @@ pub(crate) fn wait_with_cancellation(
 ) -> std::io::Result<CommandOutcome> {
     let (sender, lines) = mpsc::channel();
     let stdout = child.stdout.take().map(|pipe| read_lines(pipe, sender));
+    let stderr = child.stderr.take().map(read_pipe);
     let mut deliver = || lines.try_iter().for_each(|line| on_line(&line));
-    let outcome = wait(child, stdout, timeout, canceled, &mut deliver)?;
+    let outcome = wait(child, stdout, stderr, timeout, canceled, &mut deliver)?;
     if matches!(outcome, CommandOutcome::Exited { .. }) {
         deliver();
     }
@@ -40,11 +42,11 @@ pub(crate) fn wait_with_cancellation(
 fn wait(
     mut child: Child,
     stdout: Option<JoinHandle<String>>,
+    stderr: Option<JoinHandle<String>>,
     timeout: Duration,
     canceled: impl Fn() -> bool,
     mut between_polls: impl FnMut(),
 ) -> std::io::Result<CommandOutcome> {
-    let stderr = child.stderr.take().map(read_pipe);
     let started = Instant::now();
     loop {
         match child.try_wait() {
@@ -88,15 +90,14 @@ fn read_pipe<R: Read + Send + 'static>(mut pipe: R) -> JoinHandle<String> {
 fn read_lines<R: Read + Send + 'static>(pipe: R, lines: Sender<String>) -> JoinHandle<String> {
     std::thread::spawn(move || {
         let mut pipe = BufReader::new(pipe);
-        let mut output = String::new();
+        let mut output = Vec::new();
         let mut line = Vec::new();
         while pipe.read_until(b'\n', &mut line).is_ok_and(|read| read > 0) {
             let text = String::from_utf8_lossy(&line);
-            output.push_str(&text);
             let _ = lines.send(text.trim_end_matches(['\n', '\r']).to_owned());
-            line.clear();
+            output.append(&mut line);
         }
-        output
+        String::from_utf8(output).unwrap_or_default()
     })
 }
 

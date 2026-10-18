@@ -22,7 +22,7 @@ use std::{
 const ENV_CREDENTIALS: [&str; 1] = ["META_API_KEY"];
 const OVERRIDES: [&str; 3] = ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "MUSE_AUTH_PATH"];
 const MALFORMED_LOGIN: &str = "The saved Muse login is malformed.";
-const SIGN_IN_PAGE: &str = "https://auth.meta.com/";
+const SIGN_IN_PAGE_PREFIX: &str = "https://auth.meta.com/";
 
 pub(super) struct Muse;
 
@@ -233,10 +233,10 @@ impl IsolatedSignIn for MuseNative {
         command
     }
 
-    fn sign_in_page(&self, line: &str) -> Option<String> {
+    fn sign_in_page<'a>(&self, line: &'a str) -> Option<&'a str> {
         let page = line.trim();
-        (page.starts_with(SIGN_IN_PAGE) && !page.contains(char::is_whitespace))
-            .then(|| page.to_owned())
+        (page.starts_with(SIGN_IN_PAGE_PREFIX) && !page.contains(char::is_whitespace))
+            .then_some(page)
     }
 
     fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {

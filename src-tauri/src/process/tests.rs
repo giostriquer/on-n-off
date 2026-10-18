@@ -37,12 +37,19 @@ fn a_line_is_seen_while_the_command_still_runs() {
 
 #[test]
 fn every_line_is_seen_in_order_and_kept_in_the_output() {
-    let child = spawn(
-        CliStub::new("prints-two-lines")
-            .stdout("first")
-            .stderr("noise"),
-        "process-lines-in-order",
-    );
+    let dir = crate::paths::scratch_dir("process-lines-in-order");
+    std::fs::write(dir.join("more.txt"), "  second\nthird\n").unwrap();
+    let child = CliStub::new("prints-three-lines")
+        .stdout("first")
+        .stdout_file("more.txt")
+        .stderr("noise")
+        .cli(&dir)
+        .command()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
     let seen = RefCell::new(Vec::new());
 
     let outcome = wait_with_cancellation(
@@ -62,15 +69,18 @@ fn every_line_is_seen_in_order_and_kept_in_the_output() {
         panic!("the command exited");
     };
     assert!(success);
-    assert_eq!(*seen.borrow(), ["first"]);
-    assert_eq!(stdout.trim_end(), "first");
+    assert_eq!(*seen.borrow(), ["first", "  second", "third"]);
+    assert_eq!(
+        stdout.lines().collect::<Vec<_>>(),
+        ["first", "  second", "third"]
+    );
     assert_eq!(stderr.trim_end(), "noise");
 }
 
 #[test]
 fn a_canceled_command_reports_no_further_lines() {
     let child = spawn(
-        CliStub::new("prints-then-sleeps").stdout("unread").sleep(2),
+        CliStub::new("prints-then-sleeps").stdout("unread").sleep(5),
         "process-canceled-lines",
     );
     let seen = Cell::new(0);
@@ -78,7 +88,10 @@ fn a_canceled_command_reports_no_further_lines() {
     let outcome = wait_with_cancellation(
         child,
         Duration::from_secs(20),
-        || true,
+        || {
+            std::thread::sleep(Duration::from_millis(500));
+            true
+        },
         |_| seen.set(seen.get() + 1),
     )
     .unwrap();

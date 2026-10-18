@@ -124,7 +124,7 @@ trait NativeAccount: Native {
 
 trait IsolatedSignIn: Native {
     fn sign_in(&self) -> std::process::Command;
-    fn sign_in_page(&self, _line: &str) -> Option<String> {
+    fn sign_in_page<'a>(&self, _line: &'a str) -> Option<&'a str> {
         None
     }
     fn first_usage(

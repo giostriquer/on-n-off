@@ -82,6 +82,7 @@ pub(super) struct NativeState {
     pub sign_in_exit: Cell<i32>,
     pub sign_in_page: Cell<Option<&'static str>>,
     pub sign_in_waits: Cell<bool>,
+    pub sign_in_wants_no_input: Cell<bool>,
     pub isolated: RefCell<Vec<(AgentId, PathBuf)>>,
     pub cleaned: Cell<usize>,
     pub homes: Option<Arc<Homes>>,
@@ -275,21 +276,32 @@ impl Native for FakeIsolated {
 }
 impl IsolatedSignIn for FakeIsolated {
     fn sign_in(&self) -> std::process::Command {
+        if cfg!(unix) && self.0 .0.sign_in_wants_no_input.get() {
+            let mut command = std::process::Command::new("sh");
+            command.args(["-c", "[ ! -p /dev/stdin ] && ! IFS= read -r _line"]);
+            return command;
+        }
         let bin = self.1.join("bin");
         let mut stub = crate::cli_stub::CliStub::new("official-sign-in");
         if let Some(page) = self.0 .0.sign_in_page.get() {
             std::fs::create_dir_all(&bin).unwrap();
-            std::fs::write(bin.join("again.txt"), format!("{page}\n")).unwrap();
-            stub = stub.stdout(page).stdout_file("again.txt");
+            std::fs::write(
+                bin.join("page.txt"),
+                format!("  {page}\nconfirm this code matches:\n  {page}\n"),
+            )
+            .unwrap();
+            stub = stub
+                .stdout("Open this page to sign in:")
+                .stdout_file("page.txt");
         }
         if self.0 .0.sign_in_waits.get() {
             stub = stub.sleep(30);
         }
         stub.exit(self.0 .0.sign_in_exit.get()).cli(&bin).command()
     }
-    fn sign_in_page(&self, line: &str) -> Option<String> {
+    fn sign_in_page<'a>(&self, line: &'a str) -> Option<&'a str> {
         let line = line.trim();
-        line.starts_with("https://").then(|| line.to_owned())
+        line.starts_with("https://").then_some(line)
     }
     fn first_usage(&self, _: &Path, _: &Identity) -> Option<crate::dto::ProviderLimitsDto> {
         None

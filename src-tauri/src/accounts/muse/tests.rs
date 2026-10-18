@@ -203,7 +203,7 @@ fn the_sign_in_page_is_the_meta_device_page_muse_prints() {
     let store = MuseNative::private(&scratch_dir("muse-sign-in-page"));
     let page = "https://auth.meta.com/oauth/device/?code=ABCD-1234";
 
-    assert_eq!(store.sign_in_page(&format!("  {page}")), Some(page.into()));
+    assert_eq!(store.sign_in_page(&format!("  {page}")), Some(page));
     for printed in [
         "Open this page to sign in:",
         "  ABCD-1234",

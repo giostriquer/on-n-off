@@ -1,9 +1,10 @@
 use super::model::Identity;
 use super::store;
 use super::transaction::Native;
-use crate::{dto::AgentId, file_lease::FileLease};
+use super::IsolatedSignIn;
+use crate::{dto::AgentId, file_lease::FileLease, process::CommandOutcome};
 use std::{
-    cell::Cell,
+    cell::OnceCell,
     collections::VecDeque,
     path::Path,
     process::Stdio,
@@ -178,37 +179,7 @@ impl super::Accounts {
                 .map_err(|_| "Cannot record isolated sign-in ownership.")?,
         )?;
         let result: Result<(), String> = (|| {
-            let child = isolated
-                .sign_in()
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .map_err(|_| {
-                    "Could not start official sign-in. Check the provider CLI installation."
-                })?;
-            let unopened = Cell::new(false);
-            let mut opened = false;
-            let outcome = crate::process::wait_with_cancellation(
-                child,
-                Duration::from_secs(300),
-                || unopened.get() || canceled.load(Ordering::Acquire),
-                |line| {
-                    if let Some(page) = isolated.sign_in_page(line).filter(|_| !opened) {
-                        opened = true;
-                        unopened.set(self.browser.open(&page).is_err());
-                    }
-                },
-            );
-            if unopened.get() {
-                return Err("Could not open the sign-in page in a browser. The current native login was not changed.".into());
-            }
-            if !matches!(
-                outcome,
-                Ok(crate::process::CommandOutcome::Exited { success: true, .. })
-            ) {
-                return Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into());
-            }
+            self.run_official_sign_in(isolated.as_ref(), &canceled)?;
             if canceled.load(Ordering::Acquire) {
                 return Err("Sign-in was canceled.".into());
             }
@@ -234,6 +205,42 @@ impl super::Accounts {
         result?;
         self.notify.changed(provider);
         Ok(())
+    }
+
+    fn run_official_sign_in(
+        &self,
+        isolated: &dyn IsolatedSignIn,
+        canceled: &AtomicBool,
+    ) -> Result<(), String> {
+        let child = isolated
+            .sign_in()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|_| {
+                "Could not start official sign-in. Check the provider CLI installation."
+            })?;
+        let opened = OnceCell::new();
+        let outcome = crate::process::wait_with_cancellation(
+            child,
+            Duration::from_secs(300),
+            || opened.get() == Some(&false) || canceled.load(Ordering::Acquire),
+            |line| {
+                if opened.get().is_none() {
+                    if let Some(page) = isolated.sign_in_page(line) {
+                        let _ = opened.set(self.browser.open(page).is_ok());
+                    }
+                }
+            },
+        );
+        if opened.get() == Some(&false) {
+            return Err("Could not open the sign-in page in a browser. The current native login was not changed.".into());
+        }
+        match outcome {
+            Ok(CommandOutcome::Exited { success: true, .. }) => Ok(()),
+            _ => Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into()),
+        }
     }
 
     pub(super) fn recover_abandoned(&self) {

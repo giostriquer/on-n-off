@@ -171,6 +171,61 @@ fn a_sign_in_whose_page_cannot_open_ends_instead_of_waiting() {
 }
 
 #[test]
+fn canceling_a_waiting_sign_in_ends_it_at_once() {
+    let harness = Harness::new();
+    *harness.native.signed_in.borrow_mut() = Some(claude("b", "b1"));
+    harness.native.sign_in_waits.set(true);
+    let id = operation();
+    let logins = harness.path().join(".on-n-off/accounts/logins");
+    let canceler = {
+        let id = id.clone();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            while started.elapsed() < std::time::Duration::from_secs(20) {
+                let running = std::fs::read_dir(&logins)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .any(|entry| entry.path().join("bin").exists());
+                if running {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            crate::accounts::cancel(&id);
+        })
+    };
+    let started = std::time::Instant::now();
+
+    let error = harness
+        .accounts()
+        .add(AgentId::Claude, id, None)
+        .unwrap_err();
+    canceler.join().unwrap();
+
+    assert!(
+        error.starts_with("Sign-in was canceled, timed out, or did not complete."),
+        "{error}"
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    assert_eq!(harness.sealed(), None, "no vault was written");
+    assert_eq!(harness.native.cleaned.get(), 1);
+    assert!(left(&harness).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_sign_in_is_given_no_input() {
+    let harness = Harness::new();
+    *harness.native.signed_in.borrow_mut() = Some(claude("b", "b1"));
+    harness.native.sign_in_wants_no_input.set(true);
+
+    let added = harness.accounts().add(AgentId::Claude, operation(), None);
+
+    assert!(added.is_ok(), "{added:?}");
+}
+
+#[test]
 fn claude_and_codex_open_their_own_sign_in_pages() {
     for (provider, printed) in [
         (

@@ -484,8 +484,8 @@ preservation, corrupted vaults and browser workspace membership. Tests do not us
 The account operations, sign-in, remembering and the saved accounts' usage refresh run on
 `Accounts` (`accounts/mod.rs`), which tests build from a scratch home whose vault the fixture key
 unlocks, a fake native store that reads each provider's logins by that provider's rules, a fake
-isolated sign-in whose official client is a stub, fake running clients and a notifier that
-records what it heard; a test build fails any test that reaches the OS credential store. Each
+isolated sign-in whose official client is a stub, fake running clients, a notifier that
+records what it heard and a browser that records the pages it opened and can refuse one; a test build fails any test that reaches the OS credential store. Each
 adapter's native store is tested beside it (`claude/tests/`, `codex/tests/`), with a scratch home,
 an injected environment and managed-policy paths, and a fake `security`.
 
