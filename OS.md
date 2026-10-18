@@ -149,6 +149,9 @@ Rust and Swift cache generations; the workflows and scripts own current keys.
   start on a fresh runner, 10-20 s of launching the tools and compiling manifests, which each macOS
   job pays in its first Swift command. SwiftPM's own `~/Library/Caches/org.swift.swiftpm` stays
   uncached: the notch package has no remote dependencies, so there is nothing in it to keep.
+- `ci.yml`'s `layout` job runs `bun run ui:layout` on the pinned Linux image after
+  `bunx playwright install --with-deps chromium`, which takes the browser of the lockfile's
+  Playwright. It is not a required check (docs/development.md, Visual verification).
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

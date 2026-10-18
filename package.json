@@ -20,7 +20,7 @@
     "check": "tsc --noEmit",
     "test": "vitest run --config vitest.config.ts",
     "ui:shots": "bun scripts/ui-shots.mjs",
-    "ui:guards": "bun scripts/ui-shots.mjs --guards",
+    "ui:layout": "bun scripts/ui-shots.mjs --layout",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

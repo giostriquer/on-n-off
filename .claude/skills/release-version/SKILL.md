@@ -68,7 +68,9 @@ Every head CI sees gets a full run, so the bump rides the PR's last push instead
 - The bump commit is pushed, in the same push as the PR's final changes whenever the release was
   known in time.
 - CI's three required checks (`frontend`, `verify-windows`, `verify-macos`) are green at the PR's
-  head. Dispatch a `workbench:ci-watcher` pinned to that SHA; on red, use `fix-ci`.
+  head. Dispatch a `workbench:ci-watcher` pinned to that SHA; on red, use `fix-ci`. The `layout`
+  check is a trial, not one of the three: when it is the watcher's only failure, confirm the three
+  with one `gh pr checks <n> --required` read and fix `layout` in a PR of its own.
 - The branch is current with `main` (the ruleset is strict). Merge `main` in, never rebase, and let
   CI pass again on the new head.
 

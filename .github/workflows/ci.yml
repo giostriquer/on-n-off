@@ -37,13 +37,16 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Check out repository
+      - &checkout
+        name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Set up Bun
+      - &setup-bun
+        name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
 
-      - name: Install frontend dependencies
+      - &install-frontend
+        name: Install frontend dependencies
         id: install
         run: bun install --frozen-lockfile
 
@@ -65,37 +68,34 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
-  # The card and popover header layout rules (docs/development.md), measured in headless Chromium by
-  # scripts/ui-shots.mjs. Not a required check: Linux fonts are not the app's, so it reports first.
+  # The card and popover header layout rules, measured in headless Chromium; not a required check
+  # yet (docs/development.md, Visual verification).
   layout:
     name: layout
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - *checkout
+      - *setup-bun
+      - *install-frontend
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-
-      - name: Install frontend dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Install Chromium for the layout guard
+      - name: Install Chromium for the layout check
         timeout-minutes: 5
         run: bunx playwright install --with-deps chromium
 
       - name: Check the Limits card and popover header layout
         timeout-minutes: 5
-        run: bun run ui:guards
+        env:
+          UI_SHOTS_DIR: .tmp/ui-shots
+        run: bun run ui:layout
 
       - name: Keep the layout captures
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: layout-captures
-          path: .tmp/ui-shots/
-          if-no-files-found: ignore
+          path: .tmp/ui-shots
+          if-no-files-found: warn
 
   # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
   # Their check runs are `windows / lint`, `windows / test` and so on; no job here or in verify.yml
