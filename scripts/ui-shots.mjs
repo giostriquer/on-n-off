@@ -314,8 +314,10 @@ async function scrollTo(page, selector) {
 }
 
 async function main() {
-  const sceneFile = process.argv[2];
-  const scenes = sceneFile ? JSON.parse(await readFile(sceneFile, "utf8")) : SCENES;
+  const argument = process.argv[2];
+  const scenes = argument === "--guards"
+    ? SCENES.filter((scene) => scene.limitsColumns || scene.popoverHeaders)
+    : argument ? JSON.parse(await readFile(argument, "utf8")) : SCENES;
   if (!Array.isArray(scenes)) throw new Error("the scene file must hold an array of scenes");
   scenes.forEach(validateScene);
   mkdirSync(OUT, { recursive: true });

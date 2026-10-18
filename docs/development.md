@@ -77,7 +77,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   The category starts under the name and its tags and runs to the header's right edge. The tray
   popover's header puts its tags at the right too. `scripts/ui-shots.mjs` checks these rules:
   `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues` in
-  every scene that sets `popoverHeaders`.
+  every scene that sets `popoverHeaders`. `bun run ui:guards` runs only those scenes, and CI runs
+  it as the `layout` check on Linux, where a failure keeps the captures as the `layout-captures`
+  artifact. The check is not required yet: Linux has none of the app's fonts, so it reports
+  before it blocks.
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the

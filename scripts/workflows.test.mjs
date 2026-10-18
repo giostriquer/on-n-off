@@ -376,3 +376,17 @@ test("the aggregator step fails for every result but success, and when it needs 
   for (const { code, output } of results.slice(passing.length)) assert.notEqual(code, 0, output);
   assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });
+
+test("the layout guard runs the header scenes in CI, each long step bounded, under a name no required check uses", { skip }, () => {
+  const layout = load("ci").jobs.layout;
+  assert.equal(layout.name, "layout");
+  assert.ok(!requiredChecks.includes(layout.name));
+  assert.equal(layout["runs-on"], pinnedImages.ubuntu);
+  const guard = step(layout, "Check the Limits card and popover header layout");
+  assert.equal(guard.run, "bun run ui:guards");
+  assert.ok(guard["timeout-minutes"] <= 10);
+  assert.ok(step(layout, "Install Chromium for the layout guard")["timeout-minutes"] <= 10);
+  assert.ok(guard.index > step(layout, "Install Chromium for the layout guard").index);
+  const packageJson = JSON.parse(readFileSync(join(directory, "..", "..", "package.json"), "utf8"));
+  assert.equal(packageJson.scripts["ui:guards"], "bun scripts/ui-shots.mjs --guards");
+});
