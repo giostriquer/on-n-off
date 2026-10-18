@@ -52,6 +52,7 @@ export const SCENES = [
     steps: [{ wait: "role=region[name='Usage over time'] >> svg path[stroke] >> nth=0" }],
   })),
   { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, popoverHeaders: true, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
+  { name: "popover-saved-paused", url: "/?surface=limits-popover&mock=savedRefreshPaused", viewport: { width: 350, height: 700 }, popoverHeaders: true, steps: [{ wait: "role=button[name='Usage status: Last known usage'] >> nth=0" }] },
   { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
   { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
   { name: "limits-archived-open-light", url: "/limits?mock=archivedAccounts", theme: "light", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
