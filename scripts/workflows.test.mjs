@@ -378,7 +378,7 @@ test("the aggregator step fails for every result but success, and when it needs 
   assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });
 
-test("CI runs on every pull request to main and every push to main, with no path filter", { skip }, () => {
+test("CI's triggers are exactly every pull request to main and every push to main, with no filter", { skip }, () => {
   assert.deepEqual(load("ci").on, { pull_request: { branches: ["main"] }, push: { branches: ["main"] } });
 });
 
