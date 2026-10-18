@@ -254,7 +254,7 @@ function backgroundFetch(verify) {
   assert.match(finish.run, /exit 0\s*$/, "a failed fetch never fails the job");
 }
 
-const requiredChecks = ["frontend", "verify-windows", "verify-macos"];
+const requiredChecks = ["frontend", "verify-windows", "verify-macos", "layout"];
 const aggregators = { "verify-windows": "windows", "verify-macos": "macos" };
 
 test("both OSes run the lint and the test job, neither of which can be skipped", { skip }, () => {
@@ -378,10 +378,10 @@ test("the aggregator step fails for every result but success, and when it needs 
   assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });
 
-test("the layout check runs the header scenes in CI on every run, can fail, keeps its captures, and is not required", { skip }, () => {
+test("the layout check runs the header scenes in CI on every run, can fail, keeps its captures, and is required", { skip }, () => {
   const layout = load("ci").jobs.layout;
   assert.equal(layout.name, "layout");
-  assert.ok(!requiredChecks.includes(layout.name));
+  assert.ok(requiredChecks.includes(layout.name));
   assert.equal(layout["runs-on"], pinnedImages.ubuntu);
   assert.equal(layout.if, undefined);
   assert.equal(layout["continue-on-error"], undefined);
