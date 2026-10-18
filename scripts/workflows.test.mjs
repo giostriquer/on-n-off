@@ -5,7 +5,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const skip = globalThis.Bun?.YAML ? false : "needs Bun's YAML parser";
-const directory = join(dirname(fileURLToPath(import.meta.url)), "..", ".github", "workflows");
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const directory = join(root, ".github", "workflows");
 const load = (name) => globalThis.Bun.YAML.parse(readFileSync(join(directory, `${name}.yml`), "utf8"));
 
 function step(job, name) {
@@ -104,7 +105,7 @@ test("no workflow spends a step on Defender exclusions the runner image already 
 });
 
 const swiftCacheAction = "./.github/actions/restore-swift-build";
-const loadAction = (path) => globalThis.Bun.YAML.parse(readFileSync(join(directory, "..", "..", path, "action.yml"), "utf8"));
+const loadAction = (path) => globalThis.Bun.YAML.parse(readFileSync(join(root, path, "action.yml"), "utf8"));
 const swiftJobs = () => [
   { name: "verify lint", job: lint(), configuration: "debug", saves: true },
   { name: "verify test", job: testJob(), configuration: "debug", saves: false },
@@ -311,7 +312,7 @@ test("the test job's setup is the lint job's, step for step and in the same orde
 });
 
 test("the lint jobs run every PowerShell script test, and the test jobs none", { skip }, () => {
-  const scripts = readdirSync(join(directory, "..", "..", "scripts")).filter((file) => file.endsWith(".test.ps1")).sort();
+  const scripts = readdirSync(join(root, "scripts")).filter((file) => file.endsWith(".test.ps1")).sort();
   assert.ok(scripts.length >= 5, scripts.join(", "));
   const runsIn = (job) => job.steps.flatMap((candidate) => candidate.run?.match(/scripts\/[\w-]+\.test\.ps1/g) ?? []).map((path) => path.slice("scripts/".length));
   assert.deepEqual(runsIn(lint()).sort(), scripts);
@@ -375,4 +376,25 @@ test("the aggregator step fails for every result but success, and when it needs 
   for (const { code, output } of results.slice(0, passing.length)) assert.equal(code, 0, output);
   for (const { code, output } of results.slice(passing.length)) assert.notEqual(code, 0, output);
   assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
+});
+
+test("the layout check runs the header scenes in CI on every run, can fail, keeps its captures, and is not required", { skip }, () => {
+  const layout = load("ci").jobs.layout;
+  assert.equal(layout.name, "layout");
+  assert.ok(!requiredChecks.includes(layout.name));
+  assert.equal(layout["runs-on"], pinnedImages.ubuntu);
+  assert.equal(layout.if, undefined);
+  assert.equal(layout["continue-on-error"], undefined);
+  const install = step(layout, "Install Chromium for the layout check");
+  const check = step(layout, "Check the Limits card and popover header layout");
+  assert.equal(check.run, "bun run ui:layout");
+  assert.equal(check.if, undefined);
+  assert.equal(check["continue-on-error"], undefined);
+  assert.ok(install.index < check.index);
+  for (const bounded of [install, check]) assert.ok(bounded["timeout-minutes"] <= 10, bounded.name);
+  const captures = step(layout, "Keep the layout captures");
+  assert.equal(captures.if, "failure()");
+  assert.equal(captures.with.path, check.env.UI_SHOTS_DIR);
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts["ui:layout"], "bun scripts/ui-shots.mjs --layout");
 });

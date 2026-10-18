@@ -77,7 +77,8 @@ locates the subsystems. Module doc-comments explain their implementation.
   The category starts under the name and its tags and runs to the header's right edge. The tray
   popover's header puts its tags at the right too. `scripts/ui-shots.mjs` checks these rules:
   `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues` in
-  every scene that sets `popoverHeaders`.
+  every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
+  verification).
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
@@ -184,6 +185,11 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 
 `bun run ui:shots [scenes.json]` drives headless Chromium (Playwright, its own Vite on `:1425`)
 through click/fill/press steps against a `?mock` build and writes retina PNGs to `.tmp/ui-shots/`.
+`bun run ui:layout` runs only the scenes that check a layout rule (`limitsColumns`,
+`popoverHeaders`; the scenes live in `scripts/ui-scenes.mjs`) and fails rather than pass with
+nothing to check. CI runs it as the `layout` check on Linux and keeps the captures as the
+`layout-captures` artifact when it fails. It is not a required check yet, because Linux has none
+of the app's fonts: when it is the only failed check, the required ones decide whether a PR merges.
 
 Design and accessibility work on a screen is judged from those captures — and, for WebKit
 fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
