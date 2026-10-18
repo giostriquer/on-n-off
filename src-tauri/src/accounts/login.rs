@@ -3,6 +3,7 @@ use super::store;
 use super::transaction::Native;
 use crate::{dto::AgentId, file_lease::FileLease};
 use std::{
+    cell::Cell,
     collections::VecDeque,
     path::Path,
     process::Stdio,
@@ -177,22 +178,37 @@ impl super::Accounts {
                 .map_err(|_| "Cannot record isolated sign-in ownership.")?,
         )?;
         let result: Result<(), String> = (|| {
-            let mut child = isolated
+            let child = isolated
                 .sign_in()
-                .stdin(Stdio::piped())
+                .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
                 .map_err(|_| {
                     "Could not start official sign-in. Check the provider CLI installation."
                 })?;
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = std::io::Write::write_all(&mut stdin, isolated.sign_in_input());
+            let unopened = Cell::new(false);
+            let mut opened = false;
+            let outcome = crate::process::wait_with_cancellation(
+                child,
+                Duration::from_secs(300),
+                || unopened.get() || canceled.load(Ordering::Acquire),
+                |line| {
+                    if let Some(page) = isolated.sign_in_page(line).filter(|_| !opened) {
+                        opened = true;
+                        unopened.set(self.browser.open(&page).is_err());
+                    }
+                },
+            );
+            if unopened.get() {
+                return Err("Could not open the sign-in page in a browser. The current native login was not changed.".into());
             }
-            match crate::process::wait_with_cancellation(child,Duration::from_secs(300),||canceled.load(Ordering::Acquire)){
-   Ok(crate::process::CommandOutcome::Exited{success:true,..})=>{},
-   _=>return Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into())
-  }
+            if !matches!(
+                outcome,
+                Ok(crate::process::CommandOutcome::Exited { success: true, .. })
+            ) {
+                return Err("Sign-in was canceled, timed out, or did not complete. The current native login was not changed.".into());
+            }
             if canceled.load(Ordering::Acquire) {
                 return Err("Sign-in was canceled.".into());
             }

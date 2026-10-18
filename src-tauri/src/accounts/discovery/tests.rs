@@ -183,6 +183,11 @@ fn untouched(home: &Path) -> super::super::Accounts {
             panic!("announced a change")
         }
     }
+    impl super::super::Browser for Untouched {
+        fn open(&self, _: &str) -> Result<(), String> {
+            panic!("opened a browser")
+        }
+    }
     impl super::super::NativeStores for Untouched {
         fn native(
             &self,
@@ -207,6 +212,7 @@ fn untouched(home: &Path) -> super::super::Accounts {
         stores: Box::new(Untouched),
         clients: Box::new(Untouched),
         notify: Box::new(Untouched),
+        browser: Box::new(Untouched),
     }
 }
 

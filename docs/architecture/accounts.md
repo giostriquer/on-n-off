@@ -166,8 +166,10 @@ code asks that rather than which provider it has. An adapter:
   preflight (custom homes, environment credentials, managed policy), its sign-out, and the
   signed-in subscription whose saved accounts' usage is read beside it (an API-key Codex login
   has none). A private one in a directory is an `IsolatedSignIn`, with the official sign-in
-  command, the first usage reading and the cleanup of anything the sign-in left outside that
-  directory;
+  command, the page that command prints for the user to open when it opens none itself (only
+  Muse's does; the `Accounts` context's `Browser` opens it once, and a page that cannot open ends
+  the sign-in at once), the first usage reading and the cleanup of anything the sign-in left
+  outside that directory;
 - reads a login through its typed view, `ClaudeLogin` or `CodexLogin` (`accounts::view`), so
   nothing else reads a login's JSON: identity and email, the credential generation's fingerprint
   and whether a saved login is due to renew. A view only reads; the bare credentials document
@@ -259,7 +261,10 @@ A saved, non-active Muse login lives in its own home under `accounts/homes/`, ru
 that home's `auth.json` and never touches the global Keychain item (verified 2026-10-16 with a
 real `muse login`); its usage is one key-mint read with that home's token, and the home is removed
 as a directory, never with `muse logout`. Sign-in runs `muse login` in an isolated home of that
-shape and presses Enter for it. Running `muse-bin-*` processes keep their login, so a switch
+shape. Without a terminal Muse opens no browser and asks for no Enter: it prints its device-code
+page (`https://auth.meta.com/oauth/device/?code=…`) and the code on stdout and waits, so on-n-off
+opens that page itself (verified 2026-10-17, Muse 1.4.10, with stdin closed and with an Enter
+sent). Running `muse-bin-*` processes keep their login, so a switch
 beside one asks first, as Codex does.
 
 ## Operations
