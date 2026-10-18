@@ -528,9 +528,34 @@ fn the_plan_is_the_tier_name_else_a_tier_that_reads_as_a_name() {
 }
 
 #[test]
-fn a_mint_answer_with_no_usable_window_falls_back() {
+fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
     let idle = json!({"is_subs_active": true, "subs_tier_name": "Wonder", "subs_usage": null});
-    assert!(normalized(idle).is_none());
+    let parsed = mint_reading(idle);
+    assert_eq!(
+        parsed.account.as_ref().map(|account| account.id.as_str()),
+        Some(scoped_you().as_str())
+    );
+    assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
+    assert_eq!(parsed.reading.windows.len(), 1);
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.id, "session");
+    assert_eq!(session.label, "5 hour · all models");
+    assert_eq!(session.used_percent, 0.0);
+    assert_eq!(session.resets_at, None);
+    assert_eq!(session.window_seconds, Some(18_000));
+
+    let unnamed = json!({"is_subs_active": true, "subs_tier_name": "27681631238169137"});
+    assert_eq!(mint_reading(unnamed).reading.plan, None);
+}
+
+#[test]
+fn a_mint_answer_with_no_usable_window_falls_back() {
+    for unconfirmed in [
+        json!({"subs_tier_name": "Wonder", "subs_usage": null}),
+        json!({"is_subs_active": null, "subs_tier_name": "Wonder"}),
+    ] {
+        assert!(normalized(unconfirmed.clone()).is_none(), "{unconfirmed}");
+    }
 
     let mut empty = mint_body();
     empty["subs_usage"]["window"] = json!(null);
@@ -690,17 +715,40 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
     );
     assert_eq!(serve_windows(rejected), 2);
 
-    let idle = read_current(
+    let unconfirmed = read_current(
         &root,
         serve_read(&root),
         |_| signed_in(Some("you@example.com")),
-        |_| {
-            Some(mint_response(
-                json!({"is_subs_active": true, "subs_usage": null}),
-            ))
-        },
+        |_| Some(mint_response(json!({"subs_usage": null}))),
     );
-    assert_eq!(serve_windows(idle), 2);
+    assert_eq!(serve_windows(unconfirmed), 2);
+}
+
+#[test]
+fn an_idle_mint_answer_answers_without_starting_serve() {
+    let root = crate::paths::scratch_dir("muse-mint-idle");
+    let read = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(Some("you@example.com")),
+        |_| {
+            Some(mint_response(json!({
+                "is_subs_active": true,
+                "subs_tier_name": "Muse Code Power Usage",
+                "subs_usage": null
+            })))
+        },
+    )
+    .expect("idle mint reading");
+    assert_eq!(read.reading.plan.as_deref(), Some("Muse Code Power Usage"));
+    assert_eq!(
+        read.reading
+            .windows
+            .iter()
+            .map(|window| (window.kind, window.used_percent))
+            .collect::<Vec<_>>(),
+        [(LimitWindowKind::Session, 0.0)]
+    );
 }
 
 #[test]
