@@ -63,7 +63,7 @@ const SCENES = [
     name: `usage-muse-${theme}`, url: "/usage?mock=ok", theme, checkMuseChart: true,
     steps: [{ wait: "role=region[name='Usage over time'] >> svg path[stroke] >> nth=0" }],
   })),
-  { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
+  { name: "limits-popover", url: "/?surface=limits-popover&mock=ok", viewport: { width: 350, height: 480 }, popoverHeaders: true, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
   { name: "limits-archived", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: [{ wait: `${ARCHIVED.claude} >> role=button[name='Archived (2)']` }] },
   { name: "limits-archived-open", url: "/limits?mock=archivedAccounts", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
   { name: "limits-archived-open-light", url: "/limits?mock=archivedAccounts", theme: "light", viewport: { width: 1120, height: 1400 }, steps: ARCHIVED_OPEN },
@@ -76,7 +76,7 @@ const SCENES = [
     { wait: "role=button[name='Unarchive person@acme.example']" },
     { shot: "limits-archived-after-archive" },
   ] },
-  { name: "popover-archived", url: "/?surface=limits-popover&mock=archivedAccounts", viewport: { width: 350, height: 900 }, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
+  { name: "popover-archived", url: "/?surface=limits-popover&mock=archivedAccounts", viewport: { width: 350, height: 900 }, popoverHeaders: true, steps: [{ wait: "role=article[name='Codex limits · other@example.com']" }] },
 ];
 
 function connects(port, host) {
@@ -135,6 +135,10 @@ function accountHeaderIssues(element) {
   const tags = element.querySelector('[data-testid="account-tags"]');
   if (!tags) return { measured: false, issues };
   const name = title.getBoundingClientRect();
+  const line = title.parentElement;
+  const column = line.getBoundingClientRect();
+  const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
+  const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
   const middle = rect => (rect.top + rect.bottom) / 2;
   const controls = [...element.querySelectorAll("button, [role='img']")]
     .filter(node => !tags.contains(node) && node.getBoundingClientRect().width > 0);
@@ -143,15 +147,13 @@ function accountHeaderIssues(element) {
       issues.push(`account header control leaves the name's line: ${control.getAttribute("aria-label") ?? control.tagName} on ${title.textContent}`);
     }
   }
-  if (tags.children.length > 0) {
+  if (tagRects.length > 0) {
     const gap = node => parseFloat(getComputedStyle(node).columnGap) || 0;
     const range = document.createRange();
     range.selectNodeContents(title);
     const nameWidth = range.getBoundingClientRect().width;
-    const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
     const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + gap(tags) * (tagRects.length - 1);
-    const line = title.parentElement;
-    const fits = name.left + nameWidth + gap(line) + tagsWidth <= line.getBoundingClientRect().right - 1;
+    const fits = name.left + nameWidth + gap(line) + tagsWidth <= column.right - 1;
     const inline = tagRects.every(rect => rect.top < name.bottom && rect.bottom > name.top);
     if (fits && !inline) {
       issues.push(`account tags wrap below the name although they fit beside it: ${title.textContent}`);
@@ -159,15 +161,43 @@ function accountHeaderIssues(element) {
     if (inline && title.scrollWidth > title.clientWidth + 0.5) {
       issues.push(`account tags beside the name truncate it: ${title.textContent}`);
     }
-    const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
-    if (!inline && tags.getBoundingClientRect().right < contentRight - 1) {
-      issues.push(`account tags on their own row stop short of the header's edge: ${title.textContent}`);
+    const rightEdge = inline ? column.right : contentRight;
+    if (Math.abs(Math.max(...tagRects.map(rect => rect.right)) - rightEdge) > 1) {
+      issues.push(`account tags are not attached at the header's right: ${title.textContent}`);
     }
-    if (!inline && Math.abs(tagRects[0].left - name.left) > 1) {
-      issues.push(`account tags on their own row do not start under the name: ${title.textContent}`);
+    if (!inline && Math.min(...tagRects.map(rect => rect.left)) < column.left - 1) {
+      issues.push(`account tags on their own row reach left of the name: ${title.textContent}`);
+    }
+    if (!inline && Math.min(...tagRects.map(rect => rect.top)) < name.bottom - 1) {
+      issues.push(`account tags on their own row are not under the name: ${title.textContent}`);
+    }
+  }
+  const category = element.querySelector('[data-testid="account-category"]');
+  if (category) {
+    const rect = category.getBoundingClientRect();
+    const above = Math.max(name.bottom, ...tagRects.map(tag => tag.bottom));
+    if (Math.abs(rect.left - column.left) > 1 || rect.top < above - 1) {
+      issues.push(`account category is not under the name and its tags: ${title.textContent}`);
+    }
+    if (Math.abs(rect.right - contentRight) > 1) {
+      issues.push(`account category does not run to the header's right edge: ${title.textContent}`);
     }
   }
   return { measured: true, issues };
+}
+
+function popoverHeaderIssues(element) {
+  const row = element.querySelector(":scope > div");
+  const label = row?.querySelector(".truncate");
+  const tags = [...(row?.children ?? [])].filter(child => child !== label && child.getBoundingClientRect().width > 0);
+  if (!label || tags.length === 0) return { measured: false, issues: [] };
+  const right = Math.max(...tags.map(tag => tag.getBoundingClientRect().right));
+  return {
+    measured: true,
+    issues: Math.abs(right - row.getBoundingClientRect().right) > 1
+      ? [`popover account tags are not attached at the header's right: ${label.textContent}`]
+      : [],
+  };
 }
 
 function validateScene(scene, index) {
@@ -239,13 +269,10 @@ async function runScene(browser, scene) {
     const headers = page.locator('[data-testid="limits-screen"] header').filter({ has: page.locator(".truncate") });
     const columns = await headers.evaluateAll(elements => new Set(elements.map(element => Math.round(element.getBoundingClientRect().left))).size);
     if (columns !== scene.limitsColumns) problems.push(`expected ${scene.limitsColumns} provider columns, got ${columns}`);
-    let measured = 0;
-    for (const header of await headers.all()) {
-      const result = await header.evaluate(accountHeaderIssues);
-      if (result.measured) measured += 1;
-      problems.push(...result.issues);
-    }
-    if (measured === 0) problems.push("the account tag guard measured no tag container");
+    problems.push(...await headerProblems(headers, accountHeaderIssues, "the account tag guard measured no tag container"));
+  }
+  if (scene.popoverHeaders) {
+    problems.push(...await headerProblems(page.locator("article > header"), popoverHeaderIssues, "the popover tag guard measured no tags"));
   }
   if (scene.checkMuseChart) {
     const blueLine = page.locator('.usage-chart-host path[stroke="#0082fb"]');
@@ -260,6 +287,17 @@ async function runScene(browser, scene) {
   }
   await context.close();
   return problems;
+}
+
+async function headerProblems(headers, check, nothingMeasured) {
+  const problems = [];
+  let measured = 0;
+  for (const header of await headers.all()) {
+    const result = await header.evaluate(check);
+    if (result.measured) measured += 1;
+    problems.push(...result.issues);
+  }
+  return measured === 0 ? [...problems, nothingMeasured] : problems;
 }
 
 async function scrollTo(page, selector) {

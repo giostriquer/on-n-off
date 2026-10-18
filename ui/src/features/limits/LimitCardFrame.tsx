@@ -40,23 +40,23 @@ function CardHeader({ card, provider, title, now, menu }: { card: LimitCard | nu
   const updatedAt = card?.freshness.updatedAt;
   const { beside, line, name, tags: tagsRow } = useTagsBeside();
   const tags = (
-    <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center gap-1.5 whitespace-nowrap empty:hidden ${beside ? "" : "mt-1 pl-6"}`}>
+    <div ref={tagsRow} data-testid="account-tags" className={`flex flex-wrap items-center justify-end gap-1.5 whitespace-nowrap empty:hidden ${beside ? "ml-auto" : "col-[2/-1] mt-1"}`}>
       {card && cardTags(card).map(tag => <HeaderTag key={tag.kind} tag={tag} now={now} />)}
     </div>
   );
   return (
-    <header className="border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
+    <header className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2.5 border-b border-[var(--hair)] px-3.5 py-2.5" title={updatedAt ? `Usage last checked ${updatedAt}` : undefined}>
+      <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-[0.5px]" />
+      <div ref={line} className="flex min-w-0 items-center gap-2.5">
+        <div ref={name} className="min-w-0 truncate text-[13px] font-semibold" title={title}>{title}</div>
+        {beside && tags}
+      </div>
       <div className="flex items-center gap-2.5">
-        <ProviderIcon provider={provider} className="size-3.5 shrink-0 translate-y-[0.5px]" />
-        <div ref={line} className="flex min-w-0 flex-1 items-center gap-2.5">
-          <div ref={name} className="min-w-0 truncate text-[13px] font-semibold" title={title}>{title}</div>
-          {beside && tags}
-        </div>
         {card?.active && !card.headline && <ActiveAccountDot />}
         {menu}
       </div>
       {!beside && tags}
-      {card?.identity.category && <div className="mt-0.5 break-words pl-6 text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
+      {card?.identity.category && <div data-testid="account-category" className="col-[2/-1] mt-0.5 break-words text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
       {updatedAt ? <p className="sr-only">Latest observation {updatedAt}</p> : null}
     </header>
   );
