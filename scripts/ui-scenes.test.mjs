@@ -1,11 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { chooseScenes, SCENES } from "./ui-scenes.mjs";
 
 const names = (scenes) => scenes.map((scene) => scene.name);
+
+function sceneFile(t, contents) {
+  const dir = mkdtempSync(join(tmpdir(), "ui-scenes-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, "scenes.json");
+  writeFileSync(file, JSON.stringify(contents));
+  return file;
+}
 
 test("--layout runs exactly the Limits card and popover header scenes", async () => {
   const layout = await chooseScenes(["--layout"]);
@@ -22,19 +30,20 @@ test("--layout runs exactly the Limits card and popover header scenes", async ()
   }
 });
 
-test("without an argument every scene runs, and a scene file runs its own scenes", async () => {
+test("without an argument every scene runs, and a scene file runs its own scenes", async (t) => {
   assert.deepEqual(names(await chooseScenes([])), names(SCENES));
-  const file = join(mkdtempSync(join(tmpdir(), "ui-scenes-")), "scenes.json");
-  writeFileSync(file, JSON.stringify([{ name: "one", url: "/limits?mock=ok" }]));
-  assert.deepEqual(names(await chooseScenes([file])), ["one"]);
+  assert.deepEqual(names(await chooseScenes([sceneFile(t, [{ name: "one", url: "/limits?mock=ok" }])])), ["one"]);
 });
 
-test("a run with nothing to check, an unknown flag or a file beside --layout is refused", async () => {
-  const empty = join(mkdtempSync(join(tmpdir(), "ui-scenes-")), "empty.json");
-  writeFileSync(empty, "[]");
+test("a run with nothing to check, a malformed file, an unknown flag or an extra file is refused", async (t) => {
+  const empty = sceneFile(t, []);
+  const scene = { name: "one", url: "/limits?mock=ok" };
   await assert.rejects(chooseScenes([empty]), /no scenes/);
+  await assert.rejects(chooseScenes([sceneFile(t, {})]), /array of scenes/);
+  await assert.rejects(chooseScenes([sceneFile(t, [{ ...scene, steps: [{ click: "a", wait: "b" }] }])]), /exactly one of/);
   await assert.rejects(chooseScenes(["--layuot"]), /Unknown option/);
   await assert.rejects(chooseScenes(["--layout", empty]), /--layout/);
+  await assert.rejects(chooseScenes([sceneFile(t, [scene]), sceneFile(t, [scene])]), /one scene file/);
 });
 
 test("a layout run needs both a Limits card scene and a popover scene", async () => {

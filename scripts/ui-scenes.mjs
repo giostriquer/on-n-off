@@ -68,15 +68,24 @@ export const SCENES = [
 
 export async function chooseScenes(argv, available = SCENES) {
   const { values, positionals } = parseArgs({ args: argv, options: { layout: { type: "boolean" } }, allowPositionals: true });
-  if (values.layout && positionals.length > 0) throw new Error("--layout runs the built-in header scenes and takes no scene file");
-  const scenes = values.layout
-    ? available.filter((scene) => scene.limitsColumns || scene.popoverHeaders)
-    : positionals[0] ? JSON.parse(await readFile(positionals[0], "utf8")) : available;
+  const scenes = values.layout ? layoutScenes(available, positionals) : await fileScenes(available, positionals);
+  scenes.forEach(validateScene);
+  return scenes;
+}
+
+function layoutScenes(available, files) {
+  if (files.length > 0) throw new Error("--layout runs the built-in header scenes and takes no scene file");
+  const scenes = available.filter((scene) => scene.limitsColumns || scene.popoverHeaders);
+  if (!scenes.some((scene) => scene.limitsColumns)) throw new Error("a layout run needs a Limits card scene");
+  if (!scenes.some((scene) => scene.popoverHeaders)) throw new Error("a layout run needs a popover scene");
+  return scenes;
+}
+
+async function fileScenes(available, files) {
+  if (files.length > 1) throw new Error("ui-shots takes one scene file");
+  const scenes = files.length === 0 ? available : JSON.parse(await readFile(files[0], "utf8"));
   if (!Array.isArray(scenes)) throw new Error("the scene file must hold an array of scenes");
   if (scenes.length === 0) throw new Error("there are no scenes to run");
-  if (values.layout && !scenes.some((scene) => scene.limitsColumns)) throw new Error("a layout run needs a Limits card scene");
-  if (values.layout && !scenes.some((scene) => scene.popoverHeaders)) throw new Error("a layout run needs a popover scene");
-  scenes.forEach(validateScene);
   return scenes;
 }
 
