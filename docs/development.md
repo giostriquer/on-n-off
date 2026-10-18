@@ -74,9 +74,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags are attached
   at the right: on the name's line, ending before the actions, when `useTagsBeside` measures that
   they fit, and otherwise on their own row under the name, ending at the header's right edge.
-  The category sits under the name in the name's column. The tray popover's header puts them at
-  the right too. `scripts/ui-shots.mjs` `accountHeaderIssues` checks this in every scene that
-  sets `limitsColumns`.
+  The category starts under the name and its tags and runs to the header's right edge. The tray
+  popover's header puts its tags at the right too. `scripts/ui-shots.mjs` checks these rules:
+  `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues` in
+  every scene that sets `popoverHeaders`.
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
