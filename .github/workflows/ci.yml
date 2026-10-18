@@ -68,8 +68,8 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
-  # The card and popover header layout rules, measured in headless Chromium; not a required check
-  # yet (docs/development.md, Visual verification).
+  # The card and popover header layout rules, measured in headless Chromium; a required check
+  # (docs/development.md, Visual verification).
   layout:
     name: layout
     runs-on: ubuntu-24.04
@@ -98,8 +98,8 @@ jobs:
           if-no-files-found: warn
 
   # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
-  # Their check runs are `windows / lint`, `windows / test` and so on; no job here or in verify.yml
-  # is named like a required check apart from frontend and the two below.
+  # Their check runs are `windows / lint`, `windows / test` and so on, none of them named like a
+  # required check (`requiredChecks` in scripts/workflows.test.mjs).
   windows:
     name: windows
     uses: ./.github/workflows/verify.yml

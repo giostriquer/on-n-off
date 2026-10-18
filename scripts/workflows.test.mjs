@@ -254,7 +254,7 @@ function backgroundFetch(verify) {
   assert.match(finish.run, /exit 0\s*$/, "a failed fetch never fails the job");
 }
 
-const requiredChecks = ["frontend", "verify-windows", "verify-macos"];
+const requiredChecks = ["frontend", "verify-windows", "verify-macos", "layout"];
 const aggregators = { "verify-windows": "windows", "verify-macos": "macos" };
 
 test("both OSes run the lint and the test job, neither of which can be skipped", { skip }, () => {
@@ -323,7 +323,7 @@ test("the lint jobs run every PowerShell script test, and the test jobs none", {
   }
 });
 
-test("only the per-OS aggregators and frontend carry a required check's name", { skip }, () => {
+test("each required check is exactly one ci.yml job, and no verify run carries a required check's name", { skip }, () => {
   const ci = load("ci").jobs;
   const names = Object.values(ci).map((job) => job.name);
   for (const required of requiredChecks) assert.equal(names.filter((name) => name === required).length, 1, required);
@@ -378,12 +378,17 @@ test("the aggregator step fails for every result but success, and when it needs 
   assert.match(results[passing.length].stdout, /^::error title=windows::windows finished as "failure", not "success"\.$/m);
 });
 
-test("the layout check runs the header scenes in CI on every run, can fail, keeps its captures, and is not required", { skip }, () => {
+test("CI's triggers are exactly every pull request to main and every push to main, with no filter", { skip }, () => {
+  assert.deepEqual(load("ci").on, { pull_request: { branches: ["main"] }, push: { branches: ["main"] } });
+});
+
+test("the layout check runs the header scenes in CI on every run, can fail, keeps its captures, and is required", { skip }, () => {
   const layout = load("ci").jobs.layout;
   assert.equal(layout.name, "layout");
-  assert.ok(!requiredChecks.includes(layout.name));
+  assert.ok(requiredChecks.includes(layout.name));
   assert.equal(layout["runs-on"], pinnedImages.ubuntu);
   assert.equal(layout.if, undefined);
+  assert.equal(layout.needs, undefined);
   assert.equal(layout["continue-on-error"], undefined);
   const install = step(layout, "Install Chromium for the layout check");
   const check = step(layout, "Check the Limits card and popover header layout");

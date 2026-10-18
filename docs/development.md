@@ -188,8 +188,9 @@ through click/fill/press steps against a `?mock` build and writes retina PNGs to
 `bun run ui:layout` runs only the scenes that check a layout rule (`limitsColumns`,
 `popoverHeaders`; the scenes live in `scripts/ui-scenes.mjs`) and fails rather than pass with
 nothing to check. CI runs it as the `layout` check on Linux and keeps the captures as the
-`layout-captures` artifact when it fails. It is not a required check yet, because Linux has none
-of the app's fonts: when it is the only failed check, the required ones decide whether a PR merges.
+`layout-captures` artifact when it fails. It is a required check: a PR that breaks a layout rule
+cannot merge. Linux has none of the app's fonts, so CI measures with fallback fonts; when it fails
+but a local run passes, judge the failure from the artifact's captures before changing a rule.
 
 Design and accessibility work on a screen is judged from those captures — and, for WebKit
 fidelity, from a `screencapture -l <window id>` of the running app — never from reading the
