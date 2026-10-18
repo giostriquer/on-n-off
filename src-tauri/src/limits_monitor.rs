@@ -432,7 +432,8 @@ fn observe_window(
             return Some((before.clone(), None));
         }
     }
-    let reset = before.is_some_and(|before| reset_detected(before, used_percent, resets_at));
+    let reset =
+        before.is_some_and(|before| reset_detected(before, used_percent, resets_at, incoming_at));
     let was_exhausted =
         before.is_some_and(|before| before.exhausted || before.used_percent >= 100.0);
     let kind = if before.is_none() {
@@ -461,16 +462,23 @@ fn observe_window(
     ))
 }
 
-fn reset_detected(before: &WindowObservation, used_percent: f64, resets_at: Option<&str>) -> bool {
-    let timestamp_advanced = before
+fn reset_detected(
+    before: &WindowObservation,
+    used_percent: f64,
+    resets_at: Option<&str>,
+    observed_at: chrono::DateTime<chrono::FixedOffset>,
+) -> bool {
+    let previous = before
         .resets_at
         .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
+    let timestamp_advanced = previous
         .zip(resets_at.and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()))
         .is_some_and(|(previous, current)| current > previous);
+    let reset_passed = previous.is_some_and(|previous| previous <= observed_at);
     let drop = before.used_percent - used_percent;
 
-    timestamp_advanced && drop > 0.5
+    (timestamp_advanced || reset_passed) && drop > 0.5
 }
 
 fn load_state(path: &Path) -> MonitorState {

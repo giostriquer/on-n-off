@@ -61,10 +61,17 @@ impl SnapshotStore {
         if card.status != LimitsStatus::Ok || !Identity::legacy_key_is_whole(card.provider) {
             return None;
         }
-        let account = card.account.as_ref()?;
+        self.replaced_legacy(card.provider, card.account.as_ref()?)
+    }
+
+    fn replaced_legacy(
+        &self,
+        provider: AgentId,
+        account: &LimitsAccountDto,
+    ) -> Option<StoredSnapshot> {
         let legacy_id = account.legacy_id.as_deref()?;
-        let stored = read_stored(&self.dir.join(file_name(card.provider, legacy_id)))?;
-        (stored.provider == card.provider && replaces(account, &stored.account)).then_some(stored)
+        let stored = read_stored(&self.dir.join(file_name(provider, legacy_id)))?;
+        (stored.provider == provider && replaces(account, &stored.account)).then_some(stored)
     }
 
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {

@@ -49,6 +49,7 @@ const SCENES = [
   ] },
   { name: "limits-band", url: "/limits?mock=limitsBand", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
   { name: "limits-band-light", url: "/limits?mock=limitsBand", theme: "light", steps: [{ wait: "role=region[name='Codex limits · 50% of the week']" }] },
+  { name: "limits-muse-idle", url: "/limits?mock=museIdle", viewport: { width: 1280, height: 900 }, steps: [{ wait: "text=Muse Code Power Usage" }] },
   { name: "limits-ok", url: "/limits?mock=ok", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-ok-light", url: "/limits?mock=ok", theme: "light", steps: [{ wait: "role=region[name='Codex limits · person@acme.example']" }] },
   { name: "limits-sign-in", url: "/limits?mock=claudeSignIn", steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }, { hover: "role=button[name='Claude sign-in ends Aug 27']" }, { wait: "role=tooltip" }] },

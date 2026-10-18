@@ -11,10 +11,14 @@ pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
 
 const DEFAULT_ROLLING_MINS: u64 = 300;
 
-const IDLE_WINDOW: MintWindow = MintWindow {
-    used_percent: Some(0.0),
-    window_duration_mins: None,
-    resets_at: None,
+static IDLE_USAGE: SubsUsage = SubsUsage {
+    tier: String::new(),
+    window: Some(MintWindow {
+        used_percent: Some(0.0),
+        window_duration_mins: None,
+        resets_at: None,
+    }),
+    weekly: None,
 };
 
 #[derive(Debug, Deserialize)]
@@ -110,25 +114,24 @@ pub(super) fn normalize(
                 .to_string(),
         )));
     }
-    let windows: Vec<LimitWindowDto> = match &response.subs_usage {
-        Some(usage) => [
-            usage.weekly.as_ref().and_then(weekly_window),
-            usage.window.as_ref().and_then(session_window),
-        ]
-        .into_iter()
-        .flatten()
-        .collect(),
-        None if response.is_subs_active == Some(true) => {
-            session_window(&IDLE_WINDOW).into_iter().collect()
-        }
-        None => Vec::new(),
+    let usage = match &response.subs_usage {
+        Some(usage) => usage,
+        None if response.is_subs_active == Some(true) => &IDLE_USAGE,
+        None => return None,
     };
+    let windows: Vec<LimitWindowDto> = [
+        usage.weekly.as_ref().and_then(weekly_window),
+        usage.window.as_ref().and_then(session_window),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
     if windows.is_empty() {
         return None;
     }
     let plan = Some(response.subs_tier_name.trim())
         .filter(|name| !name.is_empty())
-        .or(response.subs_usage.as_ref().map(|usage| usage.tier.trim()))
+        .or(Some(usage.tier.trim()))
         .filter(|name| name.chars().any(char::is_alphabetic))
         .map(str::to_string);
     Some(Ok(Parsed {

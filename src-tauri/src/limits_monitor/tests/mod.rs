@@ -207,6 +207,87 @@ fn a_reset_rearms_the_exhausted_notification() {
 }
 
 #[test]
+fn an_idle_window_read_after_its_reset_rearms_the_exhausted_notification() {
+    let mut state = MonitorState::default();
+    let muse = |used_percent, resets_at, at| {
+        observed_at(
+            snapshot(
+                AgentId::Muse,
+                "profile:you",
+                "you@example.com",
+                used_percent,
+                resets_at,
+            ),
+            at,
+        )
+    };
+    assert!(observe(
+        &mut state,
+        &[muse(
+            100.0,
+            Some("2026-10-16T21:45:00Z"),
+            "2026-10-16T21:40:00Z"
+        )]
+    )
+    .is_empty());
+
+    let idle = observe(&mut state, &[muse(0.0, None, "2026-10-17T09:00:00Z")]);
+
+    assert_eq!(idle.len(), 1);
+    assert_eq!(idle[0].kind, LimitEventKind::Reset);
+    assert_eq!(idle[0].previous_used_percent, 100.0);
+    assert_eq!(idle[0].used_percent, 0.0);
+    assert!(observe(
+        &mut state,
+        &[muse(
+            40.0,
+            Some("2026-10-18T12:00:00Z"),
+            "2026-10-18T08:00:00Z"
+        )]
+    )
+    .is_empty());
+    let exhausted_again = observe(
+        &mut state,
+        &[muse(
+            100.0,
+            Some("2026-10-18T12:00:00Z"),
+            "2026-10-18T10:00:00Z",
+        )],
+    );
+    assert_eq!(
+        exhausted_again
+            .iter()
+            .map(|event| event.kind)
+            .collect::<Vec<_>>(),
+        [LimitEventKind::Exhausted]
+    );
+}
+
+#[test]
+fn a_drop_read_before_the_saved_reset_is_not_a_reset() {
+    let mut state = MonitorState::default();
+    let at_limit = snapshot(
+        AgentId::Muse,
+        "profile:you",
+        "you@example.com",
+        100.0,
+        Some("2026-08-19T15:00:00Z"),
+    );
+    assert!(observe(&mut state, &[at_limit]).is_empty());
+
+    let early = observe(
+        &mut state,
+        &[observed_at(
+            snapshot(AgentId::Muse, "profile:you", "you@example.com", 0.0, None),
+            "2026-08-19T14:00:00Z",
+        )],
+    );
+
+    assert!(early.is_empty());
+    assert!(state.providers[&AgentId::Muse].windows["weekly"].exhausted);
+}
+
+#[test]
 fn advancing_the_reset_timestamp_after_usage_notifies_once() {
     let mut state = MonitorState::default();
     let before = snapshot(

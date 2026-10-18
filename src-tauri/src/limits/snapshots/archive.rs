@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 
-use super::{file_name, read_stored, replaces, SnapshotStore, SNAPSHOT_WRITES};
+use super::{SnapshotStore, SNAPSHOT_WRITES};
 use crate::dto::{AgentId, LimitsAccountDto};
 use crate::usage::cache_io::atomic_write;
 
@@ -50,10 +50,7 @@ impl SnapshotStore {
         let archived = self.archived(provider);
         let mut ids = vec![account.id.clone()];
         if let Some(legacy) = account.legacy_id.as_ref().filter(|legacy| {
-            archived.contains(*legacy)
-                && read_stored(&self.dir.join(file_name(provider, legacy))).is_some_and(|stored| {
-                    stored.provider == provider && replaces(account, &stored.account)
-                })
+            archived.contains(*legacy) && self.replaced_legacy(provider, account).is_some()
         }) {
             ids.push(legacy.clone());
         }

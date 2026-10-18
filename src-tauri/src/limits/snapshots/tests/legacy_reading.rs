@@ -155,7 +155,7 @@ fn a_scoped_history_of_its_own_wins_over_the_legacy_one() {
     own.account = idle(AgentId::Muse).account;
     own.reading.windows[0].used_percent = 50.0;
     for window in &mut own.reading.windows {
-        window.observed_at = "2026-10-17T10:00:00.000Z".to_string();
+        window.observed_at = "2026-10-15T10:00:00.000Z".to_string();
     }
     store.save(&own).unwrap();
 
@@ -163,7 +163,7 @@ fn a_scoped_history_of_its_own_wins_over_the_legacy_one() {
 
     assert_eq!(
         weekly(&remembered.card),
-        Some((50.0, "2026-10-17T10:00:00.000Z"))
+        Some((50.0, "2026-10-15T10:00:00.000Z"))
     );
     fs::remove_dir_all(home).unwrap();
 }

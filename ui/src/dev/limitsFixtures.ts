@@ -69,6 +69,17 @@ const MUSE: ProviderLimits[] = [
   },
 ];
 
+function museIdle(): ProviderLimits[] {
+  return [{
+    ...MUSE[0],
+    plan: "Muse Code Power Usage",
+    windows: [
+      { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 30, resetsAt: at(17 * 60 + 24), observedAt: at(-33 * 60) },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, windowSeconds: 18_000, observedAt: OBSERVED },
+    ],
+  }];
+}
+
 function subscriptionBadgesCodex(): ProviderLimits[] {
   const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
   const cases: Array<[string, ProviderLimits["subscription"]]> = [
@@ -332,6 +343,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   subscriptionBadges: () => ({ codex: subscriptionBadgesCodex }),
   claudeMissingReset: () => ({ claude: claudeWithoutReset }),
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
+  museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
   savedRefreshPaused: () => ({ claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) }),
   limitsBand: () => ({ claude: limitsBandClaude, codex: limitsBandCodex }),
