@@ -525,7 +525,12 @@ accounts. Every scoped card, the current Codex card and a saved account's failed
 included, and every listed profile carry it as `legacyId`; the UI join reads the profile's. So
 the join does not depend on the snapshot's optional `legacyId`, which older app versions can
 drop when rewriting history. It does not transfer old quotas or delete history, and preserves
-current legacy observations and accounts without a verified scoped replacement.
+current legacy observations and accounts without a verified scoped replacement. Muse is the one
+exception to the transfer rule, because its legacy key is the whole identity
+(`Identity::legacy_key_is_whole`): when a Muse card's first successful scoped reading has no weekly
+window, the snapshot store fills it from the legacy snapshot with the same legacy id and email, the
+way a later reading keeps its own last weekly. Meta omits Muse's usage while the 5-hour window is
+idle, so without this the first reading after the id change would show no weekly at all.
 The confirmed Remove account action retains that association and explicitly forgets matched
 legacy history before its scoped snapshot, so the next read cannot resurrect the removed card.
 Legacy deletion passes an optional expected email through the existing Forget command. Storage

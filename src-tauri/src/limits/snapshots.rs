@@ -7,6 +7,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::reading::{keep_remembered, newest, parse_observed_at};
+use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::usage::cache_io::atomic_write;
 
@@ -49,11 +50,28 @@ impl SnapshotStore {
             };
         };
         let existing = read_stored(&path);
-        if let Some(existing) = &existing {
-            keep_remembered(&mut card, existing.clone().into_dto(Utc::now()).reading);
+        if let Some(remembered) = existing.clone().or_else(|| self.predecessor(&card)) {
+            keep_remembered(&mut card, remembered.into_dto(Utc::now()).reading);
         }
         let saved = write_over(&path, &card, existing.as_ref());
         Remembered { card, saved }
+    }
+
+    fn predecessor(&self, card: &ProviderLimitsDto) -> Option<StoredSnapshot> {
+        if card.status != LimitsStatus::Ok || !Identity::legacy_key_is_whole(card.provider) {
+            return None;
+        }
+        self.replaced_legacy(card.provider, card.account.as_ref()?)
+    }
+
+    fn replaced_legacy(
+        &self,
+        provider: AgentId,
+        account: &LimitsAccountDto,
+    ) -> Option<StoredSnapshot> {
+        let legacy_id = account.legacy_id.as_deref()?;
+        let stored = read_stored(&self.dir.join(file_name(provider, legacy_id)))?;
+        (stored.provider == provider && replaces(account, &stored.account)).then_some(stored)
     }
 
     pub fn save(&self, dto: &ProviderLimitsDto) -> Result<(), String> {

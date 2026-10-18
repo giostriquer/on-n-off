@@ -518,7 +518,7 @@ describe("each provider's card features", () => {
   const EXPECTED: Record<LimitsProvider, Features> = {
     claude: { signIn: true, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Starts with your first message" },
     codex: { signIn: false, term: true, paidOffer: true, resetActions: true, resetAlert: true, sessionNote: "Reset time unavailable" },
-    muse: { signIn: false, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Reset time unavailable" },
+    muse: { signIn: false, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Starts with your first message" },
   };
 
   it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {

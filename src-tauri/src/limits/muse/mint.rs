@@ -11,6 +11,16 @@ pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
 
 const DEFAULT_ROLLING_MINS: u64 = 300;
 
+static IDLE_USAGE: SubsUsage = SubsUsage {
+    tier: String::new(),
+    window: Some(MintWindow {
+        used_percent: Some(0.0),
+        window_duration_mins: None,
+        resets_at: None,
+    }),
+    weekly: None,
+};
+
 #[derive(Debug, Deserialize)]
 pub(super) struct MintResponse {
     #[serde(default)]
@@ -104,7 +114,11 @@ pub(super) fn normalize(
                 .to_string(),
         )));
     }
-    let usage = response.subs_usage.as_ref()?;
+    let usage = match &response.subs_usage {
+        Some(usage) => usage,
+        None if response.is_subs_active == Some(true) => &IDLE_USAGE,
+        None => return None,
+    };
     let windows: Vec<LimitWindowDto> = [
         usage.weekly.as_ref().and_then(weekly_window),
         usage.window.as_ref().and_then(session_window),

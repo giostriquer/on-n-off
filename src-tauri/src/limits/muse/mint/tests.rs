@@ -83,20 +83,44 @@ fn a_rejected_token_reads_as_unauthorized() {
 }
 
 #[test]
-fn an_idle_window_and_an_inactive_subscription_are_unavailable_rather_than_failed() {
-    let (idle_url, idle) = serve_once(
+fn an_idle_window_reads_its_plan_and_an_unused_session() {
+    let (url, served) = serve_once(
         "200 OK",
         &answer("you@example.com", serde_json::Value::Null),
     );
-    let idle_read = read_saved(&identity(), &token(), &urls(&idle_url));
-    idle.join().unwrap();
-    let inactive = json!({"is_subs_active": false, "user_email": "you@example.com"}).to_string();
-    let (inactive_url, served) = serve_once("200 OK", &inactive);
-    let inactive_read = read_saved(&identity(), &token(), &urls(&inactive_url));
+
+    let card = read_saved(&identity(), &token(), &urls(&url)).unwrap();
     served.join().unwrap();
 
-    assert!(matches!(idle_read, Err(SavedReadError::Unavailable(_))));
-    assert!(matches!(inactive_read, Err(SavedReadError::Unavailable(_))));
+    assert_eq!(card.status, LimitsStatus::Ok);
+    assert_eq!(
+        card.account.map(|account| account.id),
+        Some(identity().observation_key())
+    );
+    assert_eq!(card.reading.plan.as_deref(), Some("Muse Code Power Usage"));
+    assert_eq!(
+        card.reading
+            .windows
+            .iter()
+            .map(|window| (window.kind, window.used_percent, window.resets_at.clone()))
+            .collect::<Vec<_>>(),
+        [(LimitWindowKind::Session, 0.0, None)]
+    );
+}
+
+#[test]
+fn an_inactive_subscription_and_an_unreadable_usage_block_are_unavailable_rather_than_failed() {
+    let inactive = json!({"is_subs_active": false, "user_email": "you@example.com"}).to_string();
+    let unreadable = answer("you@example.com", json!({"window": null, "weekly": null}));
+    for body in [inactive, unreadable] {
+        let (url, served) = serve_once("200 OK", &body);
+        let read = read_saved(&identity(), &token(), &urls(&url));
+        served.join().unwrap();
+        assert!(
+            matches!(read, Err(SavedReadError::Unavailable(_))),
+            "{body}"
+        );
+    }
 }
 
 #[test]

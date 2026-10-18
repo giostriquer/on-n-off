@@ -1,4 +1,5 @@
 mod file_shape;
+mod legacy_reading;
 mod loading;
 
 use super::*;

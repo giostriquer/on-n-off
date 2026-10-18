@@ -70,6 +70,12 @@ impl Identity {
             AgentId::Antigravity | AgentId::Cursor => None,
         }
     }
+    pub fn legacy_key_is_whole(provider: AgentId) -> bool {
+        match provider {
+            AgentId::Muse => true,
+            AgentId::Claude | AgentId::Codex | AgentId::Antigravity | AgentId::Cursor => false,
+        }
+    }
     pub fn is_profile_key(key: &str) -> bool {
         key.starts_with(PROFILE_KEY_PREFIX)
     }
