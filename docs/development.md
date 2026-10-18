@@ -70,7 +70,13 @@ locates the subsystems. Module doc-comments explain their implementation.
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: the table is keyed by the
   catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and
   reusing a feature means reusing that implementation. A new header tag kind (`cardTags.ts`)
-  fails both header renderers until each surface decides.
+  fails both header renderers until each surface decides. The card header is a grid of the
+  provider icon, the name's column and the actions (the active dot and ⋯). Its tags are attached
+  at the right: on the name's line, ending before the actions, when `useTagsBeside` measures that
+  they fit, and otherwise on their own row under the name, ending at the header's right edge.
+  The category sits under the name in the name's column. The tray popover's header puts them at
+  the right too. `scripts/ui-shots.mjs` `accountHeaderIssues` checks this in every scene that
+  sets `limitsColumns`.
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the

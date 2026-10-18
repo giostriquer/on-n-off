@@ -159,12 +159,14 @@ function accountHeaderIssues(element) {
     if (inline && title.scrollWidth > title.clientWidth + 0.5) {
       issues.push(`account tags beside the name truncate it: ${title.textContent}`);
     }
+    const column = line.getBoundingClientRect();
     const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
-    if (!inline && tags.getBoundingClientRect().right < contentRight - 1) {
-      issues.push(`account tags on their own row stop short of the header's edge: ${title.textContent}`);
+    const rightEdge = inline ? column.right : contentRight;
+    if (Math.abs(Math.max(...tagRects.map(rect => rect.right)) - rightEdge) > 1) {
+      issues.push(`account tags are not attached at the header's right: ${title.textContent}`);
     }
-    if (!inline && Math.abs(tagRects[0].left - name.left) > 1) {
-      issues.push(`account tags on their own row do not start under the name: ${title.textContent}`);
+    if (!inline && Math.min(...tagRects.map(rect => rect.left)) < column.left - 1) {
+      issues.push(`account tags on their own row reach left of the name: ${title.textContent}`);
     }
   }
   return { measured: true, issues };
