@@ -135,6 +135,10 @@ function accountHeaderIssues(element) {
   const tags = element.querySelector('[data-testid="account-tags"]');
   if (!tags) return { measured: false, issues };
   const name = title.getBoundingClientRect();
+  const line = title.parentElement;
+  const column = line.getBoundingClientRect();
+  const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
+  const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
   const middle = rect => (rect.top + rect.bottom) / 2;
   const controls = [...element.querySelectorAll("button, [role='img']")]
     .filter(node => !tags.contains(node) && node.getBoundingClientRect().width > 0);
@@ -143,15 +147,12 @@ function accountHeaderIssues(element) {
       issues.push(`account header control leaves the name's line: ${control.getAttribute("aria-label") ?? control.tagName} on ${title.textContent}`);
     }
   }
-  if (tags.children.length > 0) {
+  if (tagRects.length > 0) {
     const gap = node => parseFloat(getComputedStyle(node).columnGap) || 0;
     const range = document.createRange();
     range.selectNodeContents(title);
     const nameWidth = range.getBoundingClientRect().width;
-    const tagRects = [...tags.children].map(child => child.getBoundingClientRect());
     const tagsWidth = tagRects.reduce((sum, rect) => sum + rect.width, 0) + gap(tags) * (tagRects.length - 1);
-    const line = title.parentElement;
-    const column = line.getBoundingClientRect();
     const fits = name.left + nameWidth + gap(line) + tagsWidth <= column.right - 1;
     const inline = tagRects.every(rect => rect.top < name.bottom && rect.bottom > name.top);
     if (fits && !inline) {
@@ -160,7 +161,6 @@ function accountHeaderIssues(element) {
     if (inline && title.scrollWidth > title.clientWidth + 0.5) {
       issues.push(`account tags beside the name truncate it: ${title.textContent}`);
     }
-    const contentRight = bounds.right - parseFloat(getComputedStyle(element).paddingRight);
     const rightEdge = inline ? column.right : contentRight;
     if (Math.abs(Math.max(...tagRects.map(rect => rect.right)) - rightEdge) > 1) {
       issues.push(`account tags are not attached at the header's right: ${title.textContent}`);
@@ -175,9 +175,12 @@ function accountHeaderIssues(element) {
   const category = element.querySelector('[data-testid="account-category"]');
   if (category) {
     const rect = category.getBoundingClientRect();
-    const above = Math.max(name.bottom, ...[...tags.children].map(child => child.getBoundingClientRect().bottom));
-    if (Math.abs(rect.left - title.parentElement.getBoundingClientRect().left) > 1 || rect.top < above - 1) {
+    const above = Math.max(name.bottom, ...tagRects.map(tag => tag.bottom));
+    if (Math.abs(rect.left - column.left) > 1 || rect.top < above - 1) {
       issues.push(`account category is not under the name and its tags: ${title.textContent}`);
+    }
+    if (Math.abs(rect.right - contentRight) > 1) {
+      issues.push(`account category does not run to the header's right edge: ${title.textContent}`);
     }
   }
   return { measured: true, issues };
@@ -266,22 +269,10 @@ async function runScene(browser, scene) {
     const headers = page.locator('[data-testid="limits-screen"] header').filter({ has: page.locator(".truncate") });
     const columns = await headers.evaluateAll(elements => new Set(elements.map(element => Math.round(element.getBoundingClientRect().left))).size);
     if (columns !== scene.limitsColumns) problems.push(`expected ${scene.limitsColumns} provider columns, got ${columns}`);
-    let measured = 0;
-    for (const header of await headers.all()) {
-      const result = await header.evaluate(accountHeaderIssues);
-      if (result.measured) measured += 1;
-      problems.push(...result.issues);
-    }
-    if (measured === 0) problems.push("the account tag guard measured no tag container");
+    problems.push(...await headerProblems(headers, accountHeaderIssues, "the account tag guard measured no tag container"));
   }
   if (scene.popoverHeaders) {
-    let measured = 0;
-    for (const header of await page.locator("article > header").all()) {
-      const result = await header.evaluate(popoverHeaderIssues);
-      if (result.measured) measured += 1;
-      problems.push(...result.issues);
-    }
-    if (measured === 0) problems.push("the popover tag guard measured no tags");
+    problems.push(...await headerProblems(page.locator("article > header"), popoverHeaderIssues, "the popover tag guard measured no tags"));
   }
   if (scene.checkMuseChart) {
     const blueLine = page.locator('.usage-chart-host path[stroke="#0082fb"]');
@@ -296,6 +287,17 @@ async function runScene(browser, scene) {
   }
   await context.close();
   return problems;
+}
+
+async function headerProblems(headers, check, nothingMeasured) {
+  const problems = [];
+  let measured = 0;
+  for (const header of await headers.all()) {
+    const result = await header.evaluate(check);
+    if (result.measured) measured += 1;
+    problems.push(...result.issues);
+  }
+  return measured === 0 ? [...problems, nothingMeasured] : problems;
 }
 
 async function scrollTo(page, selector) {
