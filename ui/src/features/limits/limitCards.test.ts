@@ -549,17 +549,25 @@ describe("each provider's card features", () => {
 });
 
 describe("a card's header tags", () => {
-  const paused = { currentAccount: false, savedProfile: true, status: "unauthenticated" as LimitsStatus, message: "Sign in again." };
+  const savedRefreshPaused = { currentAccount: false, savedProfile: true, status: "unauthenticated" as LimitsStatus, message: "Sign in again." };
+  const renews = { activeUntil: "2026-10-10T12:00:00Z", willRenew: true, checkedAt: NOW };
   const kinds = (card: LimitCard) => cardTags(card).map(tag => tag.kind);
 
   it("lead with the usage clock, then the renewal tag, then the plan", () => {
-    const [codex] = cards([okCodex({ ...paused, subscription: { activeUntil: "2026-10-10T12:00:00Z", willRenew: true, checkedAt: NOW } })]);
+    const [codex] = cards([okCodex({ ...savedRefreshPaused, subscription: renews })]);
     expect(kinds(codex)).toEqual(["usageStatus", "term", "plan"]);
   });
 
   it("lead with the usage clock, then the sign-in tag, then the plan", () => {
     const profile = saved("claude", "uuid-1", "uuid-1", "me@claude.example", { signInEndsAt: new Date(AT_NOW + 2 * 24 * 3_600_000).toISOString() });
-    const [claude] = cards([okClaude(paused)], [profile], AT_NOW, "claude");
+    const [claude] = cards([okClaude(savedRefreshPaused)], [profile], AT_NOW, "claude");
     expect(kinds(claude)).toEqual(["usageStatus", "signIn", "plan"]);
+  });
+
+  it("lead with a remembered card's status too, and leave the plan out when there is none", () => {
+    const [, remembered] = cards([okCodex(), staleCodex({ subscription: renews })]);
+    expect(kinds(remembered)).toEqual(["remembered", "term", "plan"]);
+    const [planless] = cards([okCodex({ ...savedRefreshPaused, plan: null, subscription: renews })]);
+    expect(kinds(planless)).toEqual(["usageStatus", "term"]);
   });
 });

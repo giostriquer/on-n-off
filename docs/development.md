@@ -76,9 +76,10 @@ locates the subsystems. Module doc-comments explain their implementation.
   When `useTagsBeside` measures that they fit, they sit on the name's line, attached at the right
   and ending before the actions; otherwise they all move to their own row, starting under the
   name in the same order. The category starts under the name and its tags and runs to the
-  header's right edge. The tray popover's header puts its tags at the right, in the same order. `scripts/ui-shots.mjs` checks these rules:
-  `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues` in
-  every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
+  header's right edge. The tray popover's header puts its tags at the right, in the same order.
+  `scripts/ui-shots.mjs` checks these rules, and that tags on one line sit one gap apart in their
+  order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
+  in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
   verification).
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.

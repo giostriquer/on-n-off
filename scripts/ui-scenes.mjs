@@ -46,6 +46,7 @@ export const SCENES = [
     limitsColumns: 3,
     steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }],
   })),
+  { name: "limits-saved-paused-1280", url: "/limits?mock=savedRefreshPaused", viewport: { width: 1280, height: 980 }, limitsColumns: 3, steps: [{ wait: "role=button[name='Usage status: Last known usage'] >> nth=0" }] },
   ...["light", "dark"].map(theme => ({
     name: `usage-muse-${theme}`, url: "/usage?mock=ok", theme, checkMuseChart: true,
     steps: [{ wait: "role=region[name='Usage over time'] >> svg path[stroke] >> nth=0" }],

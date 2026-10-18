@@ -1,5 +1,6 @@
 import type { SignInPresentation } from "./claudeSignIn";
 import type { CardSubscription, LimitCard } from "./limitCards";
+import type { CardStatus } from "./limitPresentation";
 
 export type CardTag =
   | { kind: "term"; subscription: CardSubscription }
@@ -11,13 +12,19 @@ export type CardTag =
 
 export function cardTags(card: LimitCard): CardTag[] {
   const tags: CardTag[] = [];
-  if (card.status?.kind === "savedRefresh") tags.push({ kind: "usageStatus", detail: card.status.detail });
+  if (card.status) tags.push(statusTag(card.status));
   if (card.subscription) tags.push({ kind: "term", subscription: card.subscription });
   if (card.signIn) tags.push({ kind: "signIn", signIn: card.signIn });
-  if (card.status?.kind === "remembered") tags.push({ kind: "remembered" });
-  if (card.status?.kind === "paused") tags.push({ kind: "paused" });
   if (card.plan) tags.push({ kind: "plan", text: card.plan });
   return tags;
+}
+
+function statusTag(status: CardStatus): CardTag {
+  switch (status.kind) {
+    case "savedRefresh": return { kind: "usageStatus", detail: status.detail };
+    case "remembered": return { kind: "remembered" };
+    case "paused": return { kind: "paused" };
+  }
 }
 
 export function unhandledTag(tag: never): never {
