@@ -11,9 +11,9 @@ export type CardTag =
 
 export function cardTags(card: LimitCard): CardTag[] {
   const tags: CardTag[] = [];
+  if (card.status?.kind === "savedRefresh") tags.push({ kind: "usageStatus", detail: card.status.detail });
   if (card.subscription) tags.push({ kind: "term", subscription: card.subscription });
   if (card.signIn) tags.push({ kind: "signIn", signIn: card.signIn });
-  if (card.status?.kind === "savedRefresh") tags.push({ kind: "usageStatus", detail: card.status.detail });
   if (card.status?.kind === "remembered") tags.push({ kind: "remembered" });
   if (card.status?.kind === "paused") tags.push({ kind: "paused" });
   if (card.plan) tags.push({ kind: "plan", text: card.plan });
