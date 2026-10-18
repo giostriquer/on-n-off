@@ -124,8 +124,8 @@ trait NativeAccount: Native {
 
 trait IsolatedSignIn: Native {
     fn sign_in(&self) -> std::process::Command;
-    fn sign_in_input(&self) -> &'static [u8] {
-        b""
+    fn sign_in_page<'a>(&self, _line: &'a str) -> Option<&'a str> {
+        None
     }
     fn first_usage(
         &self,
@@ -163,6 +163,10 @@ trait Notify {
     fn accounts(&self);
 }
 
+trait Browser {
+    fn open(&self, url: &str) -> Result<(), String>;
+}
+
 trait NativeStores {
     fn native(&self, provider: AgentId, home: &Path) -> Result<Box<dyn NativeAccount>, String>;
     fn isolated(&self, provider: AgentId, dir: &Path) -> Result<Box<dyn IsolatedSignIn>, String>;
@@ -188,6 +192,7 @@ struct Accounts {
     stores: Box<dyn NativeStores>,
     clients: Box<dyn Clients>,
     notify: Box<dyn Notify>,
+    browser: Box<dyn Browser>,
 }
 
 struct RunningClients;
@@ -197,6 +202,13 @@ impl Clients for RunningClients {
     }
     fn closed(&self, provider: AgentId) -> Result<(), String> {
         clients::require_closed(provider)
+    }
+}
+
+struct SystemBrowser;
+impl Browser for SystemBrowser {
+    fn open(&self, url: &str) -> Result<(), String> {
+        tauri_plugin_opener::open_url(url, None::<&str>).map_err(|error| error.to_string())
     }
 }
 
@@ -218,6 +230,7 @@ impl Accounts {
             stores: Box::new(AdapterStores),
             clients: Box::new(RunningClients),
             notify: Box::new(Announce),
+            browser: Box::new(SystemBrowser),
         })
     }
     fn native(&self, provider: AgentId) -> Result<Box<dyn NativeAccount>, String> {

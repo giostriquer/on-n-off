@@ -172,7 +172,7 @@ fn a_linked_login_file_is_refused_before_activation_starts() {
 }
 
 #[test]
-fn sign_in_runs_the_official_login_in_its_own_file_backed_home_and_presses_enter() {
+fn sign_in_runs_the_official_login_in_its_own_file_backed_home() {
     let dir = scratch_dir("muse-sign-in");
     let store = MuseNative::private(&dir);
     let command = store.sign_in();
@@ -196,7 +196,25 @@ fn sign_in_runs_the_official_login_in_its_own_file_backed_home_and_presses_enter
     );
     assert_eq!(env["TBH_CREDENTIAL_BACKEND"], Some(OsString::from("file")));
     assert_eq!(env["MUSE_AUTH_PATH"], None);
-    assert_eq!(store.sign_in_input(), b"\n");
+}
+
+#[test]
+fn the_sign_in_page_is_the_meta_device_page_muse_prints() {
+    let store = MuseNative::private(&scratch_dir("muse-sign-in-page"));
+    let page = "https://auth.meta.com/oauth/device/?code=ABCD-1234";
+
+    assert_eq!(store.sign_in_page(&format!("  {page}")), Some(page));
+    for printed in [
+        "Open this page to sign in:",
+        "  ABCD-1234",
+        "http://auth.meta.com/oauth/device/?code=ABCD-1234",
+        "https://auth.meta.com.example/oauth/device/?code=ABCD-1234",
+        "https://example.com/?next=https://auth.meta.com/oauth/device/",
+        "https://auth.meta.com/oauth/device/ ?code=ABCD-1234",
+        "Waiting for approval…",
+    ] {
+        assert_eq!(store.sign_in_page(printed), None, "{printed}");
+    }
 }
 
 #[test]
