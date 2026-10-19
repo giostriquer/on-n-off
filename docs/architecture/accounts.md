@@ -261,7 +261,7 @@ macOS resets an item's partition list to its writer's, so after that write the l
 `apple-tool:` and the next Muse process, signed by Meta, asks once for its own login; "Always
 Allow" adds Muse's team until the next activation (verified 2026-10-19 in the `securityd` log).
 Muse has no command that stores a device login (`muse auth set` takes only API keys), so on-n-off
-cannot write the item as Muse. on-n-off therefore never starts Muse in the background for a
+cannot write the item as Muse. on-n-off therefore never starts Muse in the background for a device
 login it can read: a login with a token gets its card from the mint read, and an expired one
 fails asking to sign in with `muse` again.
 A saved, non-active Muse login lives in its own home under `accounts/homes/`, run with `HOME`,
