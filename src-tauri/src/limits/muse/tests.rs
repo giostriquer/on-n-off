@@ -245,7 +245,7 @@ fn a_missing_muse_cli_reads_as_not_installed() {
         None,
     ));
 
-    assert_eq!(error, Some(ServeFailure::NotInstalled));
+    assert_eq!(error, Some(ReadFailure::NotInstalled));
     assert_eq!(card.status, LimitsStatus::SignedOut);
     assert_eq!(
         card.message.as_deref(),
@@ -430,13 +430,15 @@ fn signed_in(email: Option<&str>) -> Option<MuseLogin> {
     Some(MuseLogin {
         email: email.map(str::to_string),
         token: Some(AccessToken::new("device-token")),
+        expired: false,
     })
 }
 
-fn expired(email: Option<&str>) -> Option<MuseLogin> {
+fn tokenless(email: Option<&str>) -> Option<MuseLogin> {
     Some(MuseLogin {
         email: email.map(str::to_string),
         token: None,
+        expired: false,
     })
 }
 
@@ -457,7 +459,7 @@ fn mint_response(body: Value) -> mint::MintResponse {
     serde_json::from_value(body).expect("mint response")
 }
 
-fn normalized(body: Value) -> Option<Result<Parsed, ServeFailure>> {
+fn normalized(body: Value) -> Option<Result<Parsed, ReadFailure>> {
     mint::normalize(Some("You@Example.com".to_string()), &mint_response(body))
 }
 
@@ -586,12 +588,12 @@ fn a_mint_answer_with_no_usable_window_is_no_reading() {
 fn an_inactive_or_unpaid_subscription_reads_unsupported() {
     let inactive = normalized(json!({"is_subs_active": false, "subs_tier_name": "Wonder"}));
     assert!(
-        matches!(&inactive, Some(Err(ServeFailure::Unsupported(message))) if message.contains("inactive")),
+        matches!(&inactive, Some(Err(ReadFailure::Unsupported(message))) if message.contains("inactive")),
         "{inactive:?}"
     );
     let billing = normalized(json!({"is_subs_active": true, "require_payment": true}));
     assert!(
-        matches!(&billing, Some(Err(ServeFailure::Unsupported(message))) if message.contains("billing")),
+        matches!(&billing, Some(Err(ReadFailure::Unsupported(message))) if message.contains("billing")),
         "{billing:?}"
     );
 }
@@ -663,13 +665,13 @@ fn a_failed_mint_call_names_its_failure() {
     assert!(matches!(refused, Err(HttpError::Network(_))), "{refused:?}");
 }
 
-fn serve_read(root: &Path) -> impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure> {
+fn serve_read(root: &Path) -> impl FnOnce(&Path, &Path, &Path) -> Result<Session, ReadFailure> {
     let mut replies = happy_replies();
     replies[1]["result"]["museHome"] = json!(crate::paths::muse_data_for(root).to_string_lossy());
     move |_, _, _| Ok(Script::new(replies).session(SERVE))
 }
 
-fn serve_must_not_run(_: &Path, _: &Path, _: &Path) -> Result<Session, ServeFailure> {
+fn serve_must_not_run(_: &Path, _: &Path, _: &Path) -> Result<Session, ReadFailure> {
     panic!("serve must not run")
 }
 
@@ -696,7 +698,7 @@ fn a_mint_reading_answers_without_starting_serve() {
 #[test]
 fn only_a_read_without_a_device_token_starts_muse_serve() {
     let root = crate::paths::scratch_dir("muse-mint-fallback");
-    let serve_windows = |read: Result<Parsed, ServeFailure>| {
+    let serve_windows = |read: Result<Parsed, ReadFailure>| {
         let read = read.expect("serve fallback");
         assert_eq!(read.reading.plan.as_deref(), Some("wonder"));
         read.reading.windows.len()
@@ -713,19 +715,43 @@ fn only_a_read_without_a_device_token_starts_muse_serve() {
     let no_token = read_current(
         &root,
         serve_read(&root),
-        |_| expired(Some("you@example.com")),
+        |_| tokenless(Some("you@example.com")),
         |_| panic!("no token means no mint"),
     );
     assert_eq!(serve_windows(no_token), 2);
 }
 
 #[test]
+fn an_expired_login_fails_the_card_without_starting_muse() {
+    let root = crate::paths::scratch_dir("muse-mint-expired");
+    let card = finish_read(read_current(
+        &root,
+        serve_must_not_run,
+        |_| {
+            Some(MuseLogin {
+                email: Some("You@Example.com".to_string()),
+                token: None,
+                expired: true,
+            })
+        },
+        |_| panic!("an expired login sends no token"),
+    ));
+    assert_eq!(card.status, LimitsStatus::Failed);
+    assert_eq!(
+        card.message.as_deref(),
+        Some("Muse's login has expired. Sign in with `muse` again to see subscription limits.")
+    );
+    assert_eq!(
+        card.account.as_ref().map(|account| account.id.as_str()),
+        Some(scoped_you().as_str())
+    );
+}
+
+#[test]
 fn a_mint_miss_fails_the_card_without_starting_muse() {
     let root = crate::paths::scratch_dir("muse-mint-miss");
     let unanswered = |why: &str| {
-        format!(
-            "Meta did not answer the Muse usage read ({why}). on-n-off will read it again later."
-        )
+        format!("The Muse usage read failed ({why}). on-n-off will read it again later.")
     };
     let misses: [(Result<mint::MintResponse, HttpError>, String); 6] = [
         (
@@ -767,6 +793,30 @@ fn a_mint_miss_fails_the_card_without_starting_muse() {
             "{expected}"
         );
         assert!(card.reading.windows.is_empty(), "{expected}");
+    }
+}
+
+#[test]
+fn an_inactive_or_unpaid_answer_reads_unsupported_without_starting_muse() {
+    let root = crate::paths::scratch_dir("muse-mint-unsupported");
+    for (body, expected) in [
+        (
+            json!({"is_subs_active": false, "subs_tier_name": "Wonder"}),
+            "This Muse subscription is inactive, so it has no subscription limits to show.",
+        ),
+        (
+            json!({"is_subs_active": true, "require_payment": true}),
+            "Muse subscription billing is incomplete; finish it in Muse to see subscription limits.",
+        ),
+    ] {
+        let card = finish_read(read_current(
+            &root,
+            serve_must_not_run,
+            |_| signed_in(Some("You@Example.com")),
+            |_| Ok(mint_response(body)),
+        ));
+        assert_eq!(card.status, LimitsStatus::Unsupported, "{expected}");
+        assert_eq!(card.message.as_deref(), Some(expected));
     }
 }
 
@@ -817,7 +867,7 @@ fn every_path_names_the_account_as_the_mint_reading_does() {
         |_| Err(HttpError::Status(500)),
     );
     assert!(
-        matches!(&missed, Err(ServeFailure::MintMissed(account, _)) if *account == minted),
+        matches!(&missed, Err(ReadFailure::Unread(account, _)) if *account == minted),
         "{missed:?}"
     );
     for serve_label in ["Display Name", "Other@Example.org"] {
@@ -829,7 +879,7 @@ fn every_path_names_the_account_as_the_mint_reading_does() {
         let fallback = read_current(
             &root,
             move |_, _, _| Ok(Script::new(replies).session(SERVE)),
-            |_| expired(Some("You@Example.com")),
+            |_| tokenless(Some("You@Example.com")),
             |_| panic!("no token means no mint"),
         )
         .expect("serve fallback")
@@ -860,7 +910,7 @@ fn a_login_without_an_email_is_the_default_account_on_every_path() {
     let fallback = read_current(
         &root,
         serve_read(&root),
-        |_| expired(None),
+        |_| tokenless(None),
         |_| panic!("no token means no mint"),
     )
     .expect("serve fallback")
@@ -868,7 +918,7 @@ fn a_login_without_an_email_is_the_default_account_on_every_path() {
     .expect("account");
     assert_eq!(minted.id, super::super::DEFAULT_ACCOUNT);
     assert!(
-        matches!(&missed, Err(ServeFailure::MintMissed(account, _)) if *account == minted),
+        matches!(&missed, Err(ReadFailure::Unread(account, _)) if *account == minted),
         "{missed:?}"
     );
     assert_eq!(fallback, minted);

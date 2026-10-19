@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{account_dto, session_label, window, ServeFailure};
+use super::{account_dto, session_label, window, ReadFailure};
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
@@ -94,10 +94,10 @@ pub(crate) fn read_saved(
     }
 }
 
-pub(super) fn reading(
+pub(super) fn current_read(
     email: Option<String>,
     answer: Result<MintResponse, HttpError>,
-) -> Result<Parsed, ServeFailure> {
+) -> Result<Parsed, ReadFailure> {
     let why = match answer {
         Ok(response) => match normalize(email.clone(), &response) {
             Some(read) => return read,
@@ -111,25 +111,25 @@ pub(super) fn reading(
             "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
                 .to_string()
         }
-        Err(error) => format!(
-            "Meta did not answer the Muse usage read ({error}). on-n-off will read it again later."
-        ),
+        Err(error) => {
+            format!("The Muse usage read failed ({error}). on-n-off will read it again later.")
+        }
     };
-    Err(ServeFailure::MintMissed(account_dto(email), why))
+    Err(ReadFailure::Unread(account_dto(email), why))
 }
 
 pub(super) fn normalize(
     email: Option<String>,
     response: &MintResponse,
-) -> Option<Result<Parsed, ServeFailure>> {
+) -> Option<Result<Parsed, ReadFailure>> {
     if response.require_payment {
-        return Some(Err(ServeFailure::Unsupported(
+        return Some(Err(ReadFailure::Unsupported(
             "Muse subscription billing is incomplete; finish it in Muse to see subscription limits."
                 .to_string(),
         )));
     }
     if response.is_subs_active == Some(false) {
-        return Some(Err(ServeFailure::Unsupported(
+        return Some(Err(ReadFailure::Unsupported(
             "This Muse subscription is inactive, so it has no subscription limits to show."
                 .to_string(),
         )));

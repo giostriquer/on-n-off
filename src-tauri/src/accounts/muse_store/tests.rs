@@ -83,6 +83,7 @@ fn a_keychain_value_without_an_access_token_gives_no_token() {
 fn a_denied_or_expired_login_keeps_its_email() {
     let denied = login_in(&config_with_auth(KEYCHAIN_AUTH), NOW, &denied);
     assert!(denied.token.is_none());
+    assert!(!denied.expired);
     assert_eq!(denied.email.as_deref(), Some("you@example.com"));
 
     let expired = config_with_auth(
@@ -90,8 +91,11 @@ fn a_denied_or_expired_login_keeps_its_email() {
     );
     let login = login_in(&expired, NOW, &no_keychain);
     assert!(login.token.is_none());
+    assert!(login.expired);
     assert_eq!(login.email.as_deref(), Some("you@example.com"));
-    assert!(login_in(&expired, NOW - 1, &no_keychain).token.is_some());
+    let live = login_in(&expired, NOW - 1, &no_keychain);
+    assert!(live.token.is_some());
+    assert!(!live.expired);
 }
 
 #[test]
@@ -131,6 +135,7 @@ fn an_expired_login_does_not_ask_the_keychain() {
         panic!("an expired login never asks the Keychain")
     });
     assert!(login.token.is_none());
+    assert!(login.expired);
 }
 
 #[test]
@@ -146,8 +151,10 @@ fn a_cached_login_expires_without_a_new_lookup() {
     let cache = LoginCache::new();
     let fresh = cache.login(&config, NOW, &lookup).expect("login");
     assert!(fresh.token.is_some());
+    assert!(!fresh.expired);
     let later = cache.login(&config, NOW + 100, &lookup).expect("login");
     assert!(later.token.is_none());
+    assert!(later.expired);
     assert_eq!(calls.get(), 1);
 }
 

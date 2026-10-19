@@ -73,12 +73,11 @@ struct ServeAnswers {
 }
 
 #[derive(Debug, PartialEq, Eq)]
-enum ServeFailure {
+enum ReadFailure {
     NotInstalled,
     SignedOut,
     Unsupported(String),
-    NoUsageYet(LimitsAccountDto),
-    MintMissed(LimitsAccountDto, String),
+    Unread(LimitsAccountDto, String),
     Failed(String),
 }
 
@@ -139,24 +138,24 @@ struct UsageReadResult {
 fn normalize(
     answers: ServeAnswers,
     login_email: Option<Option<String>>,
-) -> Result<Parsed, ServeFailure> {
+) -> Result<Parsed, ReadFailure> {
     let account = &answers.account;
     match account.state.as_str() {
         "accountLogin" => {}
-        "loggedOut" => return Err(ServeFailure::SignedOut),
+        "loggedOut" => return Err(ReadFailure::SignedOut),
         "apiKey" | "envKey" => {
-            return Err(ServeFailure::Unsupported(
+            return Err(ReadFailure::Unsupported(
                 "Muse is signed in with an API key, which has no subscription limits.".to_string(),
             ));
         }
         other => {
-            return Err(ServeFailure::Unsupported(format!(
+            return Err(ReadFailure::Unsupported(format!(
                 "Muse account type `{other}` has no subscription limits to show."
             )));
         }
     }
     if !account.credential_required {
-        return Err(ServeFailure::Unsupported(
+        return Err(ReadFailure::Unsupported(
             "This Muse endpoint needs no credential and reports no subscription limits."
                 .to_string(),
         ));
@@ -169,7 +168,10 @@ fn normalize(
         .map(str::to_string);
     let account_dto = account_dto(login_email.unwrap_or(label));
     let Some(usage) = answers.usage else {
-        return Err(ServeFailure::NoUsageYet(account_dto));
+        return Err(ReadFailure::Unread(
+            account_dto,
+            "Muse has not observed subscription usage yet. This version does not expose usage to external readers.".to_string(),
+        ));
     };
     let observed_at = rfc3339_ms(usage.observed_at_ms);
     let mut session_window = window(
@@ -251,10 +253,10 @@ fn rfc3339_ms(ms: i64) -> String {
         .unwrap_or_default()
 }
 
-fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
+fn finish_read(read: Result<Parsed, ReadFailure>) -> ProviderLimitsDto {
     match read {
         Ok(parsed) => finish(AgentId::Muse, LimitsStatus::Ok, None, parsed),
-        Err(ServeFailure::NotInstalled) => finish(
+        Err(ReadFailure::NotInstalled) => finish(
             AgentId::Muse,
             LimitsStatus::SignedOut,
             Some(
@@ -262,28 +264,19 @@ fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
             ),
             Parsed::default(),
         ),
-        Err(ServeFailure::SignedOut) => finish(
+        Err(ReadFailure::SignedOut) => finish(
             AgentId::Muse,
             LimitsStatus::SignedOut,
             Some("Sign in with `muse` to see subscription limits.".to_string()),
             Parsed::default(),
         ),
-        Err(ServeFailure::Unsupported(message)) => finish(
+        Err(ReadFailure::Unsupported(message)) => finish(
             AgentId::Muse,
             LimitsStatus::Unsupported,
             Some(message),
             Parsed::default(),
         ),
-        Err(ServeFailure::NoUsageYet(account)) => finish(
-            AgentId::Muse,
-            LimitsStatus::Failed,
-            Some("Muse has not observed subscription usage yet. This version does not expose usage to external readers.".to_string()),
-            Parsed {
-                account: Some(account),
-                ..Parsed::default()
-            },
-        ),
-        Err(ServeFailure::MintMissed(account, message)) => finish(
+        Err(ReadFailure::Unread(account, message)) => finish(
             AgentId::Muse,
             LimitsStatus::Failed,
             Some(message),
@@ -292,7 +285,7 @@ fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
                 ..Parsed::default()
             },
         ),
-        Err(ServeFailure::Failed(message)) => finish(
+        Err(ReadFailure::Failed(message)) => finish(
             AgentId::Muse,
             LimitsStatus::Failed,
             Some(message),
@@ -312,31 +305,41 @@ pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
 
 fn read_current(
     home: &Path,
-    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
+    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ReadFailure>,
     signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
     mint: impl FnOnce(&AccessToken) -> Result<mint::MintResponse, HttpError>,
-) -> Result<Parsed, ServeFailure> {
+) -> Result<Parsed, ReadFailure> {
     match signed_in(&crate::paths::muse_config_for(home)) {
         Some(MuseLogin {
             email,
             token: Some(token),
-        }) => mint::reading(email, mint(&token)),
+            ..
+        }) => mint::current_read(email, mint(&token)),
+        Some(MuseLogin {
+            email,
+            expired: true,
+            ..
+        }) => Err(ReadFailure::Unread(
+            account_dto(email),
+            "Muse's login has expired. Sign in with `muse` again to see subscription limits."
+                .to_string(),
+        )),
         login => read_with(home, start, login.map(|login| login.email)),
     }
 }
 
 fn read_with(
     home: &Path,
-    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
+    start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ReadFailure>,
     login_email: Option<Option<String>>,
-) -> Result<Parsed, ServeFailure> {
+) -> Result<Parsed, ReadFailure> {
     let config = crate::paths::muse_config_for(home);
     let data = crate::paths::muse_data_for(home);
-    let answers = query_serve(start(home, &config, &data)?, &data).map_err(ServeFailure::Failed)?;
+    let answers = query_serve(start(home, &config, &data)?, &data).map_err(ReadFailure::Failed)?;
     normalize(answers, login_email)
 }
 
-fn start(home: &Path, config: &Path, data: &Path) -> Result<Session, ServeFailure> {
+fn start(home: &Path, config: &Path, data: &Path) -> Result<Session, ReadFailure> {
     let binary = resolve_provider_cli(AgentId::Muse, "muse")
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| "muse".to_string());
@@ -360,10 +363,10 @@ fn start(home: &Path, config: &Path, data: &Path) -> Result<Session, ServeFailur
     begin(SERVE, command)
 }
 
-fn begin(peer: Peer, command: Command) -> Result<Session, ServeFailure> {
+fn begin(peer: Peer, command: Command) -> Result<Session, ReadFailure> {
     Session::start(peer, command).map_err(|failure| match failure {
-        NotStarted::Missing => ServeFailure::NotInstalled,
-        NotStarted::Failed(message) => ServeFailure::Failed(message),
+        NotStarted::Missing => ReadFailure::NotInstalled,
+        NotStarted::Failed(message) => ReadFailure::Failed(message),
     })
 }
 
