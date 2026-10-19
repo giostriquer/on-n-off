@@ -55,11 +55,7 @@ struct MintWindow {
     resets_at: Option<f64>,
 }
 
-pub(super) fn fetch(url: &str, token: &AccessToken) -> Option<MintResponse> {
-    fetch_saved(url, token).ok()
-}
-
-fn fetch_saved(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError> {
+pub(super) fn fetch(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError> {
     let authorization = token.authorization();
     let value = crate::http::post_json_headers(
         url,
@@ -78,7 +74,7 @@ pub(crate) fn read_saved(
     token: &AccessToken,
     urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let response = fetch_saved(urls.muse, token)?;
+    let response = fetch(urls.muse, token)?;
     let email = response
         .user_email
         .as_deref()
@@ -96,6 +92,30 @@ pub(crate) fn read_saved(
             "Muse shows no recent usage for this account.",
         )),
     }
+}
+
+pub(super) fn reading(
+    email: Option<String>,
+    answer: Result<MintResponse, HttpError>,
+) -> Result<Parsed, ServeFailure> {
+    let why = match answer {
+        Ok(response) => match normalize(email.clone(), &response) {
+            Some(read) => return read,
+            None => "Meta's answer had no subscription usage for this Muse account.".to_string(),
+        },
+        Err(HttpError::Unauthorized) => {
+            "Meta did not accept Muse's login. Sign in with `muse` again to see subscription limits."
+                .to_string()
+        }
+        Err(HttpError::RateLimited(_)) => {
+            "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
+                .to_string()
+        }
+        Err(error) => format!(
+            "Meta did not answer the Muse usage read ({error}). on-n-off will read it again later."
+        ),
+    };
+    Err(ServeFailure::MintMissed(account_dto(email), why))
 }
 
 pub(super) fn normalize(

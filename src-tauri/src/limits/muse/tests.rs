@@ -3,6 +3,7 @@ use crate::accounts::model::AccessToken;
 use crate::accounts::muse_store::MuseLogin;
 use crate::dto::LimitWindowDto;
 use crate::dto::{LimitWindowKind, LimitsStatus};
+use crate::http::{HttpError, RateLimitReset};
 use crate::json_line_session::Script;
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -432,6 +433,13 @@ fn signed_in(email: Option<&str>) -> Option<MuseLogin> {
     })
 }
 
+fn expired(email: Option<&str>) -> Option<MuseLogin> {
+    Some(MuseLogin {
+        email: email.map(str::to_string),
+        token: None,
+    })
+}
+
 fn mint_body() -> Value {
     json!({
         "is_subs_active": true,
@@ -549,7 +557,7 @@ fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
 }
 
 #[test]
-fn a_mint_answer_with_no_usable_window_falls_back() {
+fn a_mint_answer_with_no_usable_window_is_no_reading() {
     for unconfirmed in [
         json!({"subs_tier_name": "Wonder", "subs_usage": null}),
         json!({"is_subs_active": null, "subs_tier_name": "Wonder"}),
@@ -624,27 +632,35 @@ fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
 }
 
 #[test]
-fn a_failed_mint_call_gives_no_answer() {
-    for (status, body) in [
-        ("401 Unauthorized", r#"{"title":"Authentication Error"}"#),
-        ("403 Forbidden", "{}"),
-        ("429 Too Many Requests", "{}"),
-        ("500 Internal Server Error", "{}"),
-        ("200 OK", "not json"),
-        ("200 OK", r#"{"subs_usage": "wrong shape"}"#),
+fn a_failed_mint_call_names_its_failure() {
+    for (status, body, expected) in [
+        (
+            "401 Unauthorized",
+            r#"{"title":"Authentication Error"}"#,
+            "token rejected",
+        ),
+        ("403 Forbidden", "{}", "HTTP 403"),
+        ("429 Too Many Requests", "{}", "rate limited"),
+        ("500 Internal Server Error", "{}", "HTTP 500"),
+        ("200 OK", "not json", "unreadable response"),
+        (
+            "200 OK",
+            r#"{"subs_usage": "wrong shape"}"#,
+            "unreadable response: Unreadable Muse key answer.",
+        ),
     ] {
         let (url, server) = crate::http::serve_once(status, body);
-        assert!(
-            mint::fetch(&url, &AccessToken::new("device-token")).is_none(),
-            "{status} {body}"
-        );
+        let error = mint::fetch(&url, &AccessToken::new("device-token"))
+            .expect_err("a failed mint call")
+            .to_string();
+        assert!(error.starts_with(expected), "{status} {body}: {error}");
         server.join().expect("served");
     }
-    assert!(mint::fetch(
+    let refused = mint::fetch(
         &crate::http::refused_url(),
-        &AccessToken::new("device-token")
-    )
-    .is_none());
+        &AccessToken::new("device-token"),
+    );
+    assert!(matches!(refused, Err(HttpError::Network(_))), "{refused:?}");
 }
 
 fn serve_read(root: &Path) -> impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure> {
@@ -670,7 +686,7 @@ fn a_mint_reading_answers_without_starting_serve() {
         },
         |token| {
             assert_eq!(token.authorization(), "Bearer device-token");
-            Some(mint_response(mint_body()))
+            Ok(mint_response(mint_body()))
         },
     )
     .expect("mint reading");
@@ -678,7 +694,7 @@ fn a_mint_reading_answers_without_starting_serve() {
 }
 
 #[test]
-fn every_mint_miss_falls_back_to_the_serve_read() {
+fn only_a_read_without_a_device_token_starts_muse_serve() {
     let root = crate::paths::scratch_dir("muse-mint-fallback");
     let serve_windows = |read: Result<Parsed, ServeFailure>| {
         let read = read.expect("serve fallback");
@@ -694,34 +710,64 @@ fn every_mint_miss_falls_back_to_the_serve_read() {
     );
     assert_eq!(serve_windows(no_login), 2);
 
-    let expired = read_current(
+    let no_token = read_current(
         &root,
         serve_read(&root),
-        |_| {
-            Some(MuseLogin {
-                email: Some("you@example.com".to_string()),
-                token: None,
-            })
-        },
+        |_| expired(Some("you@example.com")),
         |_| panic!("no token means no mint"),
     );
-    assert_eq!(serve_windows(expired), 2);
+    assert_eq!(serve_windows(no_token), 2);
+}
 
-    let rejected = read_current(
-        &root,
-        serve_read(&root),
-        |_| signed_in(Some("you@example.com")),
-        |_| None,
-    );
-    assert_eq!(serve_windows(rejected), 2);
-
-    let unconfirmed = read_current(
-        &root,
-        serve_read(&root),
-        |_| signed_in(Some("you@example.com")),
-        |_| Some(mint_response(json!({"subs_usage": null}))),
-    );
-    assert_eq!(serve_windows(unconfirmed), 2);
+#[test]
+fn a_mint_miss_fails_the_card_without_starting_muse() {
+    let root = crate::paths::scratch_dir("muse-mint-miss");
+    let unanswered = |why: &str| {
+        format!(
+            "Meta did not answer the Muse usage read ({why}). on-n-off will read it again later."
+        )
+    };
+    let misses: [(Result<mint::MintResponse, HttpError>, String); 6] = [
+        (
+            Err(HttpError::Unauthorized),
+            "Meta did not accept Muse's login. Sign in with `muse` again to see subscription limits."
+                .to_string(),
+        ),
+        (
+            Err(HttpError::RateLimited(RateLimitReset::Unknown)),
+            "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
+                .to_string(),
+        ),
+        (
+            Err(HttpError::Network("connection refused".to_string())),
+            unanswered("network error: connection refused"),
+        ),
+        (Err(HttpError::Status(503)), unanswered("HTTP 503")),
+        (
+            Err(HttpError::Parse("Unreadable Muse key answer.".to_string())),
+            unanswered("unreadable response: Unreadable Muse key answer."),
+        ),
+        (
+            Ok(mint_response(json!({"subs_usage": null}))),
+            "Meta's answer had no subscription usage for this Muse account.".to_string(),
+        ),
+    ];
+    for (answer, expected) in misses {
+        let card = finish_read(read_current(
+            &root,
+            serve_must_not_run,
+            |_| signed_in(Some("You@Example.com")),
+            |_| answer,
+        ));
+        assert_eq!(card.status, LimitsStatus::Failed, "{expected}");
+        assert_eq!(card.message.as_deref(), Some(expected.as_str()));
+        assert_eq!(
+            card.account.as_ref().map(|account| account.id.as_str()),
+            Some(scoped_you().as_str()),
+            "{expected}"
+        );
+        assert!(card.reading.windows.is_empty(), "{expected}");
+    }
 }
 
 #[test]
@@ -732,7 +778,7 @@ fn an_idle_mint_answer_answers_without_starting_serve() {
         serve_must_not_run,
         |_| signed_in(Some("you@example.com")),
         |_| {
-            Some(mint_response(json!({
+            Ok(mint_response(json!({
                 "is_subs_active": true,
                 "subs_tier_name": "Muse Code Power Usage",
                 "subs_usage": null
@@ -752,18 +798,28 @@ fn an_idle_mint_answer_answers_without_starting_serve() {
 }
 
 #[test]
-fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
+fn every_path_names_the_account_as_the_mint_reading_does() {
     let root = crate::paths::scratch_dir("muse-identity-fallback");
     let minted = read_current(
         &root,
         serve_must_not_run,
         |_| signed_in(Some("You@Example.com")),
-        |_| Some(mint_response(mint_body())),
+        |_| Ok(mint_response(mint_body())),
     )
     .expect("mint reading")
     .account
     .expect("account");
     assert_eq!(minted.id, scoped_you());
+    let missed = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(Some("You@Example.com")),
+        |_| Err(HttpError::Status(500)),
+    );
+    assert!(
+        matches!(&missed, Err(ServeFailure::MintMissed(account, _)) if *account == minted),
+        "{missed:?}"
+    );
     for serve_label in ["Display Name", "Other@Example.org"] {
         let mut replies = happy_replies();
         replies[1]["result"]["museHome"] =
@@ -773,8 +829,8 @@ fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
         let fallback = read_current(
             &root,
             move |_, _, _| Ok(Script::new(replies).session(SERVE)),
-            |_| signed_in(Some("You@Example.com")),
-            |_| None,
+            |_| expired(Some("You@Example.com")),
+            |_| panic!("no token means no mint"),
         )
         .expect("serve fallback")
         .account
@@ -784,22 +840,37 @@ fn a_serve_fallback_names_the_account_as_the_mint_reading_does() {
 }
 
 #[test]
-fn a_login_without_an_email_is_the_default_account_on_both_paths() {
+fn a_login_without_an_email_is_the_default_account_on_every_path() {
     let root = crate::paths::scratch_dir("muse-identity-default");
     let minted = read_current(
         &root,
         serve_must_not_run,
         |_| signed_in(None),
-        |_| Some(mint_response(mint_body())),
+        |_| Ok(mint_response(mint_body())),
     )
     .expect("mint reading")
     .account
     .expect("account");
-    let fallback = read_current(&root, serve_read(&root), |_| signed_in(None), |_| None)
-        .expect("serve fallback")
-        .account
-        .expect("account");
+    let missed = read_current(
+        &root,
+        serve_must_not_run,
+        |_| signed_in(None),
+        |_| Err(HttpError::Unauthorized),
+    );
+    let fallback = read_current(
+        &root,
+        serve_read(&root),
+        |_| expired(None),
+        |_| panic!("no token means no mint"),
+    )
+    .expect("serve fallback")
+    .account
+    .expect("account");
     assert_eq!(minted.id, super::super::DEFAULT_ACCOUNT);
+    assert!(
+        matches!(&missed, Err(ServeFailure::MintMissed(account, _)) if *account == minted),
+        "{missed:?}"
+    );
     assert_eq!(fallback, minted);
 }
 

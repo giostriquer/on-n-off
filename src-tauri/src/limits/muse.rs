@@ -15,6 +15,7 @@ use crate::dto::{
     AgentId, LimitWindowDto, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto,
     Reading,
 };
+use crate::http::HttpError;
 use crate::json_line_session::{Conversation, Failure, NotStarted, Peer, Request, Session};
 
 pub(super) mod mint;
@@ -77,6 +78,7 @@ enum ServeFailure {
     SignedOut,
     Unsupported(String),
     NoUsageYet(LimitsAccountDto),
+    MintMissed(LimitsAccountDto, String),
     Failed(String),
 }
 
@@ -281,6 +283,15 @@ fn finish_read(read: Result<Parsed, ServeFailure>) -> ProviderLimitsDto {
                 ..Parsed::default()
             },
         ),
+        Err(ServeFailure::MintMissed(account, message)) => finish(
+            AgentId::Muse,
+            LimitsStatus::Failed,
+            Some(message),
+            Parsed {
+                account: Some(account),
+                ..Parsed::default()
+            },
+        ),
         Err(ServeFailure::Failed(message)) => finish(
             AgentId::Muse,
             LimitsStatus::Failed,
@@ -303,14 +314,15 @@ fn read_current(
     home: &Path,
     start: impl FnOnce(&Path, &Path, &Path) -> Result<Session, ServeFailure>,
     signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
-    mint: impl FnOnce(&AccessToken) -> Option<mint::MintResponse>,
+    mint: impl FnOnce(&AccessToken) -> Result<mint::MintResponse, HttpError>,
 ) -> Result<Parsed, ServeFailure> {
-    let login = signed_in(&crate::paths::muse_config_for(home));
-    let minted = login.as_ref().and_then(|login| {
-        let response = mint(login.token.as_ref()?)?;
-        mint::normalize(login.email.clone(), &response)
-    });
-    minted.unwrap_or_else(|| read_with(home, start, login.map(|login| login.email)))
+    match signed_in(&crate::paths::muse_config_for(home)) {
+        Some(MuseLogin {
+            email,
+            token: Some(token),
+        }) => mint::reading(email, mint(&token)),
+        login => read_with(home, start, login.map(|login| login.email)),
+    }
 }
 
 fn read_with(

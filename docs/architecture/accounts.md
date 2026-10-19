@@ -230,8 +230,8 @@ the signed-in Codex login only through `codex_store`'s projections.
 Muse is the second exception, also the user's decision (2026-10-16). `accounts/muse_store.rs`
 reads Muse Code's signed-in device login, inline in its `auth.json` or else its macOS Keychain
 item. For the Muse Limits read (`limits/muse.rs`) it yields only the access token, as
-`model::AccessToken`, and the login's email, which also names the account when Limits falls back
-to `muse serve`; that read sends one POST per read to the key-mint endpoint the CLI calls itself
+`model::AccessToken`, and the login's email, which also names the account when the mint misses
+or, with no token to send, Limits asks `muse serve`; that read sends one POST per read to the key-mint endpoint the CLI calls itself
 (`limits/muse/mint.rs`) and keeps only the quota fields of the answer. Saved accounts use the
 same store for whole logins, as the next paragraph describes.
 
@@ -256,6 +256,12 @@ Keychain item through `/usr/bin/security`, keeping its `secret_schema_version` (
 no item yet), or inline; `auth.json` is replaced atomically with other providers' entries kept,
 as Codex's credential file is, without Muse's `.auth.json.lock` (Muse never renews, and a switch
 beside a running Muse asks first). A malformed document or item is refused, never repaired.
+macOS resets an item's partition list to its writer's, so after that write the list holds only
+`apple-tool:` and the next Muse process, signed by Meta, asks once for its own login; "Always
+Allow" adds Muse's team until the next activation (verified 2026-10-19 in the `securityd` log).
+Muse has no command that stores a device login (`muse auth set` takes only API keys), so on-n-off
+cannot write the item as Muse. on-n-off therefore never starts Muse in the background while it
+holds a token: the Limits read asks `muse serve` only when it has no token to send.
 A saved, non-active Muse login lives in its own home under `accounts/homes/`, run with `HOME`,
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `TBH_CREDENTIAL_BACKEND=file`, so its login stays inline in
 that home's `auth.json` and never touches the global Keychain item (verified 2026-10-16 with a
