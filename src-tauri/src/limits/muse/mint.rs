@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{account_dto, session_label, window, ServeFailure};
+use super::{account_dto, session_label, window, ReadFailure};
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
@@ -55,11 +55,7 @@ struct MintWindow {
     resets_at: Option<f64>,
 }
 
-pub(super) fn fetch(url: &str, token: &AccessToken) -> Option<MintResponse> {
-    fetch_saved(url, token).ok()
-}
-
-fn fetch_saved(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError> {
+pub(super) fn fetch(url: &str, token: &AccessToken) -> Result<MintResponse, HttpError> {
     let authorization = token.authorization();
     let value = crate::http::post_json_headers(
         url,
@@ -78,7 +74,7 @@ pub(crate) fn read_saved(
     token: &AccessToken,
     urls: &SavedReadUrls<'_>,
 ) -> Result<ProviderLimitsDto, SavedReadError> {
-    let response = fetch_saved(urls.muse, token)?;
+    let response = fetch(urls.muse, token)?;
     let email = response
         .user_email
         .as_deref()
@@ -98,18 +94,42 @@ pub(crate) fn read_saved(
     }
 }
 
+pub(super) fn current_read(
+    email: Option<String>,
+    answer: Result<MintResponse, HttpError>,
+) -> Result<Parsed, ReadFailure> {
+    let why = match answer {
+        Ok(response) => match normalize(email.clone(), &response) {
+            Some(read) => return read,
+            None => "Meta's answer had no subscription usage for this Muse account.".to_string(),
+        },
+        Err(HttpError::Unauthorized) => {
+            "Meta did not accept Muse's login. Sign in with `muse` again to see subscription limits."
+                .to_string()
+        }
+        Err(HttpError::RateLimited(_)) => {
+            "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
+                .to_string()
+        }
+        Err(error) => {
+            format!("The Muse usage read failed ({error}). on-n-off will read it again later.")
+        }
+    };
+    Err(ReadFailure::Unread(account_dto(email), why))
+}
+
 pub(super) fn normalize(
     email: Option<String>,
     response: &MintResponse,
-) -> Option<Result<Parsed, ServeFailure>> {
+) -> Option<Result<Parsed, ReadFailure>> {
     if response.require_payment {
-        return Some(Err(ServeFailure::Unsupported(
+        return Some(Err(ReadFailure::Unsupported(
             "Muse subscription billing is incomplete; finish it in Muse to see subscription limits."
                 .to_string(),
         )));
     }
     if response.is_subs_active == Some(false) {
-        return Some(Err(ServeFailure::Unsupported(
+        return Some(Err(ReadFailure::Unsupported(
             "This Muse subscription is inactive, so it has no subscription limits to show."
                 .to_string(),
         )));

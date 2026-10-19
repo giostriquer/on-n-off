@@ -20,6 +20,7 @@ const UNREACHABLE: &str =
 pub(crate) struct MuseLogin {
     pub(crate) email: Option<String>,
     pub(crate) token: Option<AccessToken>,
+    pub(crate) expired: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -229,6 +230,7 @@ impl LoginCache {
         Some(MuseLogin {
             email: meta.email(),
             token: token.map(|token| AccessToken::new(&token)),
+            expired: !live,
         })
     }
 
