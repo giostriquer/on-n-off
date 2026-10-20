@@ -1,9 +1,4 @@
 use super::*;
-use std::{collections::BTreeMap, sync::Mutex};
-
-type Seen = (String, Option<SignInDeadline>);
-
-static DEADLINES: Mutex<BTreeMap<PathBuf, Seen>> = Mutex::new(BTreeMap::new());
 
 pub(in crate::accounts) struct ClaudeHome {
     dir: PathBuf,
@@ -52,27 +47,12 @@ impl Home for ClaudeHome {
         )
     }
 
-    fn login_stamp(&self) -> Option<String> {
+    fn login_stamp(&self) -> Result<String, String> {
         self.store.login_stamp()
     }
 
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
-        let stamp = self.store.login_stamp()?;
-        let seen = DEADLINES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .get(&self.dir)
-            .filter(|(seen, _)| *seen == stamp)
-            .map(|(_, deadline)| deadline.clone());
-        if let Some(deadline) = seen {
-            return deadline;
-        }
-        let deadline = NativeAccount::sign_in_deadline(&self.store);
-        DEADLINES
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(self.dir.clone(), (stamp, deadline.clone()));
-        deadline
+        NativeAccount::sign_in_deadline(&self.store)
     }
 
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String> {

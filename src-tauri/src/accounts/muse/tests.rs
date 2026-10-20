@@ -332,7 +332,7 @@ fn a_homes_login_stamp_follows_its_auth_file_without_reading_it() {
     home.put(&login("you@example.com", "t1"), &()).unwrap();
     let first = home.login_stamp();
 
-    assert_eq!(empty.as_deref(), Some(""), "no login yet");
+    assert_eq!(empty.as_deref(), Ok(native::ABSENT), "no login yet");
     assert_ne!(first, empty);
     assert_eq!(home.login_stamp(), first);
     #[cfg(unix)]

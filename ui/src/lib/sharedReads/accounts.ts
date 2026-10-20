@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { AccountCategories, AccountsReading } from "$lib/accountTypes";
+import { parseInstant } from "$lib/limitsFormat";
 import type { AccountProvider, LimitsProvider } from "$lib/providers";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
@@ -9,6 +10,8 @@ const ACCOUNTS = ["accounts"] as const;
 const CODEX_SUBSCRIPTIONS = ["subscription", "codex"] as const;
 const ANNOUNCED = [ACCOUNTS, CODEX_SUBSCRIPTIONS] as const;
 const DAY_MS = 24 * 60 * 60_000;
+const MINUTE_MS = 60_000;
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 function accountListKey(provider: AccountProvider) {
   return [...ACCOUNTS, provider] as const;
@@ -19,7 +22,21 @@ export const accountsAnnouncements = {
 } satisfies Record<Extract<SharedReadSource, "accounts">, readonly QueryKey[]>;
 
 export function accountListQuery(provider: AccountProvider) {
-  return queryOptions({ queryKey: accountListKey(provider), queryFn: () => api.readAccounts(provider), retry: false });
+  return queryOptions({
+    queryKey: accountListKey(provider),
+    queryFn: () => api.readAccounts(provider),
+    retry: false,
+    refetchInterval: (query) => untilSignInEnds(query.state.data, Date.now()),
+  });
+}
+
+export function untilSignInEnds(reading: AccountsReading | undefined, now: number): number | false {
+  const ends = (reading?.profiles ?? []).flatMap(({ loginState }) => {
+    const until = loginState.state === "ending" ? parseInstant(loginState.endsAt) : null;
+    return until === null ? [] : [until - now];
+  });
+  if (ends.length === 0) return false;
+  return Math.min(Math.max(Math.min(...ends), MINUTE_MS), LONGEST_TIMER_MS);
 }
 
 export function accountCategoriesQuery() {

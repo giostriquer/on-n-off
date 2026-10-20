@@ -231,14 +231,12 @@ impl ClaudeNative {
         Ok(None)
     }
 
-    fn login_stamp(&self) -> Option<String> {
-        let file = native::file_stamp(&self.storage_dir().credentials_file()).ok()?;
-        let item = self.keychain_stamp().ok()?;
-        Some(format!(
-            "{}|{}",
-            item.unwrap_or_default(),
-            file.unwrap_or_default()
-        ))
+    fn login_stamp(&self) -> Result<String, String> {
+        let item = self
+            .keychain_stamp()?
+            .unwrap_or_else(|| native::ABSENT.into());
+        let file = native::file_stamp(&self.storage_dir().credentials_file())?;
+        Ok(format!("{item}|{file}"))
     }
 
     fn keychain_stamp(&self) -> Result<Option<String>, String> {

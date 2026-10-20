@@ -167,7 +167,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
 
 it("draws the card action plan's menu in its order, each item under its own label", async () => {
   const old = okCodex({ currentAccount: false, account: { id: "codex-old", label: "old@codex.example" } });
-  const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, needsLogin: false };
+  const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" } };
   readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   answer(read => read === "codex" ? [okCodex(), old] : [CURRENT[read]()]);
   renderLimits();

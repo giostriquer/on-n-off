@@ -276,9 +276,12 @@ card reads only that state, never a per-provider switch, so a provider whose ada
 sign-in deadline would get the same tag, with its own name in the copy. A sign-in still awaiting Use account is
 newer than whatever the default store holds for that account, so it reads only its own login;
 otherwise the default store's date comes first. The listing reads the credential document
-only for that date: it uses no token and sends nothing. A saved account's home reads it once per
-login, keyed by the home's login stamp (Saved subscription profiles, below), so the listing reads the
-home's Keychain item again only after Claude Code rewrote it. **code** (Claude
+only for that date: it uses no token and sends nothing. A saved account in its home has the date
+its profile records whenever on-n-off holds the login (a save, the move into or out of the home,
+a home taken back), so the listing reads no home's Keychain item for it; a profile an older
+version wrote is read once and the date recorded. A login replaced in its home outside on-n-off
+keeps the recorded date until on-n-off next holds it. The signed-in account shows its date even
+with no saved login, and its card never reads as refused or another account. **code** (Claude
 Code 2.1.296): the field, the 30-day default, the emptied login keeping the date, and the three-day
 notice. **verified** (2026-10-12): a login renewed that morning kept its date three days out, and a
 login 31 days past its `/login` was refused at its next renewal.

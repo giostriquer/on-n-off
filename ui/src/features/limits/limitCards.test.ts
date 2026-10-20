@@ -11,7 +11,7 @@ import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixture
 const AT_NOW = Date.parse(NOW);
 
 function saved(provider: AgentId, id: string, observationId: string, email: string, overrides: Partial<SavedProfile> = {}): SavedProfile {
-  return { id, observationId, legacyId: id, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
+  return { id, observationId, legacyId: id, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides };
 }
 
 function cards(entries: ProviderLimits[] | undefined, profiles: SavedProfile[] = [], now = AT_NOW, provider = (entries?.[0]?.provider ?? "codex") as LimitsProvider): LimitCard[] {
@@ -478,10 +478,10 @@ describe("a saved sign-in's end", () => {
   it("once passed, is the card's message in red, read or not", () => {
     const unread = saved("claude", "me", "uuid-1", "me@claude.example", { loginState: { state: "ended", endsAt: ended } });
     const [card] = cards(undefined, [unread], AT_NOW, "claude");
-    expect(card).toMatchObject({ signIn: { state: "ended" }, empty: null, freshness: { message: endedMessage } });
+    expect(card).toMatchObject({ signIn: { label: "Sign-in ended", tone: "expired" }, empty: null, freshness: { message: endedMessage } });
 
     const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits." }], [unread]);
-    expect(signedOut).toMatchObject({ signIn: { state: "ended" }, freshness: { message: endedMessage } });
+    expect(signedOut).toMatchObject({ signIn: { label: "Sign-in ended", tone: "expired" }, freshness: { message: endedMessage } });
   });
 
 });

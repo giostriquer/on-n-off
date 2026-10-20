@@ -1,19 +1,14 @@
 use super::*;
 use crate::accounts::transaction::NativeGuard;
+use std::sync::Arc;
 
-struct SecretsUntouched {
-    stamp: Mutex<Option<String>>,
+#[derive(Default)]
+struct HomeState {
+    stamp: Mutex<String>,
     reads: Mutex<usize>,
 }
 
-impl SecretsUntouched {
-    fn stamped(stamp: &str) -> Self {
-        Self {
-            stamp: Mutex::new(Some(stamp.into())),
-            reads: Mutex::new(0),
-        }
-    }
-}
+struct SecretsUntouched(Arc<HomeState>);
 
 impl Home for SecretsUntouched {
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
@@ -32,11 +27,11 @@ impl Home for SecretsUntouched {
         panic!("emptied a home")
     }
     fn read_usage(&self, _: &model::Identity) -> Result<Accepted, ReadFailure> {
-        *self.reads.lock().unwrap() += 1;
+        *self.0.reads.lock().unwrap() += 1;
         Err(ReadFailure::LoginRefused)
     }
-    fn login_stamp(&self) -> Option<String> {
-        self.stamp.lock().unwrap().clone()
+    fn login_stamp(&self) -> Result<String, String> {
+        Ok(self.0.stamp.lock().unwrap().clone())
     }
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline> {
         panic!("read a home's sign-in deadline")
@@ -46,54 +41,49 @@ impl Home for SecretsUntouched {
     }
 }
 
-fn homed(home: &Path) -> Profile {
-    let mut p = profile();
-    p.home = Some(uuid::Uuid::new_v4().to_string());
-    p.login = None;
-    rewrite(home, |db| db.profiles.push(p.clone()));
-    p
-}
-
 #[test]
 fn a_homes_generation_is_its_login_stamp_and_never_its_login() {
     let home = tempfile::tempdir().unwrap();
-    let p = homed(home.path());
-    let account_home = SecretsUntouched::stamped("item written at 10:00");
-    let poll = |force| {
-        poll_home(
+    let mut p = profile();
+    let id = uuid::Uuid::new_v4().to_string();
+    p.home = Some(id.clone());
+    p.login = None;
+    rewrite(home.path(), |db| db.profiles.push(p.clone()));
+    let state = Arc::new(HomeState::default());
+    *state.stamp.lock().unwrap() = "item written at 10:00".into();
+    let kept = || Kept::Home(&id, Box::new(SecretsUntouched(state.clone())));
+    let poll_once = |force| {
+        poll(
             home.path(),
             &p,
+            &kept(),
             &ticket(home.path()),
             force,
             &|| Ok(open(home.path())),
-            &account_home,
+            &|_| panic!("a home is never fetched from the vault"),
         )
     };
-    let parked_now = || {
-        parked(
-            home.path(),
-            &p,
-            Some(&|_: &str| -> Result<Box<dyn Home>, String> {
-                Ok(Box::new(SecretsUntouched {
-                    stamp: Mutex::new(account_home.stamp.lock().unwrap().clone()),
-                    reads: Mutex::new(0),
-                }))
-            }),
-        )
-    };
+    let reads = || *state.reads.lock().unwrap();
 
-    assert!(poll(false).unwrap().is_err());
-    assert_eq!(parked_now(), Some(Parked::Refused));
-    super::elapse(home.path());
-    assert!(poll(true).unwrap().is_err());
+    let (card, changed) = poll_once(false);
+    assert!(card.unwrap().is_err());
+    assert!(changed, "now refused");
     assert_eq!(
-        *account_home.reads.lock().unwrap(),
-        1,
-        "parked until the login changes"
+        parked(home.path(), &p, Some(&kept())),
+        Some(Parked::Refused)
     );
+    super::elapse(home.path());
+    assert!(!poll_once(true).1, "held, nothing changed");
+    assert_eq!(reads(), 1, "parked until the login changes");
 
-    *account_home.stamp.lock().unwrap() = Some("item written at 10:05".into());
-    assert_eq!(parked_now(), None, "a changed login is usable at once");
-    assert!(poll(false).unwrap().is_err());
-    assert_eq!(*account_home.reads.lock().unwrap(), 2);
+    *state.stamp.lock().unwrap() = "item written at 10:05".into();
+    assert_eq!(
+        parked(home.path(), &p, Some(&kept())),
+        None,
+        "a changed login is usable at once"
+    );
+    let (card, changed) = poll_once(false);
+    assert!(card.unwrap().is_err());
+    assert!(changed, "refused again, for the new login");
+    assert_eq!(reads(), 2);
 }

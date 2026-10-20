@@ -61,10 +61,12 @@ pub(crate) fn with_test_cli<T>(program: &Path, run: impl FnOnce() -> T) -> T {
     run()
 }
 
-pub(super) fn file_stamp(path: &Path) -> Result<Option<String>, String> {
+pub(super) const ABSENT: &str = "absent";
+
+pub(super) fn file_stamp(path: &Path) -> Result<String, String> {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(ABSENT.into()),
         Err(_) => return Err("Cannot read the login file's metadata.".into()),
     };
     let modified = metadata
@@ -76,7 +78,7 @@ pub(super) fn file_stamp(path: &Path) -> Result<Option<String>, String> {
     let file = std::os::unix::fs::MetadataExt::ino(&metadata);
     #[cfg(not(unix))]
     let file = 0;
-    Ok(Some(format!("{file}:{}:{modified}", metadata.len())))
+    Ok(format!("{file}:{}:{modified}", metadata.len()))
 }
 
 pub fn read_json(path: &Path) -> Result<Value, String> {

@@ -259,6 +259,7 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
                     "binary": facts.binary,
                     "binaryAliases": facts.binary_aliases,
                     "limitsReader": facts.limits.is_some(),
+                    "limitsClient": facts.limits.map(|limits| limits.client),
                     "usage": facts.usage,
                     "savedAccounts": facts.saved_accounts,
                 }),

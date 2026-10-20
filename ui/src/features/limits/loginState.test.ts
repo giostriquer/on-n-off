@@ -21,12 +21,12 @@ type Shown = {
   message: string | null;
 };
 
-function shown(provider: LimitsProvider, loginState: LoginState | undefined): Shown {
+function shown(provider: LimitsProvider, loginState: LoginState): Shown {
   const reading = READING[provider]({ currentAccount: false, savedProfile: true, status: "failed", message: "The read's own words." });
   const account = reading.account!;
   const profile: SavedProfile = {
     id: `saved-${provider}`, observationId: account.id, legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },
-    email: account.label, label: account.label!, savedAt: NOW, active: false, needsLogin: false, loginState,
+    email: account.label, label: account.label!, savedAt: NOW, active: false, loginState,
   };
   const card = limitCards({ provider, entries: [reading], profiles: [profile], nativeLogin: { observationId: "someone-else", settled: true }, now: AT_NOW })!
     .find(candidate => candidate.account?.id === account.id)!;
@@ -45,15 +45,14 @@ function shown(provider: LimitsProvider, loginState: LoginState | undefined): Sh
 
 const AGAIN = "Sign in again to use this account.";
 
-const TABLE: [string, LoginState | undefined, (name: string) => Shown][] = [
+const TABLE: [string, LoginState, (name: string) => Shown][] = [
   ["usable", { state: "usable" }, () => ({ main: "useAccount", useInMenu: false, tag: null, message: null })],
-  ["sent by an app that says nothing", undefined, () => ({ main: "useAccount", useInMenu: false, tag: null, message: null })],
   ["ending in more than a week", { state: "ending", endsAt: at(20) }, () => ({ main: "useAccount", useInMenu: false, tag: null, message: null })],
   ["ending within the week", { state: "ending", endsAt: at(3) }, () => ({
     main: "useAccount", useInMenu: false, tag: { label: "Sign-in ends Aug 20", tone: "warning" }, message: null,
   })],
-  ["ending, its date since passed", { state: "ending", endsAt: at(-1) }, name => ({
-    main: "signInAgain", useInMenu: false, tag: { label: "Sign-in ended", tone: "expired" }, message: `${name} ended this sign-in on Aug 16. ${AGAIN}`,
+  ["ending, its date passed since the account list said so", { state: "ending", endsAt: at(-0.01) }, () => ({
+    main: "useAccount", useInMenu: false, tag: { label: "Sign-in ends Aug 17", tone: "warning" }, message: null,
   })],
   ["ended", { state: "ended", endsAt: at(-2) }, name => ({
     main: "signInAgain", useInMenu: false, tag: { label: "Sign-in ended", tone: "expired" }, message: `${name} ended this sign-in on Aug 15. ${AGAIN}`,
@@ -95,7 +94,7 @@ describe("a sign-in's end", () => {
   });
 
   it("warns through the last seven days, filling as the end nears", () => {
-    expect(ending(7)).toMatchObject({ state: "ending", tone: "warning", progress: 0, name: "Muse sign-in ends Aug 24", countdown: "7 days remaining" });
+    expect(ending(7)).toMatchObject({ tone: "warning", progress: 0, name: "Muse sign-in ends Aug 24", countdown: "7 days remaining" });
     expect(ending(3.5)).toMatchObject({ progress: 0.5, countdown: "4 days remaining" });
     expect(ending(1)).toMatchObject({ countdown: "1 day remaining" });
     expect(ending(0.5)).toMatchObject({ countdown: "Less than 1 day remaining" });
@@ -105,7 +104,9 @@ describe("a sign-in's end", () => {
     const soon = signInPresentation({ state: "ending", endsAt: at(3) }, "claude", AT_NOW)!;
     expect(soon.headline).toMatch(/^Claude ends this sign-in Aug 20, 2026, \d{1,2}:\d{2}/);
     expect(soon.headline).not.toMatch(/GMT|UTC/);
-    expect(soon.next).toBe("Then Claude asks you to sign in again.");
+    expect(soon.next).toBe("Then Claude Code asks you to sign in again.");
+    expect(signInPresentation({ state: "ending", endsAt: at(3) }, "codex", AT_NOW)!.next).toBe("Then Codex CLI asks you to sign in again.");
+    expect(ending(3)!.next).toBe("Then Muse Code asks you to sign in again.");
     const ended = signInPresentation({ state: "ended", endsAt: at(-400) }, "codex", AT_NOW)!;
     expect(ended).toMatchObject({ name: "Codex sign-in ended Jul 13, 2025", countdown: null, progress: 0, next: AGAIN });
     expect(ended.headline).toMatch(/^Codex ended this sign-in Jul 13, 2025, \d{1,2}:\d{2}/);

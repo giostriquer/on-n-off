@@ -25,7 +25,7 @@ import {
   type LimitAccountPresentation,
   type LimitWindowPresentation,
 } from "./limitPresentation";
-import { loginStateOf, signInPresentation, type SignInPresentation } from "./loginState";
+import { signInPresentation, type SignInPresentation } from "./loginState";
 
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
 
@@ -170,7 +170,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
-  const login = profile && loginStateOf(profile, now);
+  const login = profile?.loginState ?? null;
   const signIn = login && signInPresentation(login, provider, now);
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null

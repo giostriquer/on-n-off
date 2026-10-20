@@ -114,6 +114,8 @@ pub(super) struct Homes {
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
+    pub secrets_read: Mutex<usize>,
+    pub sealed: Mutex<bool>,
 }
 
 struct FakeHome(Arc<Homes>, PathBuf, AgentId);
@@ -135,6 +137,11 @@ impl Home for FakeHome {
         Ok(Box::new(()))
     }
     fn read(&self) -> Result<Option<Login>, String> {
+        assert!(
+            !*self.0.sealed.lock().unwrap(),
+            "read a home's login secret"
+        );
+        *self.0.secrets_read.lock().unwrap() += 1;
         if self.0.unreadable.lock().unwrap().contains(&self.1) {
             return Err("The home's login could not be read.".into());
         }
@@ -174,19 +181,14 @@ impl Home for FakeHome {
             &identity.observation_key(),
         )))
     }
-    fn login_stamp(&self) -> Option<String> {
+    fn login_stamp(&self) -> Result<String, String> {
         if self.0.unreadable.lock().unwrap().contains(&self.1) {
-            return None;
+            return Err("The home's login could not be stamped.".into());
         }
-        Some(
-            self.0
-                .logins
-                .lock()
-                .unwrap()
-                .get(&self.1)
-                .map(|login| fingerprint(self.2, login))
-                .unwrap_or_default(),
-        )
+        Ok(self.0.logins.lock().unwrap().get(&self.1).map_or_else(
+            || super::super::native::ABSENT.into(),
+            |login| fingerprint(self.2, login),
+        ))
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         let login = self.read().ok()??;

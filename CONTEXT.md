@@ -123,7 +123,8 @@ Whether a saved profile's login can still be used: usable; ending, with the date
 ended, once that date has passed; refused, when its provider refused it or found it signed out;
 another account, when it now signs in as a different account; or missing, when nothing is kept
 for it. The last poll decides refused and another account, for the login it read, until that login
-changes. Every Limits card reads it, for every provider, to ask for a new sign-in.
+changes; the signed-in account's is its sign-in's end alone. Every Limits card reads it, for every
+provider, to ask for a new sign-in.
 _Avoid_: needs login, rejected, expired
 
 **Account change**:

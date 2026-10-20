@@ -34,19 +34,10 @@ fn token(login: Option<Login>) -> Option<String> {
 
 #[cfg(target_os = "macos")]
 fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
-    keychain_counting(std::rc::Rc::default(), run)
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_counting<T>(
-    secret_reads: std::rc::Rc<std::cell::Cell<usize>>,
-    run: impl FnOnce() -> T,
-) -> (T, Vec<String>) {
     use crate::process::CommandOutcome;
-    use std::{cell::Cell, cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, rc::Rc};
     let item: Rc<RefCell<Option<String>>> = Rc::default();
     let held = item.clone();
-    let writes = Rc::new(Cell::new(0));
     let runner = move |command: &str| {
         let exited = |success: bool, stdout: String, stderr: &str| CommandOutcome::Exited {
             success,
@@ -65,7 +56,6 @@ fn keychain_counting<T>(
                 .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
                 .collect();
             *held.borrow_mut() = Some(String::from_utf8(bytes).unwrap());
-            writes.set(writes.get() + 1);
             return exited(true, String::new(), "");
         }
         if command.starts_with("delete-generic-password") {
@@ -78,18 +68,8 @@ fn keychain_counting<T>(
                 String::new(),
                 "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.",
             ),
-            (Some(secret), true) => {
-                secret_reads.set(secret_reads.get() + 1);
-                exited(true, format!("{secret}\n"), "")
-            }
-            (Some(_), false) => exited(
-                true,
-                format!(
-                    "    \"acct\"<blob>=\"claude-code-user\"\n    \"mdat\"<timedate>=\"write {}\"\n",
-                    writes.get()
-                ),
-                "",
-            ),
+            (Some(secret), true) => exited(true, format!("{secret}\n"), ""),
+            (Some(_), false) => exited(true, "    \"acct\"<blob>=\"claude-code-user\"\n".into(), ""),
         }
     };
     let result = crate::accounts::keychain::with_test_runner(runner, run);
@@ -371,7 +351,7 @@ fn a_homes_login_stamp_follows_its_credentials_file_without_reading_it() {
         (empty, first, again, unreadable, home.login_stamp())
     });
 
-    assert!(empty.is_some() && first.is_some());
+    assert!(empty.is_ok() && first.is_ok());
     assert_ne!(empty, first, "a login written into the home");
     assert_eq!(first, again);
     assert_eq!(unreadable, first, "the stamp never opens the file");
@@ -410,7 +390,7 @@ fn a_homes_login_stamp_reads_its_keychain_items_attributes_and_never_its_secret(
             (first, again, home.login_stamp())
         });
 
-    assert!(first.is_some());
+    assert!(first.is_ok());
     assert_eq!(first, again);
     assert_ne!(rewritten, first, "Claude Code rewrote the item");
     assert!(!sent.is_empty());
@@ -419,90 +399,4 @@ fn a_homes_login_stamp_reads_its_keychain_items_attributes_and_never_its_secret(
             && !command.contains(" -w")),
         "{sent:?}"
     );
-}
-
-#[cfg(unix)]
-fn dated(generation: &str, ends_at_ms: i64) -> Login {
-    let mut login = login(generation);
-    login.auth["claudeAiOauth"]["refreshTokenExpiresAt"] = ends_at_ms.into();
-    login
-}
-
-#[cfg(unix)]
-fn ends_at(ends_at_ms: i64) -> Option<SignInDeadline> {
-    Some(SignInDeadline {
-        identity: identity(),
-        ends_at_ms,
-    })
-}
-
-#[cfg(target_os = "macos")]
-#[test]
-fn a_homes_sign_in_deadline_reads_its_keychain_secret_once_per_login() {
-    use std::{cell::Cell, rc::Rc};
-    let root = tempfile::tempdir().unwrap();
-    let home = ClaudeHome::at(root.path());
-    let secret_reads = Rc::new(Cell::new(0));
-    let put = |login: &Login| {
-        let locks = home.lock().unwrap();
-        home.put(login, locks.as_ref()).unwrap();
-    };
-    let deadline = |reads: &Cell<usize>| {
-        let before = reads.get();
-        (home.sign_in_deadline(), reads.get() - before)
-    };
-
-    let ((first, second, renewed), _) = keychain_counting(secret_reads.clone(), || {
-        put(&dated("b1", 1_792_081_900_000));
-        let first = deadline(&secret_reads);
-        let second = deadline(&secret_reads);
-        put(&dated("b2", 1_794_110_392_000));
-        (first, second, deadline(&secret_reads))
-    });
-
-    assert_eq!(first, (ends_at(1_792_081_900_000), 1));
-    assert_eq!(
-        second,
-        (ends_at(1_792_081_900_000), 0),
-        "the same login read twice"
-    );
-    assert_eq!(
-        renewed,
-        (ends_at(1_794_110_392_000), 1),
-        "a new login read again"
-    );
-}
-
-#[cfg(unix)]
-#[test]
-fn a_homes_sign_in_deadline_in_a_file_is_read_once_per_login() {
-    use std::os::unix::fs::PermissionsExt;
-    let root = tempfile::tempdir().unwrap();
-    let home = ClaudeHome::at(root.path());
-    let config = root.path().join(".claude");
-    std::fs::create_dir_all(&config).unwrap();
-    std::fs::write(
-        config.join(".claude.json"),
-        json!({"oauthAccount": login("b1").account}).to_string(),
-    )
-    .unwrap();
-    let file = config.join(".credentials.json");
-    let write = |login: &Login| std::fs::write(&file, login.auth.to_string()).unwrap();
-    let locked = |mode: u32| {
-        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(mode)).unwrap();
-    };
-
-    let ((first, unopened, renewed), _) = keychain(|| {
-        write(&dated("b1", 1_792_081_900_000));
-        let first = home.sign_in_deadline();
-        locked(0o000);
-        let unopened = home.sign_in_deadline();
-        locked(0o600);
-        write(&dated("b-renewed", 1_794_110_392_000));
-        (first, unopened, home.sign_in_deadline())
-    });
-
-    assert_eq!(first, ends_at(1_792_081_900_000));
-    assert_eq!(unopened, first, "the same login is not read again");
-    assert_eq!(renewed, ends_at(1_794_110_392_000), "a new login is");
 }

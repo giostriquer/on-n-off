@@ -25,7 +25,7 @@ function profile(provider: LimitsProvider, overrides: Partial<SavedProfile> = {}
   const email = READING[provider]().account!.label!;
   return {
     id: `saved-${provider}`, observationId: accountId(provider), legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },
-    email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides,
+    email, label: email, savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides,
   };
 }
 
@@ -82,7 +82,7 @@ const STATES = {
   "current unconfirmed": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)] }),
   "current unsaved": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: { observationId: accountId(provider), settled: true } }),
   saved: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)] }),
-  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })], profiles: [profile(provider, { needsLogin: true, loginState: { state: "missing" } })] }),
+  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })], profiles: [profile(provider, { loginState: { state: "missing" } })] }),
   "sign-in ended": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider, { loginState: { state: "ended", endsAt: before(1) } })],
   }),
@@ -241,7 +241,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
   const profileOf = (overrides: Partial<SavedProfile> = {}): SavedProfile => ({
     id: "saved", observationId: "profile:saved", legacyId: "saved", identity: { provider: "codex", userId: "saved", workspaceId: "saved" },
-    email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, needsLogin: false, ...overrides,
+    email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides,
   });
 
   it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
@@ -254,7 +254,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf()],
     ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf({ active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
-    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ needsLogin: true, loginState: { state: "missing" } })],
+    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ loginState: { state: "missing" } })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {
     const shown = limitCards({ provider: "codex", entries: [reading], profiles: saved ? [saved] : [], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;

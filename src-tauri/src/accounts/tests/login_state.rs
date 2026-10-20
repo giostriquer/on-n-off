@@ -351,6 +351,53 @@ fn the_signed_in_accounts_state_is_its_deadline_alone() {
 }
 
 #[test]
+fn a_home_whose_login_cannot_be_stamped_keeps_its_verdict_and_is_not_read_again() {
+    let saved = Saved::new(AgentId::Muse, Kept::Home);
+    saved.answering(Some(ReadFailure::LoginRefused));
+    saved.poll(false);
+    let id = saved.harness.vault().profiles[0].id.clone();
+    let dir = saved.harness.home_of(&id).unwrap();
+    saved.harness.homes().unreadable.lock().unwrap().push(dir);
+
+    super::super::usage::tests::elapse(saved.harness.path());
+    saved.answering(None);
+    assert!(!saved.poll(true), "nothing new is known");
+
+    assert_eq!(
+        saved.reads(),
+        1,
+        "read again without knowing its login changed"
+    );
+    assert_eq!(saved.state(), json!({"state": "refused"}));
+}
+
+#[test]
+fn a_signed_in_account_without_a_saved_login_still_says_when_its_sign_in_ends() {
+    for (ends_at_ms, expected) in [
+        (
+            AHEAD_MS,
+            json!({"state": "ending", "endsAt": "2100-01-01T00:00:00Z"}),
+        ),
+        (
+            PASSED_MS,
+            json!({"state": "ended", "endsAt": "2020-01-01T00:00:00Z"}),
+        ),
+    ] {
+        let harness = Harness::new();
+        let (identity, login) = you(AgentId::Claude, "g1");
+        harness.saved(identity.clone(), login.clone());
+        harness.seed(|db| db.profiles[0].login = None);
+        harness.signed_in(Some(login));
+        *harness.native.deadline.borrow_mut() = Some(SignInDeadline {
+            identity,
+            ends_at_ms,
+        });
+
+        assert_eq!(login_states(&harness, AgentId::Claude), [expected]);
+    }
+}
+
+#[test]
 fn every_login_state_is_written_as_the_card_reads_it() {
     use super::super::login_state::LoginState;
     let written = serde_json::to_value([

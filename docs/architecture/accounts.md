@@ -61,13 +61,18 @@ grant for it. Muse's (`MuseHome`, `accounts/muse.rs`) keeps its login inline in 
 
 Renewal never outlives the sign-in itself: Anthropic ends each one at the `refreshTokenExpiresAt`
 Claude Code stores with it, and only signing in again starts a new one. The account listing reads
-that date from the default store and from each saved login, in the vault or its home
-(`NativeAccount::sign_in_deadline`, `Home::sign_in_deadline`, `LoginView::sign_in_deadline`),
-credited only to the account the store's `oauthAccount` names. A home reads its date once per login:
-it keeps the date in memory beside the home's login stamp (Login state, below) and reads the login
-again only once the stamp changed, so a listing does not reread a home's Keychain item with `-w`
-every time the account list refreshes; a home whose stamp cannot be taken shows no date rather than
-read its login. A sign-in awaiting use is newer than
+that date from the default store (`NativeAccount::sign_in_deadline`) and from each saved login,
+credited only to the account the login's `oauthAccount` names: a login in the vault from its view
+(`LoginView::sign_in_deadline`), already decrypted, and a login in its home from the date its
+profile records (`sign_in_end` on `Profile`, `SignInEnd` in `accounts/login_state.rs`), which is
+not a secret. on-n-off records it wherever it already holds the login: every save (save current,
+remembering, a sign-in's publication, a switch's capture of the outgoing login), the move into a
+home at check-in, the move out of it at check-out, and a forgotten home taken back. A profile an
+older version wrote has no record; its home is read once (`Home::sign_in_deadline`, through the
+store's own read) and what that read found, a date or none, is recorded with a metadata change
+(`ChangeKind::Metadata`), so a home is read at most once, never once per listing. The limit: a
+login replaced in its home outside on-n-off, by running `claude /login` with that config dir, keeps
+the date recorded for the login it replaced until on-n-off next holds the login. A sign-in awaiting use is newer than
 whatever the default store still holds for its account, so it reads only its own login; otherwise
 the default store's date comes first. The card warns through the last seven days ([PROVIDERS.md](../../PROVIDERS.md)). The date survives
 Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when.
@@ -176,12 +181,18 @@ provider:
 
 When more than one applies, the first of missing, ended, another account, refused and ending wins,
 so a sign-in that ended still says when after the refusal its end brought. The signed-in
-account's state is its date alone: the saved poll never reads it, and its own read names what
-failed.
+account's state is its date alone, `usable`, `ending` or `ended`, never `missing`, `refused` or
+`otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
+failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
+in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
+account list is read; the UI reads the account list again once the nearest `ending` date has
+passed ([shared-reads.md](shared-reads.md)).
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's
-fingerprint, or the home's id with its login stamp (`Home::login_stamp`). A rate limit holds the
+fingerprint, or the home's id with its login stamp (`Home::login_stamp`). The poll and the listing
+resolve where each profile's login is kept once (`usage::kept`: the vault login, or its home) and
+take its generation from that. A rate limit holds the
 next attempt until its Retry-After, any other failure the Limits failure backoff, and a refusal or
 another account parks the login: no attempt, forced or not, reads it again until its generation
 changes, by a new sign-in, a switch that captured a renewed login, or the provider's client
@@ -196,16 +207,19 @@ read without opening the file. Reading the login instead would read Claude's ite
 background poll: Claude Code rewrites the item whenever it renews the login in the home, and macOS
 then resets the item's partition list to Claude's signing team, so that read would raise a
 "security wants to use" prompt. The vault login's fingerprint comes from the vault already
-unlocked for the poll. The listing takes the poll's verdict
-only while the profile's generation is still the one parked (`usage::parked`), so a changed login is
-usable at once. A Muse login refused (401) in its home used to be read again on the backoff, while
+unlocked for the poll. A stamp that cannot be taken mints no generation: the poll reads nothing and
+replays the verdict it has, and the listing keeps the parked verdict. The listing takes the poll's
+verdict only while the profile's generation is still the one parked (`usage::parked`), so a changed
+login is usable at once. A Muse login refused (401) in its home used to be read again on the backoff, while
 the same refusal in the vault waited for a new login.
 
 The poll's attempts live in memory, as its holds always have, and are not kept across a restart:
 the first saved poll after a restart finds nothing held, reads every saved login and parks a
 refused one again, so the state comes back within one Limits read; until then the listing says
-usable, or ending or ended from the date. A poll that changes any profile's parked verdict says
-so, and the Limits read that ran it announces the account list once its cache lock is released
+usable, or ending or ended from the date. A poll that changes a profile's parked verdict, or the
+generation a verdict is parked for, says so (`hold_back` compares the attempt it records with the
+one it replaces), and the Limits read that ran it announces the account list once its cache lock
+is released
 (`limits_refresh::read_provider`), as it does for an account it unarchived. The account list
 answers unforced, which reads the verdicts and polls nothing, so the exchange ends there.
 

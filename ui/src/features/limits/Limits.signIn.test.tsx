@@ -22,13 +22,13 @@ vi.mock("$lib/api", () => ({
 
 const DAY = 86_400_000;
 const at = (days: number) => new Date(Date.parse(NOW) + days * DAY).toISOString();
-const ending = (endsAt: string): Partial<SavedProfile> => ({ signInEndsAt: endsAt, loginState: { state: "ending", endsAt } });
-const ended = (endsAt: string): Partial<SavedProfile> => ({ signInEndsAt: endsAt, loginState: { state: "ended", endsAt } });
+const ending = (endsAt: string): Partial<SavedProfile> => ({ loginState: { state: "ending", endsAt } });
+const ended = (endsAt: string): Partial<SavedProfile> => ({ loginState: { state: "ended", endsAt } });
 
 function profile(overrides: Partial<SavedProfile>): SavedProfile {
   return {
     id: "saved-me", observationId: "uuid-1", legacyId: "me", identity: { provider: "claude", userId: "me", workspaceId: "team" },
-    label: "me@claude.example", email: "me@claude.example", savedAt: NOW, active: true, needsLogin: false, ...overrides,
+    label: "me@claude.example", email: "me@claude.example", savedAt: NOW, active: true, loginState: { state: "usable" }, ...overrides,
   };
 }
 
@@ -79,7 +79,7 @@ describe("a Claude sign-in's end", () => {
     expect(parseFloat(badge.querySelector<HTMLElement>(".term-badge-fill")!.style.width)).toBeCloseTo(400 / 7, 1);
     fireEvent.focus(badge);
     expect(screen.getByRole("tooltip")).toHaveTextContent("3 days remaining");
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Then Claude asks you to sign in again.");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Then Claude Code asks you to sign in again.");
     expect(within(card).queryByRole("button", { name: "Sign in again" })).toBeNull();
   });
 
@@ -133,25 +133,27 @@ describe("a Claude sign-in's end", () => {
     expect(within(card).queryByRole("button", { name: "Use account" })).toBeNull();
   });
 
-  it("ends on the local minute clock, without reading the account again", async () => {
+  it("ends when the account list says so, read again once its date passes", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(NOW));
-    answer([okClaude()], [profile(ending(new Date(Date.parse(NOW) + 30_000).toISOString()))]);
+    const endsAt = new Date(Date.parse(NOW) + 30_000).toISOString();
+    answer([okClaude()], [profile(ending(endsAt))]);
     renderLimits();
     const card = await signedInCard();
     expect(await within(card).findByRole("button", { name: "Claude sign-in ends Aug 17" })).toHaveClass("term-badge--warning");
     const reads = readAccounts.mock.calls.length;
+    answer([okClaude()], [profile(ended(endsAt))]);
     await act(async () => { vi.advanceTimersByTime(60_000); });
-    expect(within(card).getByRole("button", { name: "Claude sign-in ended Aug 17" })).toHaveClass("term-badge--expired");
+    expect(await within(card).findByRole("button", { name: "Claude sign-in ended Aug 17" })).toHaveClass("term-badge--expired");
     expect(within(card).getByText("Claude ended this sign-in on Aug 17. Sign in again to use this account.")).toBeTruthy();
-    expect(readAccounts.mock.calls.length).toBe(reads);
+    expect(readAccounts.mock.calls.length).toBeGreaterThan(reads);
   });
 });
 
 describe("a saved login its provider refused", () => {
   const refused: SavedProfile = {
     id: "saved-personal", observationId: "acct-personal", legacyId: "personal", identity: { provider: "codex", userId: "personal", workspaceId: "team" },
-    label: "personal@codex.example", email: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false, loginState: { state: "refused" },
+    label: "personal@codex.example", email: "personal@codex.example", savedAt: NOW, active: false, loginState: { state: "refused" },
   };
 
   beforeEach(() => {

@@ -42,5 +42,6 @@ mod profiles;
 mod remembering;
 mod saved_claims;
 mod saved_usage;
+mod sign_in_end;
 mod signing_in;
 mod switching;

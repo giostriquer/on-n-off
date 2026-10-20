@@ -80,6 +80,27 @@ fn reading(profile: &Profile) -> ProviderLimitsDto {
     }];
     dto
 }
+fn poll_vault(
+    home: &Path,
+    profile: &Profile,
+    ticket: &Ticket,
+    force: bool,
+    open: &dyn Fn() -> Result<Store, String>,
+    fetch: &dyn Fn(&Profile) -> FetchResult,
+) -> Option<Result<ProviderLimitsDto, String>> {
+    let login = profile.login.as_ref().expect("a vault login");
+    poll(
+        home,
+        profile,
+        &Kept::Vault(login),
+        ticket,
+        force,
+        open,
+        fetch,
+    )
+    .0
+}
+
 #[test]
 fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
     let home = tempfile::tempdir().unwrap();

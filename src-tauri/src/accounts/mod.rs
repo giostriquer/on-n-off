@@ -151,7 +151,7 @@ trait Home: Send + Sync {
         &self,
         identity: &model::Identity,
     ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure>;
-    fn login_stamp(&self) -> Option<String>;
+    fn login_stamp(&self) -> Result<String, String>;
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline>;
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }
@@ -339,37 +339,47 @@ impl Accounts {
         let homes = self.account_homes(provider);
         let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
         let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut read_ends = Vec::new();
+        let profiles = db
+            .profiles
+            .iter()
+            .filter(|p| p.identity.provider == provider)
+            .map(|p| {
+                let active = current.as_ref() == Some(&p.identity);
+                let kept = usage::kept(p, homes);
+                let deadline =
+                    login_state::Deadline::of(p, native_deadline.as_ref(), kept.as_ref());
+                if let Some(end) = deadline.read() {
+                    read_ends.push((p.id.clone(), p.home.clone(), end));
+                }
+                let standing = if active {
+                    login_state::Standing::SignedIn
+                } else {
+                    login_state::Standing::Saved(usage::parked(home, p, kept.as_ref()))
+                };
+                ProfileDto {
+                    sign_in_ends_at: deadline.spelled(),
+                    login_state: login_state::LoginState::of(p, &deadline, standing, now_ms),
+                    needs_login: p.needs_login(),
+                    archived: archived.contains(&p.identity.observation_key()),
+                    category: categories.get(&p.identity.observation_key()).cloned(),
+                    observation_id: p.identity.observation_key(),
+                    legacy_id: p.identity.legacy_key(),
+                    active,
+                    id: p.id.clone(),
+                    identity: p.identity.clone(),
+                    label: p.label.clone(),
+                    email: p.email.clone(),
+                    saved_at: p.saved_at.clone(),
+                    pending_activation: p.pending_activation,
+                }
+            })
+            .collect();
+        if !read_ends.is_empty() {
+            let _ = login_state::remember_ends(home, &read_ends);
+        }
         Ok(AccountsDto {
-            profiles: db
-                .profiles
-                .into_iter()
-                .filter(|p| p.identity.provider == provider)
-                .map(|p| {
-                    let active = current.as_ref() == Some(&p.identity);
-                    let deadline = login_state::Deadline::of(&p, native_deadline.as_ref(), homes);
-                    let parked = if active {
-                        None
-                    } else {
-                        usage::parked(home, &p, homes)
-                    };
-                    ProfileDto {
-                        sign_in_ends_at: deadline.spelled(),
-                        login_state: login_state::LoginState::of(&p, &deadline, parked, now_ms),
-                        needs_login: p.needs_login(),
-                        archived: archived.contains(&p.identity.observation_key()),
-                        category: categories.get(&p.identity.observation_key()).cloned(),
-                        observation_id: p.identity.observation_key(),
-                        legacy_id: p.identity.legacy_key(),
-                        active,
-                        id: p.id,
-                        identity: p.identity,
-                        label: p.label,
-                        email: p.email,
-                        saved_at: p.saved_at,
-                        pending_activation: p.pending_activation,
-                    }
-                })
-                .collect(),
+            profiles,
             remember_accounts: discovery::enabled(home).unwrap_or(false),
             native_observation_id: current.as_ref().map(model::Identity::observation_key),
             native_account: current,
