@@ -42,6 +42,39 @@ function Invoke-Writer {
     }
 }
 
+function Invoke-WriterFrom {
+    param([string] $Location)
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $powershell
+    $startInfo.WorkingDirectory = $fixtureRoot
+    foreach ($argument in @(
+        "-NoProfile",
+        "-ExecutionPolicy", "Bypass",
+        "-Command", "Set-Location -LiteralPath '$Location'; & '$scriptUnderTest' -Directory . -OutputPath SHA256SUMS.txt; exit `$LASTEXITCODE"
+    )) {
+        $startInfo.ArgumentList.Add($argument)
+    }
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw "Failed to start the checksum writer"
+    }
+    $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+    $stderrTask = $process.StandardError.ReadToEndAsync()
+    $process.WaitForExit()
+
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Stdout   = $stdoutTask.GetAwaiter().GetResult()
+        Stderr   = $stderrTask.GetAwaiter().GetResult()
+    }
+}
+
 function Get-Sha256 {
     param([string] $Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -58,8 +91,8 @@ try {
     $sumsPath = Join-Path $assets "SHA256SUMS.txt"
 
     $written = Invoke-Writer -Directory $assets -OutputPath $sumsPath
-    if ($written.ExitCode -ne 0) {
-        $failures += "Writing checksums should succeed. Stderr: $($written.Stderr)"
+    if ($written.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $sumsPath -PathType Leaf)) {
+        throw "Writing checksums should succeed. Stderr: $($written.Stderr)"
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($sumsPath)
@@ -101,6 +134,20 @@ try {
         } finally {
             Pop-Location
         }
+    }
+
+    $relative = Join-Path $fixtureRoot "relative"
+    New-Item -ItemType Directory -Path $relative -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $relative "on-n-off_1.2.3_aarch64.dmg"), "dmg", [System.Text.UTF8Encoding]::new($false))
+    $fromLocation = Invoke-WriterFrom -Location $relative
+    if ($fromLocation.ExitCode -ne 0) {
+        $failures += "A relative output path should succeed. Stderr: $($fromLocation.Stderr)"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $relative "SHA256SUMS.txt") -PathType Leaf)) {
+        $failures += "A relative -OutputPath must resolve against PowerShell's location, the asset folder"
+    }
+    if (Test-Path -LiteralPath (Join-Path $fixtureRoot "SHA256SUMS.txt")) {
+        $failures += "A relative -OutputPath was written against the process directory instead of PowerShell's location"
     }
 
     $empty = Join-Path $fixtureRoot "empty"
