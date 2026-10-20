@@ -142,12 +142,18 @@ impl Cache {
                 listing.ends.clone(),
             )
         };
-        crate::limits::column(
+        let mut column = crate::limits::column(
             entries,
             &roster,
             &ends,
             chrono::Utc::now().timestamp_millis(),
-        )
+        );
+        crate::limits::desktop_app::mark_other_account(
+            self.provider,
+            &mut column,
+            crate::paths::user_home().ok().as_deref(),
+        );
+        column
     }
 
     fn keep_listed(&self, roster: Roster, rereads_before: u64) {

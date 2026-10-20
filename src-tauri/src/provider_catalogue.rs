@@ -24,6 +24,7 @@ pub struct LimitsFacts {
     pub banked_resets: Option<BankedResets>,
     pub subscription_term: Option<SubscriptionTerm>,
     pub paid_reset_offer: Option<PaidResetOffer>,
+    pub desktop_app: Option<DesktopApp>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -63,6 +64,11 @@ pub enum PaidResetOffer {
     Codex,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DesktopApp {
+    Claude,
+}
+
 impl LimitsFacts {
     pub const NONE: Self = Self {
         client: "",
@@ -74,6 +80,7 @@ impl LimitsFacts {
         banked_resets: None,
         subscription_term: None,
         paid_reset_offer: None,
+        desktop_app: None,
     };
 
     pub const fn named(client: &'static str, vendor: &'static str) -> Self {
@@ -103,6 +110,7 @@ impl AgentId {
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
                     on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                    desktop_app: Some(DesktopApp::Claude),
                     ..LimitsFacts::named("Claude Code", "Anthropic")
                 }),
                 usage: Some(UsageProvider::Claude),

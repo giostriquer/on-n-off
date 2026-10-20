@@ -33,6 +33,22 @@ fn flags_path_lives_under_on_n_off_home() {
 }
 
 #[test]
+fn claude_desktop_keeps_its_data_in_the_platform_app_data_dir() {
+    let home = std::env::temp_dir().join("scratch");
+    let expected = if cfg!(windows) {
+        Path::new("AppData").join("Roaming").join("Claude")
+    } else {
+        Path::new("Library")
+            .join("Application Support")
+            .join("Claude")
+    };
+    assert_eq!(
+        claude_desktop_data_for(&home).strip_prefix(&home),
+        Ok(expected.as_path())
+    );
+}
+
+#[test]
 fn normalize_skill_path_unifies_slash_and_skill_md() {
     assert_eq!(
         normalize_skill_path(r"C:\Users\Me\.agents\skills\loom-feed"),

@@ -209,7 +209,8 @@ function PopoverAccount({ card, divided }: { card: LimitCard; divided: boolean }
 function PopoverTag({ tag }: { tag: CardTag }) {
   switch (tag.kind) {
     case "term":
-    case "signIn": return null;
+    case "signIn":
+    case "desktop": return null;
     case "usageStatus": return <UsageStatusBadge detail={tag.detail} />;
     case "remembered": return <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">Remembered account</span>;
     case "paused": return <span className="shrink-0 rounded-full bg-[var(--popover-control)] px-1.5 py-0.5 type-badge text-[var(--mute)] uppercase">Refresh paused</span>;

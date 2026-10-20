@@ -25,6 +25,7 @@ import {
   type CardStatus,
   type QuotaWindowPresentation,
 } from "./limitPresentation";
+import { desktopPresentation, type DesktopPresentation } from "./desktopAccount";
 import { signInPresentation, type SignInPresentation } from "./loginState";
 
 export type CardWindow = QuotaWindowPresentation & { id: string; label: string };
@@ -75,6 +76,7 @@ export type LimitCard = {
   subscription: CardSubscription | null;
   login: LoginState | null;
   signIn: SignInPresentation | null;
+  desktop: DesktopPresentation | null;
   archived: boolean;
 };
 
@@ -181,6 +183,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
     login,
     signIn,
+    desktop: desktopPresentation(entry.otherDesktopAccount, provider),
     archived: !!entry.archived,
   };
 }

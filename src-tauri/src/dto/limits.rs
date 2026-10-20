@@ -257,6 +257,14 @@ pub struct ColumnEntryDto {
     pub replaced: Vec<LimitsAccountDto>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub unread: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub other_desktop_account: Option<OtherDesktopAccountDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct OtherDesktopAccountDto {
+    pub label: Option<String>,
 }
 
 #[cfg(test)]

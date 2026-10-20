@@ -43,6 +43,7 @@ describe("which cards a provider shows", () => {
       subscription: null,
       login: { state: "usable" },
       signIn: null,
+      desktop: null,
       archived: false,
     });
   });

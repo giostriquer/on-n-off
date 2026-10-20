@@ -100,6 +100,18 @@ fn muse_xdg(name: &str, lookup: &impl Fn(&str) -> Option<OsString>) -> Option<Pa
     path.is_absolute().then(|| path.join("muse"))
 }
 
+#[cfg(not(windows))]
+pub fn claude_desktop_data_for(home: &std::path::Path) -> PathBuf {
+    home.join("Library")
+        .join("Application Support")
+        .join("Claude")
+}
+
+#[cfg(windows)]
+pub fn claude_desktop_data_for(home: &std::path::Path) -> PathBuf {
+    home.join("AppData").join("Roaming").join("Claude")
+}
+
 pub fn muse_config_root() -> Result<PathBuf, AdapterError> {
     Ok(muse_config_for(&user_home()?))
 }
