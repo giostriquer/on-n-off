@@ -112,9 +112,7 @@ function leadsColumn(slot: Slot): boolean {
 }
 
 function signedInState(slot: Slot, accountId: string | undefined, nativeLogin: NativeLogin | null): SignedIn {
-  if (accountId === undefined) return "no";
-  const claimed = slot.profile ? slot.profile.active : !!slot.reading?.currentAccount;
-  if (!claimed) return "no";
+  if (accountId === undefined || !leadsColumn(slot)) return "no";
   if (!nativeLogin) return "confirmed";
   return nativeLogin.settled && nativeLogin.observationId === accountId ? "confirmed" : "unconfirmed";
 }

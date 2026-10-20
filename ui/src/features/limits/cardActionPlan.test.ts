@@ -249,8 +249,6 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["Codex: no term read", false, codexSaved(null), profileOf()],
     ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf()],
     ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf({ active: true })],
-    ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf()],
-    ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf({ active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ loginState: { state: "missing" } })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {

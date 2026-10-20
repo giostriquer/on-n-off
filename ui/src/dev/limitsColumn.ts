@@ -40,6 +40,6 @@ export function asColumn(read: ProviderLimits[], profiles: SavedProfile[], categ
     return { ...card, ...facts(card.account?.id), ...(replaced.length ? { replaced } : {}) };
   });
   const unread = profiles.filter(profile => !cards.some(card => card.account?.id === profile.observationId))
-    .map(profile => ({ ...unreadEntry({ ...profile, active: false }), ...facts(profile.observationId) }));
+    .map(profile => ({ ...unreadEntry(profile), ...facts(profile.observationId) }));
   return [...shown, ...unread];
 }
