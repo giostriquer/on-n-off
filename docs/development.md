@@ -112,6 +112,8 @@ source carries no comments (see [Code comments](#code-comments)).
   and ending before the actions; otherwise they all move to their own row, starting under the
   name in the same order. The category starts under the name and its tags and runs to the
   header's right edge. The tray popover's header puts its tags at the right, in the same order.
+  A remembered or paused card's status is a tag in the clock's place on the popover only: the
+  Limits screen draws it as the first line of the card's body, so its header renders no tag for it.
   `scripts/ui-shots.mjs` checks these rules, and that tags on one line sit one gap apart in their
   order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
   in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
