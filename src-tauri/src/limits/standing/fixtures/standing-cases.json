@@ -34,6 +34,14 @@
       "notch": null
     },
     {
+      "name": "a remembered account whose last read failed",
+      "provider": "codex", "account": "remembered", "status": "failed", "observes": "windows",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "remembered" },
+      "card": { "status": { "kind": "remembered" }, "message": null },
+      "notch": null
+    },
+    {
       "name": "a failed read keeping its windows",
       "provider": "claude", "account": "current", "status": "failed", "observes": "windows",
       "message": "Claude Code reported no usage.",
@@ -122,20 +130,20 @@
       "notch": null
     },
     {
-      "name": "a failed read with nothing kept that said nothing",
+      "name": "a read that reported no usage, with nothing kept",
       "provider": "claude", "account": "current", "status": "failed", "observes": "nothing",
-      "message": null,
-      "standing": { "kind": "unavailable", "message": { "text": "Claude limits are unavailable.", "tone": "error" } },
-      "card": { "status": null, "message": { "text": "Claude limits are unavailable.", "tone": "error" } },
-      "notch": { "notice": { "text": "Claude limits are unavailable.", "tone": "red" }, "paused": null }
+      "message": "Claude Code reported no usage.",
+      "standing": { "kind": "unavailable", "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "card": { "status": null, "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "notch": { "notice": { "text": "Claude Code reported no usage.", "tone": "red" }, "paused": null }
     },
     {
-      "name": "a signed-out read with nothing kept that said nothing",
+      "name": "a signed-out read with nothing kept",
       "provider": "codex", "account": "current", "status": "signedOut", "observes": "nothing",
-      "message": null,
-      "standing": { "kind": "unavailable", "message": { "text": "Codex limits are unavailable.", "tone": "muted" } },
-      "card": { "status": null, "message": { "text": "Codex limits are unavailable.", "tone": "muted" } },
-      "notch": { "notice": { "text": "Codex limits are unavailable.", "tone": "muted" }, "paused": null }
+      "message": "Sign in with `codex` to see subscription limits.",
+      "standing": { "kind": "unavailable", "message": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" } },
+      "card": { "status": null, "message": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" } },
+      "notch": { "notice": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" }, "paused": null }
     },
     {
       "name": "a login without subscription limits",

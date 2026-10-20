@@ -190,7 +190,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentWindow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
-    empty: hasWindows || !presentation.answered || message ? null
+    empty: hasWindows || !presentation.mayShowEmpty || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
     freshness: {

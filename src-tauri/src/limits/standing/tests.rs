@@ -28,3 +28,35 @@ fn the_limits_command_sends_each_card_as_it_is_with_its_standing_left_out_while_
         assert_eq!(sent, serde_json::to_value(&card).unwrap(), "{}", case.name);
     }
 }
+
+#[test]
+fn a_signed_in_read_that_did_not_answer_stands_unavailable_in_the_read_outcomes_words() {
+    use super::super::outcome::{self, Context, Read, ReadFailure, Unsupported};
+    use crate::dto::{AgentId, MessageTone};
+    for (failure, tone) in [
+        (ReadFailure::NotInstalled, MessageTone::Muted),
+        (ReadFailure::SignedOut, MessageTone::Muted),
+        (
+            ReadFailure::Unsupported(Unsupported::ApiKey),
+            MessageTone::Muted,
+        ),
+        (ReadFailure::LoginRefused, MessageTone::Error),
+        (ReadFailure::NoUsage, MessageTone::Error),
+        (
+            ReadFailure::RequestFailed("timed out".into()),
+            MessageTone::Error,
+        ),
+    ] {
+        let (card, _) = outcome::signed_in(AgentId::Codex, Read::anonymous(failure.clone()));
+        assert_eq!(
+            ReadStanding::of(&card),
+            ReadStanding::Unavailable {
+                message: StandingMessage {
+                    text: outcome::message(AgentId::Codex, Context::SignedIn, &failure),
+                    tone,
+                },
+            },
+            "{failure:?}"
+        );
+    }
+}

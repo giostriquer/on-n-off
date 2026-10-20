@@ -82,8 +82,7 @@ drew only the cells that had been read into the first slots of a rail sized for 
   observed values below." over windows or a workspace share, and "Refresh paused." when it holds
   only figures the notch does not draw, such as a credit balance, rather than pointing at values
   that are not there. Above it, the standing's message is its notice. An unavailable card shows
-  the standing's message alone, the provider's own or "<Provider> limits are unavailable.", the
-  card's words. A message's tone is the card's: a failed read's message is red (`error`), any other
+  the standing's message alone: the card's own, in the read outcome's words. A message's tone is the card's: a failed read's message is red (`error`), any other
   muted. The notch used to decide this itself: "Usage unavailable." where the card said "Claude
   limits are unavailable.", always muted where the card is red, and paused only over windows or a
   share. The read's status, message and standing never reach the drawers: the notice and the

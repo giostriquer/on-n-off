@@ -4,7 +4,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
-import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, okMuse, staleCodex, unavailable } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
@@ -82,7 +82,7 @@ const STATES = {
   "current unconfirmed": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)] }),
   "current unsaved": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: { observationId: accountId(provider), settled: true } }),
   saved: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)] }),
-  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })], profiles: [profile(provider, { needsLogin: true })] }),
+  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })], profiles: [profile(provider, { needsLogin: true })] }),
   "sign-in ended": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider, { signInEndsAt: before(1) })],
   }),
@@ -93,7 +93,7 @@ const STATES = {
   "signing in": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)], accounts: { ...LIST, signingIn: "running", blocked: true },
   }),
-  remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })] }),
+  remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })] }),
   "pending automatic spend": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)],
     accounts: { ...LIST, runningClients: RUNNING }, pendingSpend: SPEND,
@@ -187,7 +187,7 @@ describe("a card's one signed-in state", () => {
     expect(signedIn({ ...STATES["current confirmed"]("codex"), nativeLogin: { observationId: accountId("codex"), settled: false } })).toBe("unconfirmed");
     expect(signedIn(STATES["current unconfirmed"]("codex"))).toBe("unconfirmed");
     expect(signedIn({ entries: [reading("codex")], profiles: [profile("codex")] }), "a signed-out read still names its account").toBe("no");
-    expect(signedIn({ entries: [reading("codex", { currentAccount: false })], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
+    expect(signedIn({ entries: [reading("codex", { currentAccount: false, standing: REMEMBERED })], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
     expect(signedIn({ entries: [], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
     expect(signedIn(STATES.remembered("codex"))).toBe("no");
   });
@@ -204,7 +204,7 @@ describe("Use banked reset", () => {
   it("is offered only on the signed-in account's live reading that has a reset banked", () => {
     expect(offered(live)).toEqual({ enabled: true });
     for (const entries of [
-      [reading("codex", { currentAccount: false })],
+      [reading("codex", { currentAccount: false, standing: REMEMBERED })],
       [reading("codex", { status: "failed" })],
       [reading("codex", { resetCredits: { availableCount: 0, nextExpiresAt: null } })],
       [reading("codex", { resetCredits: null })],
@@ -269,8 +269,8 @@ describe("Sign in again in place of the footer's action", () => {
 
   it("is offered once a saved Claude sign-in ended, read or not, signed out or never used", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})] })).toBe("signInAgain");
-    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut" }], profiles: [claudeProfile({})] })).toBe("signInAgain");
-    expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed" })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");
+    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }], profiles: [claudeProfile({})] })).toBe("signInAgain");
+    expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");
   });
 
   it("gives way to the Cancel of the sign-in it started", () => {

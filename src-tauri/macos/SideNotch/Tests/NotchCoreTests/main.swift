@@ -554,9 +554,9 @@ final class NotchTests {
     expectEqual(
       ProviderCell(
         provider: .codex, reading: reading(windows: []),
-        notice: Notice(text: "Codex limits are unavailable.", tone: .red)
+        notice: Notice(text: "Sign in with `codex` to see subscription limits.", tone: .muted)
       ).spoken(name: "Codex", at: now),
-      "Codex, Codex limits are unavailable.")
+      "Codex, Sign in with `codex` to see subscription limits.")
     expectEqual(
       ProviderCell(
         provider: .codex, reading: reading(windows: []),

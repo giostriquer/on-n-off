@@ -110,7 +110,7 @@ describe("a Claude sign-in's end", () => {
 
   it("while signing in again, offers to cancel that sign-in instead", async () => {
     addAccount.mockReturnValue(new Promise(() => {}));
-    answer([{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Claude limits are unavailable.", "muted") }], [profile({ active: false, signInEndsAt: at(-1) })]);
+    answer([{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }], [profile({ active: false, signInEndsAt: at(-1) })]);
     renderLimits();
     const card = await signedInCard();
     fireEvent.click(await within(card).findByRole("button", { name: "Sign in again" }));

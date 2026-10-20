@@ -363,9 +363,10 @@ observed when it holds an observation (`Reading::has_observations`: a quota wind
 no read just gave: the signed-in read is paused (it failed, or reached no account it could read:
 signed out, an expired login, or a login without subscription limits), a saved profile's refresh is
 paused, or the card is a remembered account, neither signed in nor polled. It is unavailable when
-its read did not answer and it holds nothing. A paused or unavailable standing carries the message
-the card shows, in its tone: the provider's message, or "<Provider> limits are unavailable.", in the
-error tone for a failed read and muted otherwise; a remembered account carries none. `standing` is
+its read did not answer and it holds nothing. A paused or unavailable standing carries the card's
+own message, which the read outcome words for every read that did not answer (`limits/outcome.rs`),
+in the error tone for a failed read and muted otherwise; a remembered account carries none. The
+standing never words a failure itself. `standing` is
 left out of a live card, so a card an older version sent reads live. Every surface renders it
 without deciding it again: the card and the tray popover (`presentStanding`,
 `ui/src/features/limits/limitPresentation.ts`) and both notches (`frame::rail`,

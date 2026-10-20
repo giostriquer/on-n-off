@@ -6,7 +6,7 @@ import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { cardTags } from "./cardTags";
 import { limitCards, limitColumn, type LimitCard } from "./limitCards";
-import { NOW, lastObserved, okClaude, okCodex, staleCodex, statusOnly, unavailable } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, staleCodex, statusOnly, unavailable } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 
@@ -333,7 +333,7 @@ describe("a card's empty copy", () => {
     expect(cards([okClaude({ windows: [], plan: null, planLabel: null, planCapacity: null, account: null })])[0]).toMatchObject({
       plan: null, empty: { reason: "noWindows", copy: "Claude reported no rate-limit windows." },
     });
-    expect(cards([okCodex({ windows: [], currentAccount: false })], [])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
+    expect(cards([okCodex({ windows: [], currentAccount: false, standing: REMEMBERED })], [])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
   });
 
   it("gives a saved read that failed but kept only figures its status, not an empty copy", () => {
