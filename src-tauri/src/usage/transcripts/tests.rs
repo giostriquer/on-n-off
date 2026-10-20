@@ -393,7 +393,6 @@ fn parse_muse_counts_model_completed_once_with_cache_split() {
     assert_eq!(record.model, "muse-acme-1.0");
     assert_eq!(record.session_id, "01acme-session");
     assert_eq!(record.timestamp_ms, 1_792_013_706_016);
-    // input_tokens includes the cached share, as Meta reports it.
     assert_eq!(record.totals.uncached_input_tokens, 56645 - 34292 - 120);
     assert_eq!(record.totals.cached_input_tokens, 34292);
     assert_eq!(record.totals.cache_creation_tokens, 120);

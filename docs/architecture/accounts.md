@@ -251,7 +251,9 @@ modification time, and the cache keeps only the parsed `{access_token, api_key}`
 cannot reach the Keychain (Windows, a disposable QA home, a saved login's home) never reads it
 from the cache. A denied lookup is an error for accounts, never "no login". A login with any
 credential is a login: an API-key login fails identification, so a switch is refused rather than
-overwriting it. Every store yields the same saved secret,
+overwriting it. Limits and accounts tell the two kinds apart by one rule,
+`muse_store::credential_of`, which reads the secrets: an `access_token` makes a device login
+whatever `mechanism` says, and an `api_key` alone makes an API-key login. Every store yields the same saved secret,
 `{access_token, api_key}`. Activation writes it back to the store Muse already uses: the same
 Keychain item through `/usr/bin/security`, keeping its `secret_schema_version` (1 when there is
 no item yet), or inline; `auth.json` is replaced atomically with other providers' entries kept,

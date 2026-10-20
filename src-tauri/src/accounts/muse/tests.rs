@@ -18,6 +18,13 @@ fn login(email: &str, token: &str) -> Login {
     }
 }
 
+fn api_key_login(mechanism: &str) -> Login {
+    Login {
+        auth: json!({"api_key": "k"}),
+        account: json!({"mechanism": mechanism, "user_email": "you@example.com"}),
+    }
+}
+
 fn you() -> Identity {
     muse_store::identity("you@example.com").unwrap()
 }
@@ -55,9 +62,16 @@ fn a_muse_login_is_identified_by_its_lowercased_email_and_never_by_an_api_key() 
     let saved = login("You@Example.com", "t1");
     assert_eq!(MuseView::of(&saved).identity().unwrap(), you());
 
-    let mut api_key = login("you@example.com", "t1");
-    api_key.account["mechanism"] = json!("api_key");
-    assert!(MuseView::of(&api_key).identity().is_err());
+    for mechanism in ["api_key", "oauth"] {
+        assert_eq!(
+            MuseView::of(&api_key_login(mechanism)).identity(),
+            Err("API key logins cannot be saved as subscription profiles.".into()),
+            "{mechanism}"
+        );
+    }
+    let mut mislabelled = login("you@example.com", "t1");
+    mislabelled.account["mechanism"] = json!("api_key");
+    assert_eq!(MuseView::of(&mislabelled).identity().unwrap(), you());
 
     let mut nameless = login("", "t1");
     nameless
@@ -66,6 +80,12 @@ fn a_muse_login_is_identified_by_its_lowercased_email_and_never_by_an_api_key() 
         .unwrap()
         .remove("user_email");
     assert!(MuseView::of(&nameless).identity().is_err());
+    let mut tokenless = login("you@example.com", "");
+    tokenless.auth = json!({});
+    assert_eq!(
+        MuseView::of(&tokenless).identity(),
+        Err(model::MISSING_CREDENTIALS.into())
+    );
     assert!(MuseView::of(&login("you@example.com", ""))
         .identity()
         .is_err());
@@ -244,11 +264,13 @@ fn sign_out_runs_the_official_logout_against_the_signed_in_home() {
 fn an_api_key_login_is_not_a_subscription() {
     let dir = scratch_dir("muse-api-key-login");
     let store = MuseNative::private(&dir);
-    let mut api_key = login("you@example.com", "t1");
-    api_key.account["mechanism"] = json!("api_key");
-    store.write(Some(&api_key)).unwrap();
+    store.write(Some(&api_key_login("oauth"))).unwrap();
 
     assert_eq!(store.subscription().unwrap(), None);
+    let mut mislabelled = login("You@Example.com", "t1");
+    mislabelled.account["mechanism"] = json!("api_key");
+    store.write(Some(&mislabelled)).unwrap();
+    assert_eq!(store.subscription().unwrap(), Some(you()));
     store.write(Some(&login("You@Example.com", "t1"))).unwrap();
     assert_eq!(store.subscription().unwrap(), Some(you()));
 }

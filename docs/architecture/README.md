@@ -102,8 +102,9 @@ the subject of [shared-reads.md](shared-reads.md), and it is the part most easil
 
 ## Feature subsystems
 
-Each is a directory under `src-tauri/src/`; the module doc-comment at the top of its `mod.rs` is
-the real explanation. What follows is only enough to know which one you want.
+Each is a directory under `src-tauri/src/`. What follows is only enough to know which one you
+want; the guides it links and the PROVIDERS.md rows hold the detail, since the source carries no
+comments.
 
 | Subsystem | What it does | Notable |
 | --- | --- | --- |

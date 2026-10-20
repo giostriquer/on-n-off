@@ -14,7 +14,6 @@ export type SignInPresentation = {
   message: string | null;
 };
 
-/** Anthropic ends every Claude sign-in at a fixed date that renewing never moves; Claude Code stores it. */
 export function claudeSignIn(endsAt: string | null | undefined, now: number): SignInPresentation | null {
   const until = parseInstant(endsAt);
   if (until === null) return null;

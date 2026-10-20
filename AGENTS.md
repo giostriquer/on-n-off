@@ -7,7 +7,8 @@ When this checkout is under `~/Documents/personal/`, first read
 
 ## Read before changing a surface
 
-Read the relevant sections, then the owning module's doc-comment.
+Read the relevant sections before changing the surface. Source carries no code comments; put
+rationale in the guide that owns the subject ([code comments](docs/development.md#code-comments)).
 
 | When working on | Read |
 | --- | --- |

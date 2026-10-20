@@ -2,7 +2,8 @@
 
 Read the relevant section before changing that surface. [AGENTS.md](../AGENTS.md)
 holds repository-wide safety and workflow rules; [architecture](architecture/README.md)
-locates the subsystems. Module doc-comments explain their implementation.
+locates the subsystems. The guides and PROVIDERS.md explain each module's implementation; the
+source carries no comments (see [Code comments](#code-comments)).
 
 ## Existing boundaries
 
@@ -123,6 +124,13 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   written by older versions must still load: give new fields defaults.
 - On restricted Windows sandboxes Vite/esbuild can fail with `spawn EPERM`. Record it and rerun
   the same command elsewhere; do not change code for a sandbox fault.
+
+## Code comments
+
+on-n-off source carries no code comments: rationale lives in the guide or PROVIDERS.md row that
+owns the subject. `scripts/no-code-comments.test.mjs` (run by `bun test scripts/` in CI) rejects a
+comment line in the Rust, TypeScript and Swift sources; compiler directives (`/// <reference …>`,
+`// @ts-expect-error`, Swift's tools-version line) are exempt.
 
 ## Test structure
 

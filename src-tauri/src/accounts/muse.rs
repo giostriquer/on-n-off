@@ -1,7 +1,7 @@
 use super::{
     clients::Client,
     model::{self, AccessToken, Identity, LoginView},
-    muse_store::{self, Keychain, SystemKeychain, SIGNED_IN},
+    muse_store::{self, Keychain, MuseCredential, SystemKeychain, SIGNED_IN},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -220,7 +220,9 @@ impl NativeAccount for MuseNative {
 
     fn subscription(&self) -> Result<Option<Identity>, String> {
         match self.read()? {
-            Some(login) if MuseView::of(&login).oauth() => self.identify(&login).map(Some),
+            Some(login) if MuseView::of(&login).access_token().is_some() => {
+                self.identify(&login).map(Some)
+            }
             _ => Ok(None),
         }
     }
@@ -313,27 +315,33 @@ impl<'a> MuseView<'a> {
         }
     }
 
-    pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        model::string(self.auth, "/access_token")
-            .ok()
-            .map(AccessToken::new)
+    fn credential(&self) -> Option<MuseCredential> {
+        self.auth.as_object().and_then(muse_store::credential_of)
     }
 
-    fn oauth(&self) -> bool {
-        self.account.get("mechanism").and_then(Value::as_str) == Some("oauth")
+    pub(crate) fn access_token(&self) -> Option<AccessToken> {
+        match self.credential()? {
+            MuseCredential::Token(token) => Some(token),
+            _ => None,
+        }
     }
 }
 
 impl LoginView for MuseView<'_> {
     fn identity(&self) -> Result<Identity, String> {
-        if !self.oauth() {
-            return Err("API key logins cannot be saved as subscription profiles.".into());
+        match self.credential() {
+            Some(MuseCredential::Token(_)) => self
+                .email()
+                .as_deref()
+                .and_then(muse_store::identity)
+                .ok_or_else(|| {
+                    "This Muse login has no account email, so it cannot be saved.".into()
+                }),
+            Some(MuseCredential::ApiKey) => {
+                Err("API key logins cannot be saved as subscription profiles.".into())
+            }
+            _ => Err(model::MISSING_CREDENTIALS.into()),
         }
-        model::string(self.auth, "/access_token")?;
-        self.email()
-            .as_deref()
-            .and_then(muse_store::identity)
-            .ok_or_else(|| "This Muse login has no account email, so it cannot be saved.".into())
     }
 
     fn email(&self) -> Option<String> {

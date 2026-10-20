@@ -59,9 +59,6 @@ pub fn cursor_root() -> Result<PathBuf, AdapterError> {
     Ok(user_home()?.join(".cursor"))
 }
 
-// Muse splits its state the XDG way on every Unix, macOS included:
-// settings under the config dir, plugins/sessions under the data dir.
-// The Windows split is assumed to follow the same config/data distinction.
 #[cfg(not(windows))]
 pub fn muse_config_for(home: &std::path::Path) -> PathBuf {
     if let Some(root) = muse_xdg("XDG_CONFIG_HOME", &process_env) {

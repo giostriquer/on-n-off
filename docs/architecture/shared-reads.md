@@ -1,7 +1,7 @@
 # Shared cached reads
 
-**Orientation, not a source of truth.** `src-tauri/src/read_revision.rs` and its module
-doc-comment are authoritative.
+**Orientation, not a source of truth.** `src-tauri/src/read_revision.rs` and its tests are
+authoritative.
 
 ## The problem
 

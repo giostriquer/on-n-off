@@ -341,7 +341,7 @@ impl LoginCache {
     }
 }
 
-fn credential_of(secret: &Fields) -> Option<MuseCredential> {
+pub(crate) fn credential_of(secret: &Fields) -> Option<MuseCredential> {
     match token_of(secret) {
         Some(token) => Some(MuseCredential::Token(AccessToken::new(&token))),
         None => secret
