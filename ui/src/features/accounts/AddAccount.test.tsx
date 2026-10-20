@@ -41,3 +41,17 @@ it("holds every provider's sign-in until its account list has been read", () => 
   const { picker } = renderPicker({ claude: () => new Promise(() => {}), codex: () => new Promise(() => {}), muse: () => new Promise(() => {}) });
   expect(within(picker).getAllByRole("button", { name: /^(Claude|Codex|Muse)$/ }).map(button => button.hasAttribute("disabled"))).toEqual([true, true, true]);
 });
+
+it("holds a provider's sign-in while one it started runs, and only that provider's", async () => {
+  vi.mocked(api.addAccount).mockImplementation(() => new Promise(() => {}));
+  vi.mocked(api.cancelAccountLogin).mockResolvedValue();
+  const { picker } = renderPicker({ claude: () => Promise.resolve(EMPTY), codex: () => Promise.resolve(EMPTY), muse: () => Promise.resolve(EMPTY) });
+  await waitFor(() => expect(within(picker).getByRole("button", { name: "Claude" })).toBeEnabled());
+  fireEvent.click(within(picker).getByRole("button", { name: "Claude" }));
+  await waitFor(() => expect(api.addAccount).toHaveBeenCalledWith("claude", expect.any(String), undefined));
+  fireEvent.click(screen.getByRole("button", { name: "Add account" }));
+  const reopened = screen.getByRole("group", { name: "Add account" });
+  expect(within(reopened).getByRole("button", { name: "Claude" })).toBeDisabled();
+  expect(within(reopened).getByRole("button", { name: "Codex" })).toBeEnabled();
+  expect(within(reopened).getByRole("button", { name: "Muse" })).toBeEnabled();
+});
