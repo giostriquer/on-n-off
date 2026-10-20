@@ -11,8 +11,91 @@ use std::path::{Path, PathBuf};
 
 pub(super) type Resolve<'a> = dyn Fn(&str) -> Result<Box<dyn Home>, String> + 'a;
 
+const RECORD: &str = "provider.json";
+const NOT_ITS_OWN: &str =
+    "This account's home belongs to another provider, or its owner cannot be read, so it was left alone.";
+
 fn root(home: &Path) -> PathBuf {
     home.join(".on-n-off/accounts/homes")
+}
+
+enum Claim {
+    Named(AgentId),
+    Unnamed,
+}
+
+enum Record {
+    Absent,
+    Of(AgentId),
+    Unreadable,
+}
+
+fn recorded(dir: &Path) -> Record {
+    match std::fs::read(dir.join(RECORD)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Record::Absent,
+        Ok(bytes) if bytes.len() < 100 => {
+            serde_json::from_slice(&bytes).map_or(Record::Unreadable, Record::Of)
+        }
+        _ => Record::Unreadable,
+    }
+}
+
+pub(super) fn recorded_provider(dir: &Path) -> Option<AgentId> {
+    match recorded(dir) {
+        Record::Of(provider) => Some(provider),
+        Record::Absent | Record::Unreadable => None,
+    }
+}
+
+pub(super) fn record(dir: &Path, provider: AgentId) -> Result<(), String> {
+    match recorded(dir) {
+        Record::Of(owner) if owner == provider => Ok(()),
+        Record::Absent => super::vault::atomic_write(
+            &dir.join(RECORD),
+            &serde_json::to_vec(&provider)
+                .map_err(|_| "Cannot record the provider this home belongs to.")?,
+        ),
+        Record::Of(_) | Record::Unreadable => Err(NOT_ITS_OWN.into()),
+    }
+}
+
+fn owner(dir: &Path, claim: Claim) -> Option<AgentId> {
+    match (recorded(dir), claim) {
+        (Record::Of(provider), _) | (Record::Absent, Claim::Named(provider)) => Some(provider),
+        (Record::Unreadable, _) => None,
+        (Record::Absent, Claim::Unnamed) => {
+            let mut found = super::PROVIDERS
+                .into_iter()
+                .filter(|&provider| laid_out(provider, dir));
+            match (found.next(), found.next()) {
+                (Some(provider), None) => Some(provider),
+                _ => None,
+            }
+        }
+    }
+}
+
+fn laid_out(provider: AgentId, dir: &Path) -> bool {
+    super::adapter(provider)
+        .ok()
+        .and_then(|adapter| adapter.homes())
+        .is_some_and(|at| at(dir).recognizes())
+}
+
+fn lock_owned(
+    home: &dyn Home,
+    provider: AgentId,
+    claim: Claim,
+) -> Result<Option<Box<dyn NativeGuard>>, String> {
+    if owner(home.dir(), claim) != Some(provider) {
+        return Ok(None);
+    }
+    home.lock().map(Some)
+}
+
+pub(super) fn retire(home: &dyn Home, provider: AgentId) -> Result<(), String> {
+    let locks = lock_owned(home, provider, Claim::Named(provider))?.ok_or(NOT_ITS_OWN)?;
+    home.delete(locks)
 }
 
 pub(super) fn remove(
@@ -58,7 +141,13 @@ pub(super) fn check_out(
     let Some(home) = profile.home.as_deref().map(home).transpose()? else {
         return Ok(None);
     };
-    let locks = home.lock()?;
+    let provider = profile.identity.provider;
+    let Some(locks) = lock_owned(home.as_ref(), provider, Claim::Named(provider))? else {
+        return match profile.login {
+            Some(_) => Ok(None),
+            None => Err(NOT_ITS_OWN.into()),
+        };
+    };
     let live = home.read()?;
     let own = match &live {
         Some(login) => home.identify(login)? == profile.identity,
@@ -105,7 +194,13 @@ pub(super) fn settle(
         .iter()
         .filter(|id| !db.profiles.iter().any(|p| p.home.as_ref() == Some(*id)))
     {
-        let _ = take_back_or_tear_down(id, &db, &ticket, open, home);
+        let Ok(unnamed) = home(id) else {
+            continue;
+        };
+        let Ok(Some(locks)) = lock_owned(unnamed.as_ref(), provider, Claim::Unnamed) else {
+            continue;
+        };
+        let _ = take_back_or_tear_down(id, unnamed.as_ref(), locks, &db, &ticket, open);
     }
     let archived = crate::limits::archived(root_home, provider);
     for profile in db.profiles.iter().filter(|p| {
@@ -150,7 +245,9 @@ fn check_in(
         }
     };
     let home = home(&id)?;
-    let locks = home.lock()?;
+    let provider = profile.identity.provider;
+    let locks = lock_owned(home.as_ref(), provider, Claim::Named(provider))?.ok_or(NOT_ITS_OWN)?;
+    record(home.dir(), provider)?;
     match home.read()? {
         Some(live) if home.identify(&live)? != profile.identity => {
             return Err("This account's home holds another account's login.".into())
@@ -188,27 +285,27 @@ fn held_profile<'db>(db: &'db mut Database, id: &str) -> Result<&'db mut Profile
 
 fn take_back_or_tear_down(
     id: &str,
+    home: &dyn Home,
+    locks: Box<dyn NativeGuard>,
     db: &Database,
     ticket: &Ticket,
     open: &dyn Fn() -> Result<Store, String>,
-    home: &Resolve<'_>,
 ) -> Result<(), String> {
-    let home = home(id)?;
-    let locks = home.lock()?;
-    let owner = home.read()?.and_then(|login| {
+    let account = home.read()?.and_then(|login| {
         let identity = home.identify(&login).ok()?;
-        let owner = db
+        let account = db
             .profiles
             .iter()
             .find(|p| p.identity == identity && p.needs_login() && !p.signed_out)?;
-        Some((owner, SignInEnd::of(&identity, &login)))
+        Some((account, SignInEnd::of(&identity, &login)))
     });
-    let Some((owner, sign_in_end)) = owner else {
+    let Some((account, sign_in_end)) = account else {
         return home.delete(locks);
     };
+    record(home.dir(), account.identity.provider)?;
     drop(locks);
     open()?.publish(ticket, |db| {
-        let target = held_profile(db, &owner.id)?;
+        let target = held_profile(db, &account.id)?;
         if !target.needs_login() || target.signed_out {
             return Err("The account changed while its home was taken back.".into());
         }

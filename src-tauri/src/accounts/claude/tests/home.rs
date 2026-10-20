@@ -32,8 +32,15 @@ fn token(login: Option<Login>) -> Option<String> {
         .map(str::to_string)
 }
 
-#[cfg(target_os = "macos")]
 fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
+    keychain_watching(|| {}, run)
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_watching<T>(
+    deleting: impl Fn() + 'static,
+    run: impl FnOnce() -> T,
+) -> (T, Vec<String>) {
     use crate::process::CommandOutcome;
     use std::{cell::RefCell, rc::Rc};
     let item: Rc<RefCell<Option<String>>> = Rc::default();
@@ -59,6 +66,7 @@ fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
             return exited(true, String::new(), "");
         }
         if command.starts_with("delete-generic-password") {
+            deleting();
             *held.borrow_mut() = None;
             return exited(true, String::new(), "");
         }
@@ -78,8 +86,31 @@ fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn keychain<T>(run: impl FnOnce() -> T) -> (T, Vec<String>) {
+fn keychain_watching<T>(
+    _deleting: impl Fn() + 'static,
+    run: impl FnOnce() -> T,
+) -> (T, Vec<String>) {
     (run(), Vec::new())
+}
+
+fn accounts_root() -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join(".on-n-off/accounts")).unwrap();
+    crate::accounts::vault::tests::unlock_fixture(&root);
+    root
+}
+
+fn unnamed_home(root: &Path) -> (PathBuf, ClaudeHome) {
+    let dir = crate::accounts::homes::dir(root, &uuid::Uuid::new_v4().to_string()).unwrap();
+    let home = ClaudeHome::at(&dir);
+    (dir, home)
+}
+
+fn settle(root: &Path, provider: AgentId) {
+    let accounts = crate::accounts::Accounts::at(root.to_path_buf());
+    let homes = accounts.account_homes(provider).unwrap();
+    let open = || crate::accounts::store::Store::open_existing(root);
+    crate::accounts::homes::settle(root, provider, None, &open, &homes);
 }
 
 #[test]
@@ -449,4 +480,123 @@ fn a_homes_login_stamp_reads_its_keychain_items_attributes_and_never_its_secret(
             && !command.contains(" -w")),
         "{sent:?}"
     );
+}
+
+#[test]
+fn a_muse_read_leaves_an_unnamed_claude_home_with_its_login() {
+    let root = accounts_root();
+    let (dir, home) = unnamed_home(root.path());
+
+    let (left, sent) = keychain(|| {
+        let locks = home.lock().unwrap();
+        home.put(&login("b1"), locks.as_ref()).unwrap();
+        drop(locks);
+        settle(root.path(), AgentId::Muse);
+        home.read().unwrap()
+    });
+
+    assert!(
+        dir.join(".claude").is_dir(),
+        "a Muse read removed a Claude home"
+    );
+    assert_eq!(token(left), Some("access-b1".into()));
+    assert!(
+        !sent
+            .iter()
+            .any(|command| command.starts_with("delete-generic-password")),
+        "{sent:?}"
+    );
+}
+
+#[test]
+fn a_claude_read_tears_down_an_unnamed_home_its_login_before_its_directory() {
+    let root = accounts_root();
+    let (dir, home) = unnamed_home(root.path());
+    let existed: std::rc::Rc<std::cell::RefCell<Vec<bool>>> = std::rc::Rc::default();
+    let watched = (existed.clone(), dir.clone());
+
+    let (left, sent) = keychain_watching(
+        move || watched.0.borrow_mut().push(watched.1.exists()),
+        || {
+            let locks = home.lock().unwrap();
+            home.put(&login("b1"), locks.as_ref()).unwrap();
+            drop(locks);
+            settle(root.path(), AgentId::Claude);
+            home.read().unwrap()
+        },
+    );
+
+    assert!(!dir.exists(), "the home stayed");
+    assert_eq!(token(left), None, "its login outlived its home");
+    #[cfg(target_os = "macos")]
+    {
+        let service = StorageDir::new(dir.join(".claude"), true).service();
+        let deletes: Vec<_> = sent
+            .iter()
+            .filter(|command| command.starts_with("delete-generic-password"))
+            .collect();
+        assert_eq!(deletes.len(), 1, "{sent:?}");
+        assert!(
+            deletes[0].contains(&format!("-s \"{service}\"")),
+            "{}",
+            deletes[0]
+        );
+        assert_eq!(
+            *existed.borrow(),
+            [true],
+            "the directory went before its Keychain entry"
+        );
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (sent, existed);
+}
+
+#[test]
+fn a_home_is_known_by_its_claude_config_dir_and_never_by_its_login() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    assert!(!home.recognizes(), "an empty home");
+    fs::create_dir_all(root.path().join("config/muse")).unwrap();
+    assert!(!home.recognizes(), "a Muse home");
+
+    let (known, sent) = keychain(|| {
+        let _locks = home.lock().unwrap();
+        home.recognizes()
+    });
+
+    assert!(known);
+    assert!(sent.is_empty(), "{sent:?}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_claude_config_dir_is_not_a_homes_layout() {
+    let root = tempfile::tempdir().unwrap();
+    let elsewhere = tempfile::tempdir().unwrap();
+    std::os::unix::fs::symlink(elsewhere.path(), root.path().join(".claude")).unwrap();
+
+    assert!(!ClaudeHome::at(root.path()).recognizes());
+}
+
+#[test]
+fn a_claude_read_leaves_an_unnamed_muse_home_to_muse() {
+    let root = accounts_root();
+    let (dir, claude) = unnamed_home(root.path());
+    let muse = crate::accounts::muse::MuseHome::at(&dir);
+    let login = Login {
+        auth: json!({"access_token": "t1", "api_key": "key-1"}),
+        account: json!({"mechanism": "oauth", "user_email": "you@example.com"}),
+    };
+    muse.put(&login, &()).unwrap();
+
+    let ((), sent) = keychain(|| settle(root.path(), AgentId::Claude));
+
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(
+        !dir.join(".claude").exists(),
+        "a Claude read laid its config dir into a Muse home"
+    );
+    assert!(muse.recognizes() && !claude.recognizes());
+    settle(root.path(), AgentId::Muse);
+    assert!(!dir.exists(), "its owner, Muse, did not tear it down");
 }

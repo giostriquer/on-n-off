@@ -596,3 +596,63 @@ mod keychain {
             .any(|command| command.starts_with("add-generic-password")));
     }
 }
+
+#[test]
+fn a_home_is_known_by_its_muse_config_dir() {
+    let dir = scratch_dir("muse-home-layout");
+    let home = MuseHome::at(&dir);
+    assert!(!home.recognizes(), "an empty home");
+    fs::create_dir_all(dir.join(".claude")).unwrap();
+    assert!(!home.recognizes(), "a Claude home");
+
+    home.put(&login("you@example.com", "t1"), &()).unwrap();
+
+    assert!(home.recognizes());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_linked_muse_config_dir_is_not_a_homes_layout() {
+    let dir = scratch_dir("muse-home-linked-layout");
+    let elsewhere = scratch_dir("muse-home-linked-target");
+    fs::create_dir_all(dir.join("config")).unwrap();
+    std::os::unix::fs::symlink(&elsewhere, dir.join("config/muse")).unwrap();
+
+    assert!(!MuseHome::at(&dir).recognizes());
+}
+
+#[test]
+fn a_muse_read_takes_back_a_home_it_forgot_and_records_itself_at_the_homes_root() {
+    use crate::accounts::store::{ChangeKind, Store};
+    let root = tempfile::tempdir().unwrap();
+    fs::create_dir_all(root.path().join(".on-n-off/accounts")).unwrap();
+    crate::accounts::vault::tests::unlock_fixture(&root);
+    let profile = Store::open(root.path(), true)
+        .unwrap()
+        .change(ChangeKind::Metadata, |db| {
+            let id = db.save(you(), login("you@example.com", "t1"), None)?;
+            db.profiles[0].login = None;
+            Ok(id)
+        })
+        .unwrap();
+    let id = uuid::Uuid::new_v4().to_string();
+    let dir = crate::accounts::homes::dir(root.path(), &id).unwrap();
+    MuseHome::at(&dir)
+        .put(&login("you@example.com", "t1"), &())
+        .unwrap();
+    let accounts = crate::accounts::Accounts::at(root.path().to_path_buf());
+    let homes = accounts.account_homes(AgentId::Muse).unwrap();
+    let open = || Store::open_existing(root.path());
+
+    crate::accounts::homes::settle(root.path(), AgentId::Muse, None, &open, &homes);
+
+    let vault = Store::open_existing(root.path()).unwrap().load().unwrap();
+    let taken = vault.profiles.iter().find(|p| p.id == profile).unwrap();
+    assert_eq!(taken.home.as_deref(), Some(id.as_str()));
+    assert_eq!(
+        fs::read_to_string(dir.join("provider.json"))
+            .ok()
+            .as_deref(),
+        Some("\"muse\"")
+    );
+}

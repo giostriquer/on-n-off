@@ -256,6 +256,14 @@ impl MuseHome {
 }
 
 impl Home for MuseHome {
+    fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    fn recognizes(&self) -> bool {
+        native::real_dir(&self.store.config)
+    }
+
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         Ok(Box::new(()))
     }

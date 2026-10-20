@@ -142,6 +142,8 @@ trait IsolatedSignIn: Native {
 }
 
 trait Home: Send + Sync {
+    fn dir(&self) -> &Path;
+    fn recognizes(&self) -> bool;
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String>;
     fn read(&self) -> Result<Option<store::Login>, String>;
     fn identify(&self, login: &store::Login) -> Result<model::Identity, String>;
@@ -538,9 +540,7 @@ impl Accounts {
         let Some(homes) = self.account_homes(provider) else {
             return Ok(());
         };
-        let home = homes(id)?;
-        let locks = home.lock()?;
-        home.delete(locks)
+        homes::retire(homes(id)?.as_ref(), provider)
     }
 
     fn remove(&self, id: &str) -> Result<(), String> {

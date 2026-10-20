@@ -11,6 +11,12 @@ struct HomeState {
 struct SecretsUntouched(Arc<HomeState>);
 
 impl Home for SecretsUntouched {
+    fn dir(&self) -> &std::path::Path {
+        panic!("asked where a polled home is")
+    }
+    fn recognizes(&self) -> bool {
+        panic!("looked at a polled home's layout")
+    }
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         panic!("a poll took a home's locks")
     }

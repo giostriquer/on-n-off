@@ -113,7 +113,7 @@ pub(super) struct Homes {
     pub unreadable: Mutex<Vec<PathBuf>>,
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
-    pub deleted: Mutex<Vec<PathBuf>>,
+    pub deleted_by: Mutex<Vec<(PathBuf, AgentId)>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
     pub deadline_reads: Mutex<Vec<PathBuf>>,
     pub secrets_read: Mutex<usize>,
@@ -131,11 +131,21 @@ impl FakeHome {
     }
 }
 impl Home for FakeHome {
+    fn dir(&self) -> &Path {
+        &self.1
+    }
+    fn recognizes(&self) -> bool {
+        panic!("a home's layout is asked of its provider's own home, never of a fake")
+    }
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         if self.0.busy.lock().unwrap().contains(&self.1) {
             return Err("Claude is busy with this home.".into());
         }
-        std::fs::create_dir_all(&self.1).unwrap();
+        let laid_out = match self.2 {
+            AgentId::Claude => self.1.join(".claude"),
+            _ => self.1.clone(),
+        };
+        std::fs::create_dir_all(laid_out).unwrap();
         Ok(Box::new(()))
     }
     fn read(&self) -> Result<Option<Login>, String> {
@@ -203,7 +213,11 @@ impl Home for FakeHome {
             return Err("The home could not be removed.".into());
         }
         self.0.logins.lock().unwrap().remove(&self.1);
-        self.0.deleted.lock().unwrap().push(self.1.clone());
+        self.0
+            .deleted_by
+            .lock()
+            .unwrap()
+            .push((self.1.clone(), self.2));
         let _ = std::fs::remove_dir_all(&self.1);
         Ok(())
     }

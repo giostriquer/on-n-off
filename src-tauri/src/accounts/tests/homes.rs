@@ -312,7 +312,7 @@ fn a_home_an_older_version_forgot_is_taken_back_at_the_next_read() {
 
     let cards = read(&harness);
 
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
     assert_eq!(harness.home_of(&b), Some(home.clone()));
     assert_eq!(harness.in_home(&b), Some("b1".into()));
     assert_eq!(asked(&harness).last(), Some(&home));
@@ -336,7 +336,7 @@ fn a_forgotten_home_that_cannot_be_read_is_left_for_a_later_read() {
 
     read(&harness);
 
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
     assert!(home.exists());
     assert_eq!(harness.home_of(&b), None);
     harness.homes().unreadable.lock().unwrap().clear();
@@ -359,8 +359,8 @@ fn a_forgotten_home_whose_account_signed_in_again_goes_at_the_next_read() {
     read(&harness);
 
     assert_eq!(
-        *harness.homes().deleted.lock().unwrap(),
-        std::slice::from_ref(&home)
+        *harness.homes().deleted_by.lock().unwrap(),
+        [(home.clone(), AgentId::Claude)]
     );
     assert_eq!(harness.in_home(&b), Some("b2".into()));
 }
@@ -376,8 +376,8 @@ fn a_removed_accounts_home_goes_at_the_next_read() {
     read(&harness);
 
     assert_eq!(
-        *harness.homes().deleted.lock().unwrap(),
-        std::slice::from_ref(&home)
+        *harness.homes().deleted_by.lock().unwrap(),
+        [(home.clone(), AgentId::Claude)]
     );
     assert!(!home.exists());
     assert!(harness.vault().profiles.iter().all(|p| p.id != b));
@@ -466,8 +466,8 @@ fn a_new_sign_in_replaces_the_home_the_account_had() {
     assert_eq!(harness.home_of(&b), None);
     read(&harness);
     assert_eq!(
-        *harness.homes().deleted.lock().unwrap(),
-        std::slice::from_ref(&old)
+        *harness.homes().deleted_by.lock().unwrap(),
+        [(old.clone(), AgentId::Claude)]
     );
     assert_eq!(harness.in_home(&b), Some("b2".into()));
     assert_ne!(harness.home_of(&b), Some(old));
