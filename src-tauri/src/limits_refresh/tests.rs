@@ -661,7 +661,13 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
     let changes = std::cell::Cell::new(true);
-    let logins_change = std::cell::Cell::new(false);
+    let verdict = std::cell::Cell::new(None);
+    let parked = crate::accounts::model::Identity {
+        provider: AgentId::Claude,
+        user_id: "saved".into(),
+        workspace_id: "team".into(),
+    };
+    let saved_id = parked.observation_key();
     let native = |_| {
         log.borrow_mut().push("native");
         native_read(vec![
@@ -684,8 +690,16 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         );
         log.borrow_mut()
             .push(if force { "saved, forced" } else { "saved" });
-        entries.push(snapshot("saved", false, LimitsStatus::Ok));
-        logins_change.get().then(Roster::default)
+        entries.push(snapshot(&saved_id, false, LimitsStatus::Ok));
+        verdict.get().map(|verdict| {
+            crate::accounts::roster_with_logins_for_test(
+                AgentId::Claude,
+                &[(parked.clone(), "saved@example.com")],
+                &[],
+                &[],
+                &|_| (None, verdict),
+            )
+        })
     };
     let flag = |entries: &mut [ProviderLimitsDto]| {
         assert!(
@@ -742,12 +756,41 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         "nothing was unarchived, so the account list is not announced"
     );
 
-    logins_change.set(true);
-    read(true);
+    let login_state = |verdict| {
+        let entries = read(true);
+        let column = cache.column(&entries);
+        let saved = column
+            .iter()
+            .find(|entry| {
+                entry
+                    .card
+                    .account
+                    .as_ref()
+                    .is_some_and(|a| a.id == saved_id)
+            })
+            .and_then(|entry| entry.profile.as_ref())
+            .map(|profile| serde_json::to_value(profile).unwrap()["loginState"].clone());
+        (verdict, saved, read_revision::take_announced())
+    };
+    verdict.set(Some(None));
+    let usable = login_state("usable");
+    verdict.set(Some(Some(crate::limits::outcome::Parked::Refused)));
+    let refused = login_state("refused");
     assert_eq!(
-        read_revision::take_announced(),
-        [Source::LimitsClaude],
-        "a roster the poll listed reaches the column with the Limits read alone"
+        [usable, refused],
+        [
+            (
+                "usable",
+                Some(serde_json::json!({"state": "usable"})),
+                vec![Source::LimitsClaude]
+            ),
+            (
+                "refused",
+                Some(serde_json::json!({"state": "refused"})),
+                vec![Source::LimitsClaude]
+            ),
+        ],
+        "a verdict the poll parks reaches the column with the Limits read alone"
     );
 }
 

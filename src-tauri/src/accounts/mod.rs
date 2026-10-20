@@ -12,7 +12,7 @@ mod transaction;
 mod homes;
 mod roster;
 #[cfg(test)]
-pub(crate) use roster::roster_for_test;
+pub(crate) use roster::{roster_for_test, roster_with_logins_for_test};
 pub(crate) use roster::{Listed, Roster, SignInDeadlines};
 mod login_state;
 

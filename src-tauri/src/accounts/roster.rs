@@ -195,6 +195,20 @@ pub(crate) fn roster_for_test(
     archived: &[String],
     categories: &[(&str, &str)],
 ) -> Roster {
+    roster_with_logins_for_test(provider, profiles, archived, categories, &|_| (None, None))
+}
+
+#[cfg(test)]
+pub(crate) type TestLogin = (Option<i64>, Option<Parked>);
+
+#[cfg(test)]
+pub(crate) fn roster_with_logins_for_test(
+    provider: AgentId,
+    profiles: &[(super::model::Identity, &str)],
+    archived: &[String],
+    categories: &[(&str, &str)],
+    login: &dyn Fn(&str) -> TestLogin,
+) -> Roster {
     let mut db = Database::default();
     for (index, (identity, email)) in profiles.iter().enumerate() {
         db.profiles.push(Profile {
@@ -221,10 +235,13 @@ pub(crate) fn roster_for_test(
         provider,
         &archived.iter().cloned().collect(),
         0,
-        &|_| Facts {
-            active: false,
-            deadline: Deadline::at(None),
-            parked: None,
+        &|p| {
+            let (ends_at_ms, parked) = login(p.email.as_deref().unwrap_or_default());
+            Facts {
+                active: false,
+                deadline: Deadline::at(ends_at_ms),
+                parked,
+            }
         },
     )
 }

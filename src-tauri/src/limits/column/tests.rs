@@ -1,7 +1,8 @@
 use super::*;
 use crate::accounts::model::Identity;
-use crate::accounts::roster_for_test;
+use crate::accounts::{roster_for_test, roster_with_logins_for_test};
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, Reading};
+use crate::limits::outcome::Parked;
 use crate::limits::window::fixture;
 
 fn identity(provider: AgentId, user: &str, workspace: &str) -> Identity {
@@ -283,6 +284,67 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
     assert_eq!(profile["observationId"], unread.observation_key());
     assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
     assert_eq!(profile["active"], false);
+}
+
+#[test]
+fn an_unread_saved_profile_carries_its_login_state_as_the_account_list_decides_it() {
+    const NOW: i64 = 1_790_000_000_000;
+    const DAY: i64 = 86_400_000;
+    let named = [
+        "signed-in",
+        "ended",
+        "ending",
+        "refused",
+        "elsewhere",
+        "usable",
+    ]
+    .map(|user| identity(AgentId::Claude, user, "team"));
+    let profiles: Vec<_> = named
+        .iter()
+        .map(|identity| (identity.clone(), identity.user_id.as_str()))
+        .collect();
+    let roster =
+        roster_with_logins_for_test(AgentId::Claude, &profiles, &[], &[], &|user| match user {
+            "signed-in" => (None, Some(Parked::Refused)),
+            "ended" => (Some(NOW - DAY), Some(Parked::Refused)),
+            "ending" => (Some(NOW - DAY), None),
+            "refused" => (None, Some(Parked::Refused)),
+            "elsewhere" => (Some(NOW + 3 * DAY), Some(Parked::OtherAccount)),
+            _ => (None, None),
+        });
+    let mut current = reading(AgentId::Claude, &named[0].observation_key(), "signed-in");
+    current.current_account = true;
+    let listed = SignInDeadlines::from([(
+        named[2].observation_key(),
+        "2026-09-25T12:00:00Z".to_string(),
+    )]);
+
+    let column = column(&[current], &roster, &listed, NOW);
+
+    let states: Vec<_> = column
+        .iter()
+        .map(|entry| {
+            let profile = serde_json::to_value(entry.profile.as_ref().unwrap()).unwrap();
+            (entry.unread, profile["loginState"].clone())
+        })
+        .collect();
+    assert_eq!(
+        states,
+        [
+            (false, serde_json::json!({"state": "usable"})),
+            (
+                true,
+                serde_json::json!({"state": "ended", "endsAt": "2026-09-20T14:13:20Z"})
+            ),
+            (
+                true,
+                serde_json::json!({"state": "ending", "endsAt": "2026-09-25T12:00:00Z"})
+            ),
+            (true, serde_json::json!({"state": "refused"})),
+            (true, serde_json::json!({"state": "otherAccount"})),
+            (true, serde_json::json!({"state": "usable"})),
+        ]
+    );
 }
 
 #[test]

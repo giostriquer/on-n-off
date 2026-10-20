@@ -262,11 +262,26 @@ fn an_account_list_hands_its_sign_in_ends_and_a_roster_reread_over_in_one_replac
         Reading::Unchanged(2),
         "a vault this session has not unlocked keeps the roster"
     );
+    let ends_at = |cache: &Cache| {
+        let column = served_column(cache);
+        assert_eq!(column[0].category.as_deref(), Some("Client A"));
+        serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap()["signInEndsAt"].clone()
+    };
+    assert_eq!(ends_at(&cache), "2026-09-30T12:00:00Z");
 
-    let column = served_column(&cache);
-    let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
-    assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
-    assert_eq!(column[0].category.as_deref(), Some("Client A"));
+    let later = |at: &str| SignInDeadlines::from([(me.clone(), at.to_string())]);
+    assert_eq!(
+        relist(&cache, Some(later("2026-10-30T12:00:00Z")), listed),
+        Reading::Replaced(3),
+        "a new end alone, the roster unchanged"
+    );
+    assert_eq!(ends_at(&cache), "2026-10-30T12:00:00Z");
+    assert_eq!(
+        relist(&cache, Some(later("2026-11-30T12:00:00Z")), || None),
+        Reading::Replaced(4),
+        "a new end alone, the vault locked"
+    );
+    assert_eq!(ends_at(&cache), "2026-11-30T12:00:00Z");
 }
 
 #[test]

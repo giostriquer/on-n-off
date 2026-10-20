@@ -88,12 +88,7 @@ impl Deadline {
     }
 
     pub(super) fn recorded(profile: &Profile) -> Self {
-        let end = match (&profile.login, &profile.home) {
-            (Some(login), _) => SignInEnd::of(&profile.identity, login),
-            (None, Some(_)) => profile.sign_in_end,
-            (None, None) => SignInEnd::Unknown,
-        };
-        Self::at(end.ends_at_ms())
+        Self::at(profile.sign_in_end.ends_at_ms())
     }
 
     pub(super) fn at(ends_at_ms: Option<i64>) -> Self {

@@ -15,22 +15,14 @@ fn answered(harness: &Harness, provider: AgentId) -> Option<Roster> {
         })
 }
 
-fn as_listed(profile: &impl serde::Serialize) -> serde_json::Value {
-    let mut json = serde_json::to_value(profile).unwrap();
-    let fields = json.as_object_mut().unwrap();
-    fields.remove("signInEndsAt");
-    fields.remove("active");
-    fields.remove("loginState");
-    json
-}
-
 fn in_column(listed: &crate::accounts::Listed) -> serde_json::Value {
     serde_json::to_value(listed.in_column(&crate::accounts::SignInDeadlines::new(), None, 0))
         .unwrap()
 }
 
 #[test]
-fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in_and_use() {
+fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_ends_and_who_is_signed_in(
+) {
     let harness = Harness::new().with_homes();
     let a = identity(AgentId::Claude, "a", "team");
     let b = identity(AgentId::Claude, "b", "team");
@@ -62,18 +54,20 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in
     harness.heard();
     let listed = harness.accounts().list(AgentId::Claude).unwrap();
 
+    let ends = listed.sign_in_deadlines();
+    let signed_in = a.observation_key();
+    let now = chrono::Utc::now().timestamp_millis();
     let read: Vec<_> = roster
         .profiles()
         .iter()
-        .map(|p| as_listed(&in_column(p)))
+        .map(|p| serde_json::to_value(p.in_column(&ends, Some(&signed_in), now)).unwrap())
         .collect();
-    let shown: Vec<_> = serde_json::to_value(&listed).unwrap()["profiles"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(as_listed)
-        .collect();
-    assert_eq!(read, shown);
+    let shown = serde_json::to_value(&listed).unwrap()["profiles"].clone();
+    assert_eq!(serde_json::Value::from(read), shown);
+    assert_eq!(
+        shown[0]["loginState"],
+        serde_json::json!({"state": "ended", "endsAt": "2026-10-15T16:31:40Z"})
+    );
     assert_eq!(
         roster
             .profiles()
@@ -177,5 +171,49 @@ fn the_saved_refresh_lists_the_saved_profiles_when_the_signed_in_login_cannot_be
             "b@example.com".to_string()
         ]),
         "the saved profiles stay listed even though no saved poll could run"
+    );
+}
+
+#[test]
+fn the_saved_refresh_dates_a_vault_login_by_its_recorded_end_or_the_ends_the_account_list_hands_over(
+) {
+    let harness = Harness::new();
+    let dated = |user: &str, ends_at_ms: i64| {
+        let mut login = claude(user, "1");
+        login.auth["claudeAiOauth"]["refreshTokenExpiresAt"] = ends_at_ms.into();
+        login
+    };
+    let recorded = identity(AgentId::Claude, "recorded", "team");
+    let unrecorded = identity(AgentId::Claude, "unrecorded", "team");
+    harness.saved(recorded.clone(), dated("recorded", 4_070_908_800_000));
+    harness.saved(unrecorded.clone(), dated("unrecorded", 4_102_444_800_000));
+    harness.seed(|db| {
+        db.profiles[1].sign_in_end = super::super::login_state::SignInEnd::Unread;
+    });
+    harness.signed_in(Some(claude("a", "a2")));
+
+    let roster = answered(&harness, AgentId::Claude).unwrap();
+    let listed = harness.accounts().list(AgentId::Claude).unwrap();
+    let in_column = |ends: &crate::accounts::SignInDeadlines| {
+        [&recorded, &unrecorded].map(|identity| {
+            let profile = roster.profile(&identity.observation_key()).unwrap();
+            serde_json::to_value(profile.in_column(ends, None, 0)).unwrap()["signInEndsAt"].clone()
+        })
+    };
+
+    assert_eq!(
+        in_column(&crate::accounts::SignInDeadlines::new()),
+        [
+            serde_json::json!("2099-01-01T00:00:00Z"),
+            serde_json::Value::Null
+        ],
+        "a profile saved before its end was recorded: the Limits read never opens its login to date it"
+    );
+    assert_eq!(
+        in_column(&listed.sign_in_deadlines()),
+        [
+            serde_json::json!("2099-01-01T00:00:00Z"),
+            serde_json::json!("2100-01-01T00:00:00Z")
+        ]
     );
 }
