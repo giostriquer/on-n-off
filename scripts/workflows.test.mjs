@@ -39,6 +39,7 @@ function runnerLegs(job) {
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
+  assert.deepEqual(readdirSync(directory).filter((file) => !file.endsWith(".yml")), [], "every workflow is a .yml file the tests read");
   for (const name of workflows()) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const { label } of runnerLegs(job)) {

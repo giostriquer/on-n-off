@@ -175,6 +175,10 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   you cannot reproduce locally.
 - Preserve Tauri command names and serialized shapes unless a migration is approved. Snapshots
   written by older versions must still load: give new fields defaults.
+- The README's Privacy section names every host the app itself contacts, and
+  `scripts/privacy-hosts.test.mjs` finds them as `https://` literals in non-test Rust. Write each
+  request URL with its full `https://host` literal, never a host assembled at runtime, and add a
+  new host to that section in the same change.
 - On restricted Windows sandboxes Vite/esbuild can fail with `spawn EPERM`. Record it and rerun
   the same command elsewhere; do not change code for a sandbox fault.
 
