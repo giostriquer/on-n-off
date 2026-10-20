@@ -59,6 +59,9 @@ fn account_change(home: &Path, edit: impl FnOnce(&mut Database)) {
 fn ticket(home: &Path) -> Ticket {
     open(home).load().unwrap().ticket(Guard::SignIn).unwrap()
 }
+fn answered(profile: &Profile) -> Accepted {
+    Accepted::for_test(reading(profile))
+}
 fn reading(profile: &Profile) -> ProviderLimitsDto {
     let mut entries = vec![];
     merge(&mut entries, profile, Some(Err("fixture".into())));
@@ -89,7 +92,7 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
         &|| Ok(open(home.path())),
         &|p| FetchResult {
             login: p.login.clone(),
-            result: Ok(reading(p)),
+            result: Ok(answered(p)),
         },
     )
     .unwrap()
@@ -124,7 +127,7 @@ fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read
             });
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -145,7 +148,7 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
             account_change(home.path(), |_| {});
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -173,7 +176,7 @@ fn a_pending_recovery_during_http_discards_the_late_read() {
             });
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -220,7 +223,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
         &|| Ok(open(home.path())),
         &|p| FetchResult {
             login: p.login.clone(),
-            result: Ok(reading(p))
+            result: Ok(answered(p))
         }
     )
     .unwrap()
@@ -235,30 +238,27 @@ fn a_poll_holds_back_as_the_verdict_of_its_read_context_says() {
         ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
         ReadFailure::Unavailable("The source said why.".into()),
     ] {
-        for context in [Context::SavedLogin, Context::AccountHome] {
-            let verdict = outcome::verdict(p.identity.provider, context, &failure, 0);
+        for saved in [Saved::Login, Saved::Home] {
             assert_eq!(
-                attempt_outcome(context, &p, &Err(failure.clone())),
-                AttemptOutcome {
-                    error: Some(verdict.message),
-                    rejected: verdict.parks_login,
-                    counted: verdict.backoff.counted,
-                    retry: verdict.backoff.floor,
-                },
-                "{failure:?} in {context:?}"
+                verdict_of(saved, &p, &Err(failure.clone())),
+                Some(outcome::saved(p.identity.provider, saved, &failure, 0)),
+                "{failure:?} in {saved:?}"
             );
         }
     }
-    assert_eq!(
-        attempt_outcome(Context::SavedLogin, &p, &Ok(reading(&p))),
-        AttemptOutcome::answered()
-    );
+    assert_eq!(verdict_of(Saved::Login, &p, &Ok(answered(&p))), None);
 }
 
 #[test]
 fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry_after() {
-    let failed = |retry| AttemptOutcome::failed("failed", false, Duration::from_secs(retry));
-    let answered = AttemptOutcome::answered();
+    let failed = |retry| {
+        Some(SavedVerdict {
+            message: "failed".into(),
+            parks_login: false,
+            retry: Duration::from_secs(retry),
+        })
+    };
+    let succeeded = None;
     for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
         let backoff = |failures| crate::limits_refresh::failure_backoff(interval, failures);
         for (before, outcome, failures, wait) in [
@@ -266,7 +266,7 @@ fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry
             (1, failed(0), 2, backoff(2)),
             (2, failed(0), 3, backoff(3)),
             (4, failed(0), 5, backoff(5)),
-            (3, answered.clone(), 0, backoff(0)),
+            (3, succeeded.clone(), 0, backoff(0)),
             (0, failed(30), 1, backoff(1)),
             (0, failed(7200), 1, Duration::from_secs(7200)),
         ] {
@@ -319,7 +319,7 @@ fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
     ] {
         let home = tempfile::tempdir().unwrap();
         let p = stored(home.path());
-        let verdict = outcome::verdict(p.identity.provider, Context::SavedLogin, &error, 0);
+        let verdict = outcome::saved(p.identity.provider, Saved::Login, &error, 0);
         let fetches = Cell::new(0);
         let poll = || {
             poll_with(
@@ -349,38 +349,6 @@ fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
 }
 
 #[test]
-fn an_answer_for_another_account_or_with_nothing_observed_is_not_published() {
-    for (case, answer) in [
-        ("another account", {
-            let mut card = reading(&profile());
-            card.account.as_mut().unwrap().id = "profile:someone-else".into();
-            card
-        }),
-        ("nothing observed", {
-            let mut card = reading(&profile());
-            card.reading.windows.clear();
-            card
-        }),
-    ] {
-        let home = tempfile::tempdir().unwrap();
-        let p = stored(home.path());
-        let result = poll_with(
-            home.path(),
-            &p,
-            &ticket(home.path()),
-            false,
-            &|| Ok(open(home.path())),
-            &|p| FetchResult {
-                login: p.login.clone(),
-                result: Ok(answer.clone()),
-            },
-        );
-        assert!(matches!(result, Some(Err(_))), "{case}: {result:?}");
-        assert!(!home.path().join(".on-n-off/limits").exists(), "{case}");
-    }
-}
-
-#[test]
 fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
@@ -394,7 +362,7 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
             &|| Ok(open(home.path())),
             &|p| FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             },
         )
     };
@@ -447,7 +415,7 @@ fn a_new_credential_retries_a_previously_rejected_account() {
         &|p| {
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         }
     )
@@ -514,7 +482,7 @@ fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
             calls.fetch_add(1, Ordering::SeqCst);
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );

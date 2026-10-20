@@ -20,7 +20,7 @@ pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
 pub(crate) use codex::{read_saved_codex, same_reset_instant, CodexEndpoints};
 pub(crate) use muse::mint::{read_saved as read_saved_muse, verify as verify_saved_muse};
-pub(crate) use outcome::{Backoff, ReadFailure};
+pub(crate) use outcome::{Accepted, NativeOutcome, ReadFailure};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 
@@ -96,32 +96,14 @@ struct Sources<'a> {
 
 pub(crate) struct NativeRead {
     pub(crate) cards: Vec<ProviderLimitsDto>,
-    pub(crate) backoff: Backoff,
-    pub(crate) nobody_signed_in: bool,
-}
-
-fn native_read(agent: AgentId, read: Read) -> (ProviderLimitsDto, NativeRead) {
-    let nobody_signed_in = read
-        .answer
-        .as_ref()
-        .err()
-        .is_some_and(outcome::nobody_signed_in);
-    let (card, backoff) = outcome::signed_in(agent, read);
-    (
-        card,
-        NativeRead {
-            cards: Vec::new(),
-            backoff,
-            nobody_signed_in,
-        },
-    )
+    pub(crate) outcome: NativeOutcome,
 }
 
 pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
     let home = match paths::user_home() {
         Ok(home) => home,
         Err(error) => {
-            let (card, read) = native_read(
+            let (card, outcome) = outcome::signed_in(
                 agent,
                 Read::anonymous(ReadFailure::Unavailable(format!(
                     "Could not read the stored login: {}",
@@ -130,7 +112,7 @@ pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
             );
             return NativeRead {
                 cards: vec![card],
-                ..read
+                outcome,
             };
         }
     };
@@ -148,16 +130,25 @@ fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> NativeRead {
     )
 }
 
+pub(crate) fn native_login(agent: AgentId) -> Option<String> {
+    let home = paths::user_home().ok()?;
+    native_login_at(agent, &home)
+}
+
+fn native_login_at(agent: AgentId, home: &Path) -> Option<String> {
+    (limits_reader(agent)?.login)(home).map(|account| account.id)
+}
+
 pub(crate) fn verify_signed_in(agent: AgentId, force: bool) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
-    let answer = match limits_reader(agent) {
-        Some(read) => {
+    let failure = match limits_reader(agent) {
+        Some(reader) => {
             let _provider_guard = provider_read_guard(agent);
-            read(&home, force).answer.map(drop)
+            (reader.read)(&home, force).answer.err()
         }
-        None => Err(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
+        None => Some(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
     };
-    outcome::verified(agent, &answer)
+    outcome::verified(agent, failure.as_ref())
 }
 
 pub fn forget_snapshot(
@@ -172,33 +163,46 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-type Reader = fn(&Path, bool) -> Read;
+#[derive(Clone, Copy)]
+struct Reader {
+    read: fn(&Path, bool) -> Read,
+    login: fn(&Path) -> Option<LimitsAccountDto>,
+}
 
 fn limits_reader(agent: AgentId) -> Option<Reader> {
     match agent {
-        AgentId::Claude => Some(|home, _| claude::claude_current(home)),
-        AgentId::Codex => Some(codex::codex_read),
-        AgentId::Muse => Some(|home, _| muse::muse_current(home)),
+        AgentId::Claude => Some(Reader {
+            read: |home, _| claude::claude_current(home),
+            login: claude::known_account,
+        }),
+        AgentId::Codex => Some(Reader {
+            read: codex::codex_read,
+            login: codex_app_server::known_account,
+        }),
+        AgentId::Muse => Some(Reader {
+            read: |home, _| muse::muse_current(home),
+            login: muse::known_account,
+        }),
         AgentId::Antigravity | AgentId::Cursor => None,
     }
 }
 
 fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRead {
-    let Some(read) = limits_reader(agent) else {
-        let (card, read) = native_read(
+    let Some(reader) = limits_reader(agent) else {
+        let (card, outcome) = outcome::signed_in(
             agent,
             Read::anonymous(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
         );
         return NativeRead {
             cards: vec![card],
-            ..read
+            outcome,
         };
     };
     let _provider_guard = provider_read_guard(agent);
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let (current, native) = native_read(agent, read(home, force));
+    let (current, outcome) = outcome::signed_in(agent, (reader.read)(home, force));
     let store = SnapshotStore::for_home(home);
     let mut cards = aggregate_accounts(&store, current);
     if agent == AgentId::Codex {
@@ -207,7 +211,7 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRe
             store.save_changed(&before, &cards);
         }
     }
-    NativeRead { cards, ..native }
+    NativeRead { cards, outcome }
 }
 
 fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {

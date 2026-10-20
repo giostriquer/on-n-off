@@ -42,7 +42,7 @@ fn automatic_renewal_renews_only_an_owned_login_and_never_a_shadow() {
                         if unauthorized {
                             Err(ReadFailure::LoginRefused)
                         } else {
-                            Ok(reading(&p))
+                            Ok(answered(&p))
                         }
                     },
                     &|| {
@@ -74,7 +74,7 @@ fn a_saved_login_renews_before_its_read_once_its_access_token_nears_expiry() {
     for (exp, due) in [(Some(1_599), true), (Some(1_600), false), (None, true)] {
         let p = codex_login(true, exp);
         let renewals = Cell::new(0);
-        let result = fetch_with(&p, 1_000_000, &|_| Ok(reading(&p)), &|| {
+        let result = fetch_with(&p, 1_000_000, &|_| Ok(answered(&p)), &|| {
             renewals.set(renewals.get() + 1);
             Ok(p.login.clone().unwrap())
         });
@@ -106,7 +106,7 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
                     Err(ReadFailure::LoginRefused)
                 } else {
                     assert_eq!(fingerprint(login), fingerprint(&rotated));
-                    Ok(reading(&p))
+                    Ok(answered(&p))
                 }
             },
             &|| Ok(rotated.clone()),

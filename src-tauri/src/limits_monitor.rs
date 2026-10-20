@@ -12,6 +12,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{
     AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
 };
+use crate::limits_refresh::Served;
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 use crate::read_revision::{announce, Source};
@@ -130,15 +131,12 @@ pub fn spend_reset_by_hand(
     })
 }
 
-#[derive(Debug, Clone, Default, PartialEq)]
-struct Readings {
-    cards: Vec<ProviderLimitsDto>,
-    nobody_signed_in: Vec<AgentId>,
-}
-
 trait Io {
-    async fn read(&self, providers: &[AgentId], fresh: Option<AgentId>)
-        -> Result<Readings, String>;
+    async fn read(
+        &self,
+        providers: &[AgentId],
+        fresh: Option<AgentId>,
+    ) -> Result<Vec<Served>, String>;
     async fn save(&self, state: &MonitorState) -> Result<(), String>;
     async fn spend(
         &self,
@@ -159,30 +157,24 @@ impl Io for App {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Readings, String> {
+    ) -> Result<Vec<Served>, String> {
         let tasks: Vec<_> = providers
             .iter()
             .map(|&provider| {
                 let force = fresh == Some(provider);
                 async_runtime::spawn_blocking(move || {
-                    (
-                        provider,
-                        crate::limits_refresh::read_served(provider, force).0,
-                    )
+                    crate::limits_refresh::read_served(provider, force).0
                 })
             })
             .collect();
-        let mut readings = Readings::default();
+        let mut reads = Vec::new();
         for task in tasks {
-            let (provider, served) = task
-                .await
-                .map_err(|error| format!("provider worker failed: {error}"))?;
-            readings.cards.extend(served.entries);
-            if served.nobody_signed_in {
-                readings.nobody_signed_in.push(provider);
-            }
+            reads.push(
+                task.await
+                    .map_err(|error| format!("provider worker failed: {error}"))?,
+            );
         }
-        Ok(readings)
+        Ok(reads)
     }
 
     async fn save(&self, state: &MonitorState) -> Result<(), String> {
@@ -309,15 +301,18 @@ async fn poll_once(
     let fresh = waiting
         .read(|waiting| waiting.any_due(polled_at))
         .then_some(AgentId::Codex);
-    let readings = io.read(watched, fresh).await?;
+    let reads = io.read(watched, fresh).await?;
+    let cards: Vec<ProviderLimitsDto> = reads
+        .iter()
+        .flat_map(|read| read.entries.iter().cloned())
+        .collect();
     let previous = state.clone();
-    let mut notices = limit_notices(state, &readings.cards, settings);
+    let mut notices = limit_notices(state, &cards, settings);
     let Plan { offered, due } = waiting.change(|waiting| {
         reset_alert::plan(
             &mut state.reset_alerts,
             waiting,
-            &readings.cards,
-            &readings.nobody_signed_in,
+            &reads,
             &settings.reset_alerts,
             polled_at,
         )

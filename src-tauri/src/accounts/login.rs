@@ -88,7 +88,7 @@ struct PreparedLogin {
 
 fn prepare_login(
     native: &dyn Native,
-    read_usage: impl FnOnce(&Identity) -> Option<crate::dto::ProviderLimitsDto>,
+    read_usage: impl FnOnce(&Identity) -> Option<crate::limits::Accepted>,
 ) -> Result<PreparedLogin, String> {
     native.verify()?;
     let login = native
@@ -102,28 +102,19 @@ fn prepare_login(
     if native.identify(&latest)? != identity {
         return Err("The signed-in account changed while reading usage. Retry sign-in.".into());
     }
-    let usage = usage
-        .filter(|dto| {
-            dto.provider == identity.provider && dto.status == crate::dto::LimitsStatus::Ok
+    let usage = usage.map(crate::limits::Accepted::into_card).filter(|dto| {
+        dto.account.as_ref().is_some_and(|account| {
+            match (
+                account.label.as_deref(),
+                super::view(identity.provider, &latest)
+                    .ok()
+                    .and_then(|latest| latest.email()),
+            ) {
+                (Some(observed), Some(email)) => observed.trim().eq_ignore_ascii_case(&email),
+                _ => false,
+            }
         })
-        .and_then(|dto| crate::limits::outcome::accepted(&identity, dto).ok())
-        .filter(|dto| {
-            dto.account.as_ref().is_some_and(|account| {
-                match (
-                    account.label.as_deref(),
-                    super::view(identity.provider, &latest)
-                        .ok()
-                        .and_then(|latest| latest.email()),
-                ) {
-                    (Some(observed), Some(email)) => observed.trim().eq_ignore_ascii_case(&email),
-                    _ => false,
-                }
-            })
-        })
-        .map(|mut dto| {
-            dto.current_account = false;
-            dto
-        });
+    });
     Ok(PreparedLogin {
         identity,
         login: latest,

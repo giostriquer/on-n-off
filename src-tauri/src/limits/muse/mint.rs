@@ -4,9 +4,9 @@ use serde_json::json;
 
 use super::account_dto;
 use crate::accounts::model::{AccessToken, Identity};
-use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
 use crate::http::HttpError;
-use crate::limits::outcome::{saved_card, verified, ReadFailure, Unsupported};
+use crate::limits::outcome::{saved_card, verified, Accepted, ReadFailure, Unsupported};
 use crate::limits::{Parsed, SavedReadUrls};
 
 pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
@@ -75,7 +75,7 @@ pub(crate) fn read_saved(
     identity: &Identity,
     token: &AccessToken,
     urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, ReadFailure> {
+) -> Result<Accepted, ReadFailure> {
     saved_answer(identity, token, urls).and_then(|parsed| saved_card(identity, parsed))
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn verify(
 ) -> Result<(), String> {
     verified(
         identity.provider,
-        &saved_answer(identity, token, urls).map(drop),
+        saved_answer(identity, token, urls).err().as_ref(),
     )
 }
 

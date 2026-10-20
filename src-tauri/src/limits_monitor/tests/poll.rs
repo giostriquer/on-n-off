@@ -1,6 +1,7 @@
 use std::cell::{Cell, RefCell};
 
 use super::*;
+use crate::limits::ReadFailure;
 use crate::settings::AppSettings;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -13,7 +14,7 @@ enum Effect {
 
 struct Fake {
     readings: RefCell<Vec<ProviderLimitsDto>>,
-    nobody_signed_in: RefCell<Vec<AgentId>>,
+    codex_failure: RefCell<Option<ReadFailure>>,
     read_fails: Cell<bool>,
     save_fails: Cell<bool>,
     outcome: RefCell<Result<ResetCreditOutcome, String>>,
@@ -27,7 +28,7 @@ impl Fake {
     fn new() -> Self {
         Self {
             readings: RefCell::new(Vec::new()),
-            nobody_signed_in: RefCell::new(Vec::new()),
+            codex_failure: RefCell::new(None),
             read_fails: Cell::new(false),
             save_fails: Cell::new(false),
             outcome: RefCell::new(Ok(ResetCreditOutcome::Reset)),
@@ -52,17 +53,28 @@ impl Io for Fake {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Readings, String> {
+    ) -> Result<Vec<Served>, String> {
         self.log
             .borrow_mut()
             .push(Effect::Read(providers.to_vec(), fresh));
         if self.read_fails.get() {
             return Err("provider worker failed: cancelled".to_string());
         }
-        Ok(Readings {
-            cards: self.readings.borrow().clone(),
-            nobody_signed_in: self.nobody_signed_in.borrow().clone(),
-        })
+        let readings = self.readings.borrow();
+        Ok(providers
+            .iter()
+            .map(|&provider| Served {
+                provider,
+                entries: readings
+                    .iter()
+                    .filter(|card| card.provider == provider)
+                    .cloned()
+                    .collect(),
+                failure: (provider == AgentId::Codex)
+                    .then(|| self.codex_failure.borrow().clone())
+                    .flatten(),
+            })
+            .collect())
     }
 
     async fn save(&self, state: &MonitorState) -> Result<(), String> {
@@ -434,6 +446,7 @@ fn nobody_named() -> ProviderLimitsDto {
 fn a_spend_falling_due_while_codex_cannot_be_asked_keeps_waiting() {
     let mut monitor = Monitor::new(automatic_only());
     monitor.schedule_a_spend();
+    *monitor.io.codex_failure.borrow_mut() = Some(ReadFailure::NotInstalled);
 
     monitor
         .poll("2026-08-19T13:11:00Z", vec![nobody_named()])
@@ -453,7 +466,7 @@ fn a_spend_falling_due_while_codex_cannot_be_asked_keeps_waiting() {
 fn a_spend_falling_due_once_codex_is_signed_out_is_kept_and_told() {
     let mut monitor = Monitor::new(automatic_only());
     monitor.schedule_a_spend();
-    *monitor.io.nobody_signed_in.borrow_mut() = vec![AgentId::Codex];
+    *monitor.io.codex_failure.borrow_mut() = Some(ReadFailure::SignedOut);
 
     monitor
         .poll("2026-08-19T13:11:00Z", vec![nobody_named()])

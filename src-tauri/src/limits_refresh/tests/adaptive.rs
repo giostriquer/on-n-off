@@ -20,8 +20,14 @@ fn quota(used: f64, current: bool) -> ProviderLimitsDto {
 }
 
 fn age_native(cache: &Cache, seconds: u64) {
-    cache.read.lock().unwrap().as_mut().unwrap().refreshed_at =
-        Instant::now() - Duration::from_secs(seconds);
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .native
+        .refreshed_at = Instant::now() - Duration::from_secs(seconds);
 }
 
 #[test]
@@ -36,7 +42,7 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
         (95.0, true, LimitsStatus::Failed, 1),
         (f64::NAN, true, LimitsStatus::Ok, 1),
     ] {
-        let cache = Cache::new(Source::LimitsClaude);
+        let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
         let native_reads = Cell::new(0);
         let saved_reads = Cell::new(0);
         let native = |_| {
@@ -74,7 +80,7 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
 
 #[test]
 fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
-    let cache = Cache::new(Source::LimitsCodex);
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     let used = Cell::new(95.0);
     let reads = Cell::new(0);
     let saved_reads = Cell::new(0);
@@ -131,7 +137,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
 
 #[test]
 fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadline() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let used = Cell::new(94.0);
     let native_reads = Cell::new(0);
     let saved_reads = Cell::new(0);
@@ -183,11 +189,25 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
         .as_mut()
         .unwrap()
         .saved_refreshed_at = Instant::now() - Duration::from_secs(1800);
-    let native_at = cache.read.lock().unwrap().as_ref().unwrap().refreshed_at;
+    let native_at = cache
+        .read
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .native
+        .refreshed_at;
     read(false);
     assert_eq!((native_reads.get(), saved_reads.get()), (4, 2));
     assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().refreshed_at,
+        cache
+            .read
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .native
+            .refreshed_at,
         native_at
     );
 
@@ -201,7 +221,7 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
 
 #[test]
 fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let native_reads = Cell::new(0);
     let saved_reads = Cell::new(0);
     let native = |_| {
@@ -245,6 +265,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
             .unwrap()
             .as_ref()
             .unwrap()
+            .native
             .consecutive_failures,
         1
     );
@@ -255,7 +276,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
 
 #[test]
 fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let weekly = Cell::new(40.0);
     let session = Cell::new(95.0);
     let calls = Cell::new(0);
@@ -306,7 +327,7 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
 
 #[test]
 fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let switched = Cell::new(false);
     let native = |_| {
         if switched.get() {

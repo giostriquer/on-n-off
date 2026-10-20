@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::ProviderLimitsDto;
 use crate::http::{never_asked, serve_once, serve_once_capturing, was_asked};
 use serde_json::Value;
 
@@ -22,7 +23,7 @@ fn read_at(
         codex,
         ..SavedReadUrls::LIVE
     };
-    read_saved_codex(identity, token, &urls)
+    read_saved_codex(identity, token, &urls).map(Accepted::into_card)
 }
 
 #[test]
@@ -541,10 +542,7 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     let (usage, u) = serve_once("200 OK", r#"{"plan_type":"pro"}"#);
     let codex = read_codex(&usage, "unused");
     u.join().unwrap();
-    assert_eq!(
-        codex.err(),
-        Some(crate::limits::outcome::no_usage(AgentId::Codex))
-    );
+    assert_eq!(codex.err(), Some(ReadFailure::NoUsage));
 }
 
 fn usage_on(plan: Option<&str>) -> String {

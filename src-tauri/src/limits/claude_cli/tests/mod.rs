@@ -1,8 +1,7 @@
 use super::*;
 use crate::cli::AgentCli;
 use crate::cli_stub::CliStub;
-use crate::dto::{LimitWindowKind, LimitsStatus};
-use crate::limits::outcome::no_usage;
+use crate::dto::{LimitWindowKind, LimitsStatus, ProviderLimitsDto};
 use std::time::Duration;
 
 const REPORT: &str = r#"{"type":"system","subtype":"init","apiKeySource":"none","claude_code_version":"2.1.284"}
@@ -46,6 +45,7 @@ fn read(dir: &tempfile::TempDir, cli: &AgentCli) -> Result<ProviderLimitsDto, Re
         &identity(),
         ANSWER,
     )
+    .map(Accepted::into_card)
 }
 
 const ANSWER: Duration = crate::cli_stub::ANSWER_DEADLINE;
@@ -208,7 +208,7 @@ fn output_without_a_usage_report_reads_as_no_card() {
     let output = "{\"type\":\"system\",\"subtype\":\"init\"}\nnot json\n{\"type\":\"result\",\"subtype\":\"success\"}";
     let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
 
-    assert_eq!(read(&dir, &cli).unwrap_err(), no_usage(AgentId::Claude));
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::NoUsage);
 }
 
 #[test]
@@ -216,7 +216,7 @@ fn a_report_of_windows_it_cannot_read_reads_as_no_card() {
     let output = r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"lunar","group":"lunar","percent":1}]}}}"#;
     let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
 
-    assert_eq!(read(&dir, &cli).unwrap_err(), no_usage(AgentId::Claude));
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::NoUsage);
 }
 
 #[test]
@@ -348,7 +348,7 @@ fn no_report_from_a_config_dir_still_signed_in_reads_as_unavailable() {
         ANSWER,
     );
 
-    assert_eq!(result.unwrap_err(), no_usage(AgentId::Claude));
+    assert_eq!(result.unwrap_err(), ReadFailure::NoUsage);
 }
 
 #[test]
@@ -367,7 +367,7 @@ fn no_report_and_a_status_claude_code_cannot_give_reads_as_unavailable() {
         ANSWER,
     );
 
-    assert_eq!(result.unwrap_err(), no_usage(AgentId::Claude));
+    assert_eq!(result.unwrap_err(), ReadFailure::NoUsage);
 }
 
 mod signed_in;

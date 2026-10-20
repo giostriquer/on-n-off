@@ -6,7 +6,12 @@ use super::claude_cli;
 use super::json::{humanize, optional_string, percent, window};
 use super::outcome::{Read, ReadFailure};
 use crate::accounts::claude::SignedIn;
-use crate::dto::{LimitWindowDto, LimitWindowKind};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto};
+
+pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
+    let claude = SignedIn::resolve(home).ok()?;
+    Some(claude_cli::known_account(claude.config_file()))
+}
 
 pub(super) fn claude_current(home: &Path) -> Read {
     match SignedIn::resolve(home) {

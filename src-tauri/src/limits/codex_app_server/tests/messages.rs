@@ -35,7 +35,7 @@ fn a_missing_codex_cli_is_not_installed() {
     let root = crate::paths::scratch_dir("codex-app-server-missing");
     let error = Session::start(APP_SERVER, Command::new(root.join("codex")))
         .err()
-        .map(not_started);
+        .map(ReadFailure::from);
 
     assert_eq!(error, Some(ReadFailure::NotInstalled));
 }

@@ -8,17 +8,42 @@ use std::time::{Duration, Instant};
 
 mod adaptive;
 
+fn why() -> ReadFailure {
+    ReadFailure::Unavailable("The source said why.".into())
+}
+
 fn native_read(cards: Vec<ProviderLimitsDto>) -> NativeRead {
-    let counted = cards
+    let failed = cards
         .iter()
         .any(|card| card.current_account && card.status == LimitsStatus::Failed);
     NativeRead {
         cards,
-        backoff: Backoff {
-            counted,
-            floor: Duration::ZERO,
+        outcome: NativeOutcome {
+            failure: failed.then(why),
+            login: None,
         },
-        nobody_signed_in: false,
+    }
+}
+
+fn native(cards: Vec<ProviderLimitsDto>) -> (Vec<ProviderLimitsDto>, Option<NativeOutcome>) {
+    let NativeRead { cards, outcome } = native_read(cards);
+    (cards, Some(outcome))
+}
+
+fn no_login() -> Option<String> {
+    None
+}
+
+fn cached(entries: Vec<ProviderLimitsDto>) -> CachedRead {
+    CachedRead {
+        entries,
+        saved_refreshed_at: Instant::now(),
+        native: NativeState {
+            refreshed_at: Instant::now(),
+            consecutive_failures: 0,
+            retry_floor: Duration::ZERO,
+            outcome: NativeOutcome::default(),
+        },
     }
 }
 
@@ -105,12 +130,24 @@ fn automatic_failures_back_off_for_every_consumer() {
         1,
         false
     ));
-    let counted = Backoff {
-        counted: true,
-        floor: Duration::ZERO,
+    let after = |failures, failure: Option<ReadFailure>| {
+        let previous = NativeState {
+            consecutive_failures: failures,
+            ..cached(Vec::new()).native
+        };
+        NativeState::after(
+            Some(&previous),
+            NativeOutcome {
+                failure,
+                login: None,
+            },
+            refreshed_at,
+        )
+        .consecutive_failures
     };
-    assert_eq!(next_failure_count(1, counted), 2);
-    assert_eq!(next_failure_count(2, Backoff::default()), 0);
+    assert_eq!(after(1, Some(why())), 2);
+    assert_eq!(after(2, None), 0);
+    assert_eq!(after(2, Some(ReadFailure::SignedOut)), 0);
 }
 
 #[test]
@@ -166,30 +203,42 @@ fn a_native_read_that_keeps_failing_waits_the_limits_failure_backoff() {
     }
 }
 
+fn rate_limited(login: &str) -> NativeOutcome {
+    NativeOutcome {
+        failure: Some(ReadFailure::RateLimited(
+            crate::http::RateLimitReset::RetryAfter(7200),
+        )),
+        login: Some(login.to_string()),
+    }
+}
+
 #[test]
 fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
     use std::cell::Cell;
-    let cache = Cache::new(Source::LimitsMuse);
+    let cache = Cache::new(AgentId::Muse, Source::LimitsMuse);
     let interval = Duration::from_secs(300);
     let reads = Cell::new(0);
+    let login = || Some("login-a".to_string());
     let read = |force| {
-        read_through_cache(&cache, interval, force, |_, refresh| {
+        read_through_cache(&cache, interval, force, &login, |_, refresh| {
             if refresh.native {
                 reads.set(reads.get() + 1);
             }
-            NativeRead {
-                cards: vec![snapshot("current", true, LimitsStatus::Failed)],
-                backoff: Backoff {
-                    counted: true,
-                    floor: Duration::from_secs(7200),
-                },
-                nobody_signed_in: false,
-            }
+            (
+                vec![snapshot("current", true, LimitsStatus::Failed)],
+                refresh.native.then(|| rate_limited("login-a")),
+            )
         })
     };
     let age = |seconds| {
-        cache.read.lock().unwrap().as_mut().unwrap().refreshed_at =
-            Instant::now() - Duration::from_secs(seconds);
+        cache
+            .read
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .native
+            .refreshed_at = Instant::now() - Duration::from_secs(seconds);
     };
 
     read(false);
@@ -211,17 +260,59 @@ fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
 }
 
 #[test]
-fn whether_nobody_is_signed_in_is_served_with_the_native_read_that_found_it() {
-    let cache = Cache::new(Source::LimitsCodex);
+fn a_retry_after_holds_only_the_login_it_was_answered_for() {
+    use std::cell::Cell;
+    let cache = Cache::new(AgentId::Muse, Source::LimitsMuse);
     let interval = Duration::from_secs(300);
-    let found = |nobody_signed_in| NativeRead {
-        cards: vec![snapshot("current", true, LimitsStatus::SignedOut)],
-        backoff: Backoff::default(),
-        nobody_signed_in,
+    let reads = Cell::new(0);
+    let read = |login: &str| {
+        let login = login.to_string();
+        read_through_cache(
+            &cache,
+            interval,
+            false,
+            &|| Some(login.clone()),
+            |_, refresh| {
+                if refresh.native {
+                    reads.set(reads.get() + 1);
+                }
+                (
+                    vec![snapshot("current", true, LimitsStatus::Failed)],
+                    refresh.native.then(|| rate_limited("login-a")),
+                )
+            },
+        )
     };
 
-    let (first, _) = read_through_cache(&cache, interval, false, |_, _| found(true));
-    let (cached, _) = read_through_cache(&cache, interval, false, |_, _| {
+    read("login-a");
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .native
+        .refreshed_at = Instant::now() - failure_backoff(interval, 1) - Duration::from_secs(1);
+    read("login-a");
+    assert_eq!(reads.get(), 1, "the login it was answered for waits");
+    read("login-b");
+    assert_eq!(reads.get(), 2, "another login is read without waiting");
+}
+
+#[test]
+fn the_native_failure_is_served_with_the_cards_it_was_read_with() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    let interval = Duration::from_secs(300);
+    let signed_out = || NativeOutcome {
+        failure: Some(ReadFailure::SignedOut),
+        login: None,
+    };
+    let cards = || vec![snapshot("current", true, LimitsStatus::SignedOut)];
+
+    let (first, _) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
+        (cards(), Some(signed_out()))
+    });
+    let (served, _) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
         unreachable!("the cached read is still fresh")
     });
     cache
@@ -231,22 +322,21 @@ fn whether_nobody_is_signed_in_is_served_with_the_native_read_that_found_it() {
         .as_mut()
         .unwrap()
         .saved_refreshed_at = Instant::now() - interval;
-    let (saved_only, _) = read_through_cache(&cache, interval, false, |_, refresh| {
+    let (saved_only, _) = read_through_cache(&cache, interval, false, &no_login, |_, refresh| {
         assert!(!refresh.native);
-        found(false)
+        (cards(), None)
     });
 
-    assert!(first.nobody_signed_in);
-    assert!(cached.nobody_signed_in);
-    assert!(
-        saved_only.nobody_signed_in,
-        "a saved-accounts refresh says nothing about who is signed in"
-    );
+    for read in [first, served, saved_only] {
+        assert_eq!(read.provider, AgentId::Codex);
+        assert_eq!(read.failure, Some(ReadFailure::SignedOut));
+        assert_eq!(read.entries, cards());
+    }
 }
 
 #[test]
 fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
-    let cache = Arc::new(Cache::new(Source::LimitsClaude));
+    let cache = Arc::new(Cache::new(AgentId::Claude, Source::LimitsClaude));
     let calls = Arc::new(AtomicUsize::new(0));
     let start = Arc::new(Barrier::new(3));
     let workers: Vec<_> = (0..2)
@@ -256,11 +346,17 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
             let start = start.clone();
             thread::spawn(move || {
                 start.wait();
-                read_through_cache(&cache, Duration::from_secs(300), false, |_, _| {
-                    calls.fetch_add(1, Ordering::SeqCst);
-                    thread::sleep(Duration::from_millis(25));
-                    native_read(Vec::new())
-                })
+                read_through_cache(
+                    &cache,
+                    Duration::from_secs(300),
+                    false,
+                    &no_login,
+                    |_, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        thread::sleep(Duration::from_millis(25));
+                        native(Vec::new())
+                    },
+                )
                 .1
             })
         })
@@ -277,25 +373,31 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
          announces nothing: {seen:?}"
     );
 
-    read_through_cache(&cache, Duration::from_secs(300), true, |force, _| {
-        assert!(force);
-        calls.fetch_add(1, Ordering::SeqCst);
-        native_read(Vec::new())
-    });
+    read_through_cache(
+        &cache,
+        Duration::from_secs(300),
+        true,
+        &no_login,
+        |force, _| {
+            assert!(force);
+            calls.fetch_add(1, Ordering::SeqCst);
+            native(Vec::new())
+        },
+    );
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
 #[test]
 fn only_a_read_that_replaces_the_cache_is_announced() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let interval = Duration::from_secs(5 * 60);
 
-    let (_, first) = read_through_cache(&cache, interval, false, |_, _| {
-        native_read(vec![snapshot("current", true, LimitsStatus::Failed)])
+    let (_, first) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
+        native(vec![snapshot("current", true, LimitsStatus::Failed)])
     });
     assert_eq!(first, Reading::Replaced(1));
 
-    let (_, unchanged) = read_through_cache(&cache, interval, false, |_, _| {
+    let (_, unchanged) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
         unreachable!("the cached read is still fresh")
     });
     assert_eq!(
@@ -305,9 +407,9 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
          announces nothing, which is what ends the exchange"
     );
 
-    let (refreshed, forced) = read_through_cache(&cache, interval, true, |force, _| {
+    let (refreshed, forced) = read_through_cache(&cache, interval, true, &no_login, |force, _| {
         assert!(force);
-        native_read(vec![snapshot("current", true, LimitsStatus::Ok)])
+        native(vec![snapshot("current", true, LimitsStatus::Ok)])
     });
     assert_eq!(
         forced,
@@ -315,7 +417,7 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
         "a user refresh replaced the cached read, so every other surface is told"
     );
 
-    let (served, seen) = read_through_cache(&cache, interval, false, |_, _| {
+    let (served, seen) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
         unreachable!("the refreshed read is fresh")
     });
     assert_eq!(seen, Reading::Unchanged(2));
@@ -332,18 +434,18 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
 
 #[test]
 fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_call() {
-    let cache = Cache::new(Source::LimitsCodex);
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     let interval = Duration::from_secs(5 * 60);
 
-    let (_, failed) = read_through_cache(&cache, interval, true, |_, _| {
-        native_read(vec![snapshot("current", true, LimitsStatus::Failed)])
+    let (_, failed) = read_through_cache(&cache, interval, true, &no_login, |_, _| {
+        native(vec![snapshot("current", true, LimitsStatus::Failed)])
     });
     assert!(
         failed.replaced(),
         "unlike the GitHub reader, a failure here is remembered, so it is worth announcing"
     );
 
-    let (served, reading) = read_through_cache(&cache, interval, false, |_, _| {
+    let (served, reading) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
         unreachable!("a consumer answering the announcement must not reach the provider")
     });
     assert_eq!(reading, Reading::Unchanged(failed.revision()));
@@ -352,18 +454,11 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
 
 #[test]
 fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_success() {
-    let cache = Cache::new(Source::LimitsClaude);
-    *cache.read.lock().unwrap() = Some(CachedRead {
-        refreshed_at: Instant::now(),
-        saved_refreshed_at: Instant::now(),
-        entries: vec![
-            snapshot("current", true, LimitsStatus::Ok),
-            snapshot("forgotten", false, LimitsStatus::Ok),
-        ],
-        consecutive_failures: 0,
-        retry_floor: Duration::ZERO,
-        nobody_signed_in: false,
-    });
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
+    *cache.read.lock().unwrap() = Some(cached(vec![
+        snapshot("current", true, LimitsStatus::Ok),
+        snapshot("forgotten", false, LimitsStatus::Ok),
+    ]));
 
     let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
     assert_eq!(
@@ -392,15 +487,8 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
 }
 
 fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
-    let cache = Cache::new(Source::LimitsCodex);
-    *cache.read.lock().unwrap() = Some(CachedRead {
-        refreshed_at: Instant::now(),
-        saved_refreshed_at: Instant::now(),
-        entries,
-        consecutive_failures: 0,
-        retry_floor: Duration::ZERO,
-        nobody_signed_in: false,
-    });
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    *cache.read.lock().unwrap() = Some(cached(entries));
     cache
 }
 
@@ -510,7 +598,7 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
 #[test]
 fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_lock_and_announces_only_a_change(
 ) {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
     let changes = std::cell::Cell::new(true);

@@ -44,25 +44,22 @@ fn falls_due(
     alerts: &HashMap<String, ResetAlert>,
     at: DateTime<Utc>,
 ) -> Vec<Due> {
-    falls_due_finding(waiting, readings, &[], alerts, at)
+    falls_due_after(waiting, readings, None, alerts, at)
 }
 
-fn falls_due_finding(
+fn falls_due_after(
     waiting: &mut Waiting,
     readings: &[ProviderLimitsDto],
-    nobody_signed_in: &[AgentId],
+    failure: Option<ReadFailure>,
     alerts: &HashMap<String, ResetAlert>,
     at: DateTime<Utc>,
 ) -> Vec<Due> {
-    plan(
-        &mut AlertMemory::default(),
-        waiting,
-        readings,
-        nobody_signed_in,
-        alerts,
-        at,
-    )
-    .due
+    let read = Served {
+        provider: AgentId::Codex,
+        entries: readings.to_vec(),
+        failure,
+    };
+    plan(&mut AlertMemory::default(), waiting, &[read], alerts, at).due
 }
 
 #[test]
@@ -177,13 +174,19 @@ fn nobody_named(status: LimitsStatus) -> ProviderLimitsDto {
 
 #[test]
 fn nobody_signed_in_keeps_the_reset() {
-    for status in [LimitsStatus::SignedOut, LimitsStatus::Unsupported] {
+    for (status, failure) in [
+        (LimitsStatus::SignedOut, ReadFailure::SignedOut),
+        (
+            LimitsStatus::Unsupported,
+            ReadFailure::Unsupported(crate::limits::outcome::Unsupported::ApiKey),
+        ),
+    ] {
         let mut waiting = scheduled();
 
-        let due = falls_due_finding(
+        let due = falls_due_after(
             &mut waiting,
             &[nobody_named(status)],
-            &[AgentId::Codex],
+            Some(failure.clone()),
             &automatic(),
             minutes_after_now(10),
         );
@@ -197,10 +200,10 @@ fn a_spend_due_while_codex_could_not_be_asked_keeps_waiting() {
     let mut waiting = scheduled();
     let not_installed = nobody_named(LimitsStatus::SignedOut);
 
-    let due = falls_due_finding(
+    let due = falls_due_after(
         &mut waiting,
         &[not_installed],
-        &[AgentId::Claude],
+        Some(ReadFailure::NotInstalled),
         &automatic(),
         minutes_after_now(12),
     );

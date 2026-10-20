@@ -94,7 +94,10 @@ fn a_saved_codex_login_is_read_from_the_usage_body_with_its_own_token() {
         },
     };
 
-    let card = fetch(&p, &urls).result.expect("the profile's card");
+    let card = fetch(&p, &urls)
+        .result
+        .expect("the profile's card")
+        .into_card();
 
     let head = request.join().unwrap().head;
     assert_eq!(

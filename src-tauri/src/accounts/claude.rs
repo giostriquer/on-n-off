@@ -10,7 +10,7 @@ use super::{
     transaction::{Native, NativeGuard, ReadBack},
     Home, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::{AgentId, ProviderLimitsDto};
+use crate::dto::AgentId;
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -55,7 +55,7 @@ impl super::Adapter for Claude {
         _: &Login,
         _: i64,
         _: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, crate::limits::ReadFailure> {
+    ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure> {
         Err(crate::limits::ReadFailure::Unavailable(
             NOT_MOVED.to_string(),
         ))
@@ -434,7 +434,7 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
-    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<crate::limits::Accepted> {
         crate::limits::claude_cli::read_usage(&|| self.command(), &self.config_file, identity).ok()
     }
 

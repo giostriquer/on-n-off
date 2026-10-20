@@ -19,7 +19,9 @@ fn read_all(harness: &Harness) -> (Vec<ProviderLimitsDto>, Vec<String>) {
             fetched.lock().unwrap().push(profile.id.clone());
             FetchResult {
                 login: profile.login.clone(),
-                result: Ok(weekly_reading(&profile.identity.observation_key())),
+                result: Ok(crate::limits::Accepted::for_test(weekly_reading(
+                    &profile.identity.observation_key(),
+                ))),
             }
         });
     (entries, fetched.into_inner().unwrap())
@@ -582,13 +584,13 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
         .iter()
         .find(|card| card.account.as_ref().unwrap().id == key("b"))
         .unwrap();
-    let verdict = crate::limits::outcome::verdict(
+    let verdict = crate::limits::outcome::saved(
         AgentId::Claude,
-        crate::limits::outcome::Context::AccountHome,
+        crate::limits::outcome::Saved::Home,
         &crate::limits::ReadFailure::SignedOut,
         0,
     );
-    assert_eq!(card.status, verdict.status);
+    assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(card.message, Some(verdict.message));
     assert_eq!(
         harness.in_home(&b),
@@ -605,9 +607,9 @@ fn a_failed_read_of_a_home_holds_the_next_one_back() {
         HttpError::Status(503),
     ] {
         let failure = crate::limits::ReadFailure::from(failure);
-        let message = crate::limits::outcome::verdict(
+        let message = crate::limits::outcome::saved(
             AgentId::Claude,
-            crate::limits::outcome::Context::AccountHome,
+            crate::limits::outcome::Saved::Home,
             &failure,
             0,
         )

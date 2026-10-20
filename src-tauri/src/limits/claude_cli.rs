@@ -6,11 +6,11 @@ use serde_json::Value;
 
 use super::claude::parse_claude;
 use super::claude_config::{read_claude_config_account, ClaudeConfigAccount};
-use super::outcome::{saved_card, Read, ReadFailure};
+use super::outcome::{saved_card, Accepted, Read, ReadFailure};
 use super::{scoped_account, Parsed, DEFAULT_ACCOUNT};
 use crate::accounts::claude_store::ENV_CREDENTIALS;
 use crate::accounts::model::Identity;
-use crate::dto::{AgentId, LimitWindowDto, LimitsAccountDto, ProviderLimitsDto, Reading};
+use crate::dto::{AgentId, LimitWindowDto, LimitsAccountDto, Reading};
 use crate::process::{wait_with_deadline, CommandOutcome};
 
 const USAGE_ARGS: [&str; 7] = [
@@ -36,7 +36,7 @@ pub(crate) fn read_usage(
     claude: &dyn Fn() -> Command,
     config_file: &Path,
     identity: &Identity,
-) -> Result<ProviderLimitsDto, ReadFailure> {
+) -> Result<Accepted, ReadFailure> {
     read_usage_within(claude, config_file, identity, DEADLINE)
 }
 
@@ -45,7 +45,7 @@ fn read_usage_within(
     config_file: &Path,
     identity: &Identity,
     deadline: Duration,
-) -> Result<ProviderLimitsDto, ReadFailure> {
+) -> Result<Accepted, ReadFailure> {
     config_account(config_file, identity)?;
     let windows = report(claude, deadline)?;
     let account = config_account(config_file, identity)?;
@@ -87,7 +87,7 @@ fn read_signed_in_within(
             return Err(ReadFailure::AccountChanged);
         }
         Ok(Parsed {
-            account: Some(after.as_ref().map_or_else(default_account, card_account)),
+            account: Some(account_named(after.as_ref())),
             reading: Reading {
                 plan: after.and_then(|account| account.plan),
                 windows,
@@ -96,9 +96,17 @@ fn read_signed_in_within(
         })
     })();
     Read {
-        account: Some(before.as_ref().map_or_else(default_account, card_account)),
+        account: Some(account_named(before.as_ref())),
         answer,
     }
+}
+
+pub(super) fn known_account(config_file: &Path) -> LimitsAccountDto {
+    account_named(read_claude_config_account(config_file).as_ref())
+}
+
+fn account_named(account: Option<&ClaudeConfigAccount>) -> LimitsAccountDto {
+    account.map_or_else(default_account, card_account)
 }
 
 fn same_account(a: Option<&ClaudeConfigAccount>, b: Option<&ClaudeConfigAccount>) -> bool {

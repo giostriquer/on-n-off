@@ -7,7 +7,7 @@ use super::{
     transaction::{Native, NativeGuard, ReadBack},
     usage_renew, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::{AgentId, ProviderLimitsDto};
+use crate::dto::AgentId;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::Value;
 use std::{
@@ -54,7 +54,7 @@ impl super::Adapter for Codex {
         login: &Login,
         _now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, crate::limits::ReadFailure> {
+    ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure> {
         let token = CodexLogin::of(login)
             .access_token()
             .ok_or(crate::limits::ReadFailure::LoginRefused)?;
@@ -250,7 +250,7 @@ impl IsolatedSignIn for CodexNative {
         command
     }
 
-    fn first_usage(&self, dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+    fn first_usage(&self, dir: &Path, identity: &Identity) -> Option<crate::limits::Accepted> {
         crate::limits::login::read_codex(dir, identity)
     }
 

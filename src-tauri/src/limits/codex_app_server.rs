@@ -179,14 +179,21 @@ fn start(codex_home: &Path) -> Result<Session, String> {
 }
 
 fn start_read(codex_home: &Path) -> Result<Session, ReadFailure> {
-    launch(codex_home).map_err(not_started)
+    Ok(launch(codex_home)?)
 }
 
-fn not_started(failure: NotStarted) -> ReadFailure {
-    match failure {
-        NotStarted::Missing => ReadFailure::NotInstalled,
-        NotStarted::Failed(message) => ReadFailure::Unavailable(message),
+impl From<NotStarted> for ReadFailure {
+    fn from(failure: NotStarted) -> Self {
+        match failure {
+            NotStarted::Missing => Self::NotInstalled,
+            NotStarted::Failed(message) => Self::Unavailable(message),
+        }
     }
+}
+
+pub(super) fn known_account(home: &Path) -> Option<crate::dto::LimitsAccountDto> {
+    let before = crate::accounts::codex_store::metadata(&home.join(".codex")).ok()??;
+    card_account(Some(&before), None)
 }
 
 fn launch(codex_home: &Path) -> Result<Session, NotStarted> {

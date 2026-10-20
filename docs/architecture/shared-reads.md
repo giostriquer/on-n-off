@@ -45,7 +45,13 @@ failure in a row, half what the other reads wait at each later step, until both 
 intervals or the hour. So a failing native read never delays the other provider, and a failing
 figure never delays the usage read it rides on. A forced read bypasses the native
 backoff but not the native read's Retry-After, nor a saved profile's backoff after a failure, nor a
-backend figure's.
+backend figure's. The native Retry-After holds only the login it was answered for: while it holds,
+the cache asks the provider's reader which account the native login names now
+(`limits::native_login`, the same lookup the read itself makes before asking; a Muse login kept in
+the Keychain is answered from memory while `auth.json` stands),
+and a login changed outside on-n-off, such as `muse login` in a terminal, is read at once. The
+cache keeps the native read's state apart from the saved accounts' (`NativeState`): a native read
+replaces it whole, and a saved-accounts refresh leaves it as it was.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

@@ -7,7 +7,7 @@ use super::{
     transaction::{Native, NativeGuard},
     Home, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::{AgentId, ProviderLimitsDto};
+use crate::dto::AgentId;
 use crate::limits::{read_saved_muse, verify_saved_muse, ReadFailure, SavedReadUrls};
 use serde_json::Value;
 use std::{
@@ -61,7 +61,7 @@ impl super::Adapter for Muse {
         login: &Login,
         _now_ms: i64,
         urls: &SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, ReadFailure> {
+    ) -> Result<crate::limits::Accepted, ReadFailure> {
         let token = MuseView::of(login)
             .access_token()
             .ok_or(ReadFailure::LoginRefused)?;
@@ -232,7 +232,7 @@ impl IsolatedSignIn for MuseNative {
             .then_some(page)
     }
 
-    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<crate::limits::Accepted> {
         read_saved_muse(identity, &self.token()?, &self.urls).ok()
     }
 
@@ -279,7 +279,7 @@ impl Home for MuseHome {
         self.store.write(None)
     }
 
-    fn read_usage(&self, identity: &Identity) -> Result<ProviderLimitsDto, ReadFailure> {
+    fn read_usage(&self, identity: &Identity) -> Result<crate::limits::Accepted, ReadFailure> {
         let token = self.store.token().ok_or(ReadFailure::LoginRefused)?;
         read_saved_muse(identity, &token, &self.store.urls)
     }

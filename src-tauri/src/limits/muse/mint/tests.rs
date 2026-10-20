@@ -1,9 +1,7 @@
 use super::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
-use crate::dto::AgentId;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::http::{refused_url, serve_once};
-use crate::limits::outcome::no_usage;
 use serde_json::Value;
 
 fn identity() -> Identity {
@@ -36,7 +34,9 @@ fn usage() -> Value {
 fn a_saved_login_reads_its_own_card_under_its_scoped_id() {
     let (url, served) = serve_once("200 OK", &answer("You@Example.com", usage()));
 
-    let card = read_saved(&identity(), &token(), &urls(&url)).unwrap();
+    let card = read_saved(&identity(), &token(), &urls(&url))
+        .unwrap()
+        .into_card();
     served.join().unwrap();
 
     assert_eq!(card.status, LimitsStatus::Ok);
@@ -82,7 +82,9 @@ fn an_idle_window_reads_its_plan_and_an_unused_session() {
         &answer("you@example.com", serde_json::Value::Null),
     );
 
-    let card = read_saved(&identity(), &token(), &urls(&url)).unwrap();
+    let card = read_saved(&identity(), &token(), &urls(&url))
+        .unwrap()
+        .into_card();
     served.join().unwrap();
 
     assert_eq!(card.status, LimitsStatus::Ok);
@@ -107,7 +109,7 @@ fn an_inactive_subscription_is_unsupported_and_an_unreadable_usage_block_no_usag
     let unreadable = answer("you@example.com", json!({"window": null, "weekly": null}));
     for (body, expected) in [
         (inactive, ReadFailure::Unsupported(Unsupported::Inactive)),
-        (unreadable, no_usage(AgentId::Muse)),
+        (unreadable, ReadFailure::NoUsage),
     ] {
         let (url, served) = serve_once("200 OK", &body);
         let read = read_saved(&identity(), &token(), &urls(&url));

@@ -6,8 +6,8 @@ use super::{
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     limits::{
-        outcome::{self, Context},
-        Backoff, ReadFailure, SavedReadUrls,
+        outcome::{self, Saved, SavedVerdict},
+        Accepted, ReadFailure, SavedReadUrls,
     },
 };
 use std::{
@@ -27,7 +27,7 @@ struct Attempt {
 }
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
-    pub(super) result: Result<ProviderLimitsDto, ReadFailure>,
+    pub(super) result: Result<Accepted, ReadFailure>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -161,10 +161,8 @@ fn poll_with(
     let fingerprint = super::view(profile.identity.provider, &fetched_login)
         .ok()?
         .fingerprint();
-    let result = fetched
-        .result
-        .and_then(|card| outcome::accepted(&profile.identity, card));
-    let mut outcome = attempt_outcome(Context::SavedLogin, profile, &result);
+    let result = fetched.result;
+    let mut outcome = verdict_of(Saved::Login, profile, &result);
     let held = ticket.holding(profile, fingerprint.clone());
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
@@ -185,13 +183,14 @@ fn poll_with(
 fn publish(
     home: &Path,
     profile: &Profile,
-    result: Result<ProviderLimitsDto, ReadFailure>,
-    outcome: &mut AttemptOutcome,
+    result: Result<Accepted, ReadFailure>,
+    outcome: &mut Option<SavedVerdict>,
     lease: &dyn Fn() -> Option<Store>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let _lease = lease()?;
     match result {
-        Ok(mut dto) => {
+        Ok(accepted) => {
+            let mut dto = accepted.into_card();
             if let Some(account) = &mut dto.account {
                 if account.label.is_none() {
                     account.label.clone_from(&profile.email);
@@ -199,13 +198,17 @@ fn publish(
             }
             let mut remembered = crate::limits::remember(home, dto);
             if remembered.saved.is_err() {
-                *outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
                 remembered.card.status = LimitsStatus::Failed;
-                remembered.card.message.clone_from(&outcome.error);
+                remembered.card.message = Some(UNSAVED.to_string());
+                *outcome = Some(SavedVerdict {
+                    message: UNSAVED.to_string(),
+                    parks_login: false,
+                    retry: Duration::ZERO,
+                });
             }
             Some(Ok(remembered.card))
         }
-        Err(_) => outcome.error.clone().map(Err),
+        Err(_) => outcome.as_ref().map(|verdict| Err(verdict.message.clone())),
     }
 }
 
@@ -214,15 +217,20 @@ fn hold_back(
     key: String,
     fingerprint: String,
     previous: Option<&Attempt>,
-    outcome: AttemptOutcome,
+    outcome: Option<SavedVerdict>,
     interval: Duration,
 ) {
-    let failures = if outcome.counted {
-        previous.map_or(1, |a| a.failures.saturating_add(1))
-    } else {
-        0
+    let failures = match outcome {
+        Some(_) => previous.map_or(1, |a| a.failures.saturating_add(1)),
+        None => 0,
     };
-    let delay = crate::limits_refresh::failure_backoff(interval, failures).max(outcome.retry);
+    let retry = outcome
+        .as_ref()
+        .map_or(Duration::ZERO, |verdict| verdict.retry);
+    let delay = crate::limits_refresh::failure_backoff(interval, failures).max(retry);
+    let (error, rejected) = outcome.map_or((None, false), |verdict| {
+        (Some(verdict.message), verdict.parks_login)
+    });
     if let Ok(mut attempts) = attempts.lock() {
         attempts.insert(
             key,
@@ -230,8 +238,8 @@ fn hold_back(
                 fingerprint,
                 next: Instant::now() + delay,
                 failures,
-                error: outcome.error,
-                rejected: outcome.rejected,
+                error,
+                rejected,
             },
         );
     }
@@ -300,7 +308,7 @@ fn poll_home(
     ticket: &Ticket,
     force: bool,
     open: &dyn Fn() -> Result<Store, String>,
-    read: &dyn Fn(&Profile) -> Result<ProviderLimitsDto, ReadFailure>,
+    read: &dyn Fn(&Profile) -> Result<Accepted, ReadFailure>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let held = ticket.holding_home(profile)?;
     let generation = profile.home.clone()?;
@@ -318,8 +326,8 @@ fn poll_home(
             return previous.error.clone().map(Err);
         }
     }
-    let result = read(profile).and_then(|card| outcome::accepted(&profile.identity, card));
-    let mut outcome = attempt_outcome(Context::AccountHome, profile, &result);
+    let result = read(profile);
+    let mut outcome = verdict_of(Saved::Home, profile, &result);
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
         store.recheck(&held).ok()?;
@@ -338,55 +346,18 @@ fn poll_home(
 
 const UNSAVED: &str = "Could not save the latest usage reading.";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AttemptOutcome {
-    error: Option<String>,
-    rejected: bool,
-    counted: bool,
-    retry: Duration,
-}
-
-impl AttemptOutcome {
-    fn failed(error: &str, rejected: bool, retry: Duration) -> Self {
-        Self {
-            error: Some(error.to_string()),
-            rejected,
-            counted: true,
-            retry,
-        }
-    }
-
-    fn answered() -> Self {
-        Self {
-            error: None,
-            rejected: false,
-            counted: false,
-            retry: Duration::ZERO,
-        }
-    }
-}
-
-fn attempt_outcome(
-    context: Context,
+fn verdict_of(
+    saved: Saved,
     profile: &Profile,
-    result: &Result<ProviderLimitsDto, ReadFailure>,
-) -> AttemptOutcome {
-    let Err(failure) = result else {
-        return AttemptOutcome::answered();
-    };
-    let verdict = outcome::verdict(
+    result: &Result<Accepted, ReadFailure>,
+) -> Option<SavedVerdict> {
+    let failure = result.as_ref().err()?;
+    Some(outcome::saved(
         profile.identity.provider,
-        context,
+        saved,
         failure,
         chrono::Utc::now().timestamp(),
-    );
-    let Backoff { counted, floor } = verdict.backoff;
-    AttemptOutcome {
-        error: Some(verdict.message),
-        rejected: verdict.parks_login,
-        counted,
-        retry: floor,
-    }
+    ))
 }
 
 fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) -> FetchResult {
@@ -432,7 +403,7 @@ fn fetch_profile_at(
 fn fetch_with(
     profile: &Profile,
     now: i64,
-    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, ReadFailure>,
+    read: &dyn Fn(&Login) -> Result<Accepted, ReadFailure>,
     renew: &dyn Fn() -> Result<Login, ReadFailure>,
 ) -> FetchResult {
     let mut login = profile.login.clone();
