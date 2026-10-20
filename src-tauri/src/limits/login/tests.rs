@@ -17,7 +17,7 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
             .labelled("me@example.com")
             .with_reading(Reading {
                 plan: Some("pro".into()),
-                windows: vec![super::super::json::window(
+                windows: vec![super::super::window::fixture(
                     "primary",
                     "Weekly · all models",
                     crate::dto::LimitWindowKind::Weekly,
@@ -60,7 +60,7 @@ fn a_first_reading_is_kept_only_when_it_answered_for_the_identity_with_something
     let who = identity();
     let answered = ProviderLimitsDto::for_test(AgentId::Codex, &who.observation_key())
         .with_reading(Reading {
-            windows: vec![super::super::json::window(
+            windows: vec![super::super::window::fixture(
                 "primary",
                 "Weekly · all models",
                 crate::dto::LimitWindowKind::Weekly,

@@ -10,7 +10,7 @@ impl Offer {
             .as_deref()
             .map(|label| format!("{label} has "))
             .unwrap_or_else(|| "Codex has ".to_string());
-        let hours = (self.renews_at - now).num_hours().max(0);
+        let hours = (self.cycle.at() - now).num_hours().max(0);
         let renews = if hours >= 24 {
             format!("{}d {}h", hours / 24, hours % 24)
         } else {

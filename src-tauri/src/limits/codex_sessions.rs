@@ -5,19 +5,16 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, Duration, SecondsFormat, Utc};
 use serde::Deserialize;
 
-use crate::dto::{LimitWindowKind, ProviderLimitsDto};
+use super::codex::{main_windows, RateLimitWindow};
+use super::window::{QuotaWindow, ResetInstant};
+use crate::dto::{LimitWindowDto, ProviderLimitsDto};
 
 const LOOKBACK_DAYS: i64 = 8;
 const MAX_SESSION_FILES: usize = 512;
 const SESSION_FILE_TAIL_BYTES: u64 = 256 * 1024;
-const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
 
 struct SessionWindow {
-    id: &'static str,
-    kind: LimitWindowKind,
-    used_percent: f64,
-    resets_at: DateTime<Utc>,
-    window_seconds: u64,
+    window: QuotaWindow,
     observed_at: DateTime<Utc>,
 }
 
@@ -39,15 +36,8 @@ struct TokenCountPayload {
 #[derive(Deserialize)]
 struct SessionRateLimits {
     limit_id: Option<String>,
-    primary: Option<SessionRateWindow>,
-    secondary: Option<SessionRateWindow>,
-}
-
-#[derive(Deserialize)]
-struct SessionRateWindow {
-    used_percent: Option<f64>,
-    window_minutes: Option<u64>,
-    resets_at: Option<i64>,
+    primary: Option<RateLimitWindow>,
+    secondary: Option<RateLimitWindow>,
 }
 
 pub(super) fn merge_recent(
@@ -59,6 +49,7 @@ pub(super) fn merge_recent(
     observations.sort_by_key(|observation| observation.observed_at);
     let mut updates = 0;
     for observation in observations {
+        let observed = observation.window.into_dto();
         let matches: Vec<(usize, usize)> = accounts
             .iter()
             .enumerate()
@@ -75,7 +66,9 @@ pub(super) fn merge_recent(
                     .windows
                     .iter()
                     .enumerate()
-                    .filter(|(_, window)| matches_window(window, &observation))
+                    .filter(|(_, window)| {
+                        matches_window(window, &observed, observation.observed_at)
+                    })
                     .map(move |(window_index, _)| (account_index, window_index))
             })
             .collect();
@@ -83,17 +76,12 @@ pub(super) fn merge_recent(
             continue;
         }
         let (account_index, window_index) = matches[0];
-        let window = &mut accounts[account_index].reading.windows[window_index];
-        window.used_percent = observation.used_percent;
-        window.resets_at = Some(
-            observation
-                .resets_at
-                .to_rfc3339_opts(SecondsFormat::Secs, true),
-        );
-        window.window_seconds = Some(observation.window_seconds);
-        window.observed_at = observation
-            .observed_at
-            .to_rfc3339_opts(SecondsFormat::Millis, true);
+        accounts[account_index].reading.windows[window_index] = LimitWindowDto {
+            observed_at: observation
+                .observed_at
+                .to_rfc3339_opts(SecondsFormat::Millis, true),
+            ..observed
+        };
         updates += 1;
     }
     updates
@@ -221,61 +209,29 @@ fn parse_event(line: &str) -> Vec<SessionWindow> {
     if limits.limit_id.as_deref() != Some("codex") {
         return Vec::new();
     }
-    [(limits.primary, "primary"), (limits.secondary, "secondary")]
+    main_windows(limits.primary.as_ref(), limits.secondary.as_ref())
         .into_iter()
-        .filter_map(|(window, id)| parse_window(window.as_ref()?, id, timestamp))
+        .filter(|window| window.length.is_some() && window.reset.is_some())
+        .map(|window| SessionWindow {
+            window,
+            observed_at: timestamp,
+        })
         .collect()
 }
 
-fn parse_window(
-    value: &SessionRateWindow,
-    id: &'static str,
+fn matches_window(
+    window: &LimitWindowDto,
+    observed: &LimitWindowDto,
     observed_at: DateTime<Utc>,
-) -> Option<SessionWindow> {
-    let used_percent = value.used_percent?;
-    if !used_percent.is_finite() {
-        return None;
-    }
-    let used_percent = used_percent.clamp(0.0, 100.0);
-    let window_seconds = value.window_minutes?.checked_mul(60)?;
-    let resets_at = value
-        .resets_at
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))?;
-    let kind = if window_seconds < WEEKLY_THRESHOLD_SECONDS {
-        LimitWindowKind::Session
-    } else {
-        LimitWindowKind::Weekly
-    };
-    Some(SessionWindow {
-        id,
-        kind,
-        used_percent,
-        resets_at,
-        window_seconds,
-        observed_at,
-    })
-}
-
-fn matches_window(window: &crate::dto::LimitWindowDto, observation: &SessionWindow) -> bool {
-    if window.id != observation.id || window.kind != observation.kind {
-        return false;
-    }
-    if window.window_seconds != Some(observation.window_seconds) {
-        return false;
-    }
-    let Some(reset) = window
-        .resets_at
-        .as_deref()
-        .and_then(|reset| DateTime::parse_from_rfc3339(reset).ok())
-        .map(|reset| reset.with_timezone(&Utc))
-    else {
-        return false;
-    };
-    if !super::codex::same_reset_instant(reset, observation.resets_at) {
-        return false;
-    }
-    DateTime::parse_from_rfc3339(&window.observed_at)
-        .is_ok_and(|existing| observation.observed_at > existing.with_timezone(&Utc))
+) -> bool {
+    window.id == observed.id
+        && window.kind == observed.kind
+        && window.window_seconds == observed.window_seconds
+        && ResetInstant::of(window)
+            .zip(ResetInstant::of(observed))
+            .is_some_and(|(remembered, seen)| remembered.same_cycle_as(seen))
+        && DateTime::parse_from_rfc3339(&window.observed_at)
+            .is_ok_and(|existing| observed_at > existing.with_timezone(&Utc))
 }
 
 #[cfg(test)]
