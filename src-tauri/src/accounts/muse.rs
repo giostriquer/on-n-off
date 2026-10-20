@@ -284,6 +284,10 @@ impl Home for MuseHome {
         read_saved_muse(identity, &token, &self.store.urls)
     }
 
+    fn login_stamp(&self) -> Result<String, String> {
+        native::file_stamp(&self.store.auth_file())
+    }
+
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline> {
         None
     }

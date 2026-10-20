@@ -1,4 +1,5 @@
 use super::{
+    homes::Resolve,
     model::Identity,
     store::{Guard, Login, Profile, Store, Ticket},
     Home,
@@ -6,7 +7,7 @@ use super::{
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     limits::{
-        outcome::{self, Saved, SavedVerdict},
+        outcome::{self, Parked, Saved, SavedVerdict},
         Accepted, ReadFailure, SavedReadUrls,
     },
 };
@@ -17,26 +18,93 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Generation {
+    Vault(String),
+    Home { id: String, stamp: String },
+}
+
 #[derive(Clone)]
 struct Attempt {
-    fingerprint: String,
+    generation: Generation,
     next: Instant,
     failures: u32,
     error: Option<String>,
-    rejected: bool,
+    parked: Option<Parked>,
 }
+
+impl Attempt {
+    fn holds(&self, force: bool) -> bool {
+        self.parked.is_some() || (Instant::now() < self.next && (!force || self.error.is_some()))
+    }
+
+    fn verdict(&self) -> Option<(Generation, Parked)> {
+        Some((self.generation.clone(), self.parked?))
+    }
+}
+
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
     pub(super) result: Result<Accepted, ReadFailure>,
 }
 
+pub(super) enum Kept<'a> {
+    Vault(&'a Login),
+    Home(&'a str, Box<dyn Home>),
+}
+
+pub(super) fn kept<'a>(profile: &'a Profile, homes: Option<&Resolve<'_>>) -> Option<Kept<'a>> {
+    match (&profile.login, profile.home.as_deref()) {
+        (Some(login), _) => Some(Kept::Vault(login)),
+        (None, Some(id)) => Some(Kept::Home(id, homes?(id).ok()?)),
+        (None, None) => None,
+    }
+}
+
+impl Kept<'_> {
+    fn generation(&self, profile: &Profile) -> Result<Generation, String> {
+        match self {
+            Self::Vault(login) => {
+                let fingerprint = super::view(profile.identity.provider, login)?.fingerprint();
+                Ok(Generation::Vault(fingerprint))
+            }
+            Self::Home(id, home) => Ok(Generation::Home {
+                id: (*id).to_owned(),
+                stamp: home.login_stamp()?,
+            }),
+        }
+    }
+
+    fn held(&self, profile: &Profile, ticket: &Ticket) -> Result<Held, String> {
+        let generation = self.generation(profile)?;
+        let ticket = match &generation {
+            Generation::Vault(fingerprint) => ticket.holding(profile, fingerprint.clone()),
+            Generation::Home { .. } => ticket
+                .holding_home(profile)
+                .ok_or("A renewal ticket cannot hold an account home.")?,
+        };
+        Ok(Held { generation, ticket })
+    }
+
+    fn saved(&self) -> Saved {
+        match self {
+            Self::Vault(_) => Saved::Login,
+            Self::Home(..) => Saved::Home,
+        }
+    }
+}
+
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<ProviderLimitsDto>) {
+pub(crate) fn refresh(
+    provider: AgentId,
+    force: bool,
+    entries: &mut Vec<ProviderLimitsDto>,
+) -> bool {
     let Ok(accounts) = super::Accounts::live() else {
-        return;
+        return false;
     };
-    accounts.refresh_usage(provider, force, entries, &fetch_profile);
+    accounts.refresh_usage(provider, force, entries, &fetch_profile)
 }
 
 type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchResult + Sync + 'a;
@@ -48,136 +116,169 @@ impl super::Accounts {
         force: bool,
         entries: &mut Vec<ProviderLimitsDto>,
         fetch: &Fetch<'_>,
-    ) {
+    ) -> bool {
         let home = &self.home;
         if !Store::vault_exists(home) {
-            return;
+            return false;
         }
         let open = || Store::open_existing(home);
         let native = self
             .native(provider)
             .and_then(|native| native.subscription());
         let homes = self.account_homes(provider);
-        if let (Some(homes), Ok(native)) = (&homes, &native) {
+        let homes = homes.as_ref().map(|homes| homes as &Resolve<'_>);
+        if let (Some(homes), Ok(native)) = (homes, &native) {
             super::homes::settle(home, provider, native.as_ref(), &open, homes);
         }
-        refresh_with(
-            home,
-            provider,
-            force,
-            entries,
-            native.clone(),
-            &open,
-            &|profile| fetch(profile, &open),
-        );
-        if let Some(homes) = &homes {
-            refresh_homes(home, provider, force, entries, native, &open, homes);
-        }
+        let reads = Reads {
+            open: &open,
+            homes,
+            fetch: &|profile| fetch(profile, &open),
+        };
+        refresh_profiles(home, provider, force, entries, native, &reads)
     }
 }
 
-fn refresh_with(
+struct Reads<'a> {
+    open: &'a (dyn Fn() -> Result<Store, String> + Sync),
+    homes: Option<&'a Resolve<'a>>,
+    fetch: &'a (dyn Fn(&Profile) -> FetchResult + Sync),
+}
+
+fn refresh_profiles(
     home: &Path,
     provider: AgentId,
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
     native: Result<Option<Identity>, String>,
-    open: &(dyn Fn() -> Result<Store, String> + Sync),
-    fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
-) {
+    reads: &Reads<'_>,
+) -> bool {
+    let Reads { open, homes, fetch } = *reads;
     let Ok(native) = native else {
-        return;
+        return false;
     };
     let Ok(db) = open().and_then(|s| s.load()) else {
-        return;
+        return false;
     };
     let Ok(ticket) = db.ticket(Guard::SignIn) else {
-        return;
+        return false;
     };
     let archived = crate::limits::archived(home, provider);
-    let profiles: Vec<_> = db
+    let due: Vec<(&Profile, Kept)> = db
         .profiles
-        .into_iter()
+        .iter()
         .filter(|p| {
             p.identity.provider == provider
                 && native.as_ref() != Some(&p.identity)
-                && p.login.is_some()
                 && !archived.contains(&p.identity.observation_key())
         })
+        .filter_map(|profile| Some((profile, kept(profile, homes)?)))
         .collect();
-    for batch in profiles.chunks(2) {
+    let mut changed = false;
+    for batch in due.chunks(2) {
         let results = std::thread::scope(|scope| {
             let tasks: Vec<_> = batch
                 .iter()
-                .map(|profile| {
-                    let (open, ticket) = (&open, &ticket);
-                    scope.spawn(move || poll_with(home, profile, ticket, force, open, fetch))
+                .map(|(profile, kept)| {
+                    let ticket = &ticket;
+                    scope.spawn(move || poll(home, profile, kept, ticket, force, open, fetch))
                 })
                 .collect();
             tasks
                 .into_iter()
-                .map(|t| t.join().unwrap_or(None))
+                .map(|t| t.join().unwrap_or((None, false)))
                 .collect::<Vec<_>>()
         });
-        for (profile, result) in batch.iter().zip(results) {
+        for ((profile, _), (result, verdict_changed)) in batch.iter().zip(results) {
             merge(entries, profile, result);
+            changed |= verdict_changed;
         }
+    }
+    changed
+}
+
+fn attempt_key(home: &Path, profile: &Profile) -> String {
+    format!("{}:{}", home.display(), profile.id)
+}
+
+pub(super) fn parked(home: &Path, profile: &Profile, kept: Option<&Kept<'_>>) -> Option<Parked> {
+    let attempt = ATTEMPTS
+        .get()?
+        .lock()
+        .ok()?
+        .get(&attempt_key(home, profile))?
+        .clone();
+    let parked = attempt.parked?;
+    match kept?.generation(profile) {
+        Ok(now) => (now == attempt.generation).then_some(parked),
+        Err(_) => Some(parked),
     }
 }
 
-fn poll_with(
+struct Held {
+    generation: Generation,
+    ticket: Ticket,
+}
+
+type Polled = (Option<Result<ProviderLimitsDto, String>>, bool);
+
+fn poll(
     home: &Path,
     profile: &Profile,
+    kept: &Kept<'_>,
     ticket: &Ticket,
     force: bool,
     open: &dyn Fn() -> Result<Store, String>,
     fetch: &dyn Fn(&Profile) -> FetchResult,
-) -> Option<Result<ProviderLimitsDto, String>> {
-    let login = profile.login.as_ref()?;
-    let fingerprint = super::view(profile.identity.provider, login)
-        .ok()?
-        .fingerprint();
-    let key = format!("{}:{}", home.display(), profile.id);
+) -> Polled {
+    let key = attempt_key(home, profile);
     let attempts = ATTEMPTS.get_or_init(Mutex::default);
-    let previous = attempts
-        .lock()
-        .ok()?
-        .get(&key)
-        .cloned()
-        .filter(|a| a.fingerprint == fingerprint);
-    if let Some(previous) = &previous {
-        if previous.rejected
-            || (Instant::now() < previous.next && (!force || previous.error.is_some()))
-        {
-            open()
-                .ok()?
-                .recheck(&ticket.holding(profile, fingerprint))
-                .ok()?;
-            return previous.error.clone().map(Err);
-        }
+    let Ok(previous) = attempts.lock().map(|attempts| attempts.get(&key).cloned()) else {
+        return (None, false);
+    };
+    let replay = |attempt: Option<&Attempt>, held: &Ticket| {
+        let unchanged = open().is_ok_and(|store| store.recheck(held).is_ok());
+        let error = attempt.and_then(|attempt| attempt.error.clone());
+        (error.filter(|_| unchanged).map(Err), false)
+    };
+    let Ok(now) = kept.held(profile, ticket) else {
+        return replay(previous.as_ref(), ticket);
+    };
+    let previous = previous.filter(|a| a.generation == now.generation);
+    if previous.as_ref().is_some_and(|a| a.holds(force)) {
+        return replay(previous.as_ref(), &now.ticket);
     }
-    let fetched = fetch(profile);
-    let fetched_login = fetched.login?;
-    let fingerprint = super::view(profile.identity.provider, &fetched_login)
-        .ok()?
-        .fingerprint();
-    let result = fetched.result;
-    let mut outcome = verdict_of(Saved::Login, profile, &result);
-    let held = ticket.holding(profile, fingerprint.clone());
+    let (after, result) = match kept {
+        Kept::Vault(_) => {
+            let fetched = fetch(profile);
+            let Some(login) = fetched.login else {
+                return (None, false);
+            };
+            (Kept::Vault(&login).held(profile, ticket), fetched.result)
+        }
+        Kept::Home(_, account_home) => {
+            let result = account_home.read_usage(&profile.identity);
+            (kept.held(profile, ticket), result)
+        }
+    };
+    let Ok(after) = after else {
+        return (None, false);
+    };
+    let mut outcome = verdict_of(kept.saved(), profile, &result);
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
-        store.recheck(&held).ok()?;
+        store.recheck(&after.ticket).ok()?;
         Some(store)
     });
-    hold_back(
+    let changed = hold_back(
         attempts,
         key,
-        fingerprint,
+        after.generation,
         previous.as_ref(),
         outcome,
         crate::limits_refresh::poll_interval(),
     );
-    published
+    (published, changed)
 }
 
 fn publish(
@@ -200,7 +301,7 @@ fn publish(
             if remembered.saved.is_err() {
                 let unsaved = SavedVerdict {
                     message: UNSAVED.to_string(),
-                    parks_login: false,
+                    parks: None,
                     retry: Duration::ZERO,
                 };
                 remembered.card.status = LimitsStatus::Failed;
@@ -216,11 +317,11 @@ fn publish(
 fn hold_back(
     attempts: &Mutex<HashMap<String, Attempt>>,
     key: String,
-    fingerprint: String,
+    generation: Generation,
     previous: Option<&Attempt>,
     outcome: Option<SavedVerdict>,
     interval: Duration,
-) {
+) -> bool {
     let failures = match outcome {
         Some(_) => previous.map_or(1, |a| a.failures.saturating_add(1)),
         None => 0,
@@ -229,120 +330,22 @@ fn hold_back(
         .as_ref()
         .map_or(Duration::ZERO, |verdict| verdict.retry);
     let delay = crate::limits_refresh::failure_backoff(interval, failures).max(retry);
-    let (error, rejected) = outcome.map_or((None, false), |verdict| {
-        (Some(verdict.message), verdict.parks_login)
+    let (error, parked) = outcome.map_or((None, None), |verdict| {
+        (Some(verdict.message), verdict.parks)
     });
-    if let Ok(mut attempts) = attempts.lock() {
-        attempts.insert(
-            key,
-            Attempt {
-                fingerprint,
-                next: Instant::now() + delay,
-                failures,
-                error,
-                rejected,
-            },
-        );
-    }
-}
-
-fn refresh_homes(
-    home: &Path,
-    provider: AgentId,
-    force: bool,
-    entries: &mut Vec<ProviderLimitsDto>,
-    native: Result<Option<Identity>, String>,
-    open: &(dyn Fn() -> Result<Store, String> + Sync),
-    homes: &super::homes::Resolve<'_>,
-) {
-    let Ok(native) = native else {
-        return;
-    };
-    let Ok(db) = open().and_then(|s| s.load()) else {
-        return;
-    };
-    let Ok(ticket) = db.ticket(Guard::SignIn) else {
-        return;
-    };
-    let archived = crate::limits::archived(home, provider);
-    let homed: Vec<(Profile, Box<dyn Home>)> = db
-        .profiles
-        .into_iter()
-        .filter(|p| {
-            p.identity.provider == provider
-                && p.login.is_none()
-                && native.as_ref() != Some(&p.identity)
-                && !archived.contains(&p.identity.observation_key())
-        })
-        .filter_map(|p| {
-            let resolved = homes(p.home.as_deref()?).ok()?;
-            Some((p, resolved))
-        })
-        .collect();
-    for batch in homed.chunks(2) {
-        let results = std::thread::scope(|scope| {
-            let tasks: Vec<_> = batch
-                .iter()
-                .map(|(profile, resolved)| {
-                    let ticket = &ticket;
-                    scope.spawn(move || {
-                        poll_home(home, profile, ticket, force, open, &|profile| {
-                            resolved.read_usage(&profile.identity)
-                        })
-                    })
-                })
-                .collect();
-            tasks
-                .into_iter()
-                .map(|t| t.join().unwrap_or(None))
-                .collect::<Vec<_>>()
-        });
-        for ((profile, _), result) in batch.iter().zip(results) {
-            merge(entries, profile, result);
-        }
-    }
-}
-
-fn poll_home(
-    home: &Path,
-    profile: &Profile,
-    ticket: &Ticket,
-    force: bool,
-    open: &dyn Fn() -> Result<Store, String>,
-    read: &dyn Fn(&Profile) -> Result<Accepted, ReadFailure>,
-) -> Option<Result<ProviderLimitsDto, String>> {
-    let held = ticket.holding_home(profile)?;
-    let generation = profile.home.clone()?;
-    let key = format!("{}:{}", home.display(), profile.id);
-    let attempts = ATTEMPTS.get_or_init(Mutex::default);
-    let previous = attempts
-        .lock()
-        .ok()?
-        .get(&key)
-        .cloned()
-        .filter(|a| a.fingerprint == generation);
-    if let Some(previous) = &previous {
-        if Instant::now() < previous.next && (!force || previous.error.is_some()) {
-            open().ok()?.recheck(&held).ok()?;
-            return previous.error.clone().map(Err);
-        }
-    }
-    let result = read(profile);
-    let mut outcome = verdict_of(Saved::Home, profile, &result);
-    let published = publish(home, profile, result, &mut outcome, &|| {
-        let store = open().ok()?;
-        store.recheck(&held).ok()?;
-        Some(store)
-    });
-    hold_back(
-        attempts,
-        key,
+    let attempt = Attempt {
         generation,
-        previous.as_ref(),
-        outcome,
-        crate::limits_refresh::poll_interval(),
-    );
-    published
+        next: Instant::now() + delay,
+        failures,
+        error,
+        parked,
+    };
+    let Ok(mut attempts) = attempts.lock() else {
+        return false;
+    };
+    let verdict = attempt.verdict();
+    let replaced = attempts.insert(key, attempt);
+    replaced.as_ref().and_then(Attempt::verdict) != verdict
 }
 
 const UNSAVED: &str = "Could not save the latest usage reading.";
@@ -493,4 +496,4 @@ fn merge(
 }
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

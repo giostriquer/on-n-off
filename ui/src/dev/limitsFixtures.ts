@@ -246,7 +246,7 @@ function sameEmailWorkspacesAccounts(): AccountsReading {
   return {
     profiles: [["personal", "0d6c1f3e-5b2a-4c8e-9f10-2a7b3c4d5e61"], ["business", "7e9a2b4c-1d3f-4a5b-8c6d-9e0f1a2b3c47"]].map(([id, workspaceId], index) => ({
       id, observationId: `profile:${id}`, legacyId: workspaceId, identity: { provider: "codex", userId: "user-shared", workspaceId },
-      label: "shared@example.com", email: "shared@example.com", category: null, savedAt: "2026-09-17T12:00:00Z", active: index === 0, needsLogin: false,
+      label: "shared@example.com", email: "shared@example.com", category: null, savedAt: "2026-09-17T12:00:00Z", active: index === 0, loginState: { state: "usable" },
     })),
     nativeObservationId: "profile:personal", nativeAccount: null, recoveryRequired: false, notice: null,
   };
@@ -282,14 +282,14 @@ function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
 
 function accountDuplicateAccounts(): AccountsReading {
   return {
-    profiles: [{ id: "saved", observationId: "profile:shared", legacyId: DUPLICATE_WORKSPACE, identity: { provider: "codex", userId: "shared-user", workspaceId: DUPLICATE_WORKSPACE }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false }],
+    profiles: [{ id: "saved", observationId: "profile:shared", legacyId: DUPLICATE_WORKSPACE, identity: { provider: "codex", userId: "shared-user", workspaceId: DUPLICATE_WORKSPACE }, label: "shared@example.com", email: "shared@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, loginState: { state: "usable" } }],
     nativeObservationId: "codex-1", nativeAccount: null, recoveryRequired: false, notice: null,
   };
 }
 
 const ARCHIVED_UNREAD: SavedProfile = {
   id: "unread", observationId: "profile:claude-unread", legacyId: "user-former", identity: { provider: "claude", userId: "user-former", workspaceId: "Former workspace" },
-  label: "former@example.com", email: "former@example.com", category: "Old client", savedAt: "2026-07-01T09:00:00Z", active: false, needsLogin: false,
+  label: "former@example.com", email: "former@example.com", category: "Old client", savedAt: "2026-07-01T09:00:00Z", active: false, loginState: { state: "usable" },
 };
 
 function archivedAccounts(): LimitsScenario {
@@ -317,8 +317,8 @@ function savedAccounts(agent: AgentId): AccountsReading {
   if (agent === "muse") return savedMuseAccount();
   return {
     profiles: [
-      { id: "personal", observationId: agent === "codex" ? "codex-1" : "claude-1", legacyId: agent === "codex" ? "Personal workspace" : "user-personal", identity: { provider: agent, userId: "user-personal", workspaceId: "Personal workspace" }, label: "personal@example.com", email: "personal@example.com", category: null, savedAt: "2026-08-24T18:30:00Z", active: true, needsLogin: false },
-      { id: "work", observationId: agent === "codex" ? "codex-2" : "claude-2", legacyId: agent === "codex" ? "Acme workspace" : "user-work", identity: { provider: agent, userId: "user-work", workspaceId: "Acme workspace" }, label: "person@acme.example", email: "person@acme.example", category: "Client A / research", savedAt: "2026-08-23T14:20:00Z", active: false, needsLogin: false },
+      { id: "personal", observationId: agent === "codex" ? "codex-1" : "claude-1", legacyId: agent === "codex" ? "Personal workspace" : "user-personal", identity: { provider: agent, userId: "user-personal", workspaceId: "Personal workspace" }, label: "personal@example.com", email: "personal@example.com", category: null, savedAt: "2026-08-24T18:30:00Z", active: true, loginState: { state: "usable" } },
+      { id: "work", observationId: agent === "codex" ? "codex-2" : "claude-2", legacyId: agent === "codex" ? "Acme workspace" : "user-work", identity: { provider: agent, userId: "user-work", workspaceId: "Acme workspace" }, label: "person@acme.example", email: "person@acme.example", category: "Client A / research", savedAt: "2026-08-23T14:20:00Z", active: false, loginState: { state: "usable" } },
     ],
     nativeObservationId: agent === "codex" ? "codex-1" : "claude-1",
     nativeAccount: { provider: agent, userId: "user-personal", workspaceId: "Personal workspace" },
@@ -330,7 +330,7 @@ function savedAccounts(agent: AgentId): AccountsReading {
 function savedMuseAccount(): AccountsReading {
   const identity = { provider: "muse" as const, userId: "you@example.com", workspaceId: "" };
   return {
-    profiles: [{ id: "muse-you", observationId: "muse-1", legacyId: "email:you@example.com", identity, label: "you@example.com", email: "you@example.com", category: null, savedAt: "2026-10-16T18:00:00Z", active: true, needsLogin: false }],
+    profiles: [{ id: "muse-you", observationId: "muse-1", legacyId: "email:you@example.com", identity, label: "you@example.com", email: "you@example.com", category: null, savedAt: "2026-10-16T18:00:00Z", active: true, loginState: { state: "usable" } }],
     nativeObservationId: "muse-1",
     nativeAccount: identity,
     recoveryRequired: false,
@@ -342,7 +342,10 @@ function claudeSignInAccounts(): AccountsReading {
   const reading = savedAccounts("claude");
   const endsIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
   const [personal, work] = reading.profiles;
-  return { ...reading, profiles: [{ ...personal, signInEndsAt: endsIn(3) }, { ...work, pendingActivation: true, signInEndsAt: endsIn(-1) }] };
+  return { ...reading, profiles: [
+    { ...personal, loginState: { state: "ending", endsAt: endsIn(3) } },
+    { ...work, pendingActivation: true, loginState: { state: "ended", endsAt: endsIn(-1) } },
+  ] };
 }
 
 function claudeSignIn(): ProviderLimits[] {
@@ -351,6 +354,32 @@ function claudeSignIn(): ProviderLimits[] {
     status: "failed",
     standing: savedRefreshPausedBy("This account's saved login has ended. Sign in again."),
   }];
+}
+
+const REFUSED_LOGIN = "Usage refresh needs sign-in again or renewal by the client that owns this login.";
+const ENDED_HOME_LOGIN = "This account's saved login has ended. Sign in again.";
+
+function refusedSaved(entry: ProviderLimits, id: string, label: string, message: string): ProviderLimits {
+  return { ...entry, account: { id, label }, currentAccount: false, savedProfile: true, status: "failed", standing: savedRefreshPausedBy(message), windows: entry.windows.map(window => ({ ...window, observedAt: REMEMBERED_OBSERVED })) };
+}
+
+function savedLoginsAccounts(agent: LimitsProvider): AccountsReading {
+  const reading = savedAccounts(agent);
+  const [signedIn] = reading.profiles;
+  const saved = (id: string, email: string, loginState: SavedProfile["loginState"]): SavedProfile => ({
+    ...signedIn, id, observationId: `${agent}-${id}`, legacyId: id, identity: { provider: agent, userId: id, workspaceId: `${id} workspace` },
+    label: email, email, category: null, active: false, loginState,
+  });
+  const others = agent === "codex"
+    ? [saved("refused", "refused@example.com", { state: "refused" }), saved("moved", "moved@example.com", { state: "otherAccount" })]
+    : [saved("refused", "refused@example.com", { state: "refused" })];
+  return { ...reading, profiles: [signedIn, ...others] };
+}
+
+function savedLogins(agent: LimitsProvider, live: ProviderLimits): ProviderLimits[] {
+  const refused = refusedSaved(live, `${agent}-refused`, "refused@example.com", agent === "codex" ? REFUSED_LOGIN : ENDED_HOME_LOGIN);
+  if (agent !== "codex") return [live, refused];
+  return [live, { ...refused, subscription: null }, { ...refusedSaved(live, "codex-moved", "moved@example.com", "This saved login now signs in as a different account. Sign in again."), subscription: null }];
 }
 
 function paidThrough(accountId: string): SubscriptionDate {
@@ -374,6 +403,10 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
   museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
+  savedLogins: () => ({
+    claude: () => savedLogins("claude", CLAUDE[0]), codex: () => savedLogins("codex", CODEX[0]), muse: () => savedLogins("muse", MUSE[0]),
+    accounts: { claude: () => savedLoginsAccounts("claude"), codex: () => savedLoginsAccounts("codex"), muse: () => savedLoginsAccounts("muse") },
+  }),
   savedRefreshPaused: () => ({ claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) }),
   limitsBand: () => ({ claude: limitsBandClaude, codex: limitsBandCodex }),
   limitsOrder: () => ({

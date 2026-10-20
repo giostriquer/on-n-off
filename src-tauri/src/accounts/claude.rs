@@ -231,6 +231,22 @@ impl ClaudeNative {
         Ok(None)
     }
 
+    fn login_stamp(&self) -> Result<String, String> {
+        let item = self
+            .keychain_stamp()?
+            .unwrap_or_else(|| native::ABSENT.into());
+        let file = native::file_stamp(&self.storage_dir().credentials_file())?;
+        Ok(format!("{item}|{file}"))
+    }
+
+    fn keychain_stamp(&self) -> Result<Option<String>, String> {
+        #[cfg(target_os = "macos")]
+        if self.use_keychain {
+            return claude_store::keychain_stamp(&self.service());
+        }
+        Ok(None)
+    }
+
     #[cfg(target_os = "macos")]
     fn service(&self) -> String {
         self.storage_dir().service()

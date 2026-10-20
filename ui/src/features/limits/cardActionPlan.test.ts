@@ -25,7 +25,7 @@ function profile(provider: LimitsProvider, overrides: Partial<SavedProfile> = {}
   const email = READING[provider]().account!.label!;
   return {
     id: `saved-${provider}`, observationId: accountId(provider), legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },
-    email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides,
+    email, label: email, savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides,
   };
 }
 
@@ -82,9 +82,9 @@ const STATES = {
   "current unconfirmed": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)] }),
   "current unsaved": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: { observationId: accountId(provider), settled: true } }),
   saved: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)] }),
-  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })], profiles: [profile(provider, { needsLogin: true })] }),
+  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })], profiles: [profile(provider, { loginState: { state: "missing" } })] }),
   "sign-in ended": (provider: LimitsProvider): Setup => ({
-    entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider, { signInEndsAt: before(1) })],
+    entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider, { loginState: { state: "ended", endsAt: before(1) } })],
   }),
   "term ended": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true, subscription: { activeUntil: before(2), willRenew: false, checkedAt: NOW } })],
@@ -129,7 +129,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "current unsaved": { menu: "checkNow category resetAlert signOut", footer: "saveAccount useBankedReset" },
     saved: { menu: CODEX_SAVED, footer: "useAccount" },
     "needs login": { menu: CODEX_SAVED, footer: "signIn" },
-    "sign-in ended": { menu: CODEX_SAVED, footer: "useAccount" },
+    "sign-in ended": { menu: CODEX_SAVED, footer: "signInAgain" },
     "term ended": { menu: CODEX_SAVED, footer: "archive" },
     "signing in": { menu: "checkNow category- signInAgain- archive- resetAlert remove-", footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive resetAlert remove", footer: "signIn" },
@@ -142,7 +142,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "current unsaved": { menu: "checkNow category signOut", footer: "saveAccount" },
     saved: { menu: SAVED, footer: "useAccount" },
     "needs login": { menu: SAVED, footer: "signIn" },
-    "sign-in ended": { menu: SAVED, footer: "useAccount" },
+    "sign-in ended": { menu: SAVED, footer: "signInAgain" },
     "term ended": { menu: SAVED, footer: "useAccount" },
     "signing in": { menu: "checkNow category- signInAgain- archive- remove-", footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive remove", footer: "signIn" },
@@ -241,7 +241,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
   const profileOf = (overrides: Partial<SavedProfile> = {}): SavedProfile => ({
     id: "saved", observationId: "profile:saved", legacyId: "saved", identity: { provider: "codex", userId: "saved", workspaceId: "saved" },
-    email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, needsLogin: false, ...overrides,
+    email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides,
   });
 
   it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
@@ -254,20 +254,29 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf()],
     ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf({ active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
-    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ needsLogin: true })],
+    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ loginState: { state: "missing" } })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {
     const shown = limitCards({ provider: "codex", entries: [reading], profiles: saved ? [saved] : [], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;
     expect(planFor(shown, { entries: [] }).footer?.main?.action === "archive").toBe(expected);
   });
+
+  it.each<[string, SavedProfile["loginState"]]>([
+    ["refused", { state: "refused" }],
+    ["now another account", { state: "otherAccount" }],
+  ])("a saved login %s asks to sign in again before it is archived, Archive account kept in the menu", (_case, loginState) => {
+    const shown = limitCards({ provider: "codex", entries: [codexSaved(term(false, PASSED))], profiles: [profileOf({ loginState })], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
+      .find(card => card.account?.id === "profile:saved")!;
+    expect(describe_(planFor(shown, { entries: [] }))).toEqual({ menu: "checkNow category signInAgain archive resetAlert remove", footer: "signInAgain" });
+  });
 });
 
 describe("Sign in again in place of the footer's action", () => {
   const ended = before(1);
-  const claudeProfile = (overrides: Partial<SavedProfile>) => profile("claude", { signInEndsAt: ended, ...overrides });
+  const claudeProfile = (overrides: Partial<SavedProfile>) => profile("claude", { loginState: { state: "ended", endsAt: ended }, ...overrides });
   const main = (setup: Setup) => plan("claude", setup).footer?.main?.action ?? null;
 
-  it("is offered once a saved Claude sign-in ended, read or not, signed out or never used", () => {
+  it("is offered once a saved sign-in ended, read or not, signed out or never used", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})] })).toBe("signInAgain");
     expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }], profiles: [claudeProfile({})] })).toBe("signInAgain");
     expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");

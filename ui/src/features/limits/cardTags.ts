@@ -1,4 +1,4 @@
-import type { SignInPresentation } from "./claudeSignIn";
+import type { SignInPresentation } from "./loginState";
 import type { CardSubscription, LimitCard } from "./limitCards";
 import type { CardStatus } from "./limitPresentation";
 

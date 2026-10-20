@@ -6,7 +6,7 @@ import { accountCards } from "./accountCards";
 
 const profile: SavedProfile = {
   id: "saved", observationId: "profile:user-team", legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" },
-  email: "person@example.com", label: "person@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, needsLogin: false,
+  email: "person@example.com", label: "person@example.com", savedAt: "2026-09-13T12:00:00Z", active: false, loginState: { state: "usable" },
 };
 const scoped: ProviderLimits = {
   provider: "codex", status: "ok", account: { id: profile.observationId, label: profile.email }, currentAccount: false,

@@ -141,14 +141,16 @@ adapter assumes today (change the adapter and this file together).
   changes as it loads (`on_load`: Codex drops its hidden windows, Claude its banked resets, and
   Claude and Muse mark an unused session without a reset as starting with the first message); and
   which implementation, if any, gives the provider each of these: credits spent (Codex), session
-  rollouts as extra observations (Codex), banked resets (Codex), a saved sign-in's deadline
-  (Claude), the subscription term (Codex: asked by the read and shown by the card, one fact) and
-  the paid reset offer (Codex). Each of those is a closed enum naming the implementations it has
-  (`BankedResets::Codex`, `SignInDeadline::Claude`, …), so a row can only name one that exists,
+  rollouts as extra observations (Codex), banked resets (Codex), the subscription term (Codex:
+  asked by the read and shown by the card, one fact) and the paid reset offer (Codex). Each of
+  those is a closed enum naming the implementations it has (`BankedResets::Codex`,
+  `SubscriptionTerm::Codex`, …), so a row can only name one that exists,
   and the code that runs it matches on it. Exactly one provider banks resets: a compile-time check
   holds `WITH_BANKED_RESETS` to one entry, `BANKED_RESETS_PROVIDER`, whose card the banked reset
   alert judges and whose read the limits monitor watches and repeats before a spend, because the
-  alert, its spend and its re-read are Codex's. The four card features are written into the
+  alert, its spend and its re-read are Codex's. A saved sign-in's end is no Limits fact: the
+  accounts adapters read it and every card reads it as the profile's login state (Saved
+  subscription profiles, below). The three card features are written into the
   catalogue fixture as `limitsFeatures`, each the key of the implementation it names, and the
   UI's `LIMITS_FEATURES` is that map, read through `LIMITS_IMPLEMENTATIONS`, the one list of the
   implementations the card model has.
@@ -316,12 +318,20 @@ the last seven days the card's header carries **Sign-in ends <date>** in the sub
 amber style, filling as the date nears; once it has passed, a red **Sign-in ended**, the message
 "Claude ended this sign-in on <date>. Sign in again to use this account." in place of any other,
 and **Sign in again** as the card's button instead of Use account. Hover or focus shows the exact
-device-local time. The date reaches the card through the account listing (`accounts::list`), which
-reads it from the default store and from each saved account's own login (in the vault or its home),
-credited to the account that login's `oauthAccount` names. A sign-in still awaiting Use account is
+device-local time. The date reaches the card as the profile's login state (`ending` or `ended` with
+its date, `loginState`; see Login state in `docs/architecture/accounts.md`) through the account
+listing (`accounts::list`), which reads it from the default store and from each saved account's own
+login (in the vault or its home), credited to the account that login's `oauthAccount` names. The
+card reads only that state, never a per-provider switch, so a provider whose adapter reported a
+sign-in deadline would get the same tag, with its own name in the copy. A sign-in still awaiting Use account is
 newer than whatever the default store holds for that account, so it reads only its own login;
 otherwise the default store's date comes first. The listing reads the credential document
-only for that date: it uses no token and sends nothing. **code** (Claude
+only for that date: it uses no token and sends nothing. A saved account in its home has the date
+its profile records whenever on-n-off holds the login (a save, the move into or out of the home,
+a home taken back), so the listing reads no home's Keychain item for it; a profile an older
+version wrote is read once and the date recorded. A login replaced in its home outside on-n-off
+keeps the recorded date until on-n-off next holds it. The signed-in account shows its date even
+with no saved login, and its card never reads as refused or another account. **code** (Claude
 Code 2.1.296): the field, the 30-day default, the emptied login keeping the date, and the three-day
 notice. **verified** (2026-10-12): a login renewed that morning kept its date three days out, and a
 login 31 days past its `/login` was refused at its next renewal.
@@ -417,7 +427,19 @@ renewal by the client that owns this login." and waits for a new login; an accou
 of its login or refused reads "This account's saved login has ended. Sign in again."; a rate limit,
 a network or status failure and an answer with nothing observed read as on the signed-in card,
 naming the cause, where they once read "Usage refresh is rate limited." or "Usage refresh is
-unavailable." without it. Every card a saved poll produces is marked
+unavailable." without it. A refused login, in the vault or in its home, and one that now signs in
+as another account wait for a new login: the poll keeps the generation it read (the vault login's
+fingerprint, or the home's id and its login stamp: the attributes of a Claude home's Keychain item,
+never its secret, and the metadata of its `.credentials.json` or a Muse home's `auth.json`, never
+their contents) and reads it again only
+once that changes. The profile's login state says so (`refused` or `otherAccount`), and every
+provider's card then reads "<Provider> no longer accepts this saved login. Sign in again to use
+this account." or "This saved login now signs in as a different <Provider> account. Sign in again to
+use this account.", tags itself **Sign-in refused** or **Other account**, and offers **Sign in
+again** as its button, with Use account kept in its ⋯ menu. Until 2026-10-20 only a Claude sign-in
+past its date changed the card: a refused Codex or Muse login, or a Claude home refused before its
+date, still offered Use account with the reason in the usage clock's tooltip, and a login refused
+in its home was read again on the backoff. Every card a saved poll produces is marked
 `savedProfile`, so a card's read standing calls a reading remembered only when it is neither the
 signed-in account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
 home by the provider's own client: Codex's app-server, and for Claude the report the signed-in card

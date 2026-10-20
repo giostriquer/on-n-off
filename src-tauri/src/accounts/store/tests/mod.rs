@@ -355,7 +355,8 @@ fn a_sealed_database_keeps_the_vault_format() {
                 "login": {"auth": {"refresh": "fixture-a"}, "account": null},
                 "pending_activation": false,
                 "usage_renewal_owned": false,
-                "home": null
+                "home": null,
+                "sign_in_end": "unknown"
             }],
             "login_epoch": 1,
             "ignored_accounts": [{"provider": "codex", "userId": "removed", "workspaceId": "team"}],

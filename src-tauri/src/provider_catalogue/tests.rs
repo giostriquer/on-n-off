@@ -27,7 +27,6 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                         client: "Claude Code",
                         vendor: "Anthropic",
                         on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
-                        sign_in_deadline: Some(SignInDeadline::Claude),
                         ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Claude),
@@ -249,7 +248,6 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
             credits_spent: None,
             session_rollouts: None,
             banked_resets: None,
-            sign_in_deadline: None,
             subscription_term: None,
             paid_reset_offer: None,
         }
@@ -315,10 +313,6 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
 
 #[test]
 fn each_card_feature_is_written_as_the_key_of_the_implementation_it_names() {
-    assert_eq!(
-        serde_json::to_value(SignInDeadline::Claude).unwrap(),
-        serde_json::json!(AgentId::Claude.key())
-    );
     for value in [
         serde_json::to_value(SubscriptionTerm::Codex).unwrap(),
         serde_json::to_value(BankedResets::Codex).unwrap(),
@@ -347,6 +341,7 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
                     "binary": facts.binary,
                     "binaryAliases": facts.binary_aliases,
                     "limitsReader": facts.limits.is_some(),
+                    "limitsClient": facts.limits.map(|limits| limits.client),
                     "usage": facts.usage,
                     "savedAccounts": facts.saved_accounts,
                 }),
@@ -365,7 +360,6 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
             (
                 id.key().to_string(),
                 serde_json::json!({
-                    "signInDeadline": facts.sign_in_deadline,
                     "subscriptionTerm": facts.subscription_term,
                     "bankedResets": facts.banked_resets,
                     "paidResetOffer": facts.paid_reset_offer,

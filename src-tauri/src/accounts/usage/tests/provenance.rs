@@ -16,14 +16,17 @@ fn polled(
     native: Result<Option<model::Identity>, String>,
     fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
 ) {
-    refresh_with(
+    refresh_profiles(
         home,
         AgentId::Claude,
         false,
         entries,
         native,
-        &|| Ok(open(home)),
-        fetch,
+        &Reads {
+            open: &|| Ok(open(home)),
+            homes: None,
+            fetch,
+        },
     );
 }
 

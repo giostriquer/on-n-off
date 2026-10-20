@@ -46,6 +46,11 @@ export const SCENES = [
     limitsColumns: 3,
     steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }],
   })),
+  { name: "limits-saved-logins-1280", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, limitsColumns: 3, steps: [{ wait: "role=region[name='Codex limits · moved@example.com']" }] },
+  { name: "limits-saved-logins-menu", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, steps: [
+    { click: "role=region[name='Codex limits · refused@example.com'] >> role=button[name='More actions for refused@example.com']" },
+    { wait: "role=group[name='Actions for refused@example.com']" },
+  ] },
   { name: "limits-saved-paused-1280", url: "/limits?mock=savedRefreshPaused", viewport: { width: 1280, height: 980 }, limitsColumns: 3, steps: [{ wait: "role=button[name='Usage status: Last known usage'] >> nth=0" }] },
   ...["light", "dark"].map(theme => ({
     name: `usage-muse-${theme}`, url: "/usage?mock=ok", theme, checkMuseChart: true,

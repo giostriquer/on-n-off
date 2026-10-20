@@ -34,7 +34,7 @@ const CANCEL_SPEND = "Cancel the automatic banked reset";
 function personal(): SavedProfile {
   return {
     id: "saved-personal", observationId: "acct-personal", legacyId: "personal", identity: { provider: "codex", userId: "personal", workspaceId: "personal" },
-    email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false,
+    email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" },
   };
 }
 
@@ -107,7 +107,7 @@ describe("a card's footer button", () => {
   });
 
   it("signs in to an account it has no saved login for, and to a saved login's own profile when that needs it", async () => {
-    answer([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })], [{ ...personal(), observationId: "acct-spare", email: "spare@codex.example", label: "spare@codex.example", needsLogin: true }]);
+    answer([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })], [{ ...personal(), observationId: "acct-spare", email: "spare@codex.example", label: "spare@codex.example", loginState: { state: "missing" } }]);
     renderLimits();
     const history = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     fireEvent.click(await within(history).findByRole("button", { name: "Sign in" }));

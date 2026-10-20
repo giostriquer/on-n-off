@@ -30,19 +30,16 @@
   },
   "limitsFeatures": {
     "claude": {
-      "signInDeadline": "claude",
       "subscriptionTerm": null,
       "bankedResets": null,
       "paidResetOffer": null
     },
     "codex": {
-      "signInDeadline": null,
       "subscriptionTerm": "codex",
       "bankedResets": "codex",
       "paidResetOffer": "codex"
     },
     "muse": {
-      "signInDeadline": null,
       "subscriptionTerm": null,
       "bankedResets": null,
       "paidResetOffer": null
@@ -54,6 +51,7 @@
       "binary": "claude",
       "binaryAliases": [],
       "limitsReader": true,
+      "limitsClient": "Claude Code",
       "usage": "claude",
       "savedAccounts": true
     },
@@ -62,6 +60,7 @@
       "binary": "codex",
       "binaryAliases": [],
       "limitsReader": true,
+      "limitsClient": "Codex CLI",
       "usage": "codex",
       "savedAccounts": true
     },
@@ -70,6 +69,7 @@
       "binary": "agy",
       "binaryAliases": [],
       "limitsReader": false,
+      "limitsClient": null,
       "usage": null,
       "savedAccounts": false
     },
@@ -80,6 +80,7 @@
         "cursor-agent"
       ],
       "limitsReader": false,
+      "limitsClient": null,
       "usage": null,
       "savedAccounts": false
     },
@@ -88,6 +89,7 @@
       "binary": "muse",
       "binaryAliases": [],
       "limitsReader": true,
+      "limitsClient": "Muse Code",
       "usage": "muse",
       "savedAccounts": true
     }
