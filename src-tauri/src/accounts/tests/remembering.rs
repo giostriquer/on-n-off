@@ -87,7 +87,7 @@ fn a_codex_generation_signed_out_of_is_not_remembered_again() {
 }
 
 fn notice(harness: &Harness, provider: AgentId) -> Option<String> {
-    harness.accounts().listing(provider).unwrap().notice
+    harness.accounts().listing(provider).unwrap().0.notice
 }
 
 #[test]

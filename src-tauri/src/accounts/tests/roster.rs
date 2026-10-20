@@ -58,8 +58,13 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
     let roster = answered(&harness, AgentId::Claude).unwrap();
     harness.heard();
     let listed = harness.accounts().list(AgentId::Claude).unwrap();
+    let ends = crate::accounts::SignInDeadlines::from([(a.observation_key(), 1_792_081_900_000)]);
+    assert_eq!(
+        harness.heard(),
+        [(Heard::Listed(AgentId::Claude, ends.clone()), true)],
+        "the account list hands Limits the sign-in ends it read, and Limits rereads its roster"
+    );
 
-    let ends = listed.sign_in_deadlines();
     let signed_in = a.observation_key();
     let now = chrono::Utc::now().timestamp_millis();
     let read: Vec<_> = roster
@@ -84,20 +89,6 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
     );
     assert_eq!(roster.category(&b.observation_key()), Some("Client A"));
     assert_eq!(roster.category("history"), Some("Old team"));
-    assert_eq!(
-        harness.heard(),
-        [(
-            Heard::Listed(
-                AgentId::Claude,
-                crate::accounts::SignInDeadlines::from([(
-                    a.observation_key(),
-                    "2026-10-15T16:31:40Z".to_string()
-                )])
-            ),
-            true
-        )],
-        "the account list hands Limits the sign-in ends it read, and Limits rereads its roster"
-    );
 }
 
 #[test]
@@ -198,7 +189,7 @@ fn the_saved_refresh_dates_a_vault_login_by_its_recorded_end_or_the_ends_the_acc
     harness.signed_in(Some(claude("a", "a2")));
 
     let roster = answered(&harness, AgentId::Claude).unwrap();
-    let listed = harness.accounts().list(AgentId::Claude).unwrap();
+    let (_, ends) = harness.accounts().listing(AgentId::Claude).unwrap();
     let in_column = |ends: &crate::accounts::SignInDeadlines| {
         [&recorded, &unrecorded].map(|identity| {
             let profile = roster.profile(&identity.observation_key()).unwrap();
@@ -216,7 +207,7 @@ fn the_saved_refresh_dates_a_vault_login_by_its_recorded_end_or_the_ends_the_acc
         "a profile saved before its end was recorded: the Limits read never opens its login to date it"
     );
     assert_eq!(
-        in_column(&listed.sign_in_deadlines()),
+        in_column(&ends),
         [
             serde_json::json!("2099-01-01T00:00:00Z"),
             serde_json::json!("2100-01-01T00:00:00Z")

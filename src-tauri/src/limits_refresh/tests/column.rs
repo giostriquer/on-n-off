@@ -238,7 +238,12 @@ fn an_account_list_hands_its_sign_in_ends_and_a_roster_reread_over_in_one_replac
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     read(&cache, "me", false, &|_, _| Some(roster_of(&["me"], &[])));
     let me = saved("me").observation_key();
-    let ends = SignInDeadlines::from([(me.clone(), "2026-09-30T12:00:00Z".to_string())]);
+    let ms = |at: &str| {
+        chrono::DateTime::parse_from_rfc3339(at)
+            .expect("an instant")
+            .timestamp_millis()
+    };
+    let ends = SignInDeadlines::from([(me.clone(), ms("2026-09-30T12:00:00Z"))]);
     let listed = || Some(roster_of(&["me"], &[(me.as_str(), "Client A")]));
 
     assert_eq!(
@@ -269,7 +274,7 @@ fn an_account_list_hands_its_sign_in_ends_and_a_roster_reread_over_in_one_replac
     };
     assert_eq!(ends_at(&cache), "2026-09-30T12:00:00Z");
 
-    let later = |at: &str| SignInDeadlines::from([(me.clone(), at.to_string())]);
+    let later = |at: &str| SignInDeadlines::from([(me.clone(), ms(at))]);
     assert_eq!(
         relist(&cache, Some(later("2026-10-30T12:00:00Z")), listed),
         Reading::Replaced(3),

@@ -317,12 +317,12 @@ impl Activation {
 
 impl Accounts {
     fn list(&self, provider: AgentId) -> Result<AccountsDto, String> {
-        let listed = self.listing(provider)?;
-        self.notify.listed(provider, listed.sign_in_deadlines());
+        let (listed, ends) = self.listing(provider)?;
+        self.notify.listed(provider, ends);
         Ok(listed)
     }
 
-    fn listing(&self, provider: AgentId) -> Result<AccountsDto, String> {
+    fn listing(&self, provider: AgentId) -> Result<(AccountsDto, SignInDeadlines), String> {
         let _read = activity::read(provider)
             .ok_or("An account change is running. Retry when it finishes.")?;
         let home = &self.home;
@@ -346,22 +346,20 @@ impl Accounts {
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
         let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
-        let read_ends = std::cell::RefCell::new(Vec::new());
+        let mut read_ends = Vec::new();
         let roster = Roster::of(
             &db,
             home,
             provider,
             &crate::limits::archived(home, provider),
             chrono::Utc::now().timestamp_millis(),
-            &|p| {
+            &mut |p| {
                 let active = current.as_ref() == Some(&p.identity);
                 let kept = usage::kept(p, homes);
                 let deadline =
                     login_state::Deadline::of(p, native_deadline.as_ref(), kept.as_ref());
                 if let Some(end) = deadline.read() {
-                    read_ends
-                        .borrow_mut()
-                        .push((p.id.clone(), p.home.clone(), end));
+                    read_ends.push((p.id.clone(), p.home.clone(), end));
                 }
                 let parked = (!active)
                     .then(|| usage::parked(home, p, kept.as_ref()))
@@ -373,18 +371,19 @@ impl Accounts {
                 }
             },
         );
-        let read_ends = read_ends.into_inner();
         if !read_ends.is_empty() {
             let _ = login_state::remember_ends(home, &read_ends);
         }
-        Ok(AccountsDto {
+        let ends = roster.sign_in_deadlines();
+        let listed = AccountsDto {
             profiles: roster.into_profiles(),
             remember_accounts: discovery::enabled(home).unwrap_or(false),
             native_observation_id: current.as_ref().map(model::Identity::observation_key),
             native_account: current,
             recovery_required,
             notice: notice.or_else(|| discovery::notice(provider)),
-        })
+        };
+        Ok((listed, ends))
     }
 
     fn save_current(&self, provider: AgentId) -> Result<(), String> {

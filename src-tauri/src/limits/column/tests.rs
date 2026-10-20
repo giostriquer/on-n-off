@@ -58,6 +58,12 @@ fn no_ends() -> SignInDeadlines {
     SignInDeadlines::new()
 }
 
+fn ms(at: &str) -> i64 {
+    chrono::DateTime::parse_from_rfc3339(at)
+        .expect("an instant")
+        .timestamp_millis()
+}
+
 fn ids(column: &[ColumnEntryDto]) -> Vec<&str> {
     column
         .iter()
@@ -253,7 +259,7 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
             &[],
             &[(unread_key.as_str(), "Client B")],
         ),
-        &SignInDeadlines::from([(unread_key.clone(), "2026-09-30T12:00:00Z".into())]),
+        &SignInDeadlines::from([(unread_key.clone(), ms("2026-09-30T12:00:00Z"))]),
         0,
     );
 
@@ -328,10 +334,7 @@ fn an_unread_saved_profile_carries_its_login_state_as_the_account_list_decides_i
     }
     let mut current = reading(AgentId::Claude, &named[0].observation_key(), "signed-in");
     current.current_account = true;
-    let listed = SignInDeadlines::from([(
-        named[2].observation_key(),
-        "2026-09-25T12:00:00Z".to_string(),
-    )]);
+    let listed = SignInDeadlines::from([(named[2].observation_key(), ms("2026-09-25T12:00:00Z"))]);
 
     let column = column(&[current], &roster, &listed, NOW);
 
@@ -393,7 +396,7 @@ fn the_signed_in_profile_is_dated_only_by_the_end_the_account_list_handed_over()
     assert_eq!(
         stated(&SignInDeadlines::from([(
             account.observation_key(),
-            "2026-10-05T12:00:00Z".into()
+            ms("2026-10-05T12:00:00Z")
         )])),
         (
             serde_json::json!({"state": "ending", "endsAt": "2026-10-05T12:00:00Z"}),
@@ -509,7 +512,7 @@ fn every_entry_carries_its_accounts_category_and_a_saved_accounts_profile() {
 #[test]
 fn a_saved_profile_carries_the_sign_in_end_the_account_list_last_read() {
     let account = identity(AgentId::Claude, "user", "team");
-    let ends = SignInDeadlines::from([(account.observation_key(), "2026-09-30T12:00:00Z".into())]);
+    let ends = SignInDeadlines::from([(account.observation_key(), ms("2026-09-30T12:00:00Z"))]);
 
     let column = column(
         &[scoped(&account, "you@example.com")],

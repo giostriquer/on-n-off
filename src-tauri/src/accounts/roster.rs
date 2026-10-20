@@ -2,14 +2,14 @@ use super::{
     login_state::{Deadline, LoginState, Standing},
     store::{Database, Profile, Store},
     usage::LoginKey,
-    AccountsDto, ProfileDto,
+    ProfileDto,
 };
 use crate::dto::AgentId;
 use crate::limits::outcome::Parked;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-pub(crate) type SignInDeadlines = BTreeMap<String, String>;
+pub(crate) type SignInDeadlines = BTreeMap<String, i64>;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Roster {
@@ -38,7 +38,7 @@ impl Roster {
         provider: AgentId,
         archived: &BTreeSet<String>,
         now_ms: i64,
-        facts: &dyn Fn(&Profile) -> Facts,
+        facts: &mut dyn FnMut(&Profile) -> Facts,
     ) -> Self {
         let categories = db
             .categories()
@@ -65,7 +65,7 @@ impl Roster {
             provider,
             &crate::limits::archived(home, provider),
             chrono::Utc::now().timestamp_millis(),
-            &|p| Facts {
+            &mut |p| Facts {
                 active: false,
                 deadline: Deadline::recorded(p),
                 parked: None,
@@ -81,6 +81,13 @@ impl Roster {
             .and_then(|store| store.load())
             .ok()?;
         Some(Self::recorded(&db, home, provider))
+    }
+
+    pub(super) fn sign_in_deadlines(&self) -> SignInDeadlines {
+        self.profiles
+            .iter()
+            .filter_map(|p| Some((p.observation_id().to_owned(), p.ends_at_ms?)))
+            .collect()
     }
 
     pub(super) fn into_profiles(self) -> Vec<ProfileDto> {
@@ -109,10 +116,7 @@ impl Roster {
         now_ms: i64,
     ) -> ProfileDto {
         let active = signed_in == Some(profile.observation_id());
-        let listed_end = ends
-            .get(profile.observation_id())
-            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-            .map(|at| at.timestamp_millis());
+        let listed_end = ends.get(profile.observation_id()).copied();
         let end = if active {
             listed_end
         } else {
@@ -162,15 +166,6 @@ impl Listed {
 
     pub(crate) fn archived(&self) -> bool {
         self.profile.archived
-    }
-}
-
-impl AccountsDto {
-    pub(crate) fn sign_in_deadlines(&self) -> SignInDeadlines {
-        self.profiles
-            .iter()
-            .filter_map(|p| Some((p.observation_id.clone(), p.sign_in_ends_at.clone()?)))
-            .collect()
     }
 }
 
@@ -284,7 +279,7 @@ pub(crate) fn roster_with_logins_for_test(
         provider,
         &archived.iter().cloned().collect(),
         0,
-        &|p| Facts {
+        &mut |p| Facts {
             active: false,
             deadline: Deadline::at(ends_at_ms(p.email.as_deref().unwrap_or_default())),
             parked: None,
