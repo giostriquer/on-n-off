@@ -60,7 +60,8 @@ list read. Both sit in the cache's listing, under one small lock of its own, nev
 lock that spans CLI and network reads, so nothing that writes them waits on a read in flight. The
 roster has two writers. The saved refresh lists it from the vault it loaded to poll, or, when it
 could not poll (the provider's login could not be read), rereads it with the session's key alone;
-it writes it unless a reread happened while it ran. `limits_refresh::roster_changed` rereads it with
+it writes it unless a reread happened while it ran, which loses nothing: the verdicts its poll
+parked are not part of the roster, and the column looks them up when it is served. `limits_refresh::roster_changed` rereads it with
 the session's key alone (`Store::open_unlocked`) after every vault write: an account change
 (`account_changed`, before the provider is read again), automatic remembering, unlock, a category
 edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and the account list

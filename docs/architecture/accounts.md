@@ -195,16 +195,24 @@ account list is read and whenever the Limits column is served; the UI reads the 
 just after the nearest `ending` date it has not been read since, and when the window shows again
 after such a date passed while it was hidden ([shared-reads.md](shared-reads.md)).
 
-The Limits column states each profile as the account list would (`Listed::in_column`,
-`accounts/roster.rs`, from the same `LoginState::of`), from facts it already holds and with no
-login, Keychain item or stamp read: signed in for the account of the read the column is served
-with (its current card), not the native store's; the date from the ends the account list last
-handed over (`Notify::listed`), else the end recorded on the profile (`sign_in_end`, recorded when a
-login is saved and when a home's is first read), never by opening the login; and the verdict the
-saved poll parked, from memory (`usage::recorded_parked`), while the vault login still has the
-fingerprint it was parked for (the vault is already unlocked for the roster) or the profile keeps the
-home it was parked in. A new login in the same home shows once the saved poll reads it, which the
-Limits read that follows the account change runs.
+The Limits column states each profile as the account list would (`Roster::in_column`,
+`accounts/roster.rs`, through the one `stated` the listing uses too), from facts it already holds and
+with no login, Keychain item or stamp read, when the column is served:
+
+- signed in for the account of the read the column is served with (its current card), not the
+  native store's;
+- the signed-in login's date only from the ends the account list last handed over
+  (`Notify::listed`), never from the saved copy: a login that reached its end and was signed in
+  again in the terminal has a later end than the copy, so it shows no date until the account list
+  hands its native one over;
+- a saved login's date from those ends, else the end recorded on the profile (`sign_in_end`,
+  recorded when a login is saved and when a home's is first read), never by opening the login;
+- the verdict the saved poll parked, looked up in memory as the column is served
+  (`usage::parked_for`), for the login the roster listed (`LoginKey`: the vault login's fingerprint,
+  taken from the vault already unlocked for the roster, or the profile's home). The verdict is not
+  part of the roster, so a reread that overtakes the poll and wins the roster cannot drop it, and the
+  read that ran the poll announces the column. A new login in the same home shows once the saved
+  poll reads it, which the Limits read that follows the account change runs.
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's
@@ -636,7 +644,8 @@ config, a denied Keychain probe, a login that names no account) rereads it with 
 read again), automatic remembering when it saves a login or is turned on, unlock, a category edit or
 forget (all through `Notify::roster`), archive and unarchive, and the account list once it has read
 the vault (`Notify::listed`), which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
-the roster alike (`Roster::of`, given the sign-in-end lookup; the roster's is none). Who is signed
+the roster alike (`Roster::of`, given each profile's facts: the listing's read its native login,
+deadlines and verdicts; the roster's are its recorded end alone). Who is signed
 in is not part of the roster: the column marks active the profile of the account the latest native
 read names, and none when that read names nobody (not installed, signed out), so a switch made in
 the CLI moves the active dot and the actions with the next native read.
@@ -646,7 +655,7 @@ reread opens the vault only with the key this session has already unlocked
 (`Store::open_unlocked`, through `SessionKeys::peek`), never asking the OS store, and neither reads
 a native login or a home's login. A sign-in's end needs a login's credentials (a home's Keychain
 item on macOS), so the column carries the end the account list last read
-(`AccountsDto::sign_in_deadlines`, which `Accounts::list` hands over through `Notify::listed` to
+(`Roster::sign_in_deadlines`, as instants, which `Accounts::list` hands over through `Notify::listed` to
 `limits_refresh::accounts_listed`, with the roster reread, announcing the Limits read once and only
 when either changed): the screen, whose account manager lists the
 accounts, shows it as before, and the popover shows it whenever the account list has been read in
