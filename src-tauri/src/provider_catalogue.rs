@@ -3,12 +3,6 @@ use std::path::Path;
 use crate::dto::AgentId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct LimitsFacts {
-    pub client: &'static str,
-    pub vendor: &'static str,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderFacts {
     pub key: &'static str,
     pub display_name: &'static str,
@@ -17,6 +11,86 @@ pub struct ProviderFacts {
     pub limits: Option<LimitsFacts>,
     pub usage: Option<UsageProvider>,
     pub saved_accounts: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitsFacts {
+    pub client: &'static str,
+    pub vendor: &'static str,
+    pub inherits_legacy_reading: bool,
+    pub on_load: &'static [OnLoad],
+    pub credits_spent: Option<CreditsSpent>,
+    pub session_rollouts: Option<SessionRollouts>,
+    pub banked_resets: Option<BankedResets>,
+    pub sign_in_deadline: Option<SignInDeadline>,
+    pub subscription_term: Option<SubscriptionTerm>,
+    pub paid_reset_offer: Option<PaidResetOffer>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OnLoad {
+    DropHiddenWindows,
+    DropResetCredits,
+    MarkFirstMessageSessions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CreditsSpent {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRollouts {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BankedResets {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignInDeadline {
+    Claude,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubscriptionTerm {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaidResetOffer {
+    Codex,
+}
+
+impl LimitsFacts {
+    pub const NONE: Self = Self {
+        client: "",
+        vendor: "",
+        inherits_legacy_reading: false,
+        on_load: &[],
+        credits_spent: None,
+        session_rollouts: None,
+        banked_resets: None,
+        sign_in_deadline: None,
+        subscription_term: None,
+        paid_reset_offer: None,
+    };
+
+    pub const fn named(client: &'static str, vendor: &'static str) -> Self {
+        Self {
+            client,
+            vendor,
+            ..Self::NONE
+        }
+    }
 }
 
 impl AgentId {
@@ -36,8 +110,9 @@ impl AgentId {
                 binary: "claude",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Claude Code",
-                    vendor: "Anthropic",
+                    on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                    sign_in_deadline: Some(SignInDeadline::Claude),
+                    ..LimitsFacts::named("Claude Code", "Anthropic")
                 }),
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
@@ -48,8 +123,13 @@ impl AgentId {
                 binary: "codex",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Codex CLI",
-                    vendor: "OpenAI",
+                    on_load: &[OnLoad::DropHiddenWindows],
+                    credits_spent: Some(CreditsSpent::Codex),
+                    session_rollouts: Some(SessionRollouts::Codex),
+                    banked_resets: Some(BankedResets::Codex),
+                    subscription_term: Some(SubscriptionTerm::Codex),
+                    paid_reset_offer: Some(PaidResetOffer::Codex),
+                    ..LimitsFacts::named("Codex CLI", "OpenAI")
                 }),
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
@@ -78,8 +158,9 @@ impl AgentId {
                 binary: "muse",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Muse Code",
-                    vendor: "Meta",
+                    inherits_legacy_reading: true,
+                    on_load: &[OnLoad::MarkFirstMessageSessions],
+                    ..LimitsFacts::named("Muse Code", "Meta")
                 }),
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: true,
@@ -89,6 +170,13 @@ impl AgentId {
 
     pub const fn key(self) -> &'static str {
         self.facts().key
+    }
+
+    pub const fn limits_facts(self) -> LimitsFacts {
+        match self.facts().limits {
+            Some(facts) => facts,
+            None => LimitsFacts::NONE,
+        }
     }
 
     pub const fn display_name(self) -> &'static str {
@@ -166,6 +254,34 @@ pub const WITH_LIMITS: [AgentId; Fact::LimitsReader.count()] = Fact::LimitsReade
 pub const WITH_SAVED_ACCOUNTS: [AgentId; Fact::SavedAccounts.count()] =
     Fact::SavedAccounts.providers();
 
+pub const WITH_BANKED_RESETS: [AgentId; Fact::BankedResets.count()] =
+    Fact::BankedResets.providers();
+
+const _: () = assert!(
+    Fact::BankedResets.count() == 1,
+    "one provider banks resets: the reset alert, its spend and its re-read follow that one provider"
+);
+
+pub const BANKED_RESETS_PROVIDER: AgentId = WITH_BANKED_RESETS[0];
+
+const _: () = assert!(
+    every_limits_row_is_named(),
+    "every provider with Limits names its client and vendor: start its row from LimitsFacts::named"
+);
+
+const fn every_limits_row_is_named() -> bool {
+    let mut i = 0;
+    while i < AgentId::ALL.len() {
+        if let Some(facts) = AgentId::ALL[i].facts().limits {
+            if facts.client.is_empty() || facts.vendor.is_empty() {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    true
+}
+
 const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;
     while i < AgentId::ALL.len() {
@@ -187,6 +303,7 @@ const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
 enum Fact {
     LimitsReader,
     SavedAccounts,
+    BankedResets,
 }
 
 impl Fact {
@@ -195,6 +312,7 @@ impl Fact {
         match self {
             Self::LimitsReader => facts.limits.is_some(),
             Self::SavedAccounts => facts.saved_accounts,
+            Self::BankedResets => id.limits_facts().banked_resets.is_some(),
         }
     }
 

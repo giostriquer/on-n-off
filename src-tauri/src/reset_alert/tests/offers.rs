@@ -10,7 +10,7 @@ fn poll(
     alerts: &HashMap<String, ResetAlert>,
 ) -> Plan {
     let read = Served {
-        provider: AgentId::Codex,
+        provider: crate::provider_catalogue::BANKED_RESETS_PROVIDER,
         entries: cards.to_vec(),
         failure: None,
     };
@@ -139,7 +139,7 @@ fn only_the_signed_in_accounts_live_read_counts() {
     for change in [
         |card: &mut ProviderLimitsDto| card.current_account = false,
         |card: &mut ProviderLimitsDto| card.status = LimitsStatus::Failed,
-        |card: &mut ProviderLimitsDto| card.provider = AgentId::Claude,
+        |card: &mut ProviderLimitsDto| card.provider = without_banked_resets(),
     ] {
         let mut first = card("acct", 99.0, RENEWS, "2026-10-01T11:50:00Z", 1);
         let mut second = card("acct", 99.0, RENEWS, "2026-10-01T12:00:00Z", 1);
@@ -249,6 +249,8 @@ fn the_fullest_main_window_decides_and_a_models_own_limit_never_does() {
                 resets_at: Some("2026-10-01T15:00:00Z".into()),
                 window_seconds: Some(18_000),
                 observed_at: observed_at.into(),
+                role: None,
+                starts_on_first_message: false,
             });
             card
         };

@@ -49,7 +49,7 @@ fn pinned_limits(agent: AgentId) -> Vec<ProviderLimitsDto> {
                 {"id":"session","label":"5 hour · all models","kind":"session","usedPercent":12.0,
                  "resetsAt":"2026-09-01T13:00:00Z","observedAt":"2026-09-01T10:00:00Z"},
                 {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":63.0,
-                 "observedAt":"2026-09-01T10:00:00Z"}
+                 "observedAt":"2026-09-01T10:00:00Z","role":"innerRing"}
             ]}
         ]),
         AgentId::Codex => serde_json::json!([

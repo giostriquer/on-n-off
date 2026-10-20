@@ -1,6 +1,7 @@
 mod archived;
 mod memory;
 mod remembered_reading;
+mod rollouts;
 
 use super::*;
 use crate::dto::{
@@ -192,16 +193,36 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
         .labelled("me@example.com")
         .with_reading(Reading {
             plan: Some("pro".to_string()),
-            windows: vec![LimitWindowDto {
-                observed_at: "2026-08-17T20:00:00.000Z".to_string(),
-                ..fixture(
-                    "primary",
-                    "Weekly · all models",
-                    LimitWindowKind::Weekly,
-                    2.5,
-                    None,
-                )
-            }],
+            plan_label: Some("Pro ×20".to_string()),
+            plan_capacity: Some(20),
+            windows: vec![
+                LimitWindowDto {
+                    observed_at: "2026-08-17T20:00:00.000Z".to_string(),
+                    ..fixture(
+                        "primary",
+                        "Weekly · all models",
+                        LimitWindowKind::Weekly,
+                        2.5,
+                        None,
+                    )
+                },
+                LimitWindowDto {
+                    observed_at: "2026-08-17T20:00:00.000Z".to_string(),
+                    role: Some(crate::dto::WindowRole::InnerRing),
+                    ..fixture("ring", "Weekly · Ring", LimitWindowKind::Model, 3.0, None)
+                },
+                LimitWindowDto {
+                    observed_at: "2026-08-17T20:00:00.000Z".to_string(),
+                    starts_on_first_message: true,
+                    ..fixture(
+                        "session",
+                        "5 hour · all models",
+                        LimitWindowKind::Session,
+                        0.0,
+                        None,
+                    )
+                },
+            ],
             credits: Some(LimitsCreditsDto {
                 balance: "3".to_string(),
                 unlimited: false,
@@ -247,7 +268,13 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             "account": {"id": "acct-1", "label": "me@example.com"},
             "currentAccount": true,
             "plan": "pro",
-            "windows": [{"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"}],
+            "planLabel": "Pro ×20",
+            "planCapacity": 20,
+            "windows": [
+                {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 2.5, "observedAt": "2026-08-17T20:00:00.000Z"},
+                {"id": "ring", "label": "Weekly · Ring", "kind": "model", "usedPercent": 3.0, "observedAt": "2026-08-17T20:00:00.000Z", "role": "innerRing"},
+                {"id": "session", "label": "5 hour · all models", "kind": "session", "usedPercent": 0.0, "observedAt": "2026-08-17T20:00:00.000Z", "startsOnFirstMessage": true}
+            ],
             "credits": {"balance": "3", "unlimited": false},
             "workspaceCredits": {"limit": "25000", "used": "8000", "usedPercent": 32.0, "resetsAt": "2026-10-01T12:00:00+00:00", "reached": true},
             "creditsSpent": {"last7Days": 18303.4, "last30Days": 20299.7, "updatedAt": "2026-09-24T19:00:00Z"},
@@ -267,6 +294,8 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
     assert_eq!(value["message"], "Sign in");
     assert_eq!(value["windows"], json!([]));
     assert!(value.get("plan").is_none());
+    assert!(value.get("planLabel").is_none());
+    assert!(value.get("planCapacity").is_none());
     assert!(value.get("credits").is_none());
     assert!(value.get("workspaceCredits").is_none());
     assert!(value.get("creditsSpent").is_none());

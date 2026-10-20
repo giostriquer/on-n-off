@@ -4,6 +4,10 @@ import type { AgentId } from "./types";
 export type LimitsProvider = keyof typeof catalogue.withLimits;
 export type AccountProvider = keyof typeof catalogue.withSavedAccounts;
 
+type LimitsFeatureRow = (typeof catalogue.limitsFeatures)[LimitsProvider];
+
+export const LIMITS_FEATURE_ROWS: Readonly<Record<LimitsProvider, LimitsFeatureRow>> = catalogue.limitsFeatures;
+
 type CatalogueRow = (typeof catalogue.providers)[AgentId];
 
 const ROWS: Readonly<Record<AgentId, CatalogueRow>> = catalogue.providers;

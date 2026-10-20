@@ -10,7 +10,7 @@ fn wire(dto: &ProviderLimitsDto) -> Value {
 }
 
 fn remembered(plan: &str) -> ProviderLimitsDto {
-    card(json!({
+    let mut dto = card(json!({
         "provider": "codex",
         "status": "ok",
         "account": {"id": "acct-1", "label": "a@example.com"},
@@ -28,7 +28,9 @@ fn remembered(plan: &str) -> ProviderLimitsDto {
         "subscription": {"activeUntil": "2100-09-28T16:22:34Z", "willRenew": false,
                          "note": "cancelled", "checkedAt": "2026-08-17T10:00:00Z"},
         "resetCredits": {"availableCount": 1, "nextExpiresAt": "2100-09-01T12:00:00+00:00"}
-    }))
+    }));
+    crate::limits::plan::describe_reading(dto.provider, &mut dto.reading);
+    dto
 }
 
 #[test]
@@ -42,6 +44,7 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
         "account": {"id": "acct-1", "label": "a@example.com"},
         "currentAccount": true,
         "plan": "business",
+        "planLabel": "Business",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
              "observedAt": "2026-08-17T11:00:00.000Z"}
@@ -60,6 +63,7 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
             "account": {"id": "acct-1", "label": "a@example.com"},
             "currentAccount": true,
             "plan": "business",
+            "planLabel": "Business",
             "windows": [
                 {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
                  "usedPercent": 50.0, "observedAt": "2026-08-17T11:00:00.000Z"}
@@ -79,6 +83,7 @@ fn an_answered_read_keeps_only_the_remembered_figures_it_could_not_tell() {
             "account": {"id": "acct-1", "label": "a@example.com"},
             "currentAccount": false,
             "plan": "business",
+            "planLabel": "Business",
             "windows": [
                 {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
                  "usedPercent": 50.0, "observedAt": "2026-08-17T11:00:00.000Z"}
@@ -156,6 +161,7 @@ fn a_failed_read_shows_the_remembered_reading() {
             "account": {"id": "acct-1", "label": "a@example.com"},
             "currentAccount": true,
             "plan": "pro",
+            "planLabel": "Pro ×20", "planCapacity": 20,
             "windows": [
                 {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
                  "usedPercent": 40.0, "resetsAt": "2026-08-24T10:00:00Z",

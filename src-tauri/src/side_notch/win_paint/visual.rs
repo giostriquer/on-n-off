@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::GithubPrsDto;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading, WindowRole};
 use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
 use crate::side_notch::sessions::LiveSession;
@@ -77,6 +77,8 @@ fn visual_dump() {
                     resets_at: Some("2026-09-07T10:59:00Z".into()),
                     window_seconds: None,
                     observed_at: "2026-09-03T10:00:00Z".into(),
+                    role: None,
+                    starts_on_first_message: false,
                 },
                 LimitWindowDto {
                     id: "w1".into(),
@@ -86,6 +88,8 @@ fn visual_dump() {
                     resets_at: Some("2026-09-03T19:59:00Z".into()),
                     window_seconds: None,
                     observed_at: "2026-09-03T10:00:00Z".into(),
+                    role: None,
+                    starts_on_first_message: false,
                 },
                 LimitWindowDto {
                     id: "w3".into(),
@@ -95,6 +99,8 @@ fn visual_dump() {
                     resets_at: Some("2026-09-07T10:59:00Z".into()),
                     window_seconds: None,
                     observed_at: "2026-09-03T10:00:00Z".into(),
+                    role: Some(WindowRole::InnerRing),
+                    starts_on_first_message: false,
                 },
             ],
             ..Reading::default()
@@ -131,6 +137,8 @@ fn visual_dump() {
                 resets_at: Some("2026-09-07T10:59:00Z".into()),
                 window_seconds: None,
                 observed_at: "2026-09-03T10:00:00Z".into(),
+                role: None,
+                starts_on_first_message: false,
             }],
             workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
                 limit: "25000".into(),

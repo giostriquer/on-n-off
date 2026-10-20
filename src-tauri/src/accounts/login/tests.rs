@@ -68,6 +68,8 @@ fn usage(identity: &Identity) -> ProviderLimitsDto {
                     window_seconds: Some(604800),
                     resets_at: None,
                     observed_at: "2026-09-13T12:00:00Z".into(),
+                    role: None,
+                    starts_on_first_message: false,
                 }],
                 ..Default::default()
             })

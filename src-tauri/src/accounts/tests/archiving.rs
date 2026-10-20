@@ -34,6 +34,8 @@ fn archived_beside_another(harness: &Harness, identity: &Identity, email: &str) 
                     window_seconds: Some(604_800),
                     resets_at: None,
                     observed_at: "2026-09-10T00:00:00Z".into(),
+                    role: None,
+                    starts_on_first_message: false,
                 }],
                 ..Reading::default()
             })

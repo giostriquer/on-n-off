@@ -10,6 +10,7 @@ pub(super) fn finish(
     mut parsed: Parsed,
 ) -> ProviderLimitsDto {
     window::keep_in_range(&mut parsed.reading);
+    super::plan::describe_reading(provider, &mut parsed.reading);
     let windows = &mut parsed.reading.windows;
     windows.sort_by_key(|window| kind_rank(window.kind));
     let observed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);

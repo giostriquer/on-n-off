@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, Reading, WindowRole};
 
 pub(super) const FIVE_HOURS: Duration = Duration::from_secs(5 * 60 * 60);
 pub(super) const ONE_WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -25,6 +25,8 @@ pub(super) enum Scope {
 pub(super) struct QuotaWindow {
     pub(super) id: String,
     pub(super) scope: Scope,
+    pub(super) role: Option<WindowRole>,
+    pub(super) cycle_starts_on_first_message: bool,
     pub(super) length: Option<Duration>,
     pub(super) used_percent: f64,
     pub(super) reset: Option<ResetInstant>,
@@ -35,6 +37,8 @@ impl QuotaWindow {
         Self {
             id: id.into(),
             scope: Scope::AllModels,
+            role: None,
+            cycle_starts_on_first_message: true,
             length: Some(length),
             used_percent: 0.0,
             reset: None,
@@ -42,13 +46,17 @@ impl QuotaWindow {
     }
 
     pub(super) fn into_dto(self) -> LimitWindowDto {
+        let used_percent = in_range(self.used_percent);
         LimitWindowDto {
             kind: self.kind(),
             label: self.label(),
-            used_percent: in_range(self.used_percent),
+            used_percent,
             resets_at: self.reset.map(|reset| reset.to_string()),
             window_seconds: self.length.map(|length| length.as_secs()),
             observed_at: String::new(),
+            role: self.role,
+            starts_on_first_message: self.cycle_starts_on_first_message
+                && unstarted(used_percent, self.reset.is_some()),
             id: self.id,
         }
     }
@@ -98,6 +106,20 @@ fn in_range(used_percent: f64) -> f64 {
         used_percent.clamp(0.0, 100.0)
     } else {
         0.0
+    }
+}
+
+fn unstarted(used_percent: f64, has_reset: bool) -> bool {
+    used_percent == 0.0 && !has_reset
+}
+
+pub(super) fn mark_first_message_sessions(windows: &mut [LimitWindowDto]) {
+    for window in windows {
+        if window.kind == LimitWindowKind::Session
+            && unstarted(window.used_percent, window.resets_at.is_some())
+        {
+            window.starts_on_first_message = true;
+        }
     }
 }
 
@@ -188,6 +210,8 @@ pub(super) fn fixture(
         resets_at,
         window_seconds: None,
         observed_at: String::new(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 

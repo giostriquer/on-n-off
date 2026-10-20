@@ -77,6 +77,8 @@ fn reading(profile: &Profile) -> ProviderLimitsDto {
         resets_at: None,
         observed_at: "2026-09-19T00:00:00Z".into(),
         window_seconds: Some(604800),
+        role: None,
+        starts_on_first_message: false,
     }];
     dto
 }

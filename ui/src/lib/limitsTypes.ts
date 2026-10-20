@@ -3,6 +3,8 @@ import type { AgentId } from "./types";
 export type LimitsStatus = "ok" | "signedOut" | "unauthenticated" | "unsupported" | "failed";
 export type LimitWindowKind = "session" | "weekly" | "model";
 
+export type LimitWindowRole = "innerRing";
+
 export type LimitWindow = {
   id: string;
   label: string;
@@ -11,6 +13,8 @@ export type LimitWindow = {
   resetsAt?: string | null;
   windowSeconds?: number | null;
   observedAt: string;
+  role?: LimitWindowRole | null;
+  startsOnFirstMessage?: boolean;
 };
 
 export type LimitsCredits = {
@@ -75,6 +79,8 @@ export type ProviderLimits = {
   savedProfile?: boolean;
   archived?: boolean;
   plan?: string | null;
+  planLabel?: string | null;
+  planCapacity?: number | null;
   windows: LimitWindow[];
   credits?: LimitsCredits | null;
   workspaceCredits?: LimitsWorkspaceCredits | null;

@@ -165,6 +165,57 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
 }
 
 #[test]
+fn a_kept_plan_always_reads_as_its_own_label_and_capacity() {
+    let remembered = Reading {
+        plan: Some("pro".to_string()),
+        plan_label: Some("Stale label".to_string()),
+        plan_capacity: Some(99),
+        windows: vec![observed(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            40.0,
+            None,
+            "2026-08-17T10:00:00.000Z",
+        )],
+        ..Reading::default()
+    };
+    let failed = |reading: Reading| ProviderLimitsDto {
+        status: LimitsStatus::Failed,
+        ..ProviderLimitsDto::for_test(crate::dto::AgentId::Codex, "acct-1").with_reading(reading)
+    };
+    let plan = |card: &ProviderLimitsDto| {
+        (
+            card.reading.plan.clone(),
+            card.reading.plan_label.clone(),
+            card.reading.plan_capacity,
+        )
+    };
+
+    let mut unreported = failed(Reading::default());
+    keep_remembered(&mut unreported, remembered.clone());
+    assert_eq!(
+        unreported.reading.windows.len(),
+        1,
+        "the remembered reading stands in"
+    );
+    assert_eq!(
+        plan(&unreported),
+        (Some("pro".into()), Some("Pro ×20".into()), Some(20))
+    );
+
+    let mut reported = failed(Reading {
+        plan: Some("plus".to_string()),
+        ..Reading::default()
+    });
+    keep_remembered(&mut reported, remembered);
+    assert_eq!(
+        plan(&reported),
+        (Some("plus".into()), Some("Plus".into()), None)
+    );
+}
+
+#[test]
 fn a_count_lapses_at_its_expiry_itself() {
     let expires_at = "2026-09-22T12:00:00+00:00";
     let resets = crate::dto::LimitsResetCreditsDto {

@@ -102,6 +102,8 @@ fn session_window(percent: f64) -> LimitWindowDto {
         resets_at: None,
         window_seconds: None,
         observed_at: "2026-09-01T10:00:00Z".into(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 fn session_only(provider: AgentId, percent: f64) -> ProviderCell {
@@ -130,6 +132,8 @@ fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWi
         resets_at: Some("2099-01-01T00:00:00Z".into()),
         window_seconds: None,
         observed_at: "2026-09-01T10:00:00Z".into(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderCell {

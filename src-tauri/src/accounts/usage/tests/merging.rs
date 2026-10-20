@@ -33,6 +33,7 @@ fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
         "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
         "currentAccount": false,
         "plan": "business",
+        "planLabel": "Business",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 40.0,
              "observedAt": "2026-09-19T00:00:00Z"}
@@ -79,6 +80,7 @@ fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
         "account": {"id": p.identity.observation_key(), "label": "a@example.com"},
         "currentAccount": false,
         "plan": "business",
+        "planLabel": "Business",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 50.0,
              "observedAt": "2026-09-20T00:00:00Z"}
@@ -105,6 +107,7 @@ fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
         "account": {"id": p.identity.observation_key(), "label": "a@example.com"},
         "currentAccount": false,
         "plan": "business",
+        "planLabel": "Business",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly",
              "usedPercent": 50.0, "observedAt": "2026-09-20T00:00:00Z"}

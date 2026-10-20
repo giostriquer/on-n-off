@@ -211,6 +211,22 @@ fn an_idle_mint_answer_reads_ok() {
             .collect::<Vec<_>>(),
         [(LimitWindowKind::Session, 0.0)]
     );
+    let (card, _) = super::super::outcome::signed_in(
+        crate::dto::AgentId::Muse,
+        Read {
+            account: read.account.clone(),
+            answer: Ok(read),
+        },
+    );
+    assert_eq!(
+        (
+            card.reading.plan_label.as_deref(),
+            card.reading.plan_capacity
+        ),
+        (Some("Muse Code Power Usage"), None)
+    );
+    assert!(card.reading.windows[0].starts_on_first_message);
+    assert_eq!(card.reading.windows[0].role, None);
 }
 
 fn minted(root: &Path, email: Option<&str>) -> Read {

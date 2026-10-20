@@ -220,6 +220,8 @@ pub(super) fn provider_reading(provider: AgentId, key: &str) -> crate::dto::Prov
             window_seconds: Some(604_800),
             resets_at: None,
             observed_at: "2026-09-19T00:00:00Z".into(),
+            role: None,
+            starts_on_first_message: false,
         }],
         ..Default::default()
     })

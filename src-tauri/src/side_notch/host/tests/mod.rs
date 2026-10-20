@@ -351,6 +351,8 @@ fn card(provider: AgentId, percent: f64) -> Vec<ProviderLimitsDto> {
                 resets_at: None,
                 window_seconds: None,
                 observed_at: "2026-09-01T10:00:00Z".into(),
+                role: None,
+                starts_on_first_message: false,
             }],
             ..Reading::default()
         },

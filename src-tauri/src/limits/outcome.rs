@@ -5,7 +5,6 @@ use super::{scoped_account, Parsed};
 use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::{HttpError, RateLimitReset};
-use crate::provider_catalogue::LimitsFacts;
 
 const LONGEST_RETRY_FLOOR: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -235,11 +234,10 @@ pub(crate) fn verified(provider: AgentId, failure: Option<&ReadFailure>) -> Resu
 
 pub(crate) fn message(provider: AgentId, context: Context, failure: &ReadFailure) -> String {
     let facts = provider.facts();
-    let LimitsFacts { client, vendor } = facts.limits.unwrap_or(LimitsFacts {
-        client: facts.display_name,
-        vendor: facts.display_name,
-    });
     let (display, cli) = (facts.display_name, facts.binary);
+    let (client, vendor) = facts
+        .limits
+        .map_or((display, display), |limits| (limits.client, limits.vendor));
     match (context, failure) {
         (Context::Verify, ReadFailure::OtherAccount) => {
             format!("{display} answered for a different account. Sign in again.")
