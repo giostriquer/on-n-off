@@ -1,14 +1,8 @@
-use super::fixtures::{mint_body, mint_response};
+use super::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::http::{refused_url, serve_once};
 use serde_json::Value;
-
-fn scoped_you() -> String {
-    crate::accounts::muse_store::identity("you@example.com")
-        .unwrap()
-        .observation_key()
-}
 
 fn identity() -> Identity {
     crate::accounts::muse_store::identity("You@Example.com").unwrap()
@@ -25,23 +19,15 @@ fn token() -> AccessToken {
     AccessToken::new("saved-token")
 }
 
-fn answer(email: &str, usage: serde_json::Value) -> String {
-    json!({
-        "subs_tier_name": "Muse Code Power Usage",
-        "is_subs_active": true,
-        "require_payment": false,
-        "user_email": email,
-        "subs_usage": usage,
-    })
-    .to_string()
+fn answer(email: &str, usage: Value) -> String {
+    let mut body = mint_body();
+    body["user_email"] = json!(email);
+    body["subs_usage"] = usage;
+    body.to_string()
 }
 
-fn usage() -> serde_json::Value {
-    json!({
-        "tier": "power",
-        "window": {"used_percent": 41.0, "window_duration_mins": 300.0, "resets_at": 1_787_000_000.0},
-        "weekly": {"used_percent": 22.0, "resets_at": 1_787_500_000.0},
-    })
+fn usage() -> Value {
+    mint_body()["subs_usage"].clone()
 }
 
 #[test]
@@ -56,7 +42,7 @@ fn a_saved_login_reads_its_own_card_under_its_scoped_id() {
     let account = card.account.unwrap();
     assert_eq!(account.id, identity().observation_key());
     assert_eq!(account.legacy_id.as_deref(), Some("email:you@example.com"));
-    assert_eq!(card.reading.plan.as_deref(), Some("Muse Code Power Usage"));
+    assert_eq!(card.reading.plan.as_deref(), Some("Wonder"));
     assert_eq!(
         card.reading
             .windows
@@ -105,7 +91,7 @@ fn an_idle_window_reads_its_plan_and_an_unused_session() {
         card.account.map(|account| account.id),
         Some(identity().observation_key())
     );
-    assert_eq!(card.reading.plan.as_deref(), Some("Muse Code Power Usage"));
+    assert_eq!(card.reading.plan.as_deref(), Some("Wonder"));
     assert_eq!(
         card.reading
             .windows
@@ -184,6 +170,22 @@ fn a_mint_response_normalizes_to_a_card_with_both_windows() {
     assert_eq!(
         session.resets_at.as_deref(),
         Some("2025-10-09T08:53:20.000Z")
+    );
+}
+
+#[test]
+fn a_usage_outside_zero_to_a_hundred_percent_is_clamped() {
+    let mut body = mint_body();
+    body["subs_usage"]["weekly"]["used_percent"] = json!(140);
+    body["subs_usage"]["window"]["used_percent"] = json!(-3);
+    let parsed = mint_reading(body);
+    assert_eq!(
+        window_of(&parsed, LimitWindowKind::Weekly).used_percent,
+        100.0
+    );
+    assert_eq!(
+        window_of(&parsed, LimitWindowKind::Session).used_percent,
+        0.0
     );
 }
 

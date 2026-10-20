@@ -122,12 +122,11 @@ impl Session {
 
     pub(crate) fn run<R: DeserializeOwned, T>(
         mut self,
-        capabilities: Option<Value>,
         accept: impl FnOnce(&R) -> Result<(), String>,
         talk: impl FnOnce(R, &mut Conversation) -> Result<T, Failure>,
     ) -> Result<T, String> {
         let conversation = &mut self.conversation;
-        let answer = match conversation.request(initialize(capabilities)) {
+        let answer = match conversation.request(initialize()) {
             Ok(answer) => answer,
             Err(failure) => {
                 let exit = conversation.transport.finish();
@@ -173,16 +172,12 @@ impl Conversation {
     }
 }
 
-fn initialize(capabilities: Option<Value>) -> Request<'static> {
-    let mut params = json!({"clientInfo": {
+fn initialize() -> Request<'static> {
+    Request::new(1, "initialize").params(json!({"clientInfo": {
         "name": "on_n_off",
         "title": "on-n-off",
         "version": env!("CARGO_PKG_VERSION"),
-    }});
-    if let Some(capabilities) = capabilities {
-        params["capabilities"] = capabilities;
-    }
-    Request::new(1, "initialize").params(params)
+    }}))
 }
 
 fn answer<R: DeserializeOwned>(

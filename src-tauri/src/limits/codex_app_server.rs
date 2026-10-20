@@ -225,7 +225,6 @@ fn open_account<T>(
     then: impl FnOnce(PathBuf, AccountReadResponse, &mut Conversation) -> Result<T, Failure>,
 ) -> Result<T, String> {
     session.run(
-        None,
         |initialize: &InitializeResponse| {
             if crate::paths::equivalent(&initialize.codex_home, expected_codex_home) {
                 return Ok(());

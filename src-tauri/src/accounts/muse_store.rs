@@ -54,7 +54,7 @@ impl Keychain for SystemKeychain {
         #[cfg(target_os = "macos")]
         return super::keychain::find_password(KEYCHAIN_SERVICE, Some(KEYCHAIN_ACCOUNT));
         #[cfg(not(target_os = "macos"))]
-        Ok(None)
+        Err(UNREACHABLE.into())
     }
 
     fn write(&self, raw: &[u8]) -> Result<(), String> {

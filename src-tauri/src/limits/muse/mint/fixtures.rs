@@ -2,6 +2,12 @@ use serde_json::{json, Value};
 
 use super::MintResponse;
 
+pub(in crate::limits::muse) fn scoped_you() -> String {
+    crate::accounts::muse_store::identity("you@example.com")
+        .unwrap()
+        .observation_key()
+}
+
 pub(in crate::limits::muse) fn mint_body() -> Value {
     json!({
         "is_subs_active": true,

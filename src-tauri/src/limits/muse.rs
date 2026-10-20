@@ -90,21 +90,21 @@ fn read_current(
             ReadFailure::NotInstalled
         });
     };
-    let why = match credential {
-        MuseCredential::Token(token) => return mint::current_read(email, mint(&token)),
-        MuseCredential::ApiKey => {
-            return Err(ReadFailure::Unsupported(
-                "Muse is signed in with an API key, which has no subscription limits.".to_string(),
-            ))
-        }
-        MuseCredential::Expired => {
+    match credential {
+        MuseCredential::Token(token) => mint::current_read(email, mint(&token)),
+        MuseCredential::ApiKey => Err(ReadFailure::Unsupported(
+            "Muse is signed in with an API key, which has no subscription limits.".to_string(),
+        )),
+        MuseCredential::Expired => Err(ReadFailure::Failed(
+            account_dto(email),
             "Muse's login has expired. Sign in with `muse` again to see subscription limits."
-        }
-        MuseCredential::Unread => {
-            "on-n-off could not read Muse's login from the Keychain, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts."
-        }
-    };
-    Err(ReadFailure::Failed(account_dto(email), why.to_string()))
+                .to_string(),
+        )),
+        MuseCredential::Unread => Err(ReadFailure::Failed(
+            account_dto(email),
+            "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.".to_string(),
+        )),
+    }
 }
 
 #[cfg(test)]

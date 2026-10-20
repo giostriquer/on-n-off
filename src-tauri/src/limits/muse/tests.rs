@@ -1,14 +1,8 @@
-use super::mint::fixtures::{mint_body, mint_response};
+use super::mint::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::http::RateLimitReset;
 use serde_json::json;
-
-fn scoped_you() -> String {
-    crate::accounts::muse_store::identity("you@example.com")
-        .unwrap()
-        .observation_key()
-}
 
 fn login(email: Option<&str>, credential: MuseCredential) -> Option<MuseLogin> {
     Some(MuseLogin {
@@ -75,6 +69,18 @@ fn no_login_reads_signed_out_or_not_installed_without_asking_meta() {
 }
 
 #[test]
+fn the_current_card_without_a_login_names_whether_the_muse_cli_was_found() {
+    let card = muse_current(&crate::paths::scratch_dir("muse-current-no-login"));
+    let expected = if resolve_provider_cli(AgentId::Muse, "muse").is_some() {
+        "Sign in with `muse` to see subscription limits."
+    } else {
+        "Install Muse Code and sign in with `muse` to see subscription limits."
+    };
+    assert_eq!(card.status, LimitsStatus::SignedOut);
+    assert_eq!(card.message.as_deref(), Some(expected));
+}
+
+#[test]
 fn a_login_never_asks_whether_muse_is_installed() {
     let root = crate::paths::scratch_dir("muse-login-installed");
     for credential in [
@@ -118,7 +124,7 @@ fn an_expired_or_unread_login_fails_the_card_under_its_account_without_asking_me
         ),
         (
             MuseCredential::Unread,
-            "on-n-off could not read Muse's login from the Keychain, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.",
+            "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.",
         ),
     ] {
         let card = finish_read(read_current(

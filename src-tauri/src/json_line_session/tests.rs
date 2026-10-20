@@ -28,11 +28,7 @@ fn opened<T>(
     session: Session,
     talk: impl FnOnce(&mut Conversation) -> Result<T, Failure>,
 ) -> Result<T, String> {
-    session.run(
-        None,
-        |_: &Value| Ok(()),
-        |_, conversation| talk(conversation),
-    )
+    session.run(|_: &Value| Ok(()), |_, conversation| talk(conversation))
 }
 
 #[test]
@@ -345,19 +341,13 @@ fn a_request_waits_for_the_answer_with_its_id() {
 }
 
 #[test]
-fn every_line_is_bare_json_without_a_jsonrpc_version() {
+fn the_handshake_sends_only_the_client_and_every_line_is_bare_json() {
     let script = initialize_then([json!({"id": 2, "result": {}})]);
 
-    script
-        .session(LITE)
-        .run(
-            Some(json!({"acme": true})),
-            |_: &Value| Ok(()),
-            |_, conversation| {
-                conversation.request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
-            },
-        )
-        .unwrap();
+    opened(script.session(LITE), |conversation| {
+        conversation.request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
+    })
+    .unwrap();
 
     let lines: Vec<String> = script
         .sent()
@@ -368,28 +358,12 @@ fn every_line_is_bare_json_without_a_jsonrpc_version() {
         lines,
         [
             format!(
-                r#"{{"id":1,"method":"initialize","params":{{"clientInfo":{{"name":"on_n_off","title":"on-n-off","version":"{}"}},"capabilities":{{"acme":true}}}}}}"#,
+                r#"{{"id":1,"method":"initialize","params":{{"clientInfo":{{"name":"on_n_off","title":"on-n-off","version":"{}"}}}}}}"#,
                 env!("CARGO_PKG_VERSION")
             ),
             r#"{"method":"initialized","params":{}}"#.to_string(),
             r#"{"id":2,"method":"acme/read","params":{"a":1}}"#.to_string(),
         ]
-    );
-}
-
-#[test]
-fn a_handshake_without_capabilities_sends_only_the_client() {
-    let script = initialize_then([]);
-
-    opened(script.session(LITE), |_| Ok(())).unwrap();
-
-    assert_eq!(
-        script.sent()[0]["params"],
-        json!({"clientInfo": {
-            "name": "on_n_off",
-            "title": "on-n-off",
-            "version": env!("CARGO_PKG_VERSION"),
-        }})
     );
 }
 
@@ -401,7 +375,6 @@ fn a_rejected_answer_ends_the_handshake_before_initialized_with_its_own_message(
     let error = script
         .session(LITE)
         .run(
-            None,
             |answer: &Value| {
                 Err(format!(
                     "Acme server used {}.",
