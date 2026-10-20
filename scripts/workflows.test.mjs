@@ -465,3 +465,13 @@ test("Dependabot keeps the pins of every workflow and local action current", { s
     .map((entry) => `/.github/actions/${entry.name}`);
   assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });
+
+test("every installer build installs the pinned cargo-about first, for the bundled license notice", { skip }, () => {
+  for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
+    const install = step(job, "Install cargo-about");
+    assert.equal(install.run, "./scripts/install-cargo-about.ps1", name);
+    const build = job.steps.findIndex((candidate) => /scripts\/build-bundle\.ps1/.test(candidate.run ?? ""));
+    assert.notEqual(build, -1, `${name} builds no bundle`);
+    assert.ok(install.index < build, `${name} installs cargo-about before it builds the bundle`);
+  }
+});

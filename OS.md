@@ -70,6 +70,16 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
+- Installers carry `THIRD_PARTY_LICENSES.md`, the license text of every Rust crate and JavaScript
+  package they bundle. `scripts/build-bundle.ps1` runs `scripts/third-party-licenses.mjs` first:
+  `cargo about generate` over the two shipped targets (`src-tauri/about.toml`; build and dev
+  dependencies left out), plus every production npm package reached from `package.json`'s
+  `dependencies` (`@types/*` left out). It adds the file through `src-tauri/tauri.licenses.conf.json`
+  and checks that the `.app` carries it. A new license fails the build until `about.toml`'s
+  `accepted` list names it, and an npm package that ships no license text fails until `TEXT_FROM`
+  maps it to one that does. The bundle and release jobs install a pinned cargo-about
+  (`scripts/install-cargo-about.ps1`, SHA-256 checked); a plain local `bun run tauri build` leaves
+  the file out.
 - `tauri-plugin-updater` is built without its default `zip` feature. A Windows update is the signed
   NSIS installer and a macOS one the `.app.tar.gz`, both of which the plugin installs without it,
   so the `zip` crate and its advisories stay out of the build. Turn it back on only for a zipped

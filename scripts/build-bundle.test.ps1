@@ -69,6 +69,11 @@ try {
     "disk image" | Set-Content -LiteralPath (Join-Path $dmgDirectory "on-n-off_0.2.0_aarch64.dmg") -Encoding UTF8
     "updater bundle" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz") -Encoding UTF8
     "signature" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz.sig") -Encoding UTF8
+    $appResources = Join-Path $macosDirectory "on-n-off.app" "Contents" "Resources"
+    $generatedLicenses = Join-Path $fixtureRoot "src-tauri" "gen" "THIRD_PARTY_LICENSES.md"
+    New-Item -ItemType Directory -Path $appResources, (Split-Path -Parent $generatedLicenses) -Force | Out-Null
+    "licenses" | Set-Content -LiteralPath (Join-Path $appResources "THIRD_PARTY_LICENSES.md") -Encoding UTF8
+    "licenses" | Set-Content -LiteralPath $generatedLicenses -Encoding UTF8
 
     $validNsis = Invoke-Validator -Kind "nsis" -Signed
     Assert-Equal $validNsis.ExitCode 0 "valid signed NSIS"
@@ -79,6 +84,7 @@ try {
     Assert-Match $validDmg.Output "installer=.*on-n-off_0.2.0_aarch64.dmg" "valid DMG installer"
     Assert-Match $validDmg.Output "updater=.*on-n-off.app.tar.gz" "valid DMG updater"
     Assert-Match $validDmg.Output "signature=.*on-n-off.app.tar.gz.sig" "valid DMG signature"
+    Assert-Match $validDmg.Output "licenses=.*on-n-off.app.*THIRD_PARTY_LICENSES.md" "valid DMG license notice"
 
     $stageDirectory = Join-Path $fixtureRoot "stage"
     $stagedNsis = Invoke-Validator -Kind "nsis" -Signed -StageDirectory $stageDirectory
@@ -109,6 +115,18 @@ try {
 
     $unsignedDmg = Invoke-Validator -Kind "dmg"
     Assert-Equal $unsignedDmg.ExitCode 0 "unsigned DMG ignores updater artifacts"
+
+    Remove-Item -LiteralPath (Join-Path $appResources "THIRD_PARTY_LICENSES.md")
+    $appWithoutLicenses = Invoke-Validator -Kind "dmg"
+    Assert-Equal $appWithoutLicenses.ExitCode 1 "an app bundle without the license notice"
+    Assert-Match $appWithoutLicenses.Output "THIRD_PARTY_LICENSES.md" "an app bundle without the license notice"
+    "licenses" | Set-Content -LiteralPath (Join-Path $appResources "THIRD_PARTY_LICENSES.md") -Encoding UTF8
+
+    Remove-Item -LiteralPath $generatedLicenses
+    $notGenerated = Invoke-Validator -Kind "nsis"
+    Assert-Equal $notGenerated.ExitCode 1 "an installer built without generating the license notice"
+    Assert-Match $notGenerated.Output "THIRD_PARTY_LICENSES.md" "an installer built without generating the license notice"
+    "licenses" | Set-Content -LiteralPath $generatedLicenses -Encoding UTF8
 
     "other" | Set-Content -LiteralPath (Join-Path $nsisDirectory "other.exe") -Encoding UTF8
     $extraInstaller = Invoke-Validator -Kind "nsis"

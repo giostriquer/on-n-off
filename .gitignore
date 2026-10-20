@@ -23,6 +23,7 @@ out/
 /target/
 src-tauri/target/
 src-tauri/gen/schemas
+src-tauri/gen/THIRD_PARTY_LICENSES.md
 ui/dist
 
 # Workbench scratch

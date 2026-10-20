@@ -40,6 +40,7 @@ $formats = @{
 }
 $format = $formats[$InstallerKind]
 $bundleRoot = Join-Path $RepositoryRoot "src-tauri" "target" "release" "bundle"
+$generatedLicenses = Join-Path $RepositoryRoot "src-tauri" "gen" "THIRD_PARTY_LICENSES.md"
 $installerDirectory = Join-Path $bundleRoot $format.InstallerDirectory
 
 if (-not $ValidateOnly) {
@@ -47,7 +48,11 @@ if (-not $ValidateOnly) {
     Push-Location $RepositoryRoot
     try {
         $env:ON_N_OFF_INSTALLER_KIND = $InstallerKind
-        $arguments = @("run", "tauri", "--", "build", "--bundles", $format.Bundles)
+        & bun "scripts/third-party-licenses.mjs" $generatedLicenses
+        if ($LASTEXITCODE -ne 0) {
+            throw "Generating THIRD_PARTY_LICENSES.md failed with exit code $LASTEXITCODE."
+        }
+        $arguments = @("run", "tauri", "--", "build", "--bundles", $format.Bundles, "--config", "src-tauri/tauri.licenses.conf.json")
         if ($SignedUpdater) {
             $arguments += @("--config", "src-tauri/tauri.updater.conf.json")
         }
@@ -76,6 +81,17 @@ if ($installers.Count -ne 1 -or $installers[0].Name -ne $format.InstallerName) {
 }
 $installerPath = $installers[0].FullName
 Write-Output "installer=$installerPath"
+
+if (-not (Test-Path -LiteralPath $generatedLicenses -PathType Leaf)) {
+    throw "The license notice was not generated: $generatedLicenses"
+}
+if ($InstallerKind -eq "dmg") {
+    $bundledLicenses = Join-Path $bundleRoot "macos" "on-n-off.app" "Contents" "Resources" "THIRD_PARTY_LICENSES.md"
+    if (-not (Test-Path -LiteralPath $bundledLicenses -PathType Leaf)) {
+        throw "The app bundle is missing its license notice: $bundledLicenses"
+    }
+    Write-Output "licenses=$bundledLicenses"
+}
 
 $updaterPath = $null
 $signaturePath = $null
