@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { windowAt } from "$lib/windowAt";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { hasObservations, latestObservedAt, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft } from "./limitPresentation";
+import { latestObservedAt, presentCreditsSpent, presentLimitWindow, usableAgainAt, usageLeft } from "./limitPresentation";
 
 const NOW = Date.parse("2026-08-17T20:00:00Z");
 
@@ -96,8 +96,6 @@ describe("usableAgainAt", () => {
   });
 });
 
-const SHARE = { limit: "25000", used: "8000", usedPercent: 32, resetsAt: null, reached: false };
-
 const SPENT = { last7Days: 18303.44, last30Days: 20299.7, updatedAt: "2026-08-17T19:00:00Z" };
 
 describe("presentCreditsSpent", () => {
@@ -119,82 +117,6 @@ describe("presentCreditsSpent", () => {
       value: "0",
       note: "last 7 days · 0 in 30 days",
     });
-  });
-});
-
-describe("hasObservations", () => {
-  const bare: ProviderLimits = { provider: "codex", status: "ok", currentAccount: true, windows: [] };
-
-  it("counts quota windows, a credit balance, a workspace-credit share, credits spent and banked resets alike", () => {
-    expect(hasObservations({ ...bare, workspaceCredits: SHARE })).toBe(true);
-    expect(hasObservations({ ...bare, creditsSpent: SPENT })).toBe(true);
-    expect(hasObservations(bare)).toBe(false);
-    expect(hasObservations({ ...bare, windows: [window] })).toBe(true);
-    expect(hasObservations({ ...bare, credits: { balance: "0", unlimited: false } })).toBe(true);
-    expect(hasObservations({ ...bare, resetCredits: { availableCount: 0, nextExpiresAt: null } })).toBe(false);
-    expect(hasObservations({ ...bare, resetCredits: { availableCount: 1, nextExpiresAt: null } })).toBe(true);
-  });
-
-  it("keeps a card with only a workspace-credit share as a paused refresh rather than an empty one", () => {
-    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", workspaceCredits: SHARE };
-    expect(presentLimitAccount(failed, "unavailable").status).toEqual({ kind: "paused" });
-    expect(presentLimitAccount({ ...failed, currentAccount: false, savedProfile: true }, "unavailable").status).toEqual({ kind: "savedRefresh", detail: "Refresh failed" });
-  });
-
-  it("keeps a card with only banked resets as a paused refresh rather than an empty one", () => {
-    const failed: ProviderLimits = { ...bare, status: "failed", message: "Refresh failed", resetCredits: { availableCount: 1, nextExpiresAt: null } };
-    expect(presentLimitAccount(failed, "unavailable").status).toEqual({ kind: "paused" });
-    expect(presentLimitAccount({ ...failed, currentAccount: false, savedProfile: true }, "unavailable").status).toEqual({ kind: "savedRefresh", detail: "Refresh failed" });
-  });
-});
-
-
-describe.each(["failed", "unauthenticated"] as const)("saved %s usage status", status => {
-  const message = "Saved usage refresh is paused.";
-  it.each([
-    {name:"windows", windows:[window]},
-    {name:"credits", windows:[], credits:{balance:"0", unlimited:false}},
-    {name:"banked resets", windows:[], resetCredits:{availableCount:1, nextExpiresAt:null}},
-    {name:"a workspace-credit share", windows:[], workspaceCredits:SHARE},
-  ])("quietly identifies retained $name", observation => {
-    const presented = presentLimitAccount({provider:"codex", currentAccount:false, savedProfile:true, status, message, ...observation}, "fallback");
-    expect(presented.message).toBeNull();
-    expect(presented.status).toEqual({ kind: "savedRefresh", detail: message });
-  });
-  it("keeps the error visible without any retained observation", () => {
-    const presented = presentLimitAccount({provider:"codex", currentAccount:false, savedProfile:true, status, message, windows:[], resetCredits:{availableCount:0, nextExpiresAt:null}}, "fallback");
-    expect(presented.message).toBe(message);
-    expect(presented.status).toBeNull();
-  });
-});
-
-describe("which reading is remembered", () => {
-  const reading: ProviderLimits = { provider: "codex", status: "ok", currentAccount: false, windows: [window] };
-
-  it("calls a reading remembered only when it is neither the signed-in account's nor a polled saved profile's", () => {
-    expect(presentLimitAccount(reading, "fallback").status).toEqual({ kind: "remembered" });
-    expect(presentLimitAccount({ ...reading, savedProfile: true }, "fallback").status).toBeNull();
-    expect(presentLimitAccount({ ...reading, currentAccount: true }, "fallback").status).toBeNull();
-  });
-
-  it("marks only a polled saved profile's failed read as last known", () => {
-    const failed: ProviderLimits = { ...reading, status: "failed", message: "Refresh failed" };
-    expect(presentLimitAccount({ ...failed, savedProfile: true }, "fallback").status).toEqual({ kind: "savedRefresh", detail: "Refresh failed" });
-    expect(presentLimitAccount(failed, "fallback").status).toEqual({ kind: "remembered" });
-  });
-});
-
-describe("presentLimitAccount freshness", () => {
-  const claude = (overrides: Partial<ProviderLimits>): ProviderLimits => ({
-    provider: "claude", status: "ok", currentAccount: true, windows: [], ...overrides,
-  });
-  it.each([
-    ["a live signed-in read", {}, false],
-    ["a saved read that answered", { currentAccount: false }, false],
-    ["a signed-in read that failed", { status: "failed" }, true],
-    ["a saved read that was refused", { currentAccount: false, status: "unauthenticated" }, true],
-  ] as const)("calls what a card shows last known only when its read did not answer: %s", (_case, overrides, lastKnown) => {
-    expect(presentLimitAccount(claude(overrides), "unavailable").lastKnown).toBe(lastKnown);
   });
 });
 

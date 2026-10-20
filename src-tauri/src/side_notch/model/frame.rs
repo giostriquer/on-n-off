@@ -1,7 +1,7 @@
 use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
-    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitsStatus, MergeKind,
-    ReviewDecision,
+    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LastObserved, MergeKind,
+    MessageTone, ReadStanding, ReviewDecision, StandingMessage,
 };
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
@@ -166,20 +166,15 @@ fn provider_cell(
     sessions: Vec<LiveSession>,
 ) -> ProviderCell {
     let (notice, paused) = match &reading {
-        Some(reading) if reading.status != LimitsStatus::Ok => (
-            Some(muted(
-                reading
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Usage unavailable.".into()),
-            )),
-            (!reading.windows.is_empty() || reading.workspace_credits.is_some()).then(|| Notice {
-                text: "Refresh paused. Last observed values below.".into(),
-                tone: Tone::Amber,
-            }),
-        ),
-        Some(_) => (None, None),
-        None => (Some(muted("Checking usage…".into())), None),
+        None => (Some(muted(CHECKING.into())), None),
+        Some(reading) => match &reading.standing {
+            ReadStanding::Live => (None, None),
+            ReadStanding::LastObserved(LastObserved::Remembered) => (None, Some(paused(reading))),
+            ReadStanding::LastObserved(
+                LastObserved::ReadPaused { message } | LastObserved::SavedRefreshPaused { message },
+            ) => (Some(notice_of(message)), Some(paused(reading))),
+            ReadStanding::Unavailable { message } => (Some(notice_of(message)), None),
+        },
     };
     ProviderCell {
         provider,
@@ -187,6 +182,31 @@ fn provider_cell(
         notice,
         paused,
         sessions,
+    }
+}
+
+const CHECKING: &str = "Checking limits…";
+
+fn paused(reading: &NotchProvider) -> Notice {
+    let draws_nothing = reading.windows.is_empty() && reading.workspace_credits.is_none();
+    Notice {
+        text: if draws_nothing {
+            "Refresh paused."
+        } else {
+            "Refresh paused. Last observed values below."
+        }
+        .into(),
+        tone: Tone::Amber,
+    }
+}
+
+fn notice_of(message: &StandingMessage) -> Notice {
+    Notice {
+        text: message.text.clone(),
+        tone: match message.tone {
+            MessageTone::Error => Tone::Red,
+            MessageTone::Muted => Tone::Muted,
+        },
     }
 }
 

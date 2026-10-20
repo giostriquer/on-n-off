@@ -6,6 +6,7 @@ import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { LimitsPopover } from "./LimitsPopover";
+import { REMEMBERED, lastObserved, unavailable } from "./readingFixtures";
 
 const readLimits = vi.hoisted(() => vi.fn());
 const onLimitsPopoverOpened = vi.hoisted(() => vi.fn());
@@ -36,6 +37,7 @@ function limits(
     status: "ok",
     account: { id, label },
     currentAccount,
+    ...(currentAccount ? {} : { standing: REMEMBERED }),
     plan: provider === "claude" ? "max" : "pro",
     planLabel: provider === "claude" ? "Max" : "Pro ×20",
     planCapacity: provider === "claude" ? 5 : 20,
@@ -175,7 +177,7 @@ describe("LimitsPopover", () => {
   it("pins \"Remembered account\" only on history, never on a saved profile Limits polls", async () => {
     readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
       ? [limits("claude", "claude-current", "current@claude.example", true),
-        { ...limits("claude", "claude-saved", "saved@claude.example", false), savedProfile: true },
+        { ...limits("claude", "claude-saved", "saved@claude.example", false), savedProfile: true, standing: { kind: "live" as const } },
         limits("claude", "claude-kept", "kept@claude.example", false)]
       : []));
     renderPopover();
@@ -222,7 +224,7 @@ describe("LimitsPopover", () => {
               {
                 ...limits("claude", "claude-current", "current@claude.example", true),
                 status: "unauthenticated" as const,
-                message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
+                standing: lastObserved("readPaused", "Access token expired — send a prompt with `claude` to renew it, then refresh here.", "muted"),
               },
             ]
           : [limits("codex", "codex-current", "current@codex.example", true)],
@@ -349,7 +351,7 @@ describe("LimitsPopover", () => {
 it("marks saved usage quietly in the popover and exposes its failure on focus", async () => {
   const reason = "Saved usage credential is no longer accepted.";
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{...limits("claude", "saved", "you@example.com", false), savedProfile:true, status:"unauthenticated", message:reason}] : []));
+    ? [{...limits("claude", "saved", "you@example.com", false), savedProfile:true, status:"unauthenticated", standing:lastObserved("savedRefreshPaused", reason, "muted")}] : []));
   renderPopover();
   const account = await screen.findByRole("article", {name:"Claude limits · you@example.com"});
   const badge = within(account).getByRole("button", {name:"Usage status: Last known usage"});
@@ -378,9 +380,11 @@ it("says under a row why it shows no reset, as the Limits screen does", async ()
 
 it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{ provider: "claude", status: "failed", message: "Could not reach the Claude usage service (HTTP 503).", currentAccount: true, windows: [] }]
+    ? [{ provider: "claude", status: "failed", currentAccount: true, windows: [],
+      standing: unavailable("Could not reach the Claude usage service (HTTP 503).", "error") }]
     : provider === "codex"
-      ? [{ provider: "codex", status: "signedOut", message: "Sign in with `codex` to see subscription limits.", currentAccount: true, windows: [] }]
+      ? [{ provider: "codex", status: "signedOut", currentAccount: true, windows: [],
+        standing: unavailable("Sign in with `codex` to see subscription limits.", "muted") }]
       : []));
   renderPopover();
   const failed = await screen.findByText("Could not reach the Claude usage service (HTTP 503).");
@@ -405,7 +409,8 @@ it.each([
   ["by its provider when it has no account", null, "Claude limits", "Claude"],
 ] as const)("names a card %s, as the Limits screen does", async (_case, account, name, label) => {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"
-    ? [{ provider: "claude", status: "signedOut", message: "Sign in with `claude`.", account, currentAccount: true, windows: [] }] : [limits("codex", "codex-current", "current@codex.example", true)]));
+    ? [{ provider: "claude", status: "signedOut", account, currentAccount: true, windows: [], standing: unavailable("Sign in with `claude`.", "muted") }]
+    : [limits("codex", "codex-current", "current@codex.example", true)]));
   renderPopover();
   const article = await screen.findByRole("article", { name });
   expect(within(article).getByText(label)).toBeInTheDocument();

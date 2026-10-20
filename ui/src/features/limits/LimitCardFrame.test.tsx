@@ -5,7 +5,7 @@ import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
+import { NOW, REMEMBERED, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
@@ -26,7 +26,7 @@ const label = (provider: LimitsProvider) => CURRENT[provider]().account!.label!;
 const oldLabel = (provider: LimitsProvider) => `old@${provider}.example`;
 
 function remembered(provider: LimitsProvider): LimitsColumnEntry {
-  return CURRENT[provider]({ currentAccount: false, account: { id: `${provider}-old`, label: oldLabel(provider) } });
+  return CURRENT[provider]({ currentAccount: false, standing: REMEMBERED, account: { id: `${provider}-old`, label: oldLabel(provider) } });
 }
 
 function answer(read: (provider: LimitsProvider) => LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>) {
@@ -165,7 +165,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
 
 it("draws the card action plan's menu in its order, each item under its own label", async () => {
   const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" as const } };
-  const old = okCodex({ currentAccount: false, account: { id: "codex-old", label: "old@codex.example" }, profile });
+  const old = okCodex({ currentAccount: false, standing: REMEMBERED, account: { id: "codex-old", label: "old@codex.example" }, profile });
   readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   answer(read => read === "codex" ? [okCodex(), old] : [CURRENT[read]()]);
   renderLimits();

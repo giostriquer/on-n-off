@@ -274,6 +274,10 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
     let entry = &column[1];
     assert!(entry.unread);
     assert_eq!(
+        entry.standing, None,
+        "unread, it stands live and the card shows its empty copy"
+    );
+    assert_eq!(
         entry.card.account,
         Some(LimitsAccountDto {
             id: unread.observation_key(),

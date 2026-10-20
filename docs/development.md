@@ -132,6 +132,12 @@ source carries no comments (see [Code comments](#code-comments)).
   `usageMeterColor` (`ui/src/lib/windowAt.ts`), `meter_color` (`side_notch/model.rs`) and
   `meterInk` (`Meter.swift`). `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
+- Whether a card's reading is live, last observed or unavailable, and the message and tone it
+  shows: its read standing, `ReadStanding::of` (`limits/standing.rs`), worked out from the card as it
+  leaves the read (each Limits column entry for the UI, `NotchProvider::current` for the notch),
+  never stored on it. The card, the tray popover and both notches render the standing and never
+  restate the rule, `Reading::has_observations` among it; the cases they all check are
+  `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together

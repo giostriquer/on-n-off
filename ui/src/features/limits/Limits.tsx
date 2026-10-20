@@ -13,6 +13,7 @@ import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/provi
 import { ArchivedAccounts } from "./ArchivedAccounts";
 import { ActiveAccountDot, LimitCardFrame, PendingCardFrame } from "./LimitCardFrame";
 import { isSignedIn, limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
+import { CHECKING_LIMITS } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { ResetAlertsContext } from "./resetAlerts";
@@ -151,7 +152,7 @@ function ProviderColumn({
     return (
       <PendingCardFrame provider={provider} now={now} checking={query.isFetching}>
         {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
-        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{query.isFetching ? "Checking limits…" : "No data yet."}</p>
+        <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{query.isFetching ? CHECKING_LIMITS : "No data yet."}</p>
       </PendingCardFrame>
     );
   }

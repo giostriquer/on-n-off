@@ -1,6 +1,8 @@
 use super::snapshots::{superseded, supersedes};
 use crate::accounts::{Listed, Roster, SignInDeadlines};
-use crate::dto::{ColumnEntryDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
+use crate::dto::{
+    ColumnEntryDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, ReadStanding, Reading,
+};
 
 pub(crate) fn column(
     entries: &[ProviderLimitsDto],
@@ -26,6 +28,7 @@ pub(crate) fn column(
         .map(|(card, _)| {
             let id = card.account.as_ref().map(|account| account.id.as_str());
             ColumnEntryDto {
+                standing: ReadStanding::sent_with(card),
                 profile: id
                     .and_then(|id| roster.profile(id))
                     .map(|profile| roster.in_column(profile, ends, signed_in, now_ms)),
@@ -72,21 +75,23 @@ fn unread(
     now_ms: i64,
 ) -> ColumnEntryDto {
     let id = profile.observation_id();
+    let card = ProviderLimitsDto {
+        provider: profile.provider(),
+        status: LimitsStatus::Ok,
+        message: None,
+        account: Some(LimitsAccountDto {
+            id: id.to_owned(),
+            legacy_id: profile.legacy_id().map(str::to_owned),
+            label: profile.email().map(str::to_owned),
+        }),
+        current_account: false,
+        saved_profile: false,
+        archived: profile.archived(),
+        reading: Reading::default(),
+    };
     ColumnEntryDto {
-        card: ProviderLimitsDto {
-            provider: profile.provider(),
-            status: LimitsStatus::Ok,
-            message: None,
-            account: Some(LimitsAccountDto {
-                id: id.to_owned(),
-                legacy_id: profile.legacy_id().map(str::to_owned),
-                label: profile.email().map(str::to_owned),
-            }),
-            current_account: false,
-            saved_profile: false,
-            archived: profile.archived(),
-            reading: Reading::default(),
-        },
+        standing: ReadStanding::sent_with(&card),
+        card,
         profile: Some(roster.in_column(profile, ends, None, now_ms)),
         category: roster.category(id).map(str::to_owned),
         replaced: Vec::new(),

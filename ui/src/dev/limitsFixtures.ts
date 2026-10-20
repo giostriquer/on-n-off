@@ -1,9 +1,11 @@
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
-import type { LimitsColumnEntry, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry, ProviderLimits, ReadStanding } from "$lib/limitsTypes";
 import { hasLimits, hasSavedAccounts, isAgentId, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 import { asColumn } from "./limitsColumn";
+
+type ReadCard = ProviderLimits & Pick<LimitsColumnEntry, "standing">;
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -31,7 +33,14 @@ function reported(plan: MockPlan) {
 }
 const REMEMBERED_OBSERVED = at(-4 * 24 * 60 - 12 * 60);
 
-const CLAUDE: ProviderLimits[] = [
+const LIVE: ReadStanding = { kind: "live" };
+const REMEMBERED: ReadStanding = { kind: "lastObserved", why: "remembered" };
+
+function savedRefreshPausedBy(text: string): ReadStanding {
+  return { kind: "lastObserved", why: "savedRefreshPaused", message: { text, tone: "error" } };
+}
+
+const CLAUDE: ReadCard[] = [
   {
     provider: "claude",
     status: "ok",
@@ -46,7 +55,7 @@ const CLAUDE: ProviderLimits[] = [
   },
 ];
 
-const CODEX: ProviderLimits[] = [
+const CODEX: ReadCard[] = [
   {
     provider: "codex",
     status: "ok",
@@ -73,7 +82,7 @@ const CODEX: ProviderLimits[] = [
   },
 ];
 
-const MUSE: ProviderLimits[] = [
+const MUSE: ReadCard[] = [
   {
     provider: "muse",
     status: "ok",
@@ -87,7 +96,7 @@ const MUSE: ProviderLimits[] = [
   },
 ];
 
-function museIdle(): ProviderLimits[] {
+function museIdle(): ReadCard[] {
   return [{
     ...MUSE[0],
     ...reported("Muse Code Power Usage"),
@@ -98,9 +107,9 @@ function museIdle(): ProviderLimits[] {
   }];
 }
 
-function subscriptionBadgesCodex(): ProviderLimits[] {
+function subscriptionBadgesCodex(): ReadCard[] {
   const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
-  const cases: Array<[string, ProviderLimits["subscription"]]> = [
+  const cases: Array<[string, ReadCard["subscription"]]> = [
     ["renewal", { activeUntil: at(30 * 24 * 60), willRenew: true, checkedAt: at(-30) }],
     ["later", { activeUntil: at(14 * 24 * 60), willRenew: false, checkedAt: at(-30) }],
     ["halfway", { activeUntil: at(3.5 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) }],
@@ -114,12 +123,13 @@ function subscriptionBadgesCodex(): ProviderLimits[] {
     ...template,
     account: { id: `badge:${id}`, label: `${id}@example.com` },
     currentAccount: index === 0,
+    standing: index === 0 ? LIVE : REMEMBERED,
     windows: template.windows.map(window => ({ ...window, usedPercent: 25 + index * 8 })),
     subscription,
   }));
 }
 
-function claudeWithoutReset(): ProviderLimits[] {
+function claudeWithoutReset(): ReadCard[] {
   return [CLAUDE[0], {
     ...CLAUDE[0],
     account: { id: "claude-2", label: "other@example.com" },
@@ -131,7 +141,7 @@ function claudeWithoutReset(): ProviderLimits[] {
   }];
 }
 
-function claudeWithoutWeekly(): ProviderLimits[] {
+function claudeWithoutWeekly(): ReadCard[] {
   return [CLAUDE[0], {
     ...CLAUDE[0],
     account: { id: "claude-2", label: "other@example.com" },
@@ -143,24 +153,26 @@ function claudeWithoutWeekly(): ProviderLimits[] {
 
 const BAND = [50, 75, 85, 95];
 
-function band(source: ProviderLimits): ProviderLimits[] {
+function band(source: ReadCard): ReadCard[] {
   const { account, windows } = source;
   if (!account) return [];
   return BAND.map((percent) => ({
     ...source,
     account: { ...account, id: `band-${percent}`, label: `${percent}% of the week` },
     currentAccount: percent === BAND[0],
+    standing: percent === BAND[0] ? LIVE : REMEMBERED,
     credits: null,
     windows: windows.slice(0, 2).map((window) => ({ ...window, usedPercent: percent })),
   }));
 }
 
-function limitsOrderClaude(): ProviderLimits[] {
+function limitsOrderClaude(): ReadCard[] {
   const source = CLAUDE[0];
-  const rung = (id: string, label: string, plan: MockPlan, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ProviderLimits => ({
+  const rung = (id: string, label: string, plan: MockPlan, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ReadCard => ({
     ...source,
     account: { id: `order-${id}`, label },
     currentAccount,
+    standing: currentAccount ? LIVE : REMEMBERED,
     ...reported(plan),
     windows: source.windows.slice(0, 2).map((window) => window.kind === "weekly"
       ? { ...window, usedPercent: weekly, resetsAt: at(weeklyResetsIn) }
@@ -175,15 +187,15 @@ function limitsOrderClaude(): ProviderLimits[] {
   ];
 }
 
-function limitsBandClaude(): ProviderLimits[] {
+function limitsBandClaude(): ReadCard[] {
   return band(CLAUDE[0]);
 }
 
-function limitsBandCodex(): ProviderLimits[] {
+function limitsBandCodex(): ReadCard[] {
   return band(CODEX[0]);
 }
 
-function bankedResetsCodex(): ProviderLimits[] {
+function bankedResetsCodex(): ReadCard[] {
   return CODEX.map((entry) => ({
     ...entry,
     resetCredits: entry.currentAccount
@@ -201,7 +213,7 @@ function bankedResetsCodex(): ProviderLimits[] {
   }));
 }
 
-function workspaceCreditsCodex(): ProviderLimits[] {
+function workspaceCreditsCodex(): ReadCard[] {
   return CODEX.map((entry) => ({
     ...entry,
     ...reported("self_serve_business_prolite"),
@@ -212,7 +224,7 @@ function workspaceCreditsCodex(): ProviderLimits[] {
   }));
 }
 
-function creditsSpentCodex(): ProviderLimits[] {
+function creditsSpentCodex(): ReadCard[] {
   return CODEX.map((entry) => ({
     ...entry,
     ...reported("self_serve_business_prolite"),
@@ -223,7 +235,7 @@ function creditsSpentCodex(): ProviderLimits[] {
   }));
 }
 
-function sameEmailWorkspacesCodex(): ProviderLimits[] {
+function sameEmailWorkspacesCodex(): ReadCard[] {
   return ([["personal", "prolite"], ["business", "self_serve_business_prolite"]] as const).map(([id, plan], index) => ({
     ...CODEX[0],
     account: { id: `profile:${id}`, label: "shared@example.com" },
@@ -243,10 +255,10 @@ function sameEmailWorkspacesAccounts(): AccountsReading {
   };
 }
 
-function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
+function savedRefreshPaused([live]: ReadCard[]): ReadCard[] {
   return [live, {
     ...live, currentAccount: false, savedProfile: true, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
-    message: "Saved usage access has expired. The last reading is retained.",
+    standing: savedRefreshPausedBy("Saved usage access has expired. The last reading is retained."),
   }];
 }
 
@@ -261,11 +273,12 @@ function accountDuplicate(): LimitsScenario {
   };
 }
 
-function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
-  const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
+function accountDuplicateCodex(reconnected: boolean): ReadCard[] {
+  const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, standing: REMEMBERED, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
   return [CODEX[0], ...(reconnected ? [{ ...legacy,
     account: { id: "profile:shared", label: "shared@example.com" },
     savedProfile: true,
+    standing: LIVE,
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
   }] : []), legacy];
 }
@@ -291,7 +304,7 @@ function archivedAccounts(): LimitsScenario {
     codex: () => [
       CODEX[0],
       { ...CODEX[1], subscription: { activeUntil: at(-2 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) } },
-      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, ...reported("plus"), subscription: null },
+      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, standing: REMEMBERED, ...reported("plus"), subscription: null },
     ],
     accounts: {
       claude: () => {
@@ -338,18 +351,19 @@ function claudeSignInAccounts(): AccountsReading {
   ] };
 }
 
-function claudeSignIn(): ProviderLimits[] {
+function claudeSignIn(): ReadCard[] {
   return [CLAUDE[0], {
     ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, ...reported("max ×5"),
-    status: "failed", message: "This account's saved login has ended. Sign in again.",
+    status: "failed",
+    standing: savedRefreshPausedBy("This account's saved login has ended. Sign in again."),
   }];
 }
 
 const REFUSED_LOGIN = "Usage refresh needs sign-in again or renewal by the client that owns this login.";
 const ENDED_HOME_LOGIN = "This account's saved login has ended. Sign in again.";
 
-function refusedSaved(entry: ProviderLimits, id: string, label: string, message: string): ProviderLimits {
-  return { ...entry, account: { id, label }, currentAccount: false, savedProfile: true, status: "failed", message, windows: entry.windows.map(window => ({ ...window, observedAt: REMEMBERED_OBSERVED })) };
+function refusedSaved(entry: ReadCard, id: string, label: string, message: string): ReadCard {
+  return { ...entry, account: { id, label }, currentAccount: false, savedProfile: true, status: "failed", standing: savedRefreshPausedBy(message), windows: entry.windows.map(window => ({ ...window, observedAt: REMEMBERED_OBSERVED })) };
 }
 
 function savedLoginsAccounts(agent: LimitsProvider): AccountsReading {
@@ -365,7 +379,7 @@ function savedLoginsAccounts(agent: LimitsProvider): AccountsReading {
   return { ...reading, profiles: [signedIn, ...others] };
 }
 
-function savedLogins(agent: LimitsProvider, live: ProviderLimits): ProviderLimits[] {
+function savedLogins(agent: LimitsProvider, live: ReadCard): ReadCard[] {
   const refused = refusedSaved(live, `${agent}-refused`, "refused@example.com", agent === "codex" ? REFUSED_LOGIN : ENDED_HOME_LOGIN);
   if (agent !== "codex") return [live, refused];
   return [live, { ...refused, subscription: null }, { ...refusedSaved(live, "codex-moved", "moved@example.com", "This saved login now signs in as a different account. Sign in again."), subscription: null }];
@@ -378,7 +392,7 @@ function paidThrough(accountId: string): SubscriptionDate {
   };
 }
 
-export type LimitsScenario = Partial<Record<LimitsProvider, () => ProviderLimits[]>> & {
+export type LimitsScenario = Partial<Record<LimitsProvider, () => ReadCard[]>> & {
   accounts?: Partial<Record<LimitsProvider, () => AccountsReading>>;
   codexSubscription?: (accountId: string) => SubscriptionDate | null;
   addAccount?: () => void;

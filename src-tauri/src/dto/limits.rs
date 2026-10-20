@@ -194,6 +194,36 @@ impl Reading {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum ReadStanding {
+    Live,
+    LastObserved(LastObserved),
+    Unavailable { message: StandingMessage },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "why", rename_all = "camelCase")]
+pub enum LastObserved {
+    Remembered,
+    ReadPaused { message: StandingMessage },
+    SavedRefreshPaused { message: StandingMessage },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StandingMessage {
+    pub text: String,
+    pub tone: MessageTone,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MessageTone {
+    Error,
+    Muted,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderLimitsDto {
@@ -217,6 +247,8 @@ pub struct ProviderLimitsDto {
 pub struct ColumnEntryDto {
     #[serde(flatten)]
     pub card: ProviderLimitsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<ReadStanding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub profile: Option<crate::accounts::ProfileDto>,
     #[serde(skip_serializing_if = "Option::is_none")]
