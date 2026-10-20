@@ -222,6 +222,8 @@ bun run tauri dev
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo deny --manifest-path src-tauri/Cargo.toml check advisories   # needs cargo-deny
+bun audit
 
 bun run tauri build                        # Windows: NSIS
 bun run tauri build --bundles app,dmg      # macOS: .app + .dmg

@@ -152,6 +152,17 @@ Rust and Swift cache generations; the workflows and scripts own current keys.
 - `ci.yml`'s `layout` job runs `bun run ui:layout` on the pinned Linux image after
   `bunx playwright install --with-deps chromium`, which takes the browser of the lockfile's
   Playwright. It is a required check (docs/development.md, Visual verification).
+- `audit.yml` checks both lockfiles against published advisories on every pull request, every
+  push to main and each Monday: `cargo deny check advisories` against `src-tauri/deny.toml`,
+  which limits the graph to the two shipped targets (so Linux-only crates such as `glib` and
+  `zbus` never fail it), fails unmaintained crates only when they are direct dependencies, and
+  lists each ignored advisory with its reason; and `bun audit`, which reads `bun.lock` alone. It
+  is not a required check: an advisory lands without a change here, and must not block unrelated
+  pull requests. cargo-deny is a pinned release whose SHA-256 the job verifies, run on the
+  image's own `stable` because `cargo metadata` needs no particular compiler. Dependabot
+  (`.github/dependabot.yml`) opens one grouped version-update PR per ecosystem each month, and
+  security updates for cargo and Actions as advisories land; it has no security updates for bun.
+  It skips `dtolnay/rust-toolchain`, which is pinned to a branch commit with no tags to follow.
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

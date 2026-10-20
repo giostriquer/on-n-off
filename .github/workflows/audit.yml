@@ -1,0 +1,73 @@
+name: Audit
+
+# Checks both lockfiles against the published advisories. It is not a required check: an advisory
+# can land on any day without a change here, and it should not block unrelated pull requests. The
+# weekly run reports one that lands while nothing is merged. Dependabot opens the security updates
+# for cargo; it has none for bun, so bun audit is the JavaScript signal.
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  CARGO_DENY_VERSION: 0.20.2
+  CARGO_DENY_SHA256: 9f12ed4c49936e09b48bf862b595cde2fe64fcbd9d74dfacac6131ca824c8d5f
+
+jobs:
+  rust:
+    name: audit-rust
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install cargo-deny
+        run: |
+          archive="cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl"
+          curl -fsSL -o "$RUNNER_TEMP/$archive.tar.gz" \
+            "https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/$archive.tar.gz"
+          echo "${CARGO_DENY_SHA256}  $RUNNER_TEMP/$archive.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$archive.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$archive" >> "$GITHUB_PATH"
+
+      # cargo-deny only reads `cargo metadata`, which any recent cargo answers. The image's stable
+      # toolchain saves installing the one rust-toolchain.toml pins for builds.
+      # src-tauri/deny.toml limits the graph to the two shipped targets and records each ignored
+      # advisory with its reason.
+      - name: Check Rust dependencies against the RustSec advisories
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: cargo deny --locked --manifest-path src-tauri/Cargo.toml check advisories
+
+  javascript:
+    name: audit-javascript
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      # bun audit reads bun.lock alone, so no install step.
+      - name: Check JavaScript dependencies against the GitHub advisories
+        run: bun audit

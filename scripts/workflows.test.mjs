@@ -38,7 +38,7 @@ function runnerLegs(job) {
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
-  for (const name of ["ci", "verify", "bundle", "release", "cache-prune"]) {
+  for (const name of ["ci", "verify", "bundle", "release", "cache-prune", "audit"]) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const { label } of runnerLegs(job)) {
         const os = String(label).split("-")[0];
@@ -73,7 +73,9 @@ test("rustfmt fails the lint job before the cache restore and the slower setup",
 });
 
 test("only pull request runs cancel an in-progress run", { skip }, () => {
-  assert.equal(load("ci").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
+  for (const name of ["ci", "audit"]) {
+    assert.equal(load(name).concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}", name);
+  }
   assert.equal(load("verify").concurrency, undefined, "verify.yml runs under ci.yml's group");
   for (const name of ["bundle", "release", "cache-prune"]) {
     assert.equal(load(name).concurrency["cancel-in-progress"], false, `${name}.yml has no pull request run to cancel`);
@@ -402,4 +404,28 @@ test("the layout check runs the header scenes in CI on every run, can fail, keep
   assert.equal(captures.with.path, check.env.UI_SHOTS_DIR);
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.equal(packageJson.scripts["ui:layout"], "bun scripts/ui-shots.mjs --layout");
+});
+
+test("the dependency audit checks both lockfiles on every pull request, every push to main and every week", { skip }, () => {
+  const audit = load("audit");
+  assert.deepEqual(audit.on.pull_request, { branches: ["main"] });
+  assert.deepEqual(audit.on.push, { branches: ["main"] });
+  assert.equal(audit.on.schedule.length, 1);
+  assert.deepEqual(audit.permissions, { contents: "read" });
+  const runs = Object.values(audit.jobs).flatMap((job) => job.steps.map((candidate) => candidate.run ?? ""));
+  assert.ok(runs.some((run) => run.includes("cargo deny --locked --manifest-path src-tauri/Cargo.toml check advisories")));
+  assert.ok(runs.some((run) => run.trim() === "bun audit"));
+});
+
+test("the dependency audit is never a required check, so a new advisory cannot block unrelated pull requests", { skip }, () => {
+  for (const job of Object.values(load("audit").jobs)) assert.ok(!requiredChecks.includes(job.name), job.name);
+});
+
+test("cargo-deny comes from a pinned release whose checksum is verified before it runs", { skip }, () => {
+  const audit = load("audit");
+  assert.match(String(audit.env.CARGO_DENY_VERSION), /^\d+\.\d+\.\d+$/);
+  assert.match(String(audit.env.CARGO_DENY_SHA256), /^[0-9a-f]{64}$/);
+  const install = step(audit.jobs.rust, "Install cargo-deny");
+  assert.match(install.run, /sha256sum -c/);
+  assert.ok(install.index < step(audit.jobs.rust, "Check Rust dependencies against the RustSec advisories").index);
 });

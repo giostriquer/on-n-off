@@ -1,0 +1,46 @@
+version: 2
+
+# One grouped pull request per ecosystem each month keeps version updates reviewable. Security
+# updates (cargo, GitHub Actions) are opened as soon as an advisory lands, outside this schedule.
+updates:
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      cargo:
+        patterns:
+          - "*"
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      bun:
+        patterns:
+          - "*"
+
+  # dtolnay/rust-toolchain is pinned to a commit of its `stable` branch, which has no release tags
+  # for Dependabot to follow; it is bumped by hand.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/restore-swift-build
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
+    groups:
+      actions:
+        patterns:
+          - "*"

@@ -1,0 +1,11 @@
+[graph]
+targets = ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]
+all-features = true
+
+[advisories]
+unmaintained = "workspace"
+ignore = [
+  { id = "RUSTSEC-2026-0367", reason = "zip is reached only through tauri-plugin-updater on Windows, whose update is the signed NSIS installer, never an extracted archive" },
+  { id = "RUSTSEC-2026-0368", reason = "zip is reached only through tauri-plugin-updater on Windows, whose update is the signed NSIS installer, never an extracted archive" },
+  { id = "RUSTSEC-2026-0369", reason = "zip is reached only through tauri-plugin-updater on Windows, whose update is the signed NSIS installer, never an extracted archive" },
+]

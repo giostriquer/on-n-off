@@ -1,7 +1,7 @@
 [package]
 name = "on-n-off"
 version = "0.35.6"
-description = "Desktop manager for Claude, Codex, and Antigravity plugins, skills, MCP servers, and agent configuration"
+description = "Desktop manager for Claude, Codex, Antigravity, Cursor, and Muse plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
 license = "MIT"

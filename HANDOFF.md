@@ -1,19 +1,12 @@
 # Prerelease smoke test (Windows and macOS)
 
-Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity / Cursor plugins, skills, MCP, and local usage estimates.
+Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity / Cursor / Muse plugins, skills, MCP, accounts, limits, and local usage estimates.
 
 The Windows notes come first; macOS-specific notes are in [macOS](#macos) below. The smoke order and safety notes apply to both.
 
-## What’s new (Studio v2 chrome)
-
-- App mark / window icons refreshed (rocker-style circular glyph)
-- Theme control moved from the top strip into left-rail **Appearance** (Dark / Light)
-- Left rail icons + hover well; Usage kept as a dedicated screen and Overview summary
-- Overview gauges link to Plugins / Skills / MCP; Usage card links to full Usage
-
 ## What you get
 
-- Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS)
+- Windows installer: `on-n-off_<version>_x64-setup.exe` (NSIS)
 - Not Authenticode-signed → Windows SmartScreen may warn; choose “More info” → “Run anyway” if you trust the sender
 - Stable releases include mandatory Tauri updater signatures for in-app update integrity
 
@@ -27,7 +20,7 @@ The Windows notes come first; macOS-specific notes are in [macOS](#macos) below.
    - `gh` (GitHub CLI, signed in with `gh auth login`; optional, needed only by **Pull requests**)
 3. Optional: Node/`npx` if you will install skills via `npx skills add …`
 
-This is a **Windows desktop** app. It reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, and `.on-n-off`.  
+On Windows the app reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, and `.on-n-off`.  
 CLIs or transcripts that exist **only inside WSL** will look missing unless the same tools/data also exist on the Windows side.
 
 If a CLI works in a terminal but the app says **os error 193** / “not a valid Win32 application”, open **Settings**, click **Diagnose**, and point **Binary** at the `.cmd` or `.exe` next to the nvm/npm shim (the extensionless `claude` file is not a Windows program).
@@ -123,7 +116,7 @@ The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-of
 ### From source on macOS
 
 ```sh
-xcode-select --install          # once
+# once: install Xcode from the App Store; the notch helper needs full Xcode (OS.md)
 curl https://sh.rustup.rs -sSf | sh   # once
 bun install
 bun run test
