@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -18,7 +18,7 @@ function sources() {
     { cwd: root, encoding: "utf8" },
   )
     .split("\0")
-    .filter(Boolean);
+    .filter((file) => file && existsSync(join(root, file)));
 }
 
 function commentLines(file) {
@@ -31,16 +31,13 @@ function commentLines(file) {
 
 test("the scan reaches nested sources in every language and skips build output", () => {
   const scanned = sources();
-  for (const file of [
-    "src-tauri/src/accounts/muse.rs",
-    "ui/src/features/limits/Limits.tsx",
-    "ui/src/lib/limitsFormat.ts",
-    "src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift",
-    "scripts/no-code-comments.test.mjs",
-  ]) {
-    assert.ok(scanned.includes(file), file);
+  for (const extension of [".rs", ".ts", ".tsx", ".swift", ".mjs"]) {
+    assert.ok(
+      scanned.some((file) => extname(file) === extension && file.includes("/")),
+      `no nested ${extension} source was scanned`,
+    );
   }
-  assert.ok(!scanned.some((file) => file.includes("/.build/") || file.includes("/node_modules/")));
+  assert.ok(!scanned.some((file) => /(^|\/)(node_modules|\.build)\//.test(file)));
 });
 
 test("sources carry no code comments", () => {
