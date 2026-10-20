@@ -1,3 +1,4 @@
+mod known_account;
 mod messages;
 mod normalize;
 mod spend_rule;
@@ -506,6 +507,7 @@ fn a_signed_in_read_asks_what_its_account_spent_once_the_account_is_confirmed() 
             parsed.reading.credits_spent = Some(spent.clone());
         },
     )
+    .answer
     .unwrap();
 
     assert_eq!(parsed.reading.credits_spent, Some(spent));
@@ -533,10 +535,13 @@ fn a_failed_signed_in_read_never_asks_what_it_spent() {
     let no_process = read_with(
         &home,
         false,
-        |_| Err("codex is not installed".to_string()),
+        |_| Err(ReadFailure::NotInstalled),
         |_: &mut Parsed, _: Option<&CodexAccess>| panic!("asked without a read"),
     );
 
-    assert!(matches!(not_chatgpt, Err(AppServerFailure::Unsupported(_))));
-    assert!(matches!(no_process, Err(AppServerFailure::Failed(_))));
+    assert_eq!(
+        not_chatgpt.answer.err(),
+        Some(ReadFailure::Unsupported(Unsupported::ApiKey))
+    );
+    assert_eq!(no_process.answer.err(), Some(ReadFailure::NotInstalled));
 }

@@ -5,8 +5,10 @@ use super::{
 };
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
-    http::{HttpError, RateLimitReset},
-    limits::{SavedReadError, SavedReadUrls},
+    limits::{
+        outcome::{self, Saved, SavedVerdict},
+        Accepted, ReadFailure, SavedReadUrls,
+    },
 };
 use std::{
     collections::HashMap,
@@ -25,7 +27,7 @@ struct Attempt {
 }
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
-    pub(super) result: Result<ProviderLimitsDto, SavedReadError>,
+    pub(super) result: Result<Accepted, ReadFailure>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -160,7 +162,7 @@ fn poll_with(
         .ok()?
         .fingerprint();
     let result = fetched.result;
-    let mut outcome = attempt_outcome(&result);
+    let mut outcome = verdict_of(Saved::Login, profile, &result);
     let held = ticket.holding(profile, fingerprint.clone());
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
@@ -181,20 +183,14 @@ fn poll_with(
 fn publish(
     home: &Path,
     profile: &Profile,
-    result: Result<ProviderLimitsDto, SavedReadError>,
-    outcome: &mut AttemptOutcome,
+    result: Result<Accepted, ReadFailure>,
+    outcome: &mut Option<SavedVerdict>,
     lease: &dyn Fn() -> Option<Store>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let _lease = lease()?;
     match result {
-        Ok(mut dto) => {
-            if dto
-                .account
-                .as_ref()
-                .is_none_or(|a| a.id != profile.identity.observation_key())
-            {
-                return None;
-            }
+        Ok(accepted) => {
+            let mut dto = accepted.into_card();
             if let Some(account) = &mut dto.account {
                 if account.label.is_none() {
                     account.label.clone_from(&profile.email);
@@ -202,13 +198,18 @@ fn publish(
             }
             let mut remembered = crate::limits::remember(home, dto);
             if remembered.saved.is_err() {
-                *outcome = AttemptOutcome::failed(UNSAVED, false, Duration::ZERO);
+                let unsaved = SavedVerdict {
+                    message: UNSAVED.to_string(),
+                    parks_login: false,
+                    retry: Duration::ZERO,
+                };
                 remembered.card.status = LimitsStatus::Failed;
-                remembered.card.message.clone_from(&outcome.error);
+                remembered.card.message = Some(unsaved.message.clone());
+                *outcome = Some(unsaved);
             }
             Some(Ok(remembered.card))
         }
-        Err(_) => outcome.error.clone().map(Err),
+        Err(_) => outcome.as_ref().map(|verdict| Err(verdict.message.clone())),
     }
 }
 
@@ -217,15 +218,20 @@ fn hold_back(
     key: String,
     fingerprint: String,
     previous: Option<&Attempt>,
-    outcome: AttemptOutcome,
+    outcome: Option<SavedVerdict>,
     interval: Duration,
 ) {
-    let failures = if outcome.error.is_some() {
-        previous.map_or(1, |a| a.failures.saturating_add(1))
-    } else {
-        0
+    let failures = match outcome {
+        Some(_) => previous.map_or(1, |a| a.failures.saturating_add(1)),
+        None => 0,
     };
-    let delay = crate::limits_refresh::failure_backoff(interval, failures).max(outcome.retry);
+    let retry = outcome
+        .as_ref()
+        .map_or(Duration::ZERO, |verdict| verdict.retry);
+    let delay = crate::limits_refresh::failure_backoff(interval, failures).max(retry);
+    let (error, rejected) = outcome.map_or((None, false), |verdict| {
+        (Some(verdict.message), verdict.parks_login)
+    });
     if let Ok(mut attempts) = attempts.lock() {
         attempts.insert(
             key,
@@ -233,8 +239,8 @@ fn hold_back(
                 fingerprint,
                 next: Instant::now() + delay,
                 failures,
-                error: outcome.error,
-                rejected: outcome.rejected,
+                error,
+                rejected,
             },
         );
     }
@@ -303,7 +309,7 @@ fn poll_home(
     ticket: &Ticket,
     force: bool,
     open: &dyn Fn() -> Result<Store, String>,
-    read: &dyn Fn(&Profile) -> Result<ProviderLimitsDto, SavedReadError>,
+    read: &dyn Fn(&Profile) -> Result<Accepted, ReadFailure>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let held = ticket.holding_home(profile)?;
     let generation = profile.home.clone()?;
@@ -322,7 +328,7 @@ fn poll_home(
         }
     }
     let result = read(profile);
-    let mut outcome = home_outcome(&result);
+    let mut outcome = verdict_of(Saved::Home, profile, &result);
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
         store.recheck(&held).ok()?;
@@ -339,79 +345,20 @@ fn poll_home(
     published
 }
 
-fn home_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
-    let failed = |error: &str| AttemptOutcome::failed(error, false, Duration::ZERO);
-    match result {
-        Err(SavedReadError::Http(HttpError::Unauthorized)) => {
-            failed("This account's saved login has ended. Sign in again.")
-        }
-        Err(SavedReadError::OtherAccount) => {
-            failed("This account's saved login now signs in as a different account. Sign in again.")
-        }
-        _ => AttemptOutcome {
-            rejected: false,
-            ..attempt_outcome(result)
-        },
-    }
-}
-
 const UNSAVED: &str = "Could not save the latest usage reading.";
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct AttemptOutcome {
-    error: Option<String>,
-    rejected: bool,
-    retry: Duration,
-}
-
-impl AttemptOutcome {
-    fn failed(error: &str, rejected: bool, retry: Duration) -> Self {
-        Self {
-            error: Some(error.to_string()),
-            rejected,
-            retry,
-        }
-    }
-}
-
-fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
-    match result {
-        Ok(_) => AttemptOutcome {
-            error: None,
-            rejected: false,
-            retry: Duration::ZERO,
-        },
-        Err(SavedReadError::Http(HttpError::Unauthorized)) => AttemptOutcome::failed(
-            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
-            true,
-            Duration::ZERO,
-        ),
-        Err(SavedReadError::OtherAccount) => AttemptOutcome::failed(
-            "This saved login now signs in as a different account. Sign in again.",
-            true,
-            Duration::ZERO,
-        ),
-        Err(SavedReadError::Unavailable(why)) => AttemptOutcome::failed(why, false, Duration::ZERO),
-        Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
-            let seconds = match reset {
-                RateLimitReset::RetryAfter(s) => *s,
-                RateLimitReset::At(at) => {
-                    at.saturating_sub(chrono::Utc::now().timestamp()).max(0) as u64
-                }
-                RateLimitReset::Unknown => 0,
-            };
-            AttemptOutcome::failed(
-                "Usage refresh is rate limited. The last reading is retained.",
-                false,
-                Duration::from_secs(seconds.min(86400)),
-            )
-        }
-        Err(_) => AttemptOutcome::failed(
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-            Duration::ZERO,
-        ),
-    }
+fn verdict_of(
+    saved: Saved,
+    profile: &Profile,
+    result: &Result<Accepted, ReadFailure>,
+) -> Option<SavedVerdict> {
+    let failure = result.as_ref().err()?;
+    Some(outcome::saved(
+        profile.identity.provider,
+        saved,
+        failure,
+        chrono::Utc::now().timestamp(),
+    ))
 }
 
 fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) -> FetchResult {
@@ -434,7 +381,7 @@ fn fetch_profile_at(
         now,
         &|login| {
             super::adapter(profile.identity.provider)
-                .map_err(|_| HttpError::Unauthorized)?
+                .map_err(|_| ReadFailure::LoginRefused)?
                 .read_usage(&profile.identity, login, now, urls)
         },
         &|| {
@@ -446,8 +393,9 @@ fn fetch_profile_at(
                 )
             })
             .map_err(|_| {
-                HttpError::Network("Private account renewal requires recovery or sign-in.".into())
-                    .into()
+                ReadFailure::Unavailable(
+                    "Private account renewal requires recovery or sign-in.".to_string(),
+                )
             })
         },
     )
@@ -456,16 +404,16 @@ fn fetch_profile_at(
 fn fetch_with(
     profile: &Profile,
     now: i64,
-    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, SavedReadError>,
-    renew: &dyn Fn() -> Result<Login, SavedReadError>,
+    read: &dyn Fn(&Login) -> Result<Accepted, ReadFailure>,
+    renew: &dyn Fn() -> Result<Login, ReadFailure>,
 ) -> FetchResult {
     let mut login = profile.login.clone();
     let result = (|| {
-        let current = login.as_mut().ok_or(HttpError::Unauthorized)?;
-        let view =
-            super::view(profile.identity.provider, current).map_err(|_| HttpError::Unauthorized)?;
+        let current = login.as_mut().ok_or(ReadFailure::LoginRefused)?;
+        let view = super::view(profile.identity.provider, current)
+            .map_err(|_| ReadFailure::LoginRefused)?;
         if view.identity().ok().as_ref() != Some(&profile.identity) {
-            return Err(HttpError::Unauthorized.into());
+            return Err(ReadFailure::LoginRefused);
         }
         let expired = view.renewal_due(now);
         drop(view);
@@ -475,7 +423,7 @@ fn fetch_with(
             renewed = true;
         }
         let mut result = read(current);
-        if matches!(result, Err(SavedReadError::Http(HttpError::Unauthorized)))
+        if matches!(result, Err(ReadFailure::LoginRefused))
             && profile.usage_renewal_owned
             && !renewed
         {

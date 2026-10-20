@@ -1,7 +1,8 @@
 use super::mint::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
-use crate::dto::{LimitWindowKind, LimitsStatus};
+use crate::dto::LimitWindowKind;
 use crate::http::RateLimitReset;
+use crate::limits::outcome::tests::{every_failure_keeps_the_account_its_answer_names, Expected};
 use serde_json::json;
 
 fn login(email: Option<&str>, credential: MuseCredential) -> Option<MuseLogin> {
@@ -26,6 +27,10 @@ fn mint_must_not_run(_: &AccessToken) -> Result<mint::MintResponse, HttpError> {
     panic!("Meta must not be asked")
 }
 
+fn known_id(read: &Read) -> Option<&str> {
+    read.account.as_ref().map(|account| account.id.as_str())
+}
+
 #[test]
 fn a_token_reads_the_card_from_the_mint() {
     let root = crate::paths::scratch_dir("muse-mint-reading");
@@ -42,6 +47,7 @@ fn a_token_reads_the_card_from_the_mint() {
             Ok(mint_response(mint_body()))
         },
     )
+    .answer
     .expect("mint reading");
     assert_eq!(read.reading.plan.as_deref(), Some("Wonder"));
 }
@@ -50,34 +56,24 @@ fn a_token_reads_the_card_from_the_mint() {
 fn no_login_reads_signed_out_or_not_installed_without_asking_meta() {
     let root = crate::paths::scratch_dir("muse-no-login");
     for (installed, expected) in [
-        (true, "Sign in with `muse` to see subscription limits."),
-        (
-            false,
-            "Install Muse Code and sign in with `muse` to see subscription limits.",
-        ),
+        (true, ReadFailure::SignedOut),
+        (false, ReadFailure::NotInstalled),
     ] {
-        let card = finish_read(read_current(
-            &root,
-            || installed,
-            |_| None,
-            mint_must_not_run,
-        ));
-        assert_eq!(card.status, LimitsStatus::SignedOut, "{expected}");
-        assert_eq!(card.message.as_deref(), Some(expected));
-        assert!(card.account.is_none(), "{expected}");
+        let read = read_current(&root, || installed, |_| None, mint_must_not_run);
+        assert_eq!(read.answer.err(), Some(expected.clone()));
+        assert!(read.account.is_none(), "{expected:?}");
     }
 }
 
 #[test]
 fn the_current_card_without_a_login_names_whether_the_muse_cli_was_found() {
-    let card = muse_current(&crate::paths::scratch_dir("muse-current-no-login"));
+    let read = muse_current(&crate::paths::scratch_dir("muse-current-no-login"));
     let expected = if resolve_provider_cli(AgentId::Muse, "muse").is_some() {
-        "Sign in with `muse` to see subscription limits."
+        ReadFailure::SignedOut
     } else {
-        "Install Muse Code and sign in with `muse` to see subscription limits."
+        ReadFailure::NotInstalled
     };
-    assert_eq!(card.status, LimitsStatus::SignedOut);
-    assert_eq!(card.message.as_deref(), Some(expected));
+    assert_eq!(read.answer.err(), Some(expected));
 }
 
 #[test]
@@ -101,96 +97,69 @@ fn a_login_never_asks_whether_muse_is_installed() {
 #[test]
 fn an_api_key_login_reads_unsupported_without_asking_meta() {
     let root = crate::paths::scratch_dir("muse-api-key");
-    let card = finish_read(read_current(
+    let read = read_current(
         &root,
         installed,
         |_| login(Some("you@example.com"), MuseCredential::ApiKey),
         mint_must_not_run,
-    ));
-    assert_eq!(card.status, LimitsStatus::Unsupported);
+    );
     assert_eq!(
-        card.message.as_deref(),
-        Some("Muse is signed in with an API key, which has no subscription limits.")
+        read.answer.err(),
+        Some(ReadFailure::Unsupported(Unsupported::ApiKey))
     );
 }
 
 #[test]
-fn an_expired_or_unread_login_fails_the_card_under_its_account_without_asking_meta() {
+fn an_expired_login_is_refused_and_an_unread_one_unavailable_without_asking_meta() {
     let root = crate::paths::scratch_dir("muse-login-unusable");
     for (credential, expected) in [
-        (
-            MuseCredential::Expired,
-            "Muse's login has expired. Sign in with `muse` again to see subscription limits.",
-        ),
+        (MuseCredential::Expired, ReadFailure::LoginRefused),
         (
             MuseCredential::Unread,
-            "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.",
+            ReadFailure::Unavailable(UNREAD.to_string()),
         ),
     ] {
-        let card = finish_read(read_current(
+        let read = read_current(
             &root,
             installed,
             |_| login(Some("You@Example.com"), credential),
             mint_must_not_run,
-        ));
-        assert_eq!(card.status, LimitsStatus::Failed, "{expected}");
-        assert_eq!(card.message.as_deref(), Some(expected));
-        assert_eq!(
-            card.account.as_ref().map(|account| account.id.as_str()),
-            Some(scoped_you().as_str()),
-            "{expected}"
         );
-        assert!(card.reading.windows.is_empty(), "{expected}");
+        assert_eq!(known_id(&read), Some(scoped_you().as_str()));
+        assert_eq!(read.answer.err(), Some(expected));
     }
 }
 
 #[test]
-fn a_mint_miss_fails_the_card_under_its_account() {
+fn a_mint_miss_is_the_failure_of_its_call() {
     let root = crate::paths::scratch_dir("muse-mint-miss");
-    let unanswered = |why: &str| {
-        format!("The Muse usage read failed ({why}). on-n-off will read it again later.")
-    };
-    let misses: [(Result<mint::MintResponse, HttpError>, String); 6] = [
-        (
-            Err(HttpError::Unauthorized),
-            "Meta did not accept Muse's login. Sign in with `muse` again to see subscription limits."
-                .to_string(),
-        ),
-        (
-            Err(HttpError::RateLimited(RateLimitReset::Unknown)),
-            "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
-                .to_string(),
-        ),
-        (
-            Err(HttpError::Network("connection refused".to_string())),
-            unanswered("network error: connection refused"),
-        ),
-        (Err(HttpError::Status(503)), unanswered("HTTP 503")),
-        (
-            Err(HttpError::Parse("Unreadable Muse key answer.".to_string())),
-            unanswered("unreadable response: Unreadable Muse key answer."),
-        ),
-        (
-            Ok(mint_response(json!({"subs_usage": null}))),
-            "Meta's answer had no subscription usage for this Muse account.".to_string(),
-        ),
-    ];
-    for (answer, expected) in misses {
-        let card = finish_read(read_current(
+    for error in [
+        HttpError::Unauthorized,
+        HttpError::RateLimited(RateLimitReset::RetryAfter(30)),
+        HttpError::Network("connection refused".to_string()),
+        HttpError::Status(503),
+        HttpError::Parse("Unreadable Muse key answer.".to_string()),
+    ] {
+        let read = read_current(
             &root,
             installed,
             |_| signed_in(Some("You@Example.com")),
-            |_| answer,
-        ));
-        assert_eq!(card.status, LimitsStatus::Failed, "{expected}");
-        assert_eq!(card.message.as_deref(), Some(expected.as_str()));
-        assert_eq!(
-            card.account.as_ref().map(|account| account.id.as_str()),
-            Some(scoped_you().as_str()),
-            "{expected}"
+            |_| Err(error.clone()),
         );
-        assert!(card.reading.windows.is_empty(), "{expected}");
+        assert_eq!(known_id(&read), Some(scoped_you().as_str()));
+        assert_eq!(read.answer.err(), Some(ReadFailure::from(error)));
     }
+}
+
+#[test]
+fn an_answer_without_usage_reads_no_window() {
+    let read = read_current(
+        &crate::paths::scratch_dir("muse-mint-no-usage"),
+        installed,
+        |_| signed_in(Some("You@Example.com")),
+        |_| Ok(mint_response(json!({"subs_usage": null}))),
+    );
+    assert!(read.answer.expect("an answer").reading.windows.is_empty());
 }
 
 #[test]
@@ -199,21 +168,20 @@ fn an_inactive_or_unpaid_answer_reads_unsupported() {
     for (body, expected) in [
         (
             json!({"is_subs_active": false, "subs_tier_name": "Wonder"}),
-            "This Muse subscription is inactive, so it has no subscription limits to show.",
+            Unsupported::Inactive,
         ),
         (
             json!({"is_subs_active": true, "require_payment": true}),
-            "Muse subscription billing is incomplete; finish it in Muse to see subscription limits.",
+            Unsupported::BillingIncomplete,
         ),
     ] {
-        let card = finish_read(read_current(
+        let read = read_current(
             &root,
             installed,
             |_| signed_in(Some("You@Example.com")),
             |_| Ok(mint_response(body)),
-        ));
-        assert_eq!(card.status, LimitsStatus::Unsupported, "{expected}");
-        assert_eq!(card.message.as_deref(), Some(expected));
+        );
+        assert_eq!(read.answer.err(), Some(ReadFailure::Unsupported(expected)));
     }
 }
 
@@ -232,6 +200,7 @@ fn an_idle_mint_answer_reads_ok() {
             })))
         },
     )
+    .answer
     .expect("idle mint reading");
     assert_eq!(read.reading.plan.as_deref(), Some("Muse Code Power Usage"));
     assert_eq!(
@@ -242,7 +211,13 @@ fn an_idle_mint_answer_reads_ok() {
             .collect::<Vec<_>>(),
         [(LimitWindowKind::Session, 0.0)]
     );
-    let card = finish_read(Ok(read));
+    let (card, _) = super::super::outcome::signed_in(
+        crate::dto::AgentId::Muse,
+        Read {
+            account: read.account.clone(),
+            answer: Ok(read),
+        },
+    );
     assert_eq!(
         (
             card.reading.plan_label.as_deref(),
@@ -254,66 +229,130 @@ fn an_idle_mint_answer_reads_ok() {
     assert_eq!(card.reading.windows[0].role, None);
 }
 
-fn failed_account(read: Result<Parsed, ReadFailure>) -> LimitsAccountDto {
-    match read {
-        Err(ReadFailure::Failed(account, _)) => account,
-        other => panic!("expected a failed card, got {other:?}"),
-    }
-}
-
-fn every_failing_path(root: &Path, email: Option<&str>) -> Vec<LimitsAccountDto> {
-    let missed = read_current(
+fn minted(root: &Path, email: Option<&str>) -> Read {
+    read_current(
         root,
         installed,
         |_| signed_in(email),
-        |_| Err(HttpError::Status(500)),
-    );
-    let mut accounts = vec![failed_account(missed)];
-    for credential in [MuseCredential::Expired, MuseCredential::Unread] {
-        accounts.push(failed_account(read_current(
+        |_| Ok(mint_response(mint_body())),
+    )
+}
+
+fn every_failing_path(root: &Path, email: Option<&str>) -> Vec<(Read, Expected)> {
+    let mint = |answer: fn() -> Result<mint::MintResponse, HttpError>| {
+        read_current(root, installed, |_| signed_in(email), |_| answer())
+    };
+    let stored = |credential| {
+        read_current(
             root,
             installed,
             |_| login(email, credential),
             mint_must_not_run,
-        )));
-    }
-    accounts
+        )
+    };
+    vec![
+        (mint(|| Err(HttpError::Status(500))), |failure| {
+            *failure == ReadFailure::RequestFailed("HTTP 500".into())
+        }),
+        (
+            mint(|| Ok(mint_response(json!({"subs_usage": null})))),
+            |failure| *failure == ReadFailure::NoUsage,
+        ),
+        (
+            mint(|| Ok(mint_response(json!({"is_subs_active": false})))),
+            |failure| *failure == ReadFailure::Unsupported(Unsupported::Inactive),
+        ),
+        (stored(MuseCredential::Expired), |failure| {
+            *failure == ReadFailure::LoginRefused
+        }),
+        (stored(MuseCredential::Unread), |failure| {
+            *failure == ReadFailure::Unavailable(UNREAD.into())
+        }),
+        (stored(MuseCredential::ApiKey), |failure| {
+            *failure == ReadFailure::Unsupported(Unsupported::ApiKey)
+        }),
+    ]
 }
 
 #[test]
-fn every_path_names_the_account_as_the_mint_reading_does() {
+fn every_failure_keeps_the_account_the_mint_reading_names() {
     let root = crate::paths::scratch_dir("muse-identity");
-    let minted = read_current(
-        &root,
-        installed,
-        |_| signed_in(Some("You@Example.com")),
-        |_| Ok(mint_response(mint_body())),
-    )
-    .expect("mint reading")
-    .account
-    .expect("account");
-    assert_eq!(minted.id, scoped_you());
-    assert_eq!(minted.legacy_id.as_deref(), Some("email:you@example.com"));
-    assert_eq!(minted.label.as_deref(), Some("You@Example.com"));
-    for account in every_failing_path(&root, Some("You@Example.com")) {
-        assert_eq!(account, minted);
-    }
+    let minted_account = minted(&root, Some("You@Example.com"))
+        .answer
+        .expect("mint reading")
+        .account
+        .expect("account");
+    assert_eq!(minted_account.id, scoped_you());
+    assert_eq!(
+        minted_account.legacy_id.as_deref(),
+        Some("email:you@example.com")
+    );
+    assert_eq!(minted_account.label.as_deref(), Some("You@Example.com"));
+    every_failure_keeps_the_account_its_answer_names(
+        AgentId::Muse,
+        minted(&root, Some("You@Example.com")),
+        every_failing_path(&root, Some("You@Example.com")),
+    );
 }
 
 #[test]
 fn a_login_without_an_email_is_the_default_account_on_every_path() {
     let root = crate::paths::scratch_dir("muse-identity-default");
-    let minted = read_current(
-        &root,
-        installed,
-        |_| signed_in(None),
-        |_| Ok(mint_response(mint_body())),
-    )
-    .expect("mint reading")
-    .account
-    .expect("account");
-    assert_eq!(minted.id, super::super::DEFAULT_ACCOUNT);
-    for account in every_failing_path(&root, None) {
-        assert_eq!(account, minted);
+    let minted_account = minted(&root, None)
+        .answer
+        .expect("mint reading")
+        .account
+        .expect("account");
+    assert_eq!(minted_account.id, super::super::DEFAULT_ACCOUNT);
+    every_failure_keeps_the_account_its_answer_names(
+        AgentId::Muse,
+        minted(&root, None),
+        every_failing_path(&root, None),
+    );
+}
+
+#[test]
+fn the_native_login_is_the_account_a_read_records_without_asking_the_keychain() {
+    use crate::accounts::muse_store::LoginCache;
+    let bundle = r#"{"secret_schema_version":1,"access_token":"keychain-token"}"#;
+    for (auth, expected) in [
+        (
+            Some(
+                r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","user_email":"You@Example.com"}}}"#,
+            ),
+            Some(scoped_you()),
+        ),
+        (
+            Some(
+                r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+            ),
+            Some(scoped_you()),
+        ),
+        (
+            Some(r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token"}}}"#),
+            Some(super::super::DEFAULT_ACCOUNT.to_string()),
+        ),
+        (None, None),
+    ] {
+        let home = crate::paths::scratch_dir("muse-native-login");
+        let config = crate::paths::muse_config_for(&home);
+        if let Some(auth) = auth {
+            std::fs::create_dir_all(&config).unwrap();
+            std::fs::write(config.join("auth.json"), auth).unwrap();
+        }
+        let read = read_current(
+            &home,
+            installed,
+            |config| LoginCache::new().login(config, 0, &|| Ok(Some(bundle.to_string()))),
+            |_| Err(HttpError::Status(503)),
+        );
+        let (_, outcome) = crate::limits::outcome::signed_in(AgentId::Muse, read);
+
+        assert_eq!(outcome.login, expected, "{auth:?}");
+        assert_eq!(
+            crate::limits::native_login_at(AgentId::Muse, &home),
+            outcome.login,
+            "{auth:?}"
+        );
     }
 }

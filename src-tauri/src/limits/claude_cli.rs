@@ -6,15 +6,12 @@ use serde_json::Value;
 
 use super::claude::parse_claude;
 use super::claude_config::{read_claude_config_account, ClaudeConfigAccount};
-use super::pipeline::finish;
+use super::outcome::{saved_card, Accepted, Read, ReadFailure};
 use super::window::QuotaWindow;
-use super::{saved_card, scoped_account, Parsed, SavedReadError, DEFAULT_ACCOUNT};
+use super::{scoped_account, Parsed, DEFAULT_ACCOUNT};
 use crate::accounts::claude_store::ENV_CREDENTIALS;
 use crate::accounts::model::Identity;
-use crate::dto::{
-    AgentId, LimitWindowDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading,
-};
-use crate::http::HttpError;
+use crate::dto::{AgentId, LimitWindowDto, LimitsAccountDto, Reading};
 use crate::process::{wait_with_deadline, CommandOutcome};
 
 const USAGE_ARGS: [&str; 7] = [
@@ -30,6 +27,8 @@ const USAGE_ARGS: [&str; 7] = [
 pub(crate) const OUTDATED: &str =
     "Update Claude Code: this version cannot report usage without starting your hooks and MCP servers.";
 
+const UNREPORTED: &str = "Claude Code could not report usage.";
+
 const DEADLINE: Duration = Duration::from_secs(90);
 
 const STATUS_DEADLINE: Duration = Duration::from_secs(30);
@@ -38,7 +37,7 @@ pub(crate) fn read_usage(
     claude: &dyn Fn() -> Command,
     config_file: &Path,
     identity: &Identity,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<Accepted, ReadFailure> {
     read_usage_within(claude, config_file, identity, DEADLINE)
 }
 
@@ -47,12 +46,9 @@ fn read_usage_within(
     config_file: &Path,
     identity: &Identity,
     deadline: Duration,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<Accepted, ReadFailure> {
     config_account(config_file, identity)?;
-    let windows = report(claude, deadline).map_err(|why| match why {
-        NoReport::SignedOut => SavedReadError::Http(HttpError::Unauthorized),
-        _ => SavedReadError::Unavailable(why.message()),
-    })?;
+    let windows = report(claude, deadline)?;
     let account = config_account(config_file, identity)?;
     saved_card(
         identity,
@@ -71,7 +67,7 @@ pub(super) fn read_signed_in(
     claude: &dyn Fn(&Path) -> Command,
     config_file: &Path,
     usage_config_dir: &Path,
-) -> ProviderLimitsDto {
+) -> Read {
     read_signed_in_within(claude, config_file, usage_config_dir, DEADLINE)
 }
 
@@ -80,60 +76,38 @@ fn read_signed_in_within(
     config_file: &Path,
     usage_config_dir: &Path,
     deadline: Duration,
-) -> ProviderLimitsDto {
+) -> Read {
     let before = read_claude_config_account(config_file);
-    let account = before.as_ref().map_or_else(default_account, card_account);
-    let failed = |status, message: &str| {
-        finish(
-            AgentId::Claude,
-            status,
-            Some(message.into()),
-            Parsed {
-                account: Some(account.clone()),
-                reading: Reading::default(),
-            },
-        )
-    };
-    if let Err(why) = clear_if_another_account(usage_config_dir, before.as_ref()) {
-        return failed(LimitsStatus::Failed, &why);
-    }
-    let windows = match report(&|| claude(usage_config_dir), deadline) {
-        Ok(windows) => windows,
-        Err(NoReport::SignedOut) => {
-            return failed(
-                LimitsStatus::SignedOut,
-                "Sign in with `claude` to see subscription limits.",
-            )
+    let answer = (|| {
+        clear_if_another_account(usage_config_dir, before.as_ref())
+            .map_err(ReadFailure::Unavailable)?;
+        let windows = report(&|| claude(usage_config_dir), deadline)?;
+        let after = read_claude_config_account(config_file);
+        if !same_account(before.as_ref(), after.as_ref()) {
+            let _ = std::fs::remove_dir_all(usage_config_dir);
+            return Err(ReadFailure::AccountChanged);
         }
-        Err(NoReport::NotInstalled) => {
-            return failed(
-                LimitsStatus::SignedOut,
-                "Install Claude Code and sign in with `claude` to see subscription limits.",
-            )
-        }
-        Err(why) => return failed(LimitsStatus::Failed, why.message()),
-    };
-    let after = read_claude_config_account(config_file);
-    if !same_account(before.as_ref(), after.as_ref()) {
-        let _ = std::fs::remove_dir_all(usage_config_dir);
-        return failed(
-            LimitsStatus::Failed,
-            "The signed-in Claude account changed while its usage was read.",
-        );
-    }
-    finish(
-        AgentId::Claude,
-        LimitsStatus::Ok,
-        None,
-        Parsed {
-            account: Some(after.as_ref().map_or_else(default_account, card_account)),
+        Ok(Parsed {
+            account: Some(account_named(after.as_ref())),
             reading: Reading {
                 plan: after.and_then(|account| account.plan),
                 windows,
                 ..Reading::default()
             },
-        },
-    )
+        })
+    })();
+    Read {
+        account: Some(account_named(before.as_ref())),
+        answer,
+    }
+}
+
+pub(super) fn known_account(config_file: &Path) -> LimitsAccountDto {
+    account_named(read_claude_config_account(config_file).as_ref())
+}
+
+fn account_named(account: Option<&ClaudeConfigAccount>) -> LimitsAccountDto {
+    account.map_or_else(default_account, card_account)
 }
 
 fn same_account(a: Option<&ClaudeConfigAccount>, b: Option<&ClaudeConfigAccount>) -> bool {
@@ -180,60 +154,38 @@ fn default_account() -> LimitsAccountDto {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum NoReport {
-    NotInstalled,
-    Unavailable,
-    Outdated,
-    SignedOut,
-    Empty,
-}
-
-impl NoReport {
-    fn message(self) -> &'static str {
-        match self {
-            Self::NotInstalled => "Claude Code is not installed.",
-            Self::Unavailable => "Claude Code could not report usage.",
-            Self::Outdated => OUTDATED,
-            Self::SignedOut => "Claude Code is signed out.",
-            Self::Empty => "Claude Code reported no usage.",
-        }
-    }
-}
-
 fn report(
     claude: &dyn Fn() -> Command,
     deadline: Duration,
-) -> Result<Vec<LimitWindowDto>, NoReport> {
+) -> Result<Vec<LimitWindowDto>, ReadFailure> {
+    let unreported = || ReadFailure::Unavailable(UNREPORTED.to_string());
     let mut command = prepared(claude(), &USAGE_ARGS);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let child = command.spawn().map_err(|error| match error.kind() {
-        std::io::ErrorKind::NotFound => NoReport::NotInstalled,
-        _ => NoReport::Unavailable,
+        std::io::ErrorKind::NotFound => ReadFailure::NotInstalled,
+        _ => unreported(),
     })?;
     match wait_with_deadline(child, deadline) {
         Ok(CommandOutcome::Exited {
             success: true,
             stdout,
             ..
-        }) => report_windows(&stdout)
-            .filter(|windows| !windows.is_empty())
-            .ok_or_else(|| {
-                if signed_out(claude) {
-                    NoReport::SignedOut
-                } else {
-                    NoReport::Empty
-                }
-            }),
+        }) => {
+            let windows = report_windows(&stdout).unwrap_or_default();
+            if windows.is_empty() && signed_out(claude) {
+                return Err(ReadFailure::SignedOut);
+            }
+            Ok(windows)
+        }
         Ok(CommandOutcome::Exited { stderr, .. })
             if stderr.contains("unknown option") && stderr.contains("--safe-mode") =>
         {
-            Err(NoReport::Outdated)
+            Err(ReadFailure::Unavailable(OUTDATED.to_string()))
         }
-        _ => Err(NoReport::Unavailable),
+        _ => Err(unreported()),
     }
 }
 
@@ -266,10 +218,10 @@ pub(crate) fn auth_status(claude: &dyn Fn() -> Command) -> Option<Value> {
 fn config_account(
     config_file: &Path,
     identity: &Identity,
-) -> Result<ClaudeConfigAccount, SavedReadError> {
-    let account = read_claude_config_account(config_file).ok_or(HttpError::Unauthorized)?;
+) -> Result<ClaudeConfigAccount, ReadFailure> {
+    let account = read_claude_config_account(config_file).ok_or(ReadFailure::SignedOut)?;
     if !account.identity.names(identity) {
-        return Err(SavedReadError::OtherAccount);
+        return Err(ReadFailure::OtherAccount);
     }
     Ok(account)
 }

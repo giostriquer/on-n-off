@@ -13,6 +13,7 @@ use crate::dto::{
     AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
 };
 use crate::limits::{cycle_turned_over, Observation, ResetInstant};
+use crate::limits_refresh::Served;
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 use crate::read_revision::{announce, Source};
@@ -136,7 +137,7 @@ trait Io {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Vec<ProviderLimitsDto>, String>;
+    ) -> Result<Vec<Served>, String>;
     async fn save(&self, state: &MonitorState) -> Result<(), String>;
     async fn spend(
         &self,
@@ -157,24 +158,24 @@ impl Io for App {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Vec<ProviderLimitsDto>, String> {
+    ) -> Result<Vec<Served>, String> {
         let tasks: Vec<_> = providers
             .iter()
             .map(|&provider| {
                 let force = fresh == Some(provider);
                 async_runtime::spawn_blocking(move || {
-                    crate::limits_refresh::read_limits(provider, force)
+                    crate::limits_refresh::read_served(provider, force).0
                 })
             })
             .collect();
-        let mut snapshots = Vec::new();
+        let mut reads = Vec::new();
         for task in tasks {
-            snapshots.extend(
+            reads.push(
                 task.await
                     .map_err(|error| format!("provider worker failed: {error}"))?,
             );
         }
-        Ok(snapshots)
+        Ok(reads)
     }
 
     async fn save(&self, state: &MonitorState) -> Result<(), String> {
@@ -301,14 +302,18 @@ async fn poll_once(
     let fresh = waiting
         .read(|waiting| waiting.any_due(polled_at))
         .then_some(crate::provider_catalogue::BANKED_RESETS_PROVIDER);
-    let readings = io.read(watched, fresh).await?;
+    let reads = io.read(watched, fresh).await?;
+    let cards: Vec<ProviderLimitsDto> = reads
+        .iter()
+        .flat_map(|read| read.entries.iter().cloned())
+        .collect();
     let previous = state.clone();
-    let mut notices = limit_notices(state, &readings, settings);
+    let mut notices = limit_notices(state, &cards, settings);
     let Plan { offered, due } = waiting.change(|waiting| {
         reset_alert::plan(
             &mut state.reset_alerts,
             waiting,
-            &readings,
+            &reads,
             &settings.reset_alerts,
             polled_at,
         )

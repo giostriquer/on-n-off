@@ -15,6 +15,8 @@ pub struct ProviderFacts {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LimitsFacts {
+    pub client: &'static str,
+    pub vendor: &'static str,
     pub inherits_legacy_reading: bool,
     pub on_load: &'static [OnLoad],
     pub credits_spent: Option<CreditsSpent>,
@@ -70,6 +72,8 @@ pub enum PaidResetOffer {
 
 impl LimitsFacts {
     pub const NONE: Self = Self {
+        client: "",
+        vendor: "",
         inherits_legacy_reading: false,
         on_load: &[],
         credits_spent: None,
@@ -98,6 +102,8 @@ impl AgentId {
                 binary: "claude",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
+                    client: "Claude Code",
+                    vendor: "Anthropic",
                     on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
                     sign_in_deadline: Some(SignInDeadline::Claude),
                     ..LimitsFacts::NONE
@@ -111,6 +117,8 @@ impl AgentId {
                 binary: "codex",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
+                    client: "Codex CLI",
+                    vendor: "OpenAI",
                     on_load: &[OnLoad::DropHiddenWindows],
                     credits_spent: Some(CreditsSpent::Codex),
                     session_rollouts: Some(SessionRollouts::Codex),
@@ -146,6 +154,8 @@ impl AgentId {
                 binary: "muse",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
+                    client: "Muse Code",
+                    vendor: "Meta",
                     inherits_legacy_reading: true,
                     on_load: &[OnLoad::MarkFirstMessageSessions],
                     ..LimitsFacts::NONE

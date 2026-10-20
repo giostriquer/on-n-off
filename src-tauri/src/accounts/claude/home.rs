@@ -39,7 +39,7 @@ impl Home for ClaudeHome {
     fn read_usage(
         &self,
         identity: &Identity,
-    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
+    ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure> {
         crate::limits::claude_cli::read_usage(
             &|| self.store.command(),
             &self.store.config_file,
