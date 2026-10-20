@@ -21,6 +21,7 @@
     "test": "vitest run --config vitest.config.ts",
     "ui:shots": "bun scripts/ui-shots.mjs",
     "ui:layout": "bun scripts/ui-shots.mjs --layout",
+    "ui:csp": "bun scripts/ui-shots.mjs --csp",
     "test:watch": "vitest",
     "tauri": "tauri"
   },

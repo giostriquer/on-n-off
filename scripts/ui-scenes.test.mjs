@@ -55,3 +55,9 @@ test("a layout run needs both a Limits card scene and a popover scene", async ()
   await assert.rejects(chooseScenes(["--layout"], popoverOnly), /Limits card scene/);
   await assert.rejects(chooseScenes(["--layout"], limitsOnly), /popover scene/);
 });
+
+test("--csp runs every built-in scene, and refuses a scene file or --layout beside it", async (t) => {
+  assert.deepEqual(names(await chooseScenes(["--csp"])), names(SCENES));
+  await assert.rejects(chooseScenes(["--csp", sceneFile(t, [{ name: "one", url: "/limits?mock=ok" }])]), /takes no scene file/);
+  await assert.rejects(chooseScenes(["--csp", "--layout"]), /separate runs/);
+});

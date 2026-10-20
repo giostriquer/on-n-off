@@ -1,14 +1,23 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
 import { chromium } from "playwright";
+import { cspHeader } from "./csp.mjs";
 import { chooseScenes } from "./ui-scenes.mjs";
 
+const CSP_RUN = process.argv.includes("--csp");
 const PORT = Number(process.env.UI_PORT ?? 1425);
-const BASE = process.env.UI_BASE ?? `http://localhost:${PORT}`;
+const CSP_PORT = Number(process.env.UI_CSP_PORT ?? 1426);
+const BASE = CSP_RUN ? `http://localhost:${CSP_PORT}` : process.env.UI_BASE ?? `http://localhost:${PORT}`;
+const DIST = path.resolve("ui/dist");
+const REPORT_VIOLATIONS = () => {
+  document.addEventListener("securitypolicyviolation", (event) => {
+    console.error(`CSP refused ${event.effectiveDirective}: ${event.blockedURI || "inline"} at ${event.sourceFile}:${event.lineNumber}`);
+  });
+};
 const OUT = process.env.UI_SHOTS_DIR ?? ".tmp/ui-shots";
 const VIEWPORT = { width: 1120, height: 760 };
 const FIXTURE_CLOCK = "2026-08-24T20:00:00Z";
@@ -34,6 +43,27 @@ function stopDevServer(child) {
   if (!child) return;
   if (process.platform === "win32") child.kill();
   else process.kill(-child.pid);
+}
+
+function serveBuildUnderPolicy() {
+  if (!existsSync(path.join(DIST, "index.html"))) throw new Error("ui/dist is missing; run `bun run build` first");
+  const policy = JSON.parse(readFileSync("src-tauri/tauri.conf.json", "utf8")).app.security.csp;
+  if (!policy) throw new Error("tauri.conf.json sets no content security policy to check");
+  const header = cspHeader(policy);
+  return globalThis.Bun.serve({
+    port: CSP_PORT,
+    async fetch(request) {
+      const file = path.join(DIST, decodeURIComponent(new URL(request.url).pathname));
+      const asset = file.startsWith(`${DIST}${path.sep}`) && statSync(file, { throwIfNoEntry: false })?.isFile() ? file : path.join(DIST, "index.html");
+      return new Response(globalThis.Bun.file(asset), { headers: { "Content-Security-Policy": header } });
+    },
+  });
+}
+
+async function mockIpcScript() {
+  const build = await globalThis.Bun.build({ entrypoints: ["ui/src/dev/mockIpc.ts"], target: "browser", format: "iife" });
+  if (!build.success) throw new Error(`the mock IPC did not bundle:\n${build.logs.join("\n")}`);
+  return build.outputs[0].text();
 }
 
 async function ensureDevServer() {
@@ -142,8 +172,9 @@ function packedInOrder({ rects, gap }) {
   });
 }
 
-async function runScene(browser, scene) {
+async function runScene(browser, scene, initScripts) {
   const context = await browser.newContext({ viewport: scene.viewport ?? VIEWPORT, deviceScaleFactor: 2 });
+  for (const script of initScripts) await context.addInitScript(script);
   await context.addInitScript(
     ({ theme, themeKey, screenKey }) => {
       localStorage.setItem(themeKey, theme);
@@ -245,13 +276,15 @@ async function scrollTo(page, selector) {
 async function main() {
   const scenes = await chooseScenes(process.argv.slice(2));
   mkdirSync(OUT, { recursive: true });
-  const dev = await ensureDevServer();
+  const server = CSP_RUN ? serveBuildUnderPolicy() : null;
+  const initScripts = CSP_RUN ? [REPORT_VIOLATIONS, { content: await mockIpcScript() }] : [];
+  const dev = CSP_RUN ? null : await ensureDevServer();
   const browser = await chromium.launch();
   let failed = false;
   try {
     for (const scene of scenes) {
       console.log(`scene ${scene.name}`);
-      const problems = await runScene(browser, scene).catch((error) => [`scene failed: ${error.message}`]);
+      const problems = await runScene(browser, scene, initScripts).catch((error) => [`scene failed: ${error.message}`]);
       for (const problem of problems) {
         console.log(`  ! ${problem}`);
         failed = true;
@@ -260,6 +293,7 @@ async function main() {
   } finally {
     await browser.close();
     stopDevServer(dev);
+    server?.stop(true);
   }
   process.exit(failed ? 1 : 0);
 }

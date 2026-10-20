@@ -97,6 +97,30 @@ jobs:
           path: .tmp/ui-shots
           if-no-files-found: warn
 
+  # Every ui-scenes scene, from the production build, under the content security policy in
+  # tauri.conf.json (docs/development.md, Content security policy).
+  csp:
+    name: csp
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - *checkout
+      - *setup-bun
+      - *install-frontend
+
+      - name: Install Chromium for the CSP check
+        timeout-minutes: 5
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build frontend
+        run: bun run build
+
+      - name: Check every scene under the content security policy
+        timeout-minutes: 10
+        env:
+          UI_SHOTS_DIR: .tmp/ui-csp
+        run: bun run ui:csp
+
   # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
   # Their check runs are `windows / lint`, `windows / test` and so on, none of them named like a
   # required check (`requiredChecks` in scripts/workflows.test.mjs).

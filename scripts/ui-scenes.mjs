@@ -74,7 +74,9 @@ export const SCENES = [
 ];
 
 export async function chooseScenes(argv, available = SCENES) {
-  const { values, positionals } = parseArgs({ args: argv, options: { layout: { type: "boolean" } }, allowPositionals: true });
+  const { values, positionals } = parseArgs({ args: argv, options: { layout: { type: "boolean" }, csp: { type: "boolean" } }, allowPositionals: true });
+  if (values.layout && values.csp) throw new Error("--layout and --csp are separate runs");
+  if (values.csp && positionals.length > 0) throw new Error("--csp runs every built-in scene and takes no scene file");
   const scenes = values.layout ? layoutScenes(available, positionals) : await fileScenes(available, positionals);
   scenes.forEach(validateScene);
   return scenes;
