@@ -1,8 +1,8 @@
 use crate::dto::AgentId;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use crate::dto::{
-    GithubPrDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto, WindowRole,
+    GithubPrDto, LimitWindowDto, LimitWindowKind, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
+    ReadStanding, WindowRole,
 };
 #[cfg(any(target_os = "windows", test))]
 use crate::limits::window_at::{Meter, WindowAt};
@@ -405,8 +405,7 @@ pub fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
-    pub status: LimitsStatus,
-    pub message: Option<String>,
+    standing: ReadStanding,
     pub windows: Vec<LimitWindowDto>,
     headline_window_id: Option<String>,
     inner_ring: Option<InnerRing>,
@@ -428,6 +427,7 @@ pub enum InnerRing {
 impl NotchProvider {
     pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
+        let standing = ReadStanding::of(&card);
         let windows = card.reading.windows;
         let workspace_credits = card.reading.workspace_credits;
         let headline_window_id = windows
@@ -436,8 +436,7 @@ impl NotchProvider {
             .map(|window| window.id.clone());
         let inner_ring = inner_ring(&windows, workspace_credits.as_ref());
         Some(Self {
-            status: card.status,
-            message: card.message,
+            standing,
             windows,
             headline_window_id,
             inner_ring,

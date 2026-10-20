@@ -79,6 +79,16 @@ describe("a card's banked reset controls", () => {
     expect(within(card).queryByRole("button", { name: "Save account" })).toBeNull();
   });
 
+  it("ask before using a reset with the card's own countdown to when its limit renews by itself", async () => {
+    answer([okCodex({ resetCredits: { availableCount: 1, nextExpiresAt: null } })]);
+    renderLimits();
+    const card = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    const use = await within(card).findByRole("button", { name: "Use banked reset" });
+    await waitFor(() => expect(use).toBeEnabled());
+    fireEvent.click(use);
+    expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(/ and renews by itself in 7d 3h\./);
+  });
+
   it("keep a waiting automatic reset's countdown and Cancel while Switch anyway is asked on the same card", async () => {
     answer([okCodex(), staleCodex()], [personal()]);
     pendingResetSpends.mockResolvedValue([{ accountId: "acct-personal", dueAt: DUE }]);

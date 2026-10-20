@@ -73,7 +73,7 @@ afterEach(() => {
 
 describe("focus as an account leaves", () => {
   const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
-  const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.");
+  const signedOut = statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted");
 
   async function removeFromMenu(label: string) {
     fireEvent.click(await screen.findByRole("button", { name: `More actions for ${label}` }));

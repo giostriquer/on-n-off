@@ -1,18 +1,18 @@
 import { describe, expect, it } from "vitest";
 import written from "../../../../src-tauri/src/accounts/fixtures/login-states.json";
 import type { LoginState, SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan } from "./cardActionPlan";
 import { cardTags } from "./cardTags";
 import { limitCards } from "./limitCards";
 import { signInPresentation } from "./loginState";
-import { NOW, okClaude, okCodex, okMuse } from "./readingFixtures";
+import { NOW, lastObserved, okClaude, okCodex, okMuse } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
 const at = (days: number) => new Date(AT_NOW + days * DAY).toISOString();
-const READING: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const READING: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
 type Shown = {
   main: string | null;
@@ -22,7 +22,7 @@ type Shown = {
 };
 
 function shown(provider: LimitsProvider, loginState: LoginState): Shown {
-  const reading = READING[provider]({ currentAccount: false, savedProfile: true, status: "failed", message: "The read's own words." });
+  const reading = READING[provider]({ currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "The read's own words.", "error") });
   const account = reading.account!;
   const profile: SavedProfile = {
     id: `saved-${provider}`, observationId: account.id, legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },

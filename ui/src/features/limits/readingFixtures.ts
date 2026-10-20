@@ -1,9 +1,19 @@
 import type { SavedProfile } from "$lib/accountTypes";
-import type { LimitsColumnEntry, LimitsStatus } from "$lib/limitsTypes";
+import type { LimitsColumnEntry, LimitsStatus, ReadStanding, StandingMessage } from "$lib/limitsTypes";
 import { unreadEntry } from "@/dev/limitsColumn";
 import type { AgentId } from "$lib/types";
 
 export const NOW = "2026-08-17T20:00:00Z";
+
+export const REMEMBERED: ReadStanding = { kind: "lastObserved", why: "remembered" };
+
+export function lastObserved(why: "readPaused" | "savedRefreshPaused", text: string, tone: StandingMessage["tone"]): ReadStanding {
+  return { kind: "lastObserved", why, message: { text, tone } };
+}
+
+export function unavailable(text: string, tone: StandingMessage["tone"]): ReadStanding {
+  return { kind: "unavailable", message: { text, tone } };
+}
 
 export function okClaude(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return {
@@ -63,6 +73,7 @@ export function staleCodex(overrides: Partial<LimitsColumnEntry> = {}): LimitsCo
     status: "ok",
     account: { id: "acct-personal", label: "personal@codex.example" },
     currentAccount: false,
+    standing: REMEMBERED,
     plan: "plus",
     planLabel: "Plus",
     windows: [
@@ -73,8 +84,8 @@ export function staleCodex(overrides: Partial<LimitsColumnEntry> = {}): LimitsCo
   };
 }
 
-export function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): LimitsColumnEntry {
-  return { provider, status, message, currentAccount: true, windows: [] };
+export function statusOnly(provider: AgentId, status: LimitsStatus, text: string, tone: StandingMessage["tone"]): LimitsColumnEntry {
+  return { provider, status, currentAccount: true, windows: [], standing: unavailable(text, tone) };
 }
 
 export function withSavedProfiles(entries: LimitsColumnEntry[], profiles: SavedProfile[]): LimitsColumnEntry[] {

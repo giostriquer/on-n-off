@@ -93,7 +93,7 @@ source carries no comments (see [Code comments](#code-comments)).
   (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
   the destructive items, and the footer: its main button, the Switch anyway confirmation and the
   banked reset controls. Each entry carries what its handler needs (the account controls, the saved
-  login, the clients still running, the reading, the waiting spend), and `useCardActions`
+  login, the clients still running, the reading and when its headline window resets by itself, the waiting spend), and `useCardActions`
   (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
   else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
   Check limits now (`checkNowEntry`). The plan reads two facts from the card for who is signed in:
@@ -116,6 +116,8 @@ source carries no comments (see [Code comments](#code-comments)).
   and ending before the actions; otherwise they all move to their own row, starting under the
   name in the same order. The category starts under the name and its tags and runs to the
   header's right edge. The tray popover's header puts its tags at the right, in the same order.
+  A remembered or paused card's status is a tag in the clock's place on the popover only: the
+  Limits screen draws it in the card's body, above its windows, so its header renders no tag for it.
   `scripts/ui-shots.mjs` checks these rules, and that tags on one line sit one gap apart in their
   order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
   in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
@@ -134,6 +136,12 @@ source carries no comments (see [Code comments](#code-comments)).
   `usageMeterColor` (`ui/src/lib/windowAt.ts`), `meter_color` (`side_notch/model.rs`) and
   `meterInk` (`Meter.swift`). `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
+- Whether a card's reading is live, last observed or unavailable, and the message and tone it
+  shows: its read standing, `ReadStanding::of` (`limits/standing.rs`), worked out from the card as it
+  leaves the read (each Limits column entry for the UI, `NotchProvider::current` for the notch),
+  never stored on it. The card, the tray popover and both notches render the standing and never
+  restate the rule, `Reading::has_observations` among it; the cases they all check are
+  `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together

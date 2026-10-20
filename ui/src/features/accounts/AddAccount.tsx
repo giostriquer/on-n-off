@@ -28,7 +28,7 @@ export function AddAccount({ buttonRef }: { buttonRef?: RefCallback<HTMLButtonEl
       <Plus className="size-3.5" aria-hidden="true" />Add account
     </button>
     {open && <div id={id} role="group" aria-label="Add account" className="absolute right-0 top-full z-20 mt-2 w-72 max-w-[calc(100vw-3rem)] rounded-lg border border-[var(--hair)] bg-[var(--plate)] p-2 shadow-lg">
-      {ACCOUNT_PROVIDERS.map(provider => <button key={provider} type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-[var(--fill)] disabled:opacity-45" disabled={!!controllers[provider].busy || controllers[provider].query.isPending || controllers[provider].query.data?.recoveryRequired} onClick={() => {
+      {ACCOUNT_PROVIDERS.map(provider => <button key={provider} type="button" className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-[13px] hover:bg-[var(--wash)] focus-visible:outline focus-visible:outline-[var(--fill)] disabled:opacity-45" disabled={controllers[provider].blocked} onClick={() => {
         setOpen(false); trigger.current?.focus(); void controllers[provider].add();
       }}><span aria-hidden="true"><ProviderIcon provider={provider} className="size-4" /></span>{providerLabel(provider)}</button>)}
       <div className="mt-2 border-t border-[var(--hair)] px-3 pt-3 pb-2"><AutomaticAccountSaving /></div>

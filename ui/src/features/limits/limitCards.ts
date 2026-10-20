@@ -10,23 +10,24 @@ import type {
   LimitsSubscription,
   LimitsWorkspaceCredits,
   ProviderLimits,
+  StandingMessage,
 } from "$lib/limitsTypes";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
-  presentLimitAccount,
+  observedAtText,
   presentLimitWindow,
+  presentStanding,
   unexpiredBankedResets,
   usableAgainAt,
   usageLeft,
   type CardStatus,
-  type LimitAccountPresentation,
-  type LimitWindowPresentation,
+  type QuotaWindowPresentation,
 } from "./limitPresentation";
 import { signInPresentation, type SignInPresentation } from "./loginState";
 
-export type CardWindow = LimitWindowPresentation & { id: string; label: string };
+export type CardWindow = QuotaWindowPresentation & { id: string; label: string };
 
 export type CardFigures = {
   ownBalance: LimitsCredits | null;
@@ -68,8 +69,7 @@ export type LimitCard = {
   empty: { reason: "usageUnavailable" | "noWindows"; copy: string } | null;
   freshness: {
     updatedAt: string | null;
-    lastKnown: boolean;
-    message: { text: string; tone: "error" | "muted" } | null;
+    message: StandingMessage | null;
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
@@ -135,8 +135,6 @@ function compare(a: number, b: number): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnown: false, updatedAt: null };
-
 function presentCard(slot: Slot, provider: LimitsProvider, index: number, nativeLogin: NativeLogin | null, now: number): LimitCard {
   const { entry, reading, profile } = slot;
   const name = providerLabel(provider);
@@ -144,15 +142,13 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
   const label = profile?.email ?? account?.label ?? null;
-  const presentation = reading ? presentLimitAccount(reading, `${name} limits are unavailable.`) : UNREAD;
+  const presentation = presentStanding(entry.standing);
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const login = profile?.loginState ?? null;
   const signIn = login && signInPresentation(login, provider, now);
-  const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
-    : presentation.message === null ? null
-    : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
+  const message = signIn?.message ? { text: signIn.message, tone: "error" as const } : presentation.message;
   return {
     key: `${leads ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
@@ -174,12 +170,11 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentWindow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
-    empty: hasWindows || readStatus !== "ok" || message ? null
+    empty: hasWindows || !presentation.mayShowEmpty || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
     freshness: {
-      updatedAt: presentation.updatedAt,
-      lastKnown: presentation.lastKnown,
+      updatedAt: reading ? observedAtText(reading) : null,
       message,
       readStatus,
     },

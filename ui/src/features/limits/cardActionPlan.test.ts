@@ -4,7 +4,7 @@ import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
-import { NOW, okClaude, okCodex, okMuse, staleCodex, withSavedProfiles } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, okMuse, staleCodex, unavailable, withSavedProfiles } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
@@ -82,7 +82,7 @@ const STATES = {
   "current unconfirmed": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)] }),
   "current unsaved": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: { observationId: accountId(provider), settled: true } }),
   saved: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)] }),
-  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })], profiles: [profile(provider, { loginState: { state: "missing" } })] }),
+  "needs login": (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })], profiles: [profile(provider, { loginState: { state: "missing" } })] }),
   "sign-in ended": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider, { loginState: { state: "ended", endsAt: before(1) } })],
   }),
@@ -93,7 +93,7 @@ const STATES = {
   "signing in": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)], accounts: { ...LIST, signingIn: "running", blocked: true },
   }),
-  remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })] }),
+  remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false, standing: REMEMBERED })] }),
   "pending automatic spend": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)],
     accounts: { ...LIST, runningClients: RUNNING }, pendingSpend: SPEND,
@@ -172,7 +172,7 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
   });
 
   it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
-    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", currentAccount: true, windows: [] }], nativeLogin: null, now: AT_NOW })![0];
     const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
     expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
     expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
@@ -203,7 +203,7 @@ describe("Use banked reset", () => {
   it("is offered only on the signed-in account's live reading that has a reset banked", () => {
     expect(offered(live)).toEqual({ enabled: true });
     for (const entries of [
-      [reading("codex", { currentAccount: false })],
+      [reading("codex", { currentAccount: false, standing: REMEMBERED })],
       [reading("codex", { status: "failed" })],
       [reading("codex", { resetCredits: { availableCount: 0, nextExpiresAt: null } })],
       [reading("codex", { resetCredits: null })],
@@ -274,8 +274,8 @@ describe("Sign in again in place of the footer's action", () => {
 
   it("is offered once a saved sign-in ended, read or not, signed out or never used", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})] })).toBe("signInAgain");
-    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut", message: null }], profiles: [claudeProfile({})] })).toBe("signInAgain");
-    expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed" })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");
+    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }], profiles: [claudeProfile({})] })).toBe("signInAgain");
+    expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");
   });
 
   it("gives way to the Cancel of the sign-in it started", () => {
@@ -286,14 +286,15 @@ describe("Sign in again in place of the footer's action", () => {
 });
 
 describe("each entry", () => {
-  it("carries what its handler needs: the account controls, the saved login, the clients still running, the reading and the waiting spend", () => {
+  it("carries what its handler needs: the account controls, the saved login, the clients still running, the reading, when its headline window resets by itself and the waiting spend", () => {
     const pending = plan("codex", STATES["pending automatic spend"]("codex"));
     expect(pending.account?.id).toBe(accountId("codex"));
     expect(pending.footer).toEqual({
       main: { action: "useAccount", enabled: true, controls: CONTROLS, profileId: "saved-codex" },
       switchAlongside: { enabled: true, clients: RUNNING, controls: CONTROLS, profileId: "saved-codex" },
-      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), useBankedReset: null, automaticSpend: SPEND },
+      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), resetsIn: "7d 3h", useBankedReset: null, automaticSpend: SPEND },
     });
+    expect(plan("codex", { entries: [reading("codex", { windows: [] })] }).footer?.resets?.resetsIn).toBeNull();
     expect(pending.menu.find(entry => entry.action === "signInAgain")).toEqual({ action: "signInAgain", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
     expect(plan("codex", STATES.remembered("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: null });
     expect(plan("codex", STATES["needs login"]("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: "saved-codex" });

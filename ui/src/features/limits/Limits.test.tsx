@@ -6,7 +6,7 @@ import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -106,7 +106,7 @@ describe("Limits", () => {
   });
 
   it("says under a row why it shows no reset", async () => {
-    const remembered = okClaude({ currentAccount: false, account: { id: "uuid-2", label: "other@claude.example" } });
+    const remembered = okClaude({ currentAccount: false, standing: REMEMBERED, account: { id: "uuid-2", label: "other@claude.example" } });
     remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: null, startsOnFirstMessage: true };
     const codex = okCodex();
     codex.windows[1] = { ...codex.windows[1], resetsAt: null };
@@ -216,7 +216,8 @@ describe("Limits", () => {
   });
 
   it("says the signed-in account's refresh is paused above its message, with nothing to sign into or forget", async () => {
-    answer([okClaude({ status: "unauthenticated", message: "Access token expired — send a prompt with `claude` to renew it, then refresh here." })], [okCodex()]);
+    const message = "Access token expired — send a prompt with `claude` to renew it, then refresh here.";
+    answer([okClaude({ status: "unauthenticated", standing: lastObserved("readPaused", message, "muted") })], [okCodex()]);
     renderLimits();
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     expect(within(claude).getByText("Refresh paused.")).toBeTruthy();
@@ -228,7 +229,7 @@ describe("Limits", () => {
   });
 
   it("re-reads every provider on focus only after the configured interval", async () => {
-    answer([statusOnly("claude", "unauthenticated", "Access token expired")], [okCodex()]);
+    answer([statusOnly("claude", "unauthenticated", "Access token expired", "muted")], [okCodex()]);
     renderLimits();
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(3));
 
@@ -267,7 +268,7 @@ describe("Limits", () => {
   });
 
   it("keeps remembered accounts visible when the current login is signed out", async () => {
-    answer([okClaude()], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits."), staleCodex()]);
+    answer([okClaude()], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted"), staleCodex()]);
     renderLimits();
     await waitFor(() => expect(card("Codex limits · personal@codex.example")).toBeTruthy());
     const current = card("Codex limits");
@@ -279,7 +280,7 @@ describe("Limits", () => {
   });
 
   it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
-    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.")]);
+    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).", "error")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted")]);
     renderLimits();
     const failed = await waitFor(() => within(card("Claude limits")).getByText("Could not reach the Claude usage service (HTTP 503)."));
     expect(failed).toHaveClass("text-[var(--trip)]");
@@ -375,7 +376,7 @@ import { readCodexSubscription } from "$lib/api";
 
 it("reads each Codex card's subscription date and offers no billing action", async () => {
   vi.mocked(readCodexSubscription).mockClear().mockResolvedValue(null);
-  answer([okClaude()], [okCodex({ currentAccount: false })]);
+  answer([okClaude()], [okCodex({ currentAccount: false, standing: REMEMBERED })]);
   renderLimits();
   const region = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
   await waitFor(() => expect(readCodexSubscription).toHaveBeenCalledWith("acct-work"));
@@ -576,7 +577,8 @@ it("says a remembered reading is a remembered account, and no saved profile's re
     okCodex(),
     staleCodex(),
     okCodex({ account: { id: "acct-live", label: "live@codex.example" }, currentAccount: false, savedProfile: true }),
-    okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, savedProfile: true, status: "failed", message: "Saved usage credential is no longer accepted." }),
+    okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, savedProfile: true, status: "failed",
+      standing: lastObserved("savedRefreshPaused", "Saved usage credential is no longer accepted.", "error") }),
   ]);
   renderLimits();
   const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
@@ -591,7 +593,7 @@ it("says a remembered reading is a remembered account, and no saved profile's re
 
 it("quietly identifies last-known usage and reveals the reason on focus", async () => {
   const reason = "Saved usage credential is no longer accepted.";
-  answer([okClaude()], [okCodex({currentAccount:false, savedProfile:true, status:"failed", message:reason})]);
+  answer([okClaude()], [okCodex({currentAccount:false, savedProfile:true, status:"failed", standing:lastObserved("savedRefreshPaused", reason, "error")})]);
   renderLimits();
   const region = await screen.findByRole("region", {name: "Codex limits · work@codex.example"});
   const badge = within(region).getByRole("button", {name:"Usage status: Last known usage"});

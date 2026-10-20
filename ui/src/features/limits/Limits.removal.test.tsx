@@ -7,7 +7,7 @@ import type { LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
+import { NOW, REMEMBERED, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
@@ -126,7 +126,7 @@ describe("removing", () => {
   });
 
   it("removes a saved account, its login and the history it replaced with one call that names the card alone", async () => {
-    serve([okCodex(), okCodex({ account: { id: SHARED.observationId, label: SHARED.email }, currentAccount: false, profile: SHARED, replaced: [{ id: "team", label: SHARED.email }] })]);
+    serve([okCodex(), okCodex({ account: { id: SHARED.observationId, label: SHARED.email }, currentAccount: false, standing: REMEMBERED, profile: SHARED, replaced: [{ id: "team", label: SHARED.email }] })]);
     savedLogins([SHARED]);
     renderLimits();
     await screen.findByRole("button", { name: "Use account" });
@@ -157,7 +157,7 @@ describe("removing", () => {
   });
 
   it("removes an archived account with the same one call", async () => {
-    serve([okCodex(), okCodex({ account: { id: SHARED.observationId, label: SHARED.email }, currentAccount: false, archived: true,
+    serve([okCodex(), okCodex({ account: { id: SHARED.observationId, label: SHARED.email }, currentAccount: false, archived: true, standing: REMEMBERED,
       profile: { ...SHARED, archived: true }, replaced: [{ id: "team", label: SHARED.email }] })]);
     savedLogins([{ ...SHARED, archived: true }]);
     renderLimits();
@@ -175,7 +175,7 @@ describe("removing", () => {
 describe("archiving", () => {
   it("archives a card from its menu without asking, with one call, and lists it under the column's archived accounts", async () => {
     const spare = staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } });
-    serve([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits."), staleCodex(), spare]);
+    serve([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted"), staleCodex(), spare]);
     renderLimits();
     await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     fireEvent.click(screen.getByRole("button", { name: "More actions for me@claude.example" }));

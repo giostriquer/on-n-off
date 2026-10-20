@@ -440,8 +440,8 @@ again** as its button, with Use account kept in its ⋯ menu. Until 2026-10-20 o
 past its date changed the card: a refused Codex or Muse login, or a Claude home refused before its
 date, still offered Use account with the reason in the usage clock's tooltip, and a login refused
 in its home was read again on the backoff. Every card a saved poll produces is marked
-`savedProfile`, so the UI says "Remembered account" only for readings that are neither the signed-in
-account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
+`savedProfile`, so a card's read standing calls a reading remembered only when it is neither the
+signed-in account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
 home by the provider's own client: Codex's app-server, and for Claude the report the signed-in card
 reads (the Usage / Limits row above), `claude -p /usage --safe-mode` with the same arguments and
 environment and `CLAUDE_CONFIG_DIR` set to that home (`limits/claude_cli.rs`). A saved account's home
