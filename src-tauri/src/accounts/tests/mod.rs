@@ -35,6 +35,7 @@ fn each_provider_keeps_the_activity_lock_file_other_app_versions_use() {
 mod archiving;
 mod categories;
 mod fixture;
+mod home_owners;
 mod homes;
 mod listing;
 mod login_precedence;

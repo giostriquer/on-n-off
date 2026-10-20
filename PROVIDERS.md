@@ -401,7 +401,10 @@ that is not the signed-in one keeps its login in its own home, a persistent Clau
 `~/.on-n-off/accounts/homes/` (`accounts/homes.rs`, `accounts/claude/home.rs`; see the Homes
 section of `docs/architecture/accounts.md`): the scoped Keychain entry `Claude Code-credentials-<hash
 of that dir>` on macOS, created by on-n-off's first write there through `/usr/bin/security`, and the
-home's `.credentials.json` on Windows, as Claude Code keeps any login there. Before every read of
+home's `.credentials.json` on Windows, as Claude Code keeps any login there. The home records its
+provider in `provider.json`; one from before that record is Claude's when it holds a `.claude`
+config dir and no Muse `config/muse` dir, and only Claude's own reads tear it down, its Keychain
+entry first (Owners, in the Homes section). Before every read of
 saved accounts, such a login moves from the vault into its home; a switch moves it back out, and
 empties the home, before publishing it. Its usage is Claude Code's own report in the home
 (`limits/claude_cli.rs`, the Usage / Limits row above), and Claude Code renews the login there itself,

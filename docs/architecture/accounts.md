@@ -116,11 +116,12 @@ Windows it is the home's `.credentials.json`, the file Claude Code keeps any log
 A new sign-in (Add or Sign in again) and Sign out (for every saved workspace of the signed-out
 user) set the profile's home aside, and Remove takes the profile with it; Remove account also
 retires the home in the same call (Remove account, below). A home no profile names
-then goes at the next read: every read lists the homes on disk before it reads the vault, and
-tears down each one no profile names, under the home's own Claude Code locks, its Keychain entry
-first, then the directory. A home's id is recorded in the vault before anything creates it, so one
-listed first and named nowhere is one nothing will use again; one its client holds, or that could
-not be removed, goes at a later read.
+then goes at the next read of its own provider (Owners, below): every read lists the homes on disk
+before it reads the vault, and tears down each one no profile names that its provider owns, through
+that provider's home: a Claude home under its own Claude Code locks, its Keychain entry first, then
+the directory; a Muse home as a directory, since it keeps nothing outside it. A home's id is
+recorded in the vault before anything creates it, so one listed first and named nowhere is one
+nothing will use again; one its client holds, or that could not be removed, goes at a later read.
 
 The exception is a version before homes. It reads a vault with homes, since every field it does
 not know is skipped, but its next write of the vault drops the field that names them, and such
@@ -128,13 +129,45 @@ writes are routine (remembering a renewed native login is one). That leaves a ho
 no login anywhere but its home. So the read first looks at what an unnamed home holds: a login
 that signs in as a saved account with neither a login nor a home is taken back by that account,
 unless Sign out left the account so, which it records on the profile (`signed_out`) in the same
-vault change; every other home is torn down. A home whose login cannot be read right now is left
-for a later read, since it may be the account's only login. The rule has one limit: a version
-before homes drops `signed_out` with `home`, so a sign-out it made, or one whose vault it rewrote
-before the signed-out homes went, leaves nothing to tell by, and the signed-out account takes its homes back;
+vault change; every other home the provider owns is torn down. A home whose login cannot be read
+right now is left for a later read, since it may be the account's only login. The rule has one
+limit: a version before homes drops `signed_out` with `home`, so a sign-out it made, or one whose
+vault it rewrote before the signed-out homes went, leaves nothing to tell by, and the signed-out account takes its homes back;
 their reads then say whether that sign-out ended their logins. The teardown never
 runs `claude auth logout`: whether a logout ends only its own login or every login of the account
 is unproven, and a logout that ended the others would sign the user out elsewhere.
+
+**Owners.** Every provider's homes share `accounts/homes/`, and each provider's read runs on its
+own. Each home therefore belongs to one provider, and only that provider's home moves a login into
+it or out of it, takes it back, or tears it down. Before this rule, a Muse read took an unnamed
+Claude home for an empty Muse home and deleted only its directory, which left the home's
+`Claude Code-credentials-<hash>` Keychain entry behind with nothing that would ever find it again
+(the service name hashes a path that no longer exists); and a Claude read deleted a Muse home that
+a Muse read would have taken back, its account's only login.
+
+A home records its provider in its own `provider.json`, the provider's name and nothing secret,
+the file and format a sign-in's isolated home records its provider in. Check-in writes it under the
+home's locks before the first login goes in, and a home taken back gets it too. One rule decides a
+home's owner (`homes::owner`), asked by check-in, check-out, the take-back and teardown of an
+unnamed home, and Remove account's retire, each before it takes the home's locks:
+
+- The provider its record names, whatever else the home holds.
+- With no record, the provider whose profile names the home (for Remove account, the profile it
+  just removed).
+- With no record and no profile naming it, a home from a version before records, the one provider
+  whose layout it holds, found by looking at directories alone (`Home::recognizes`): a Claude home
+  is the directory with a `.claude` config dir in it, which Claude Code's locks create before
+  anything is written there, and a Muse home the one with a `config/muse` dir. Neither reads a
+  login, a file's contents or a Keychain item, and a linked directory does not count.
+
+A home whose record cannot be read (malformed, or naming a provider this version does not know),
+with no layout, or with both layouts belongs to no provider. No read takes its locks, reads its
+login or deletes it, and it stays on disk until it is removed by hand: a home whose owner cannot be
+told may hold an account's only login, and the wrong provider's teardown would leave a Keychain
+entry behind. A check-in or a switch refuses a home another provider owns ("This account's home
+belongs to another provider, so it was left alone."), and the account's login stays in the vault.
+Keychain entries an earlier version left behind this way are not found: on-n-off never lists the
+Keychain, and the path each one hashes is gone.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:
@@ -365,7 +398,8 @@ A saved, non-active Muse login lives in its own home under `accounts/homes/`, ru
 `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `TBH_CREDENTIAL_BACKEND=file`, so its login stays inline in
 that home's `auth.json` and never touches the global Keychain item (verified 2026-10-16 with a
 real `muse login`); its usage is one key-mint read with that home's token, and the home is removed
-as a directory, never with `muse logout`. Sign-in runs `muse login` in an isolated home of that
+as a directory, never with `muse logout`: nothing of it lives outside the directory. Sign-in runs
+`muse login` in an isolated home of that
 shape. Without a terminal Muse opens no browser and asks for no Enter: it prints its device-code
 page (`https://auth.meta.com/oauth/device/?code=…`) and the code on stdout and waits, so on-n-off
 opens that page itself (verified 2026-10-17, Muse 1.4.10, with stdin closed and with an Enter
@@ -538,11 +572,12 @@ stores, in this order:
    login secret. If this step fails, nothing has changed and nothing is announced: a vault that
    does not open refuses even a card with no saved login, which the blocked rule above keeps from
    being asked. Once the vault lease is released, and outside the cache lock, the home the removed
-   profile named is retired with that profile's own provider's home: under the home's own locks
-   it deletes the home's login (on macOS Claude's scoped Keychain entry) first, then the
-   directory, reading no login on the way (`Accounts::retire_home`). A home that cannot go now,
-   because its client holds it or it cannot be deleted, is left for a later read, which tears
-   down every home no profile names (Homes, above).
+   profile named is retired with that profile's own provider's home, once the owner rule says the
+   home is that provider's (Owners, in Homes above): under the home's own locks it deletes the
+   home's login (on macOS Claude's scoped Keychain entry) first, then the directory, reading no
+   login on the way (`Accounts::retire_home`). A home that cannot go now, because its client holds
+   it, it cannot be deleted or it records another provider, is left for a later read of its owner,
+   which tears down every home no profile names that it owns (Homes, above).
 2. **The usage history**, under the Limits cache lock, so no read of the provider runs beside it:
    the snapshot store checks every replaced legacy snapshot's email again, the final guard,
    then deletes them, the card's own snapshot and any legacy that one supersedes on disk, and

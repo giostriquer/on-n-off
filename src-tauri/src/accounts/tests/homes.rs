@@ -429,6 +429,7 @@ fn a_read_that_finds_the_home_already_named_moves_the_login_into_that_one() {
         Some(&native),
         &open,
         &homes,
+        &|provider, dir| accounts.laid_out(provider, dir),
     );
 
     let held: Vec<_> = harness

@@ -148,7 +148,8 @@ impl super::Accounts {
         let homes = self.account_homes(provider);
         let homes = homes.as_ref().map(|homes| homes as &Resolve<'_>);
         if let (Some(homes), Ok(native)) = (homes, &native) {
-            super::homes::settle(home, provider, native.as_ref(), &open, homes);
+            let laid_out = |provider, dir: &Path| self.laid_out(provider, dir);
+            super::homes::settle(home, provider, native.as_ref(), &open, homes, &laid_out);
         }
         let reads = Reads {
             open: &open,

@@ -22,6 +22,10 @@ pub(super) fn refuse_linked(config_file: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub(super) fn real_dir(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
+}
+
 pub(super) fn refuse_env_credentials(
     names: &[&str],
     env: &dyn Fn(&str) -> Option<OsString>,

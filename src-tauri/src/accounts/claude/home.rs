@@ -15,6 +15,14 @@ impl ClaudeHome {
 }
 
 impl Home for ClaudeHome {
+    fn dir(&self) -> &Path {
+        &self.dir
+    }
+
+    fn recognizes(&self) -> bool {
+        native::real_dir(&self.store.config_home)
+    }
+
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         self.store.lock()
     }

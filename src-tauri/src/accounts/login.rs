@@ -163,11 +163,7 @@ impl super::Accounts {
             .map_err(|_| "Cannot own isolated sign-in storage.")?;
         let lease = FileLease::acquire(lease_file, std::fs::File::try_lock)
             .map_err(|_| "Cannot own isolated sign-in storage.")?;
-        super::vault::atomic_write(
-            &scratch.path().join("provider.json"),
-            &serde_json::to_vec(&provider)
-                .map_err(|_| "Cannot record isolated sign-in ownership.")?,
-        )?;
+        super::homes::record(scratch.path(), provider)?;
         let result: Result<(), String> = (|| {
             self.run_official_sign_in(isolated.as_ref(), &canceled)?;
             if canceled.load(Ordering::Acquire) {
@@ -256,11 +252,7 @@ impl super::Accounts {
             let Ok(lease) = FileLease::acquire(file, std::fs::File::try_lock) else {
                 continue;
             };
-            let Some(provider) = std::fs::read(path.join("provider.json"))
-                .ok()
-                .filter(|v| v.len() < 100)
-                .and_then(|v| serde_json::from_slice::<AgentId>(&v).ok())
-            else {
+            let Some(provider) = super::homes::recorded_provider(&path) else {
                 continue;
             };
             let Ok(isolated) = self.isolated(provider, &path) else {

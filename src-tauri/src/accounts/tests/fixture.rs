@@ -114,6 +114,7 @@ pub(super) struct Homes {
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
+    pub deleted_by: Mutex<Vec<(PathBuf, AgentId)>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
     pub deadline_reads: Mutex<Vec<PathBuf>>,
     pub secrets_read: Mutex<usize>,
@@ -131,6 +132,14 @@ impl FakeHome {
     }
 }
 impl Home for FakeHome {
+    fn dir(&self) -> &Path {
+        &self.1
+    }
+    fn recognizes(&self) -> bool {
+        super::super::AdapterStores
+            .homes(self.2)
+            .is_some_and(|at| at(&self.1).recognizes())
+    }
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         if self.0.busy.lock().unwrap().contains(&self.1) {
             return Err("Claude is busy with this home.".into());
@@ -204,6 +213,11 @@ impl Home for FakeHome {
         }
         self.0.logins.lock().unwrap().remove(&self.1);
         self.0.deleted.lock().unwrap().push(self.1.clone());
+        self.0
+            .deleted_by
+            .lock()
+            .unwrap()
+            .push((self.1.clone(), self.2));
         let _ = std::fs::remove_dir_all(&self.1);
         Ok(())
     }

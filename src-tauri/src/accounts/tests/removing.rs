@@ -192,12 +192,31 @@ fn forgetting_a_saved_card_retires_the_home_its_profile_named_within_the_call() 
         })
     );
     assert_eq!(
-        *harness.homes().deleted.lock().unwrap(),
-        std::slice::from_ref(&dir),
+        *harness.homes().deleted_by.lock().unwrap(),
+        [(dir.clone(), AgentId::Claude)],
         "by its own provider's home, which deletes the login with it"
     );
     assert!(!dir.exists());
     assert!(kept.exists(), "another account's home stays");
+}
+
+#[test]
+fn a_home_another_provider_owns_is_left_by_remove_account_and_says_why() {
+    let harness = Harness::new().with_homes();
+    let (key, dir) = homed(&harness, "a");
+    std::fs::write(dir.join("provider.json"), "\"muse\"").unwrap();
+
+    let forgot = harness
+        .accounts()
+        .forget_account(AgentId::Claude, &key, std::slice::from_ref(&key))
+        .unwrap();
+
+    assert!(forgot.profile && forgot.changed);
+    let why = forgot.home_left.expect("the home was left");
+    assert!(why.contains("another provider"), "{why}");
+    assert!(dir.exists(), "Claude's teardown removed Muse's home");
+    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.vault().profiles.is_empty());
 }
 
 #[test]

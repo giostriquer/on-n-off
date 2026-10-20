@@ -596,3 +596,16 @@ mod keychain {
             .any(|command| command.starts_with("add-generic-password")));
     }
 }
+
+#[test]
+fn a_home_is_known_by_its_muse_config_dir() {
+    let dir = scratch_dir("muse-home-layout");
+    let home = MuseHome::at(&dir);
+    assert!(!home.recognizes(), "an empty home");
+    fs::create_dir_all(dir.join(".claude")).unwrap();
+    assert!(!home.recognizes(), "a Claude home");
+
+    home.put(&login("you@example.com", "t1"), &()).unwrap();
+
+    assert!(home.recognizes());
+}

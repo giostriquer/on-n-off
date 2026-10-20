@@ -142,6 +142,8 @@ trait IsolatedSignIn: Native {
 }
 
 trait Home: Send + Sync {
+    fn dir(&self) -> &Path;
+    fn recognizes(&self) -> bool;
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String>;
     fn read(&self) -> Result<Option<store::Login>, String>;
     fn identify(&self, login: &store::Login) -> Result<model::Identity, String>;
@@ -263,6 +265,11 @@ impl Accounts {
     ) -> Option<impl Fn(&str) -> Result<Box<dyn Home>, String> + '_> {
         let at = self.stores.homes(provider)?;
         Some(move |id: &str| Ok(at(&homes::dir(&self.home, id)?)))
+    }
+    fn laid_out(&self, provider: AgentId, dir: &Path) -> bool {
+        self.stores
+            .homes(provider)
+            .is_some_and(|at| at(dir).recognizes())
     }
 }
 
@@ -538,9 +545,7 @@ impl Accounts {
         let Some(homes) = self.account_homes(provider) else {
             return Ok(());
         };
-        let home = homes(id)?;
-        let locks = home.lock()?;
-        home.delete(locks)
+        homes::retire(homes(id)?.as_ref(), provider)
     }
 
     fn remove(&self, id: &str) -> Result<(), String> {
