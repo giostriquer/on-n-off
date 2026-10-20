@@ -19,14 +19,13 @@ pub fn seal(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
     Ok([MAGIC, nonce.as_slice(), &encrypted].concat())
 }
 pub fn unseal(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
-    let data = data
+    let (nonce, ciphertext) = data
         .strip_prefix(MAGIC)
-        .filter(|v| v.len() >= 40)
+        .and_then(<[u8]>::split_first_chunk::<24>)
+        .filter(|(_, ciphertext)| ciphertext.len() >= 16)
         .ok_or("Invalid or unsupported account vault.")?;
-    let nonce =
-        XNonce::try_from(&data[..24]).map_err(|_| "Invalid or unsupported account vault.")?;
     XChaCha20Poly1305::new(key.into())
-        .decrypt(&nonce, &data[24..])
+        .decrypt(&XNonce::from(*nonce), ciphertext)
         .map_err(|_| {
             "The account vault could not be unlocked or is damaged. It has not been replaced."
                 .into()

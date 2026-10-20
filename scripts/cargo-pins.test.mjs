@@ -6,19 +6,17 @@ import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const skip = globalThis.Bun?.TOML ? false : "needs Bun's TOML parser";
+const SINGLE_COPY = {
+  tao: "move the cfg(windows) `tao` pin in src-tauri/Cargo.toml to tauri-runtime-wry's",
+  windows: "move the cfg(windows) `windows` pin in src-tauri/Cargo.toml to tauri-runtime's, then `cargo update -p` whichever crate still holds the old one",
+  "windows-core": "update the crate that still pulls the older `windows`",
+  winreg: "move the cfg(windows) `winreg` pin in src-tauri/Cargo.toml to embed-resource's",
+};
 
-function versionUsedBy(packages, owner, dependency) {
-  const entry = packages.find((candidate) => candidate.name === owner)?.dependencies?.find((name) => name.split(" ")[0] === dependency);
-  assert.ok(entry, `${owner} does not depend on ${dependency}`);
-  const pinned = entry.split(" ")[1];
-  if (pinned) return pinned;
-  const versions = packages.filter((candidate) => candidate.name === dependency).map((candidate) => candidate.version);
-  assert.equal(versions.length, 1, `${dependency} has several versions but ${owner} names none`);
-  return versions[0];
-}
-
-test("the app's own tao and windows are the versions the Tauri runtime uses, so a Windows build compiles one copy of each", { skip }, () => {
+test("the Windows build compiles one copy each of tao, windows and winreg, the largest codegen units in its tree", { skip }, () => {
   const packages = globalThis.Bun.TOML.parse(readFileSync(join(root, "src-tauri", "Cargo.lock"), "utf8")).package;
-  assert.equal(versionUsedBy(packages, "on-n-off", "tao"), versionUsedBy(packages, "tauri-runtime-wry", "tao"));
-  assert.equal(versionUsedBy(packages, "on-n-off", "windows"), versionUsedBy(packages, "tauri-runtime", "windows"));
+  for (const [name, fix] of Object.entries(SINGLE_COPY)) {
+    const versions = packages.filter((candidate) => candidate.name === name).map((candidate) => candidate.version);
+    assert.equal(versions.length, 1, `Cargo.lock holds ${name} ${versions.join(" and ")}: ${fix}`);
+  }
 });

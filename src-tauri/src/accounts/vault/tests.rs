@@ -21,10 +21,7 @@ fn authenticates_large_credentials_without_plaintext_on_disk() {
 }
 #[test]
 fn a_vault_sealed_before_the_aead_upgrade_still_opens_and_new_seals_keep_its_layout() {
-    let sealed: Vec<u8> = (0..SEALED_BY_CHACHA20POLY1305_0_10.len())
-        .step_by(2)
-        .map(|i| u8::from_str_radix(&SEALED_BY_CHACHA20POLY1305_0_10[i..i + 2], 16).unwrap())
-        .collect();
+    let sealed = crate::sha::hex_bytes(SEALED_BY_CHACHA20POLY1305_0_10);
     let plain = br#"{"profiles":[],"fixture":"sealed by chacha20poly1305 0.10.1"}"#;
     assert_eq!(unseal(&[7; 32], &sealed).unwrap(), plain);
     let resealed = seal(&[7; 32], plain).unwrap();

@@ -58,11 +58,11 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
-# `tao` and `windows` follow the versions the Tauri runtime resolves (tauri-runtime-wry's `tao`,
-# tauri-runtime's `windows`), and `winreg` stays where it is: a second copy of `windows` is the
+# `tao`, `windows` and `winreg` are the versions the rest of the tree resolves (tauri-runtime-wry's
+# `tao`, tauri-runtime's `windows`, embed-resource's `winreg`): a second copy of `windows` is the
 # largest codegen unit in the Windows tree, and every duplicated generation counts against the
 # 10 GB Actions cache cap that cache-prune.yml exists to defend. scripts/cargo-pins.test.mjs fails
-# when a Tauri bump moves them, so bump these with it; Dependabot leaves their minors alone.
+# on a second copy, so move these with a Tauri bump; Dependabot leaves their minors alone.
 winreg = "0.55"
 tao = "0.37"
 tiny-skia = "0.12"
