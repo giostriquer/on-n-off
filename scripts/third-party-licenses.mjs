@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -113,14 +114,16 @@ if (import.meta.main) {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const manifest = join(root, "src-tauri", "Cargo.toml");
   const output = process.argv[2] ?? join(root, "src-tauri", "gen", "THIRD_PARTY_LICENSES.md");
-  execFileSync("cargo", ["fetch", "--locked", "--manifest-path", manifest], { stdio: "inherit" });
-  const about = execFileSync(process.env.CARGO_ABOUT ?? "cargo-about", ["generate", "--format", "json", "--locked", "--offline", "--fail", "--manifest-path", manifest], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "inherit"],
-    maxBuffer: 1 << 30,
-  });
-  const notice = renderLicenses(JSON.parse(about), npmPackages(root));
-  mkdirSync(dirname(output), { recursive: true });
-  writeFileSync(output, notice);
-  console.log(`wrote ${output}`);
+  const scratch = mkdtempSync(join(tmpdir(), "on-n-off-licenses-"));
+  try {
+    execFileSync("cargo", ["fetch", "--locked", "--manifest-path", manifest], { stdio: "inherit" });
+    const json = join(scratch, "about.json");
+    execFileSync(process.env.CARGO_ABOUT ?? "cargo-about", ["generate", "--format", "json", "--locked", "--offline", "--fail", "--manifest-path", manifest, "--output-file", json], { stdio: "inherit" });
+    const notice = renderLicenses(readJson(json), npmPackages(root));
+    mkdirSync(dirname(output), { recursive: true });
+    writeFileSync(output, notice);
+    console.log(`wrote ${output}`);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }

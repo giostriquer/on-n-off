@@ -188,7 +188,18 @@ test("the command fetches the crates, runs cargo-about with its failure gates, a
     "src-tauri/Cargo.toml": "[package]\nname = \"webapp\"\n",
     "about.json": about,
     "bin/cargo": `#!/bin/sh\necho "$@" >> "$(dirname "$0")/cargo.log"\n`,
-    "bin/cargo-about": `#!/bin/sh\n[ -f "$(dirname "$0")/cargo.log" ] || exit 4\necho "$@" > "$(dirname "$0")/cargo-about.log"\n[ -n "$FAIL" ] && exit 3\ncat "$(dirname "$0")/../about.json"\n`,
+    "bin/cargo-about": [
+      "#!/bin/sh",
+      'dir="$(dirname "$0")"',
+      '[ -f "$dir/cargo.log" ] || exit 4',
+      'echo "$@" > "$dir/cargo-about.log"',
+      '[ -n "$FAIL" ] && exit 3',
+      'out=""',
+      'while [ $# -gt 0 ]; do [ "$1" = "--output-file" ] && out="$2"; shift; done',
+      '[ -n "$out" ] || { echo "cargo-about should not redirect its output in powershell" >&2; exit 5; }',
+      'cat "$dir/../about.json" > "$out"',
+      "",
+    ].join("\n"),
   });
   for (const tool of ["cargo", "cargo-about"]) chmodSync(join(root, "bin", tool), 0o755);
   mkdirSync(join(root, "scripts"));
@@ -203,7 +214,11 @@ test("the command fetches the crates, runs cargo-about with its failure gates, a
   const output = join(root, "out", "THIRD_PARTY_LICENSES.md");
   run(output);
   assert.equal(readFileSync(join(root, "bin", "cargo.log"), "utf8"), `fetch --locked --manifest-path ${manifest}\n`);
-  assert.equal(readFileSync(join(root, "bin", "cargo-about.log"), "utf8"), `generate --format json --locked --offline --fail --manifest-path ${manifest}\n`);
+  assert.match(
+    readFileSync(join(root, "bin", "cargo-about.log"), "utf8"),
+    new RegExp(`^generate --format json --locked --offline --fail --manifest-path ${manifest.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} --output-file \\S+\\n$`),
+    "cargo-about writes its JSON to a file: it refuses stdout under PowerShell",
+  );
   const notice = readFileSync(output, "utf8");
   assert.ok(notice.startsWith(expectedNotice.split("## JavaScript packages")[0]), "the crates come from cargo-about's answer");
   for (const user of ["app 1.0.0", "rolldown 1.0.0", "tailwindcss 4.0.0", "vite 8.0.0"]) assert.ok(notice.includes(user), user);
