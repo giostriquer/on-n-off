@@ -51,9 +51,14 @@ fn fingerprint(slots: &[Option<&Value>]) -> String {
     crate::sha::sha256_hex(&serde_json::to_vec(slots).expect("serializable credential generation"))
 }
 
+pub const MISSING_CREDENTIALS: &str = "The native login is missing required identity or renewable credentials. Sign in again with the official CLI.";
+
 pub fn string<'a>(value: &'a Value, pointer: &str) -> Result<&'a str, String> {
-    value.pointer(pointer).and_then(Value::as_str).filter(|s| !s.trim().is_empty())
-        .ok_or_else(|| "The native login is missing required identity or renewable credentials. Sign in again with the official CLI.".into())
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .filter(|s| !s.trim().is_empty())
+        .ok_or_else(|| MISSING_CREDENTIALS.into())
 }
 
 impl Identity {

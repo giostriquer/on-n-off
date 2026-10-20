@@ -69,9 +69,9 @@ fn a_muse_login_is_identified_by_its_lowercased_email_and_never_by_an_api_key() 
             "{mechanism}"
         );
     }
-    let mut unlabelled = login("you@example.com", "t1");
-    unlabelled.account["mechanism"] = json!("api_key");
-    assert_eq!(MuseView::of(&unlabelled).identity().unwrap(), you());
+    let mut mislabelled = login("you@example.com", "t1");
+    mislabelled.account["mechanism"] = json!("api_key");
+    assert_eq!(MuseView::of(&mislabelled).identity().unwrap(), you());
 
     let mut nameless = login("", "t1");
     nameless
@@ -80,6 +80,12 @@ fn a_muse_login_is_identified_by_its_lowercased_email_and_never_by_an_api_key() 
         .unwrap()
         .remove("user_email");
     assert!(MuseView::of(&nameless).identity().is_err());
+    let mut tokenless = login("you@example.com", "");
+    tokenless.auth = json!({});
+    assert_eq!(
+        MuseView::of(&tokenless).identity(),
+        Err(model::MISSING_CREDENTIALS.into())
+    );
     assert!(MuseView::of(&login("you@example.com", ""))
         .identity()
         .is_err());
@@ -261,6 +267,10 @@ fn an_api_key_login_is_not_a_subscription() {
     store.write(Some(&api_key_login("oauth"))).unwrap();
 
     assert_eq!(store.subscription().unwrap(), None);
+    let mut mislabelled = login("You@Example.com", "t1");
+    mislabelled.account["mechanism"] = json!("api_key");
+    store.write(Some(&mislabelled)).unwrap();
+    assert_eq!(store.subscription().unwrap(), Some(you()));
     store.write(Some(&login("You@Example.com", "t1"))).unwrap();
     assert_eq!(store.subscription().unwrap(), Some(you()));
 }

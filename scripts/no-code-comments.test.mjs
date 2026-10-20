@@ -1,47 +1,50 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
-import { dirname, extname, join, relative } from "node:path";
+import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-
-const SOURCES = [
-  { dir: "src-tauri/src", extensions: [".rs"] },
-  { dir: "ui/src", extensions: [".ts", ".tsx"] },
-  { dir: "src-tauri/macos", extensions: [".swift"], skip: ["/.build/"] },
-];
+const SOURCE_PATTERNS = ["*.rs", "*.ts", "*.tsx", "*.swift", "*.mjs"];
 
 const COMMENT = /^\s*(\/\/|\/\*|\{\s*\/\*)/;
-const DIRECTIVE = /^\s*(\/\/\/ <reference |\/\/ @ts-expect-error\b|\/\/ swift-tools-version:)/;
+const DIRECTIVE = /^\s*(\/\/\/ <reference .*\/>\s*$|\/\/ @ts-expect-error\s*$|\/\/ swift-tools-version:)/;
 
-function files(dir, extensions, skip = []) {
-  const found = [];
-  const pending = [join(root, dir)];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const path = join(current, entry.name);
-      if (skip.some((part) => `${path}/`.includes(part))) continue;
-      if (entry.isDirectory()) pending.push(path);
-      else if (extensions.includes(extname(entry.name))) found.push(path);
-    }
-  }
-  return found;
+function sources() {
+  return execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...SOURCE_PATTERNS],
+    { cwd: root, encoding: "utf8" },
+  )
+    .split("\0")
+    .filter(Boolean);
 }
 
-function commentLines(path) {
-  const lines = readFileSync(path, "utf8").split("\n");
+function commentLines(file) {
+  const lines = readFileSync(join(root, file), "utf8").split("\n");
   return lines.flatMap((line, index) => {
     if (!COMMENT.test(line) || DIRECTIVE.test(line)) return [];
-    return [`${relative(root, path)}:${index + 1}: ${line.trim()}`];
+    return [`${file}:${index + 1}: ${line.trim()}`];
   });
 }
 
-test("app sources carry no code comments", () => {
-  const found = SOURCES.flatMap(({ dir, extensions, skip }) =>
-    files(dir, extensions, skip).flatMap(commentLines),
-  );
+test("the scan reaches nested sources in every language and skips build output", () => {
+  const scanned = sources();
+  for (const file of [
+    "src-tauri/src/accounts/muse.rs",
+    "ui/src/features/limits/Limits.tsx",
+    "ui/src/lib/limitsFormat.ts",
+    "src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift",
+    "scripts/no-code-comments.test.mjs",
+  ]) {
+    assert.ok(scanned.includes(file), file);
+  }
+  assert.ok(!scanned.some((file) => file.includes("/.build/") || file.includes("/node_modules/")));
+});
+
+test("sources carry no code comments", () => {
+  const found = sources().flatMap(commentLines);
   assert.deepEqual(found, [], "move each comment's rationale into the docs that own the subject");
 });
 
@@ -55,5 +58,7 @@ test("the comment pattern sees line, block, doc and JSX comments, not URLs or di
   for (const line of ['/// <reference types="vite/client" />', "// @ts-expect-error", "// swift-tools-version: 5.9"]) {
     assert.ok(DIRECTIVE.test(line), line);
   }
-  assert.ok(!DIRECTIVE.test("// @ts-expect-errors are fine here"), "a prose comment is not a directive");
+  for (const line of ["// @ts-expect-error because the types lag", "/// <reference prose"]) {
+    assert.ok(!DIRECTIVE.test(line), `prose rides no directive: ${line}`);
+  }
 });

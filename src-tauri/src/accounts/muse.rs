@@ -315,31 +315,33 @@ impl<'a> MuseView<'a> {
         }
     }
 
-    pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        match self.auth.as_object().and_then(muse_store::credential_of) {
-            Some(MuseCredential::Token(token)) => Some(token),
-            _ => None,
-        }
+    fn credential(&self) -> Option<MuseCredential> {
+        self.auth.as_object().and_then(muse_store::credential_of)
     }
 
-    fn api_key(&self) -> bool {
-        matches!(
-            self.auth.as_object().and_then(muse_store::credential_of),
-            Some(MuseCredential::ApiKey)
-        )
+    pub(crate) fn access_token(&self) -> Option<AccessToken> {
+        match self.credential()? {
+            MuseCredential::Token(token) => Some(token),
+            _ => None,
+        }
     }
 }
 
 impl LoginView for MuseView<'_> {
     fn identity(&self) -> Result<Identity, String> {
-        if self.api_key() {
-            return Err("API key logins cannot be saved as subscription profiles.".into());
+        match self.credential() {
+            Some(MuseCredential::Token(_)) => self
+                .email()
+                .as_deref()
+                .and_then(muse_store::identity)
+                .ok_or_else(|| {
+                    "This Muse login has no account email, so it cannot be saved.".into()
+                }),
+            Some(MuseCredential::ApiKey) => {
+                Err("API key logins cannot be saved as subscription profiles.".into())
+            }
+            _ => Err(model::MISSING_CREDENTIALS.into()),
         }
-        model::string(self.auth, "/access_token")?;
-        self.email()
-            .as_deref()
-            .and_then(muse_store::identity)
-            .ok_or_else(|| "This Muse login has no account email, so it cannot be saved.".into())
     }
 
     fn email(&self) -> Option<String> {
