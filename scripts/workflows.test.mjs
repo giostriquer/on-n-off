@@ -498,3 +498,14 @@ test("the required layout job also runs every scene of the production build unde
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.equal(packageJson.scripts["ui:csp"], "bun scripts/ui-shots.mjs --csp");
 });
+
+test("every step a CI job's conditions wait on exists in that job, so no check is skipped by a missing id", { skip }, () => {
+  for (const [name, job] of Object.entries(load("ci").jobs)) {
+    const ids = new Set((job.steps ?? []).map((candidate) => candidate.id).filter(Boolean));
+    for (const candidate of job.steps ?? []) {
+      for (const [, id] of String(candidate.if ?? "").matchAll(/steps\.([\w-]+)\./g)) {
+        assert.ok(ids.has(id), `${name} › ${candidate.name} waits on steps.${id}, which the job does not have`);
+      }
+    }
+  }
+});
