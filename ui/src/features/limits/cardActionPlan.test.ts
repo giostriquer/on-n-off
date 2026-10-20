@@ -260,6 +260,15 @@ describe("the footer of a saved account whose subscription ended", () => {
       .find(card => card.account?.id === "profile:saved")!;
     expect(planFor(shown, { entries: [] }).footer?.main?.action === "archive").toBe(expected);
   });
+
+  it.each<[string, SavedProfile["loginState"]]>([
+    ["refused", { state: "refused" }],
+    ["now another account", { state: "otherAccount" }],
+  ])("a saved login %s asks to sign in again before it is archived, Archive account kept in the menu", (_case, loginState) => {
+    const shown = limitCards({ provider: "codex", entries: [codexSaved(term(false, PASSED))], profiles: [profileOf({ loginState })], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
+      .find(card => card.account?.id === "profile:saved")!;
+    expect(describe_(planFor(shown, { entries: [] }))).toEqual({ menu: "checkNow category signInAgain archive resetAlert remove", footer: "signInAgain" });
+  });
 });
 
 describe("Sign in again in place of the footer's action", () => {

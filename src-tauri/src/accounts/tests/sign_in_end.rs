@@ -126,3 +126,24 @@ fn a_home_with_no_recorded_end_is_read_once_and_remembered() {
     assert_eq!(reads() - before, 1, "one lazy read, then the recorded date");
     assert_eq!(recorded(&harness, &you_id), json!({"at": AHEAD_MS}));
 }
+
+#[test]
+fn a_home_whose_one_read_fails_records_no_end_and_is_not_read_again() {
+    let harness = Harness::new().with_homes();
+    let you_id = harness.saved(you(), claude("you", "y0"));
+    harness.signed_in(Some(claude("me", "m1")));
+    homed(&harness, &you_id, dated("you", "y1"));
+    unread(&harness, &you_id);
+    let dir = harness.home_of(&you_id).unwrap();
+    harness.homes().unreadable.lock().unwrap().push(dir);
+    let reads = || *harness.homes().secrets_read.lock().unwrap();
+
+    let before = reads();
+    let first = login_state(&harness);
+    let second = login_state(&harness);
+
+    assert_eq!(first, json!({"state": "usable"}));
+    assert_eq!(second, first);
+    assert_eq!(reads() - before, 1, "the failed read is not made again");
+    assert_eq!(recorded(&harness, &you_id), json!("unknown"));
+}
