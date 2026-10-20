@@ -374,7 +374,9 @@ a network or status failure and an answer with nothing observed read as on the s
 naming the cause, where they once read "Usage refresh is rate limited." or "Usage refresh is
 unavailable." without it. A refused login, in the vault or in its home, and one that now signs in
 as another account wait for a new login: the poll keeps the generation it read (the vault login's
-fingerprint, or the home's id and the fingerprint of the login it holds) and reads it again only
+fingerprint, or the home's id and its login stamp: the attributes of a Claude home's Keychain item,
+never its secret, and the metadata of its `.credentials.json` or a Muse home's `auth.json`, never
+their contents) and reads it again only
 once that changes. The profile's login state says so (`refused` or `otherAccount`), and every
 provider's card then reads "<Provider> no longer accepts this saved login. Sign in again to use
 this account." or "This saved login now signs in as a different <Provider> account. Sign in again to

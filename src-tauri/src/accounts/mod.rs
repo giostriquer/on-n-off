@@ -151,6 +151,7 @@ trait Home: Send + Sync {
         &self,
         identity: &model::Identity,
     ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure>;
+    fn login_stamp(&self) -> Option<String>;
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline>;
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }

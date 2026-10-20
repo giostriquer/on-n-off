@@ -325,6 +325,29 @@ fn a_malformed_saved_login_is_refused_and_the_signed_in_one_left_alone() {
 }
 
 #[test]
+fn a_homes_login_stamp_follows_its_auth_file_without_reading_it() {
+    let dir = scratch_dir("muse-home-stamp");
+    let home = MuseHome::at(&dir);
+    let empty = home.login_stamp();
+    home.put(&login("you@example.com", "t1"), &()).unwrap();
+    let first = home.login_stamp();
+
+    assert_eq!(empty.as_deref(), Some(""), "no login yet");
+    assert_ne!(first, empty);
+    assert_eq!(home.login_stamp(), first);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let file = home.store.auth_file();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(home.login_stamp(), first, "the stamp never opens the file");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    home.put(&login("you@example.com", "token-2"), &()).unwrap();
+    assert_ne!(home.login_stamp(), first, "a new login");
+}
+
+#[test]
 fn a_home_and_a_new_sign_in_read_usage_with_their_own_token() {
     let dir = scratch_dir("muse-home-usage");
     let (home_url, home_served) = serve_once("200 OK", &mint("you@example.com"));

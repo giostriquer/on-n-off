@@ -174,6 +174,20 @@ impl Home for FakeHome {
             &identity.observation_key(),
         )))
     }
+    fn login_stamp(&self) -> Option<String> {
+        if self.0.unreadable.lock().unwrap().contains(&self.1) {
+            return None;
+        }
+        Some(
+            self.0
+                .logins
+                .lock()
+                .unwrap()
+                .get(&self.1)
+                .map(|login| fingerprint(self.2, login))
+                .unwrap_or_default(),
+        )
+    }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         let login = self.read().ok()??;
         let deadline = super::super::view(self.2, &login).ok()?.sign_in_deadline();

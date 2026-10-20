@@ -21,7 +21,7 @@ use std::{
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Generation {
     Vault(String),
-    Home { id: String, login: Option<String> },
+    Home { id: String, stamp: Option<String> },
 }
 
 #[derive(Clone)]
@@ -218,11 +218,7 @@ fn fingerprint(profile: &Profile, login: &Login) -> Option<String> {
 fn home_generation(profile: &Profile, home: &dyn Home) -> Option<Generation> {
     Some(Generation::Home {
         id: profile.home.clone()?,
-        login: home
-            .read()
-            .ok()
-            .flatten()
-            .and_then(|login| fingerprint(profile, &login)),
+        stamp: home.login_stamp(),
     })
 }
 

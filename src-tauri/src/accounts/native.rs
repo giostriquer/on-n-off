@@ -61,6 +61,24 @@ pub(crate) fn with_test_cli<T>(program: &Path, run: impl FnOnce() -> T) -> T {
     run()
 }
 
+pub(super) fn file_stamp(path: &Path) -> Result<Option<String>, String> {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Cannot read the login file's metadata.".into()),
+    };
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |at| at.as_nanos());
+    #[cfg(unix)]
+    let file = std::os::unix::fs::MetadataExt::ino(&metadata);
+    #[cfg(not(unix))]
+    let file = 0;
+    Ok(Some(format!("{file}:{}:{modified}", metadata.len())))
+}
+
 pub fn read_json(path: &Path) -> Result<Value, String> {
     match fs::read(path) {
         Ok(bytes) => {

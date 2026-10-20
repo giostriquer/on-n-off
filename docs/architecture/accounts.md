@@ -176,13 +176,23 @@ account's state is its date alone: the saved poll never reads it, and its own re
 failed.
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
-each attempt is keyed by the profile and kept with the generation it read, the vault login's
-fingerprint or the home's id with the fingerprint of the login the home holds. A rate limit holds
-the next attempt until its Retry-After, any other failure the Limits failure backoff, and a refusal
-or another account parks the login: no attempt, forced or not, reads it again until its
-generation changes, by a new sign-in, a switch that captured a renewed login, or the provider's
-client renewing it in its home. Reading a home's generation reads the login it holds, on macOS
-Claude's through `/usr/bin/security` like any account read. The listing takes the poll's verdict
+each attempt is keyed by the profile and kept with the generation it read: the vault login's
+fingerprint, or the home's id with its login stamp (`Home::login_stamp`). A rate limit holds the
+next attempt until its Retry-After, any other failure the Limits failure backoff, and a refusal or
+another account parks the login: no attempt, forced or not, reads it again until its generation
+changes, by a new sign-in, a switch that captured a renewed login, or the provider's client
+renewing it in its home.
+
+A login stamp is evidence that changes whenever the home's login is written, and it never reads the
+login itself. A Claude home's is the attributes of its Keychain item (`find-generic-password`
+without `-w`: its account and modification date, which ask macOS for no access to the secret), under
+Claude Code's own account name first, then any, beside its `.credentials.json`'s metadata; a Muse
+home's is its `auth.json`'s metadata. File metadata is the file's id, size and modification time,
+read without opening the file. Reading the login instead would read Claude's item with `-w` from a
+background poll: Claude Code rewrites the item whenever it renews the login in the home, and macOS
+then resets the item's partition list to Claude's signing team, so that read would raise a
+"security wants to use" prompt. The vault login's fingerprint comes from the vault already
+unlocked for the poll. The listing takes the poll's verdict
 only while the profile's generation is still the one parked (`usage::parked`), so a changed login is
 usable at once. A Muse login refused (401) in its home used to be read again on the backoff, while
 the same refusal in the vault waited for a new login.
