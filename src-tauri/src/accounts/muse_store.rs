@@ -19,8 +19,14 @@ const UNREACHABLE: &str =
 
 pub(crate) struct MuseLogin {
     pub(crate) email: Option<String>,
-    pub(crate) token: Option<AccessToken>,
-    pub(crate) expired: bool,
+    pub(crate) credential: MuseCredential,
+}
+
+pub(crate) enum MuseCredential {
+    Token(AccessToken),
+    ApiKey,
+    Expired,
+    Unread,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -215,22 +221,24 @@ impl LoginCache {
     ) -> Option<MuseLogin> {
         let (text, stamp) = read_auth(config).ok()??;
         let meta = meta_of(&document(&text).ok()?)?;
-        let live = meta
+        let storage = meta.storage?;
+        let credential = if meta
             .expires_at
-            .is_none_or(|expires_at| expires_at > now_secs);
-        let token = match meta.storage.filter(|_| live) {
-            Some(Storage::Inline) => token_of(&meta.inline),
-            Some(Storage::Keychain) => self
-                .keychain(config, &stamp, lookup)
-                .ok()
-                .flatten()
-                .and_then(|secret| token_of(&secret)),
-            None => None,
+            .is_some_and(|expires_at| expires_at <= now_secs)
+        {
+            MuseCredential::Expired
+        } else {
+            match storage {
+                Storage::Inline => credential_of(&meta.inline)?,
+                Storage::Keychain => match self.keychain(config, &stamp, lookup) {
+                    Ok(secret) => credential_of(&secret?)?,
+                    Err(_) => MuseCredential::Unread,
+                },
+            }
         };
         Some(MuseLogin {
             email: meta.email(),
-            token: token.map(|token| AccessToken::new(&token)),
-            expired: !live,
+            credential,
         })
     }
 
@@ -330,6 +338,15 @@ impl LoginCache {
         let written = super::vault::atomic_write(&file, &bytes);
         self.forget(config);
         written
+    }
+}
+
+fn credential_of(secret: &Fields) -> Option<MuseCredential> {
+    match token_of(secret) {
+        Some(token) => Some(MuseCredential::Token(AccessToken::new(&token))),
+        None => secret
+            .contains_key("api_key")
+            .then_some(MuseCredential::ApiKey),
     }
 }
 

@@ -1,6 +1,14 @@
+use super::fixtures::{mint_body, mint_response};
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::http::{refused_url, serve_once};
+use serde_json::Value;
+
+fn scoped_you() -> String {
+    crate::accounts::muse_store::identity("you@example.com")
+        .unwrap()
+        .observation_key()
+}
 
 fn identity() -> Identity {
     crate::accounts::muse_store::identity("You@Example.com").unwrap()
@@ -129,4 +137,210 @@ fn an_unreachable_endpoint_is_a_network_failure() {
         read_saved(&identity(), &token(), &urls(&refused_url())),
         Err(SavedReadError::Http(HttpError::Network(_)))
     ));
+}
+
+fn normalized(body: Value) -> Option<Result<Parsed, ReadFailure>> {
+    normalize(Some("You@Example.com".to_string()), &mint_response(body))
+}
+
+fn mint_reading(body: Value) -> Parsed {
+    normalized(body).expect("mint reading").expect("parsed")
+}
+
+fn window_of(parsed: &Parsed, kind: LimitWindowKind) -> &LimitWindowDto {
+    parsed
+        .reading
+        .windows
+        .iter()
+        .find(|window| window.kind == kind)
+        .expect("window")
+}
+
+#[test]
+fn a_mint_response_normalizes_to_a_card_with_both_windows() {
+    let parsed = mint_reading(mint_body());
+    let account = parsed.account.as_ref().expect("account");
+    assert_eq!(account.id, scoped_you());
+    assert_eq!(account.legacy_id.as_deref(), Some("email:you@example.com"));
+    assert_eq!(account.label.as_deref(), Some("You@Example.com"));
+    assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
+    assert_eq!(parsed.reading.windows.len(), 2);
+
+    let weekly = window_of(&parsed, LimitWindowKind::Weekly);
+    assert_eq!(weekly.id, "weekly");
+    assert_eq!(weekly.label, "Weekly · all models");
+    assert_eq!(weekly.window_seconds, None);
+    assert_eq!(weekly.used_percent, 22.0);
+    assert_eq!(
+        weekly.resets_at.as_deref(),
+        Some("2025-10-15T03:46:40.000Z")
+    );
+
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.id, "session");
+    assert_eq!(session.label, "5 hour · all models");
+    assert_eq!(session.used_percent, 41.0);
+    assert_eq!(session.window_seconds, Some(18_000));
+    assert_eq!(
+        session.resets_at.as_deref(),
+        Some("2025-10-09T08:53:20.000Z")
+    );
+}
+
+#[test]
+fn a_session_window_without_a_duration_is_the_five_hour_window() {
+    for duration in [json!(null), json!(0), json!(-5)] {
+        let mut body = mint_body();
+        body["subs_usage"]["window"]["window_duration_mins"] = duration.clone();
+        let parsed = mint_reading(body);
+        let session = window_of(&parsed, LimitWindowKind::Session);
+        assert_eq!(session.label, "5 hour · all models", "{duration}");
+        assert_eq!(session.window_seconds, Some(18_000), "{duration}");
+    }
+    let mut body = mint_body();
+    body["subs_usage"]["window"]["window_duration_mins"] = json!(120);
+    let parsed = mint_reading(body);
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.label, "2 hour · all models");
+    assert_eq!(session.window_seconds, Some(7_200));
+}
+
+#[test]
+fn the_plan_is_the_tier_name_else_a_tier_that_reads_as_a_name() {
+    let mut body = mint_body();
+    body["subs_tier_name"] = json!(" ");
+    body["subs_usage"]["tier"] = json!("wonder");
+    assert_eq!(mint_reading(body).reading.plan.as_deref(), Some("wonder"));
+
+    let mut body = mint_body();
+    body["subs_tier_name"] = json!("");
+    assert_eq!(mint_reading(body).reading.plan, None);
+}
+
+#[test]
+fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
+    let idle = json!({"is_subs_active": true, "subs_tier_name": "Wonder", "subs_usage": null});
+    let parsed = mint_reading(idle);
+    assert_eq!(
+        parsed.account.as_ref().map(|account| account.id.as_str()),
+        Some(scoped_you().as_str())
+    );
+    assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
+    assert_eq!(parsed.reading.windows.len(), 1);
+    let session = window_of(&parsed, LimitWindowKind::Session);
+    assert_eq!(session.id, "session");
+    assert_eq!(session.label, "5 hour · all models");
+    assert_eq!(session.used_percent, 0.0);
+    assert_eq!(session.resets_at, None);
+    assert_eq!(session.window_seconds, Some(18_000));
+
+    let unnamed = json!({"is_subs_active": true, "subs_tier_name": "27681631238169137"});
+    assert_eq!(mint_reading(unnamed).reading.plan, None);
+}
+
+#[test]
+fn a_mint_answer_with_no_usable_window_is_no_reading() {
+    for unconfirmed in [
+        json!({"subs_tier_name": "Wonder", "subs_usage": null}),
+        json!({"is_subs_active": null, "subs_tier_name": "Wonder"}),
+    ] {
+        assert!(normalized(unconfirmed.clone()).is_none(), "{unconfirmed}");
+    }
+
+    let mut empty = mint_body();
+    empty["subs_usage"]["window"] = json!(null);
+    empty["subs_usage"]["weekly"] = json!(null);
+    assert!(normalized(empty).is_none());
+
+    let mut unusable = mint_body();
+    unusable["subs_usage"]["window"] = json!({"window_duration_mins": 300});
+    unusable["subs_usage"]["weekly"] = json!({"used_percent": null, "resets_at": 1_760_500_000i64});
+    assert!(normalized(unusable).is_none());
+
+    let mut weekly_only = mint_body();
+    weekly_only["subs_usage"]["window"] = json!(null);
+    let parsed = mint_reading(weekly_only);
+    assert_eq!(parsed.reading.windows.len(), 1);
+    assert_eq!(parsed.reading.windows[0].id, "weekly");
+}
+
+#[test]
+fn an_inactive_or_unpaid_subscription_reads_unsupported() {
+    let inactive = normalized(json!({"is_subs_active": false, "subs_tier_name": "Wonder"}));
+    assert!(
+        matches!(&inactive, Some(Err(ReadFailure::Unsupported(message))) if message.contains("inactive")),
+        "{inactive:?}"
+    );
+    let billing = normalized(json!({"is_subs_active": true, "require_payment": true}));
+    assert!(
+        matches!(&billing, Some(Err(ReadFailure::Unsupported(message))) if message.contains("billing")),
+        "{billing:?}"
+    );
+}
+
+#[test]
+fn a_minted_key_in_the_response_is_never_kept() {
+    let mut body = mint_body();
+    body["api_key"] = json!("LLM|secret-minted-key");
+    body["account"] = json!({"id": "acct-1"});
+    let debug = format!("{:?}", mint_response(body));
+    assert!(!debug.contains("secret-minted-key"), "{debug}");
+    assert!(!debug.contains("acct-1"), "{debug}");
+}
+
+#[test]
+fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
+    let (url, request) = crate::http::serve_once_capturing(
+        "200 OK",
+        &[],
+        &serde_json::to_string(&mint_body()).expect("body"),
+    );
+    let response = fetch(&url, &AccessToken::new("device-token")).expect("fetch");
+    let captured = request.join().expect("captured");
+    assert_eq!(
+        crate::http::head_header(&captured.head, "authorization"),
+        Some("Bearer device-token"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(
+        crate::http::head_header(&captured.head, "x-api-version"),
+        Some("1.0.0"),
+        "{}",
+        captured.head
+    );
+    assert_eq!(captured.body, "{}");
+    assert!(normalize(None, &response).is_some());
+}
+
+#[test]
+fn a_failed_mint_call_names_its_failure() {
+    for (status, body, expected) in [
+        (
+            "401 Unauthorized",
+            r#"{"title":"Authentication Error"}"#,
+            "token rejected",
+        ),
+        ("403 Forbidden", "{}", "HTTP 403"),
+        ("429 Too Many Requests", "{}", "rate limited"),
+        ("500 Internal Server Error", "{}", "HTTP 500"),
+        ("200 OK", "not json", "unreadable response"),
+        (
+            "200 OK",
+            r#"{"subs_usage": "wrong shape"}"#,
+            "unreadable response: Unreadable Muse key answer.",
+        ),
+    ] {
+        let (url, server) = crate::http::serve_once(status, body);
+        let error = fetch(&url, &AccessToken::new("device-token"))
+            .expect_err("a failed mint call")
+            .to_string();
+        assert!(error.starts_with(expected), "{status} {body}: {error}");
+        server.join().expect("served");
+    }
+    let refused = fetch(
+        &crate::http::refused_url(),
+        &AccessToken::new("device-token"),
+    );
+    assert!(matches!(refused, Err(HttpError::Network(_))), "{refused:?}");
 }

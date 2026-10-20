@@ -1,7 +1,8 @@
+use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{account_dto, session_label, window, ReadFailure};
+use super::{account_dto, ReadFailure};
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
@@ -115,10 +116,10 @@ pub(super) fn current_read(
             format!("The Muse usage read failed ({error}). on-n-off will read it again later.")
         }
     };
-    Err(ReadFailure::Unread(account_dto(email), why))
+    Err(ReadFailure::Failed(account_dto(email), why))
 }
 
-pub(super) fn normalize(
+fn normalize(
     email: Option<String>,
     response: &MintResponse,
 ) -> Option<Result<Parsed, ReadFailure>> {
@@ -172,7 +173,6 @@ fn weekly_window(value: &MintWindow) -> Option<LimitWindowDto> {
         LimitWindowKind::Weekly,
         used,
         resets_at_ms(value),
-        "",
     ))
 }
 
@@ -188,10 +188,41 @@ fn session_window(value: &MintWindow) -> Option<LimitWindowDto> {
         LimitWindowKind::Session,
         used,
         resets_at_ms(value),
-        "",
     );
     dto.window_seconds = Some(minutes.saturating_mul(60));
     Some(dto)
+}
+
+fn session_label(minutes: u64) -> String {
+    if minutes > 0 && minutes.is_multiple_of(60) {
+        format!("{} hour · all models", minutes / 60)
+    } else {
+        format!("{minutes} min · all models")
+    }
+}
+
+fn window(
+    id: &str,
+    label: String,
+    kind: LimitWindowKind,
+    used_percent: f64,
+    resets_at_ms: i64,
+) -> LimitWindowDto {
+    LimitWindowDto {
+        id: id.to_string(),
+        label,
+        kind,
+        used_percent: used_percent.clamp(0.0, 100.0),
+        resets_at: (resets_at_ms > 0).then(|| rfc3339_ms(resets_at_ms)),
+        window_seconds: None,
+        observed_at: String::new(),
+    }
+}
+
+fn rfc3339_ms(ms: i64) -> String {
+    DateTime::from_timestamp_millis(ms)
+        .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
+        .unwrap_or_default()
 }
 
 fn used_percent(value: &MintWindow) -> Option<f64> {
@@ -205,5 +236,7 @@ fn resets_at_ms(value: &MintWindow) -> i64 {
         .map_or(0, |seconds| (seconds * 1000.0) as i64)
 }
 
+#[cfg(test)]
+pub(super) mod fixtures;
 #[cfg(test)]
 mod tests;

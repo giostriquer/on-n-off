@@ -32,7 +32,7 @@ locates the subsystems. Module doc-comments explain their implementation.
 - CLI lookup and spawning: `cli_locate.rs` and `AgentCli` — a GUI app does not inherit a
   terminal's `PATH`.
 - Child processes: `process.rs` for a command run to its exit; `json_line_session.rs` for a CLI
-  kept running and spoken to in line-delimited JSON-RPC (Codex app-server, Muse serve), whose
+  kept running and spoken to in line-delimited JSON-RPC (Codex app-server), whose
   readers keep only their command, methods and normalisation. Drain stdout and stderr concurrently
   from the start, or a full pipe deadlocks.
 - File locks: `FileLease` (`file_lease.rs`). It unlocks when dropped; closing a locked `File`

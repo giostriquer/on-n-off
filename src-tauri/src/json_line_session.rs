@@ -16,7 +16,6 @@ const METHOD_NOT_FOUND: i64 = -32601;
 pub(crate) struct Peer {
     name: &'static str,
     exited_early: &'static str,
-    jsonrpc: bool,
     timeout: Duration,
     line_limit: usize,
 }
@@ -26,16 +25,8 @@ impl Peer {
         Self {
             name,
             exited_early,
-            jsonrpc: false,
             timeout: DEADLINE,
             line_limit: LINE_LIMIT,
-        }
-    }
-
-    pub(crate) const fn jsonrpc(name: &'static str, exited_early: &'static str) -> Self {
-        Self {
-            jsonrpc: true,
-            ..Self::jsonrpc_lite(name, exited_early)
         }
     }
 
@@ -173,9 +164,6 @@ impl Conversation {
 
     fn send(&mut self, id: Option<u64>, method: &str, params: Value) -> Result<(), Failure> {
         let mut message = Map::new();
-        if self.peer.jsonrpc {
-            message.insert("jsonrpc".to_string(), json!("2.0"));
-        }
         if let Some(id) = id {
             message.insert("id".to_string(), json!(id));
         }
