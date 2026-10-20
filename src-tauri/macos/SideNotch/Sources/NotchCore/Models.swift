@@ -46,21 +46,19 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
       try values.decodeIfPresent(Bool.self, forKey: .startsOnFirstMessage) ?? false
   }
 
-  public func isRenewed(at now: Date) -> Bool {
-    parseInstant(resetsAt).map { $0 <= now } ?? false
+  public func cycle(at now: Date) -> ResetCycle {
+    guard let reset = parseInstant(resetsAt) else { return startsOnFirstMessage ? .idle : .unknown }
+    return reset <= now ? .renewed(reset) : .pending(reset)
   }
 
   public func percent(at now: Date) -> Double? {
     guard usedPercent.isFinite, (0...reachedPercent).contains(usedPercent) else { return nil }
-    return isRenewed(at: now) ? 0 : usedPercent
+    if case .renewed = cycle(at: now) { return 0 }
+    return usedPercent
   }
 
   public func isReached(at now: Date) -> Bool {
     percent(at: now).map { $0 >= reachedPercent } ?? false
-  }
-
-  public func isIdle(at now: Date) -> Bool {
-    startsOnFirstMessage && parseInstant(resetsAt) == nil && percent(at: now) == 0
   }
 
   public func text(at now: Date) -> String {
@@ -68,11 +66,20 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 
   public func note(at now: Date) -> String {
-    guard let reset = parseInstant(resetsAt) else {
-      return isIdle(at: now) ? "Starts with first message" : "Reset time unavailable"
-    }
-    let clock = localClock(reset, format: "EEE HH:mm")
-    return reset <= now ? "Reset \(clock)" : "Resets \(clock)"
+    resetNote(cycle(at: now), format: "EEE HH:mm", unknown: "Reset time unavailable")
+  }
+}
+
+public enum ResetCycle: Equatable, Sendable {
+  case pending(Date), renewed(Date), idle, unknown
+}
+
+private func resetNote(_ cycle: ResetCycle, format: String, unknown: String) -> String {
+  switch cycle {
+  case .pending(let reset): return "Resets \(localClock(reset, format: format))"
+  case .renewed(let reset): return "Reset \(localClock(reset, format: format))"
+  case .idle: return "Starts with first message"
+  case .unknown: return unknown
   }
 }
 
@@ -89,6 +96,16 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
     self.renewed = renewed
   }
 
+  private enum CodingKeys: String, CodingKey { case usedPercent, resetsAt, left, renewed }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    usedPercent = try values.decodeIfPresent(Double.self, forKey: .usedPercent) ?? .nan
+    resetsAt = try values.decodeIfPresent(String.self, forKey: .resetsAt)
+    left = try values.decode(String.self, forKey: .left)
+    renewed = try values.decode(String.self, forKey: .renewed)
+  }
+
   public var quota: Quota {
     Quota(
       id: "workspace-credits", label: "Workspace credits", kind: "credits",
@@ -96,13 +113,12 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
   }
 
   public func amounts(at now: Date) -> String {
-    quota.isRenewed(at: now) ? renewed : left
+    if case .renewed = quota.cycle(at: now) { return renewed }
+    return left
   }
 
   public func note(at now: Date) -> String {
-    guard let reset = parseInstant(resetsAt) else { return "" }
-    let date = localClock(reset, format: "MMM d")
-    return reset <= now ? "Reset \(date)" : "Resets \(date)"
+    resetNote(quota.cycle(at: now), format: "MMM d", unknown: "")
   }
 }
 
@@ -269,13 +285,13 @@ public struct ProviderCell: Codable, Equatable, Sendable {
       headline.map { _ in "weekly" }
       ?? (reading == nil ? "updating" : (notice?.text ?? "unavailable"))
     guard let headline = headline else { return "\(name), \(period)" }
-    let reached = headline.isReached(at: now) ? ", limit reached" : ""
-    let inner = reading?.inner.map {
-      ", \($0.spokenName), \($0.quota.text(at: now)) used"
-        + ($0.quota.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
+    func use(_ quota: Quota) -> String {
+      guard quota.percent(at: now) != nil else { return "usage unavailable" }
+      return "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : "")
+    }
+    let inner = reading?.inner.map { ", \($0.spokenName), \(use($0.quota))" } ?? ""
     let paused = self.paused == nil ? "" : ", refresh paused, last observed"
-    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + inner + paused
+    return "\(name), \(period), \(use(headline))" + inner + paused
   }
 }
 

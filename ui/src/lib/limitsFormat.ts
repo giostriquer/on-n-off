@@ -1,6 +1,3 @@
-import { providerColor } from "./providers";
-import type { AgentId } from "./types";
-import type { MeterLevel } from "./windowAt";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -90,23 +87,6 @@ export function formatClock(iso: string | null | undefined, timeZone?: string): 
     hourCycle: "h23",
     timeZone,
   }).format(at);
-}
-
-export function usageMeterColor(base: string, meter: MeterLevel): string {
-  switch (meter.level) {
-    case "trip": return "var(--trip)";
-    case "blend": return `color-mix(in srgb, ${base}, var(--trip) ${(meter.fraction * 100).toFixed(1)}%)`;
-    case "base":
-    case "unreadable": return base;
-  }
-}
-
-export function usageFillStyle(provider: AgentId, meter: MeterLevel) {
-  return { background: providerColor(provider), backgroundColor: usageMeterColor(providerColor(provider), meter) };
-}
-
-export function usageTextColor(meter: MeterLevel): string | undefined {
-  return meter.level === "trip" ? "var(--trip)" : undefined;
 }
 
 export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {

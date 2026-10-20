@@ -179,6 +179,7 @@ describe("UseBankedReset", () => {
   it.each([
     [94.6, "has 5% of its Codex limit left", null],
     [94.4, "has 6% of its Codex limit left", "More than 5% of the limit is still left: the reset gives back only the 94% used so far."],
+    [99.6, "has 1% of its Codex limit left", null],
   ] as const)("with %s percent used, names one rounded share in the account's line and the warning", (used, line, warning) => {
     render(button({ entry: codex({ windows: [weekly(used)] }) }));
 

@@ -7,9 +7,6 @@ import {
   formatResetAt,
   formatResetIn,
   hasElapsed,
-  usageFillStyle,
-  usageMeterColor,
-  usageTextColor,
 } from "./limitsFormat";
 
 const NOW = Date.parse("2026-08-17T00:00:00Z");
@@ -78,18 +75,6 @@ describe("formatClock", () => {
     expect(formatClock("2026-08-17T20:05:00Z", "America/Sao_Paulo")).toBe("17:05");
     expect(formatClock(null, "UTC")).toBe("");
     expect(formatClock("later", "UTC")).toBe("");
-  });
-});
-
-describe("usageMeterColor and usageTextColor", () => {
-  it("draw each meter level in one ink, never the warning amber", () => {
-    expect(usageMeterColor("red", { level: "base" })).toBe("red");
-    expect(usageMeterColor("red", { level: "unreadable" })).toBe("red");
-    expect(usageMeterColor("red", { level: "blend", fraction: 0.5 })).toBe("color-mix(in srgb, red, var(--trip) 50.0%)");
-    expect(usageMeterColor("red", { level: "trip" })).toBe("var(--trip)");
-    expect(usageFillStyle("claude", { level: "base" })).toEqual({ background: "#d97757", backgroundColor: "#d97757" });
-    expect(usageTextColor({ level: "blend", fraction: 0.99 })).toBeUndefined();
-    expect(usageTextColor({ level: "trip" })).toBe("var(--trip)");
   });
 });
 

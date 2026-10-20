@@ -9,16 +9,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 41.5,
-      "renewed": false,
+      "usedFigure": 42,
       "reached": false,
-      "idle": false,
       "usedText": "42%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -31,16 +30,15 @@
         "resetsAt": "2026-10-19T16:05:30Z"
       },
       "usedNow": 12,
-      "renewed": false,
+      "usedFigure": 12,
       "reached": false,
-      "idle": false,
       "usedText": "12%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Mon 18:05",
+        "when": "Mon 18:05",
         "relative": "4h 5m",
         "card": "resets in 4h 5m · Mon 18:05",
         "notch": "Resets Mon 18:05"
@@ -53,16 +51,15 @@
         "resetsAt": "2026-10-19T12:00:30Z"
       },
       "usedNow": 3,
-      "renewed": false,
+      "usedFigure": 3,
       "reached": false,
-      "idle": false,
       "usedText": "3%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Mon 14:00",
+        "when": "Mon 14:00",
         "relative": "<1m",
         "card": "resets in <1m · Mon 14:00",
         "notch": "Resets Mon 14:00"
@@ -75,16 +72,15 @@
         "resetsAt": "2026-10-26T09:00:00Z"
       },
       "usedNow": 66,
-      "renewed": false,
+      "usedFigure": 66,
       "reached": false,
-      "idle": false,
       "usedText": "66%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Mon 10:00",
+        "when": "Mon 10:00",
         "relative": "6d 21h",
         "card": "resets in 6d 21h · Mon 10:00",
         "notch": "Resets Mon 10:00"
@@ -97,16 +93,15 @@
         "resetsAt": "2026-10-20T00:00:00Z"
       },
       "usedNow": 0,
-      "renewed": false,
+      "usedFigure": 0,
       "reached": false,
-      "idle": false,
       "usedText": "0%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Tue 02:00",
+        "when": "Tue 02:00",
         "relative": "12h 0m",
         "card": "resets in 12h 0m · Tue 02:00",
         "notch": "Resets Tue 02:00"
@@ -119,16 +114,15 @@
         "resetsAt": "2026-10-19T10:35:00Z"
       },
       "usedNow": 0,
-      "renewed": true,
+      "usedFigure": 0,
       "reached": false,
-      "idle": false,
       "usedText": "0%",
       "meter": {
         "level": "base"
       },
       "note": {
-        "kind": "elapsed",
-        "at": "Mon 12:35",
+        "kind": "renewed",
+        "when": "Mon 12:35",
         "relative": "1h ago",
         "card": "reset 1h ago · Mon 12:35",
         "notch": "Reset Mon 12:35"
@@ -141,16 +135,15 @@
         "resetsAt": "2026-10-19T12:00:00Z"
       },
       "usedNow": 0,
-      "renewed": true,
+      "usedFigure": 0,
       "reached": false,
-      "idle": false,
       "usedText": "0%",
       "meter": {
         "level": "base"
       },
       "note": {
-        "kind": "elapsed",
-        "at": "Mon 14:00",
+        "kind": "renewed",
+        "when": "Mon 14:00",
         "relative": "just now",
         "card": "reset just now · Mon 14:00",
         "notch": "Reset Mon 14:00"
@@ -163,9 +156,8 @@
         "startsOnFirstMessage": true
       },
       "usedNow": 0,
-      "renewed": false,
+      "usedFigure": 0,
       "reached": false,
-      "idle": true,
       "usedText": "0%",
       "meter": {
         "level": "base"
@@ -177,57 +169,13 @@
       }
     },
     {
-      "name": "a reset wins over the first-message flag",
-      "window": {
-        "usedPercent": 0,
-        "resetsAt": "2026-10-20T00:00:00Z",
-        "startsOnFirstMessage": true
-      },
-      "usedNow": 0,
-      "renewed": false,
-      "reached": false,
-      "idle": false,
-      "usedText": "0%",
-      "meter": {
-        "level": "base"
-      },
-      "note": {
-        "kind": "pending",
-        "at": "Tue 02:00",
-        "relative": "12h 0m",
-        "card": "resets in 12h 0m · Tue 02:00",
-        "notch": "Resets Tue 02:00"
-      }
-    },
-    {
-      "name": "a used window is never idle, whatever its reader said",
-      "window": {
-        "usedPercent": 12,
-        "startsOnFirstMessage": true
-      },
-      "usedNow": 12,
-      "renewed": false,
-      "reached": false,
-      "idle": false,
-      "usedText": "12%",
-      "meter": {
-        "level": "base"
-      },
-      "note": {
-        "kind": "unknown",
-        "card": "Reset time unavailable",
-        "notch": "Reset time unavailable"
-      }
-    },
-    {
       "name": "a window without a reset says its reset is unknown",
       "window": {
         "usedPercent": 17
       },
       "usedNow": 17,
-      "renewed": false,
+      "usedFigure": 17,
       "reached": false,
-      "idle": false,
       "usedText": "17%",
       "meter": {
         "level": "base"
@@ -245,9 +193,8 @@
         "resetsAt": "soon"
       },
       "usedNow": 93,
-      "renewed": false,
+      "usedFigure": 93,
       "reached": false,
-      "idle": false,
       "usedText": "93%",
       "meter": {
         "level": "trip"
@@ -265,16 +212,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 0.4,
-      "renewed": false,
+      "usedFigure": 1,
       "reached": false,
-      "idle": false,
       "usedText": "<1%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -287,16 +233,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 2.5,
-      "renewed": false,
+      "usedFigure": 3,
       "reached": false,
-      "idle": false,
       "usedText": "3%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -309,16 +254,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 70,
-      "renewed": false,
+      "usedFigure": 70,
       "reached": false,
-      "idle": false,
       "usedText": "70%",
       "meter": {
         "level": "base"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -331,9 +275,8 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 75,
-      "renewed": false,
+      "usedFigure": 75,
       "reached": false,
-      "idle": false,
       "usedText": "75%",
       "meter": {
         "level": "blend",
@@ -341,7 +284,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -354,9 +297,8 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 80,
-      "renewed": false,
+      "usedFigure": 80,
       "reached": false,
-      "idle": false,
       "usedText": "80%",
       "meter": {
         "level": "blend",
@@ -364,7 +306,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -377,9 +319,8 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 89.9,
-      "renewed": false,
+      "usedFigure": 90,
       "reached": false,
-      "idle": false,
       "usedText": "90%",
       "meter": {
         "level": "blend",
@@ -387,7 +328,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -400,16 +341,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 90,
-      "renewed": false,
+      "usedFigure": 90,
       "reached": false,
-      "idle": false,
       "usedText": "90%",
       "meter": {
         "level": "trip"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -422,16 +362,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 99.5,
-      "renewed": false,
+      "usedFigure": 99,
       "reached": false,
-      "idle": false,
       "usedText": "99%",
       "meter": {
         "level": "trip"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -444,16 +383,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": 100,
-      "renewed": false,
+      "usedFigure": 100,
       "reached": true,
-      "idle": false,
       "usedText": "100%",
       "meter": {
         "level": "trip"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -466,16 +404,15 @@
         "resetsAt": "2026-10-21T15:00:00Z"
       },
       "usedNow": null,
-      "renewed": false,
+      "usedFigure": null,
       "reached": false,
-      "idle": false,
       "usedText": "—",
       "meter": {
         "level": "unreadable"
       },
       "note": {
         "kind": "pending",
-        "at": "Wed 17:00",
+        "when": "Wed 17:00",
         "relative": "2d 3h",
         "card": "resets in 2d 3h · Wed 17:00",
         "notch": "Resets Wed 17:00"
@@ -487,9 +424,8 @@
         "usedPercent": -3
       },
       "usedNow": null,
-      "renewed": false,
+      "usedFigure": null,
       "reached": false,
-      "idle": false,
       "usedText": "—",
       "meter": {
         "level": "unreadable"
@@ -503,13 +439,11 @@
     {
       "name": "a value that is not a number is unreadable",
       "window": {
-        "usedPercent": null,
-        "startsOnFirstMessage": true
+        "usedPercent": null
       },
       "usedNow": null,
-      "renewed": false,
+      "usedFigure": null,
       "reached": false,
-      "idle": false,
       "usedText": "—",
       "meter": {
         "level": "unreadable"
@@ -527,16 +461,15 @@
         "resetsAt": "2026-10-19T10:35:00Z"
       },
       "usedNow": null,
-      "renewed": true,
+      "usedFigure": null,
       "reached": false,
-      "idle": false,
       "usedText": "—",
       "meter": {
         "level": "unreadable"
       },
       "note": {
-        "kind": "elapsed",
-        "at": "Mon 12:35",
+        "kind": "renewed",
+        "when": "Mon 12:35",
         "relative": "1h ago",
         "card": "reset 1h ago · Mon 12:35",
         "notch": "Reset Mon 12:35"
@@ -551,7 +484,7 @@
         "resetsAt": "2026-12-01T12:00:00Z"
       },
       "usedNow": 32,
-      "renewed": false,
+      "usedFigure": 32,
       "reached": false,
       "usedText": "32%",
       "meter": {
@@ -559,7 +492,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Dec 1",
+        "when": "Dec 1",
         "card": "resets Dec 1",
         "notch": "Resets Dec 1"
       }
@@ -571,7 +504,7 @@
         "resetsAt": "2026-11-30T23:30:00Z"
       },
       "usedNow": 40,
-      "renewed": false,
+      "usedFigure": 40,
       "reached": false,
       "usedText": "40%",
       "meter": {
@@ -579,7 +512,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Dec 1",
+        "when": "Dec 1",
         "card": "resets Dec 1",
         "notch": "Resets Dec 1"
       }
@@ -591,7 +524,7 @@
         "resetsAt": "2026-12-01T12:00:00Z"
       },
       "usedNow": 100,
-      "renewed": false,
+      "usedFigure": 100,
       "reached": true,
       "usedText": "100%",
       "meter": {
@@ -599,7 +532,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Dec 1",
+        "when": "Dec 1",
         "card": "resets Dec 1",
         "notch": "Resets Dec 1"
       }
@@ -611,15 +544,15 @@
         "resetsAt": "2026-10-18T12:00:00Z"
       },
       "usedNow": 0,
-      "renewed": true,
+      "usedFigure": 0,
       "reached": false,
       "usedText": "0%",
       "meter": {
         "level": "base"
       },
       "note": {
-        "kind": "elapsed",
-        "at": "Oct 18",
+        "kind": "renewed",
+        "when": "Oct 18",
         "relative": "1d ago",
         "card": "reset 1d ago · Oct 18",
         "notch": "Reset Oct 18"
@@ -631,7 +564,7 @@
         "usedPercent": 40
       },
       "usedNow": 40,
-      "renewed": false,
+      "usedFigure": 40,
       "reached": false,
       "usedText": "40%",
       "meter": {
@@ -650,7 +583,7 @@
         "resetsAt": "2026-12-01T12:00:00Z"
       },
       "usedNow": null,
-      "renewed": false,
+      "usedFigure": null,
       "reached": false,
       "usedText": "—",
       "meter": {
@@ -658,7 +591,7 @@
       },
       "note": {
         "kind": "pending",
-        "at": "Dec 1",
+        "when": "Dec 1",
         "card": "resets Dec 1",
         "notch": "Resets Dec 1"
       }

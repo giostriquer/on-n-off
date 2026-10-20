@@ -134,8 +134,9 @@ window passes in and NotchCore restates; both, and the card, read the cases in
 `limits/window_at/fixtures/window-cases.json` ([why](README.md#limits)). The review request copied from a row is
 still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
 (`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided
-fields alone: a cell not read yet is "updating", one without a headline says its notice, and the
-paused line adds "refresh paused, last observed".
+fields alone: a cell not read yet is "updating", one without a headline says its notice, a ring
+whose meter is unreadable says "usage unavailable", as its popover row does, and the paused line adds
+"refresh paused, last observed".
 
 A drawer never decides what a cell says. A new badge, notice or rule goes in `model/frame.rs` and
 reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the

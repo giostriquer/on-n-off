@@ -109,7 +109,7 @@ fn in_range(used_percent: f64) -> f64 {
     }
 }
 
-pub(super) fn unstarted(used_percent: f64, has_reset: bool) -> bool {
+fn unstarted(used_percent: f64, has_reset: bool) -> bool {
     used_percent == 0.0 && !has_reset
 }
 

@@ -1,14 +1,10 @@
-import { formatObservedAt, hasElapsed, parseInstant, usageTextColor } from "$lib/limitsFormat";
+import { formatObservedAt, hasElapsed, parseInstant } from "$lib/limitsFormat";
 import type { LimitWindow, LimitsCreditsSpent, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
-import { shareAt, windowAt, type MeterLevel, type WindowAt } from "$lib/windowAt";
+import { shareAt, windowAt, type WindowAt } from "$lib/windowAt";
 
-export type LimitWindowPresentation = {
-  percent: number;
-  meter: MeterLevel;
-  text: string;
-  color: string | undefined;
-  note: string;
-};
+export type Gauge = Pick<WindowAt, "usedNow" | "usedFigure" | "meter">;
+
+export type LimitWindowPresentation = Gauge & { text: string; note: string };
 
 export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
 
@@ -25,7 +21,7 @@ export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow |
 }
 
 function present(at: WindowAt, note: string): LimitWindowPresentation {
-  return { percent: at.usedNow ?? 0, meter: at.meter, text: at.usedText, color: usageTextColor(at.meter), note };
+  return { usedNow: at.usedNow, usedFigure: at.usedFigure, meter: at.meter, text: at.usedText, note };
 }
 
 export function presentLimitWindow(window: LimitWindow, now: number): LimitWindowPresentation {
@@ -40,6 +36,11 @@ function mainWindows(entry: ProviderLimits): LimitWindow[] {
 export function usageLeft(entry: ProviderLimits, now: number): number | null {
   const used = mainWindows(entry).flatMap((window) => windowAt(window, now).usedNow ?? []);
   return used.length ? 100 - Math.max(...used) : null;
+}
+
+export function usageLeftFigure(entry: ProviderLimits, now: number): number | null {
+  const figures = mainWindows(entry).flatMap((window) => windowAt(window, now).usedFigure ?? []);
+  return figures.length ? 100 - Math.max(...figures) : null;
 }
 
 export function usableAgainAt(entry: ProviderLimits, now: number): number {
@@ -61,7 +62,7 @@ export function presentWorkspaceShare(share: LimitsWorkspaceCredits, now: number
   const at = shareAt(share, now);
   const limit = Number(share.limit);
   const used = Number(share.used);
-  const amounts = at.renewed
+  const amounts = at.note.kind === "renewed"
     ? `${AMOUNT.format(limit)} of ${AMOUNT.format(limit)} left`
     : !share.reached
       ? `${AMOUNT.format(Math.max(limit - used, 0))} of ${AMOUNT.format(limit)} left`

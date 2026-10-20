@@ -108,6 +108,24 @@ afterEach(() => {
 });
 
 describe("LimitsPopover", () => {
+  it("tells a screen reader the percent each window shows: 99 short of the limit, nothing when unreadable", async () => {
+    const claude = limits("claude", "claude-current", "current@claude.example", true);
+    claude.windows = [
+      { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 99.5, resetsAt: "2026-08-25T12:00:00Z", observedAt: "2026-08-18T12:00:00Z" },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 101, resetsAt: "2026-08-18T16:00:00Z", observedAt: "2026-08-18T12:00:00Z" },
+    ];
+    readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [claude] : []));
+    renderPopover();
+
+    const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
+    const weekly = within(account).getByRole("meter", { name: "Weekly · all models" });
+    expect([weekly.getAttribute("aria-valuenow"), weekly.getAttribute("aria-valuetext")]).toEqual(["99", null]);
+    expect(within(account).getByText("99%")).toBeTruthy();
+    const session = within(account).getByRole("meter", { name: "5 hour · all models" });
+    expect([session.getAttribute("aria-valuenow"), session.getAttribute("aria-valuetext")]).toEqual([null, "Usage unavailable"]);
+    expect(within(account).getByText("—")).toBeTruthy();
+  });
+
   it("shows a window that reset since its observation as unobserved, not as its old percentage", async () => {
     const claude = limits("claude", "claude-current", "current@claude.example", true);
     claude.windows = [

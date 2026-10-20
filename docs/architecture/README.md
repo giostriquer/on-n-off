@@ -248,12 +248,16 @@ path:
   saved, and clamps the workspace-credit share a read computes.
 
 What a window reads at an instant is decided once, in `limits/window_at.rs`: `WindowAt` (`of` a
-window, `of_share` a workspace-credit share) given the window and the time. Its used now is 0 once
-its reset instant has passed (it has renewed), and none when its used percent is not a number or
-lies outside 0–100, which every surface draws as a dash and an empty meter in the unreadable ink. It
-is reached only at 100% used: the percent text says "100%" only then, so 99.5% reads "99%"; a
-sliver under 1% reads "<1%"; otherwise the percent is rounded, a half up. A window is idle while its
-reader says it starts with the first message, it is unused and it has no reset. The meter's level
+window, `of_share` a workspace-credit share, in its `instant` child, which only the Windows painter
+and tests compile) given the window and the time. Its reset cycle is decided once: pending until its
+reset instant, renewed from it, and without a reset idle when its reader says the window starts with
+the first message, else unknown. The flag is set only through `window::unstarted`, so the surfaces
+trust it and never check the usage again. Its used now is 0 once renewed, and none when its used
+percent is not a number or lies outside 0–100, which every surface draws as a dash and an empty
+meter in the unreadable ink, and a screen reader hears as "Usage unavailable". It is reached only at
+100% used. The figure behind the percent text is 100 only then, so 99.5% reads "99%"; a sliver under
+1% reads "<1%" and counts as 1; otherwise the percent is rounded, a half up. That figure is what the
+card's meters tell a screen reader and what the banked reset's confirmation says is left. The meter's level
 is the base ink up to 70%, a blend toward the trip red eased by the square root of how far it is
 through 70–90%, and the trip red from 90%. The reset note names the reset instant in the local zone,
 a window's as a weekday and a 24-hour clock (`Mon 14:00`), a share's as a date (`Dec 1`); a window
@@ -267,8 +271,8 @@ module whether a window is reached and how a notification words a percent, so "r
 
 The module does no I/O and reads no clock: the Windows painter is given the time by its window, and
 the drawers that redraw between reads ask it again. The card restates the rules in
-`ui/src/lib/windowAt.ts` and the macOS helper in `NotchCore` (`Quota`, `WorkspaceCredits`,
-`meterLevel`), since each redraws on its own clock. All three read the cases in
+`ui/src/lib/windowAt.ts`, with the meter inks beside the levels, and the macOS helper in `NotchCore`
+(`Quota.cycle`, `WorkspaceCredits`, `meterLevel`), since each redraws on its own clock. All three read the cases in
 `limits/window_at/fixtures/window-cases.json`, pinned to one instant and one time zone: the Rust
 tests assert every field but the card's wording, `windowAt.test.ts` every field but the notch's,
 and `NotchCoreChecks` what the helper draws. A row names each surface's wording (`card`, `notch`), so

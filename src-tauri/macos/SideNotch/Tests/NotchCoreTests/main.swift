@@ -54,13 +54,20 @@ final class NotchTests {
       if case .blend(let a) = shown, case .blend(let b)? = expected { return abs(a - b) < 1e-9 }
       return shown == expected
     }
+    func kind(_ cycle: ResetCycle) -> String {
+      switch cycle {
+      case .pending: return "pending"
+      case .renewed: return "renewed"
+      case .idle: return "idle"
+      case .unknown: return "unknown"
+      }
+    }
     func check(_ entry: WindowCases.Case, _ quota: Quota, note: String) {
       let shown = (
-        quota.percent(at: at), quota.isRenewed(at: at), quota.isReached(at: at),
-        quota.isIdle(at: at), quota.text(at: at), note)
+        quota.percent(at: at), quota.isReached(at: at), kind(quota.cycle(at: at)),
+        quota.text(at: at), note)
       let expected = (
-        entry.usedNow, entry.renewed, entry.reached, entry.idle ?? false, entry.usedText,
-        entry.note.notch)
+        entry.usedNow, entry.reached, entry.note.kind, entry.usedText, entry.note.notch)
       if shown != expected || !sameLevel(meterLevel(quota, at: at), level(entry.meter)) {
         failures += 1
         print("FAIL window case \(entry.name): \(shown) != \(expected)")
@@ -306,11 +313,13 @@ final class NotchTests {
     expectEqual(
       providerCell(try HostMessage.decode(Data(withCredits.utf8)))?.reading?.inner?.quota.percent(
         at: now), 32)
-    expectNil(
-      providerCell(
-        try HostMessage.decode(
-          Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8))
-      )?.reading?.inner?.quota.percent(at: now))
+    for unreadable in ["101", "null"] {
+      let share = withCredits.replacingOccurrences(
+        of: "\"usedPercent\":32", with: "\"usedPercent\":\(unreadable)")
+      let decoded = providerCell(try HostMessage.decode(Data(share.utf8)))
+      expectNil(decoded?.reading?.inner?.quota.percent(at: now))
+      expectEqual(decoded?.reading?.workspaceCredits?.left, "17,000 of 25,000 left")
+    }
     let emptyName = withSessions.replacingOccurrences(of: "\"name\":\"repo-1a\"", with: "\"name\":\"\"")
     expectThrows(try HostMessage.decode(Data(emptyName.utf8)))
     let oneSession =
@@ -457,7 +466,7 @@ final class NotchTests {
     let claude = providerCell(golden, 0)
     expectEqual(claude?.reading?.headline?.usedPercent, 41.5)
     let idle = claude?.reading?.windows.first { $0.id == "session" }
-    expectEqual(idle?.isIdle(at: now), true)
+    expectEqual(idle?.cycle(at: now), .idle)
     expectEqual(idle?.note(at: now), "Starts with first message")
     expectEqual(claude?.reading?.inner, InnerQuota.fable(claude!.reading!.windows[2]))
     expectNil(claude?.notice)
@@ -520,6 +529,14 @@ final class NotchTests {
         provider: .codex, reading: reading(windows: [quota("weekly", 100)], headline: "weekly")
       ).spoken(name: "Codex", at: now),
       "Codex, weekly, 100% used, limit reached")
+    expectEqual(
+      ProviderCell(
+        provider: .claude,
+        reading: reading(
+          windows: [quota("weekly", 101), quota("model", .nan, label: "Weekly · Fable", id: "fable")],
+          headline: "weekly", inner: .fable(windowId: "fable"))
+      ).spoken(name: "Claude", at: now),
+      "Claude, weekly, usage unavailable, Fable weekly, usage unavailable")
     expectEqual(
       ProviderCell(
         provider: .claude, reading: reading(windows: [weekly], headline: "weekly"),
@@ -605,6 +622,7 @@ struct WindowCases: Decodable {
     let fraction: Double?
   }
   struct Note: Decodable {
+    let kind: String
     let notch: String
   }
   struct Case: Decodable {
@@ -612,9 +630,7 @@ struct WindowCases: Decodable {
     let window: Input?
     let share: Input?
     let usedNow: Double?
-    let renewed: Bool
     let reached: Bool
-    let idle: Bool?
     let usedText: String
     let meter: Meter
     let note: Note

@@ -15,23 +15,23 @@ const window: LimitWindow = {
 };
 
 describe("presentLimitWindow", () => {
-  it("draws a window as it reads now: its meter's fill and level, its text, colour and note", () => {
+  it("draws a window as it reads now: its meter's fill, figure and level, its text and note", () => {
     const live = { ...window, resetsAt: "2026-08-17T23:00:00Z" };
     expect(presentLimitWindow(live, NOW)).toEqual({
-      percent: 93,
+      usedNow: 93,
+      usedFigure: 93,
       meter: { level: "trip" },
       text: "93%",
-      color: "var(--trip)",
       note: windowAt(live, NOW).note.text,
     });
   });
 
-  it("leaves an unreadable window's meter empty and its figure a dash", () => {
+  it("keeps an unreadable window unreadable: no fill, no figure, a dash", () => {
     expect(presentLimitWindow({ ...window, usedPercent: 101, resetsAt: null }, NOW)).toEqual({
-      percent: 0,
+      usedNow: null,
+      usedFigure: null,
       meter: { level: "unreadable" },
       text: "—",
-      color: undefined,
       note: "Reset time unavailable",
     });
   });

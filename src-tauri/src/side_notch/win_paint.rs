@@ -8,7 +8,7 @@ use super::model::{
     workspace_share_wording, Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode,
 };
 use crate::dto::{AgentId, CiState};
-use crate::limits::window_at::WindowAt;
+use crate::limits::window_at::{WindowAt, UNREADABLE};
 use chrono::{DateTime, Utc};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
@@ -593,12 +593,11 @@ fn popover_entries(
                     R::new(x, y, inner_w, v(4.0)),
                 ));
                 y += v(4.0) + v(5.0);
+                let used = block.at.used_text();
                 let figure = match (block.at.used_now(), &block.detail) {
-                    (None, _) => UNREADABLE.into(),
-                    (Some(_), None) => format!("{} Used", block.at.used_text()),
-                    (Some(_), Some(detail)) => {
-                        format!("{} Used · {detail}", block.at.used_text())
-                    }
+                    (None, _) => used,
+                    (Some(_), None) => format!("{used} Used"),
+                    (Some(_), Some(detail)) => format!("{used} Used · {detail}"),
                 };
                 text_entry(
                     &mut entries,
@@ -1039,7 +1038,6 @@ fn measure(entries: &[(PopItem, R)], size_scale: f64, display_scale: f64, paddin
     bottom + padding
 }
 
-const UNREADABLE: &str = "—";
 const WORKSPACE_CREDITS: &str = "Workspace credits";
 const RAIL_INK: Color = [8, 8, 8, 255];
 const POPOVER_INK: Color = [14, 14, 17, 255];
