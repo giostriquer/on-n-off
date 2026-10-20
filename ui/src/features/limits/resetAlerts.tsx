@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useState } from "react";
+import { actionButton as button } from "@/components/actionButton";
 import { Segmented } from "@/components/Segmented";
 import { SwitchRow } from "@/components/SettingsCard";
 import {
@@ -24,7 +25,6 @@ export function useResetSpendLimit(accountId: string): number {
   return resetSpendLimit(useContext(ResetAlertsContext)?.alerts ?? {}, accountId);
 }
 
-const button = "rounded-md border border-[var(--hair)] px-2.5 py-1 text-[12px] hover:bg-[var(--wash)] disabled:opacity-50";
 const field = "w-16 rounded border border-[var(--hair)] bg-transparent px-2 py-1 text-[12px] tabular-nums";
 
 export function ResetAlertForm({ accountId, label, onDone }: {
