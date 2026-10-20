@@ -8,9 +8,9 @@ use crate::dto::{
     LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
 };
 use crate::paths::scratch_dir;
-use json::window;
 use serde_json::json;
 use std::fs;
+use window::fixture;
 
 #[test]
 fn provider_read_guards_serialize_only_the_same_provider() {
@@ -148,7 +148,7 @@ fn dto_serializes_with_the_camel_case_wire_shape_the_ui_expects() {
             plan: Some("pro".to_string()),
             windows: vec![LimitWindowDto {
                 observed_at: "2026-08-17T20:00:00.000Z".to_string(),
-                ..window(
+                ..fixture(
                     "primary",
                     "Weekly · all models",
                     LimitWindowKind::Weekly,

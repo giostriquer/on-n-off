@@ -77,19 +77,19 @@ fn a_report_reads_as_the_accounts_card_with_every_window_it_names() {
                 "session",
                 LimitWindowKind::Session,
                 12.0,
-                Some("2026-09-29T18:00:00.006917+00:00")
+                Some("2026-09-29T18:00:00.006Z")
             ),
             (
                 "weekly_all",
                 LimitWindowKind::Weekly,
                 34.0,
-                Some("2026-10-05T09:00:00.006938+00:00")
+                Some("2026-10-05T09:00:00.006Z")
             ),
             (
                 "weekly_scoped:Fable",
                 LimitWindowKind::Model,
                 5.0,
-                Some("2026-10-05T09:00:00+00:00")
+                Some("2026-10-05T09:00:00.000Z")
             ),
         ]
     );

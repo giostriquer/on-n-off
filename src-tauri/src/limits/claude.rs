@@ -1,12 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use serde_json::Value;
 
 use super::claude_cli;
-use super::json::{humanize, optional_string, percent, window};
+use super::json::{humanize, optional_string};
 use super::outcome::{Read, ReadFailure};
+use super::window::{QuotaWindow, ResetInstant, Scope, FIVE_HOURS, ONE_WEEK};
 use crate::accounts::claude::SignedIn;
-use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsAccountDto};
+use crate::dto::LimitsAccountDto;
 
 pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
     let claude = SignedIn::resolve(home).ok()?;
@@ -30,8 +32,8 @@ pub(super) fn usage_config_dir(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("claude-usage")
 }
 
-pub(super) fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
-    let normalized: Vec<LimitWindowDto> = payload
+pub(super) fn parse_claude(payload: &Value) -> Vec<QuotaWindow> {
+    let normalized: Vec<QuotaWindow> = payload
         .get("limits")
         .and_then(Value::as_array)
         .map(|entries| entries.iter().filter_map(normalized_window).collect())
@@ -42,29 +44,38 @@ pub(super) fn parse_claude(payload: &Value) -> Vec<LimitWindowDto> {
     legacy_windows(payload)
 }
 
-fn normalized_window(entry: &Value) -> Option<LimitWindowDto> {
+fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
     let kind = optional_string(entry.get("kind"))?;
     let group = optional_string(entry.get("group"))?;
-    let used = percent(entry.get("percent"))?;
-    let resets_at = optional_string(entry.get("resets_at"));
-    let scope = scope_name(entry.get("scope"));
-    let (window_kind, label) = match (group.as_str(), kind.as_str()) {
-        ("session", _) => (LimitWindowKind::Session, "5 hour · all models".to_string()),
-        ("weekly", "weekly_all") => (LimitWindowKind::Weekly, "Weekly · all models".to_string()),
+    let used_percent = entry.get("percent").and_then(Value::as_f64)?;
+    let named = scope_name(entry.get("scope"));
+    let (scope, length) = match (group.as_str(), kind.as_str()) {
+        ("session", _) => (Scope::AllModels, FIVE_HOURS),
+        ("weekly", "weekly_all") => (Scope::AllModels, ONE_WEEK),
         ("weekly", other) => {
-            let name = match &scope {
-                Some(scope) => scope.clone(),
+            let name = match &named {
+                Some(name) => name.clone(),
                 None => humanize(other.strip_prefix("weekly_").unwrap_or(other)),
             };
-            (LimitWindowKind::Model, format!("Weekly · {name}"))
+            (Scope::Model(name), ONE_WEEK)
         }
         _ => return None,
     };
-    let id = match &scope {
-        Some(scope) => format!("{kind}:{scope}"),
+    let id = match &named {
+        Some(name) => format!("{kind}:{name}"),
         None => kind,
     };
-    Some(window(id, label, window_kind, used, resets_at))
+    Some(QuotaWindow {
+        id,
+        scope,
+        length: Some(length),
+        used_percent,
+        reset: reset(entry),
+    })
+}
+
+fn reset(entry: &Value) -> Option<ResetInstant> {
+    optional_string(entry.get("resets_at")).and_then(|text| ResetInstant::parse(&text))
 }
 
 fn scope_name(scope: Option<&Value>) -> Option<String> {
@@ -77,40 +88,29 @@ fn scope_name(scope: Option<&Value>) -> Option<String> {
     .or_else(|| optional_string(scope.get("surface")))
 }
 
-fn legacy_windows(payload: &Value) -> Vec<LimitWindowDto> {
-    const LEGACY: [(&str, &str, &str, LimitWindowKind); 4] = [
-        (
-            "five_hour",
-            "session",
-            "5 hour · all models",
-            LimitWindowKind::Session,
-        ),
-        (
-            "seven_day",
-            "weekly_all",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-        ),
-        (
-            "seven_day_opus",
-            "weekly_opus",
-            "Weekly · Opus",
-            LimitWindowKind::Model,
-        ),
+fn legacy_windows(payload: &Value) -> Vec<QuotaWindow> {
+    const LEGACY: [(&str, &str, Option<&str>, Duration); 4] = [
+        ("five_hour", "session", None, FIVE_HOURS),
+        ("seven_day", "weekly_all", None, ONE_WEEK),
+        ("seven_day_opus", "weekly_opus", Some("Opus"), ONE_WEEK),
         (
             "seven_day_sonnet",
             "weekly_sonnet",
-            "Weekly · Sonnet",
-            LimitWindowKind::Model,
+            Some("Sonnet"),
+            ONE_WEEK,
         ),
     ];
     LEGACY
         .iter()
-        .filter_map(|(key, id, label, kind)| {
+        .filter_map(|(key, id, model, length)| {
             let entry = payload.get(*key)?;
-            let used = percent(entry.get("utilization"))?;
-            let resets_at = optional_string(entry.get("resets_at"));
-            Some(window(*id, *label, *kind, used, resets_at))
+            Some(QuotaWindow {
+                id: (*id).to_string(),
+                scope: model.map_or(Scope::AllModels, |name| Scope::Model(name.to_string())),
+                length: Some(*length),
+                used_percent: entry.get("utilization").and_then(Value::as_f64)?,
+                reset: reset(entry),
+            })
         })
         .collect()
 }

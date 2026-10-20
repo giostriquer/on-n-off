@@ -264,6 +264,7 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
             ("extra:base_model_inference:secondary", "Weekly · Inference"),
             ("extra:reserve", "Weekly · GPT-Reserve"),
             ("extra:gpt_luna", "Weekly · GPT-5.6-Luna"),
+            ("extra:team_split", "Weekly · Team · GPT-Reserve"),
         ],
     );
 
@@ -275,7 +276,10 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
             .map(|window| window.id.clone())
             .collect()
     };
-    assert_eq!(ids(&remembered), ["primary", "extra:gpt_luna"]);
+    assert_eq!(
+        ids(&remembered),
+        ["primary", "extra:gpt_luna", "extra:team_split"]
+    );
 
     let mut paused = ProviderLimitsDto {
         status: LimitsStatus::Failed,
@@ -283,7 +287,10 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
         ..ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
     };
     crate::limits::keep_remembered(&mut paused, remembered.reading);
-    assert_eq!(ids(&paused), ["primary", "extra:gpt_luna"]);
+    assert_eq!(
+        ids(&paused),
+        ["primary", "extra:gpt_luna", "extra:team_split"]
+    );
     assert!(fs::read_to_string(path)
         .unwrap()
         .contains("codex_bengalfox"));
@@ -319,4 +326,40 @@ fn another_providers_remembered_windows_load_whatever_their_names() {
     store.save(&claude).unwrap();
 
     assert_eq!(store.load(AgentId::Claude)[0].reading.windows.len(), 2);
+}
+
+#[test]
+fn a_remembered_file_out_of_range_loads_in_range_and_stays_as_written() {
+    let home = scratch_dir("limits-snap-out-of-range");
+    let store = SnapshotStore::for_home(&home);
+    let path = codex_file_with(
+        &store,
+        "acct-1",
+        &[("extra:gpt_luna", "Weekly · GPT-5.6-Luna")],
+    );
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    stored["windows"][0]["usedPercent"] = serde_json::json!(140.0);
+    stored["windows"][1]["usedPercent"] = serde_json::json!(-3.0);
+    stored["workspaceCredits"] = serde_json::json!({"limit": "100", "used": "250",
+        "usedPercent": 250.0, "reached": true});
+    fs::write(&path, stored.to_string()).unwrap();
+
+    let remembered = store.load(AgentId::Codex).remove(0);
+
+    let used: Vec<f64> = remembered
+        .reading
+        .windows
+        .iter()
+        .map(|window| window.used_percent)
+        .collect();
+    assert_eq!(used, [100.0, 0.0]);
+    assert_eq!(
+        remembered
+            .reading
+            .workspace_credits
+            .map(|share| share.used_percent),
+        Some(100.0)
+    );
+    assert!(fs::read_to_string(&path).unwrap().contains("140"));
 }

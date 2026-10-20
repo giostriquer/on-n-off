@@ -226,6 +226,7 @@ impl StoredSnapshot {
 
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         let mut reading = self.reading.known_at(now);
+        super::window::keep_in_range(&mut reading);
         match self.provider {
             AgentId::Codex => super::codex::drop_hidden(&mut reading.windows),
             AgentId::Claude => reading.reset_credits = None,

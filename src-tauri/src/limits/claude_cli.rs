@@ -7,6 +7,7 @@ use serde_json::Value;
 use super::claude::parse_claude;
 use super::claude_config::{read_claude_config_account, ClaudeConfigAccount};
 use super::outcome::{saved_card, Accepted, Read, ReadFailure};
+use super::window::QuotaWindow;
 use super::{scoped_account, Parsed, DEFAULT_ACCOUNT};
 use crate::accounts::claude_store::ENV_CREDENTIALS;
 use crate::accounts::model::Identity;
@@ -231,7 +232,12 @@ fn report_windows(stdout: &str) -> Option<Vec<LimitWindowDto>> {
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|event| event.get("type").and_then(Value::as_str) == Some("assistant"))
         .find_map(|event| event.pointer("/usage_report/rate_limits").cloned())?;
-    Some(parse_claude(&report))
+    Some(
+        parse_claude(&report)
+            .into_iter()
+            .map(QuotaWindow::into_dto)
+            .collect(),
+    )
 }
 
 #[cfg(test)]

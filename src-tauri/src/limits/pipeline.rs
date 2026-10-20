@@ -1,6 +1,6 @@
 use chrono::{SecondsFormat, Utc};
 
-use super::Parsed;
+use super::{window, Parsed};
 use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
 
 pub(super) fn finish(
@@ -9,6 +9,7 @@ pub(super) fn finish(
     message: Option<String>,
     mut parsed: Parsed,
 ) -> ProviderLimitsDto {
+    window::keep_in_range(&mut parsed.reading);
     let windows = &mut parsed.reading.windows;
     windows.sort_by_key(|window| kind_rank(window.kind));
     let observed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);

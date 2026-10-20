@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::LimitWindowKind;
-use crate::limits::json::window;
+use crate::limits::window::fixture as window;
 
 const NOW: i64 = 1_800_000_000;
 const LOGIN: Context = Context::Saved(Saved::Login);

@@ -23,6 +23,11 @@ A rolling rate limit a provider enforces on an account: the five-hour session, t
 single model's.
 _Avoid_: limit, bucket
 
+**Reset instant**:
+When a quota window renews, as its provider reported it. Two within two seconds of each other are
+the same instant, and one names the window's current cycle.
+_Avoid_: reset string, reset timestamp
+
 **Reading**:
 Everything one read reported about one provider account: its quota windows, its figures and its
 account details.

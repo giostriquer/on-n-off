@@ -2,27 +2,24 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::time::Duration;
 
 use serde_json::Value;
 
-use super::json::window;
 use super::outcome::{saved_card, Accepted, Read, ReadFailure};
+use super::window::{scope_of_label, QuotaWindow, ResetInstant, Scope};
 use super::SavedReadUrls;
 use super::{codex_app_server, credits_spent, renewal, Parsed};
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
-    AgentId, LimitWindowDto, LimitWindowKind, LimitsBankedResetDto, LimitsCreditsDto,
-    LimitsPriceDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto, Reading,
+    AgentId, LimitWindowDto, LimitsBankedResetDto, LimitsCreditsDto, LimitsPriceDto,
+    LimitsResetCreditsDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto, Reading,
     ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
 use crate::reset_alert::ResetSpend;
-
-const WEEKLY_THRESHOLD_SECONDS: u64 = 24 * 60 * 60;
-
-const RESET_TOLERANCE_SECONDS: i64 = 2;
 
 const HIDDEN_BUCKETS: [&str; 2] = ["base_model_inference", "codex_bengalfox"];
 const HIDDEN_NAMES: [&str; 2] = ["gpt-reserve", "gpt-5.3-codex-spark"];
@@ -62,11 +59,12 @@ struct RateLimitBucket {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct RateLimitWindow {
+pub(super) struct RateLimitWindow {
+    #[serde(alias = "used_percent")]
     used_percent: f64,
-    #[serde(default)]
+    #[serde(default, alias = "window_minutes")]
     window_duration_mins: Option<u64>,
-    #[serde(default)]
+    #[serde(default, alias = "resets_at")]
     resets_at: Option<i64>,
 }
 
@@ -101,31 +99,13 @@ struct RateLimitCredits {
 }
 
 pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
-    let fallback = &payload.rate_limits;
-    let main_id = fallback
-        .limit_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| "codex".to_string());
-    let buckets = payload.rate_limits_by_limit_id.as_ref();
-    let main = buckets
-        .and_then(|items| items.get(&main_id))
-        .unwrap_or(fallback);
-    let mut windows = Vec::new();
-    windows.extend(bucket_windows(&main_id, main, true));
-    if let Some(buckets) = buckets {
-        for (id, bucket) in buckets {
-            if id != &main_id {
-                windows.extend(bucket_windows(id, bucket, false));
-            }
-        }
-    }
-    drop_hidden(&mut windows);
+    let (main_id, main) = main_bucket(payload);
     Reading {
         plan: main.plan_type.clone(),
-        windows,
+        windows: quota_windows(payload, &main_id, main)
+            .into_iter()
+            .map(QuotaWindow::into_dto)
+            .collect(),
         credits: credits(main.credits.as_ref()),
         workspace_credits: workspace_credits(
             main.individual_limit.as_ref(),
@@ -138,20 +118,52 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
     }
 }
 
-pub(super) fn drop_hidden(windows: &mut Vec<LimitWindowDto>) {
-    windows.retain(|window| !is_hidden(window));
+fn main_bucket(payload: &RateLimitsResponse) -> (String, &RateLimitBucket) {
+    let fallback = &payload.rate_limits;
+    let main_id = fallback
+        .limit_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| "codex".to_string());
+    let main = payload
+        .rate_limits_by_limit_id
+        .as_ref()
+        .and_then(|items| items.get(&main_id))
+        .unwrap_or(fallback);
+    (main_id, main)
 }
 
-fn is_hidden(window: &LimitWindowDto) -> bool {
-    let name = window
-        .label
-        .rsplit('·')
-        .next()
-        .unwrap_or_default()
-        .trim()
-        .to_lowercase();
-    HIDDEN_NAMES.contains(&name.as_str())
-        || window.id.strip_prefix("extra:").is_some_and(|bucket| {
+fn quota_windows(
+    payload: &RateLimitsResponse,
+    main_id: &str,
+    main: &RateLimitBucket,
+) -> Vec<QuotaWindow> {
+    let mut windows = main_windows(main.primary.as_ref(), main.secondary.as_ref());
+    for (id, bucket) in payload.rate_limits_by_limit_id.iter().flatten() {
+        if id != main_id {
+            windows.extend(extra_windows(id, bucket));
+        }
+    }
+    windows.retain(|window| !hidden(&window.id, &window.scope));
+    windows
+}
+
+pub(super) fn drop_hidden(windows: &mut Vec<LimitWindowDto>) {
+    windows.retain(|window| {
+        let scope = scope_of_label(&window.label).unwrap_or(Scope::AllModels);
+        !hidden(&window.id, &scope)
+    });
+}
+
+fn hidden(id: &str, scope: &Scope) -> bool {
+    let hidden_name = match scope {
+        Scope::Model(name) => HIDDEN_NAMES.contains(&name.trim().to_lowercase().as_str()),
+        Scope::AllModels => false,
+    };
+    hidden_name
+        || id.strip_prefix("extra:").is_some_and(|bucket| {
             HIDDEN_BUCKETS.iter().any(|hidden| {
                 bucket
                     .strip_prefix(hidden)
@@ -160,78 +172,59 @@ fn is_hidden(window: &LimitWindowDto) -> bool {
         })
 }
 
-fn bucket_windows(id: &str, bucket: &RateLimitBucket, main: bool) -> Vec<LimitWindowDto> {
-    [
-        ("primary", bucket.primary.as_ref()),
-        ("secondary", bucket.secondary.as_ref()),
-    ]
-    .into_iter()
-    .filter_map(|(slot, entry)| rate_limit_window(id, bucket, slot, entry?, main))
-    .collect()
+const PRIMARY: &str = "primary";
+const SECONDARY: &str = "secondary";
+
+pub(super) fn main_windows(
+    primary: Option<&RateLimitWindow>,
+    secondary: Option<&RateLimitWindow>,
+) -> Vec<QuotaWindow> {
+    [(PRIMARY, primary), (SECONDARY, secondary)]
+        .into_iter()
+        .filter_map(|(slot, entry)| Some(quota_window(slot.to_string(), Scope::AllModels, entry?)))
+        .collect()
 }
 
-fn rate_limit_window(
-    id: &str,
-    bucket: &RateLimitBucket,
-    slot: &str,
-    entry: &RateLimitWindow,
-    main: bool,
-) -> Option<LimitWindowDto> {
-    let used = entry.used_percent.clamp(0.0, 100.0);
-    if !used.is_finite() {
-        return None;
-    }
-    let minutes = entry.window_duration_mins;
-    let seconds = minutes.and_then(|minutes| minutes.checked_mul(60));
-    let duration_kind = match seconds {
-        Some(seconds) if seconds < WEEKLY_THRESHOLD_SECONDS => LimitWindowKind::Session,
-        _ => LimitWindowKind::Weekly,
-    };
-    let kind = if main {
-        duration_kind
-    } else {
-        LimitWindowKind::Model
-    };
-    let prefix = match duration_kind {
-        LimitWindowKind::Session => session_length(minutes),
-        LimitWindowKind::Weekly | LimitWindowKind::Model => "Weekly".to_string(),
-    };
-    let target = if main {
-        "all models".to_string()
-    } else {
+fn extra_windows(id: &str, bucket: &RateLimitBucket) -> Vec<QuotaWindow> {
+    let scope = Scope::Model(
         bucket
             .limit_name
             .clone()
-            .unwrap_or_else(|| "extra limit".to_string())
-    };
-    let resets_at = entry.resets_at.and_then(rfc3339_from_epoch);
-    let window_id = if main {
-        slot.to_string()
-    } else if slot == "primary" {
-        format!("extra:{id}")
-    } else {
-        format!("extra:{id}:{slot}")
-    };
-    Some(LimitWindowDto {
-        window_seconds: seconds,
-        ..window(
-            window_id,
-            format!("{prefix} · {target}"),
-            kind,
-            used,
-            resets_at,
-        )
+            .unwrap_or_else(|| "extra limit".to_string()),
+    );
+    [
+        (PRIMARY, bucket.primary.as_ref()),
+        (SECONDARY, bucket.secondary.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(slot, entry)| {
+        let window_id = if slot == PRIMARY {
+            format!("extra:{id}")
+        } else {
+            format!("extra:{id}:{slot}")
+        };
+        Some(quota_window(window_id, scope.clone(), entry?))
     })
+    .collect()
 }
 
-fn session_length(minutes: Option<u64>) -> String {
-    match minutes {
-        Some(minutes) if minutes >= 60 && minutes.is_multiple_of(60) => {
-            format!("{} hour", minutes / 60)
-        }
-        Some(minutes) => format!("{minutes} minute"),
-        None => "Session".to_string(),
+fn quota_window(id: String, scope: Scope, entry: &RateLimitWindow) -> QuotaWindow {
+    QuotaWindow {
+        id,
+        scope,
+        length: entry
+            .window_duration_mins
+            .and_then(|minutes| minutes.checked_mul(60))
+            .map(Duration::from_secs),
+        used_percent: entry.used_percent,
+        reset: reset_at_epoch(entry.resets_at),
     }
+}
+
+fn reset_at_epoch(epoch: Option<i64>) -> Option<ResetInstant> {
+    epoch
+        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+        .map(ResetInstant::from)
 }
 
 fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
@@ -276,20 +269,10 @@ fn workspace_credits(
         limit,
         used,
         used_percent,
-        resets_at: share
-            .get("resetsAt")
-            .and_then(serde_json::Value::as_i64)
-            .and_then(rfc3339_from_epoch),
+        resets_at: reset_at_epoch(share.get("resetsAt").and_then(serde_json::Value::as_i64))
+            .map(|reset| reset.to_string()),
         reached,
     })
-}
-
-pub(crate) fn same_reset_instant(one: DateTime<Utc>, other: DateTime<Utc>) -> bool {
-    (one - other).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
-}
-
-fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
 
 const BUY_RESET: &str = "buy_reset";
