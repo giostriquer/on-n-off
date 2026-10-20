@@ -1,35 +1,37 @@
 import type { ReactNode, RefCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { ActionMenu, type ActionMenuItem } from "@/components/ActionMenu";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
-import { checkLimitsNow } from "$lib/sharedReads/limits";
+import { checkNowEntry } from "./cardActionPlan";
+import { useCardActions, useCheckNow, type CardFrameInput } from "./cardActions";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
-import type { LimitCard } from "./limitCards";
+import { isSignedIn, type LimitCard } from "./limitCards";
 import { SignInBadge } from "./SignInBadge";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { useTagsBeside } from "./useTagsBeside";
 
-export function LimitCardFrame({ provider, card, now, checking, items = [], danger = [], menuButtonRef, footer, children }: {
-  provider: LimitsProvider;
-  card: LimitCard | null;
-  now: number;
-  checking: boolean;
-  items?: ActionMenuItem[];
-  danger?: ActionMenuItem[];
-  menuButtonRef?: RefCallback<HTMLButtonElement>;
-  footer?: ReactNode;
-  children?: ReactNode;
-}) {
-  const client = useQueryClient();
+type FrameChrome = { menuButtonRef?: RefCallback<HTMLButtonElement>; children?: ReactNode };
+
+export function LimitCardFrame({ menuButtonRef, children, ...input }: CardFrameInput & FrameChrome) {
+  const { menu, footer } = useCardActions(input);
+  return <CardShell provider={input.provider} card={input.card} now={input.now} menu={menu} footer={footer} menuButtonRef={menuButtonRef}>{children}</CardShell>;
+}
+
+export function PendingCardFrame({ provider, now, checking, menuButtonRef, children }: { provider: LimitsProvider; now: number; checking: boolean } & FrameChrome) {
+  const checkNow = useCheckNow(provider);
+  return <CardShell provider={provider} card={null} now={now} menu={[checkNow(checkNowEntry(checking))]} footer={null} menuButtonRef={menuButtonRef}>{children}</CardShell>;
+}
+
+function CardShell({ provider, card, now, menu, footer, menuButtonRef, children }: {
+  provider: LimitsProvider; card: LimitCard | null; now: number; menu: ActionMenuItem[]; footer: ReactNode;
+} & FrameChrome) {
   const name = providerLabel(provider);
   const title = card?.identity.label ?? name;
-  const checkNow: ActionMenuItem = { id: "checkNow", label: "Check limits now", disabled: checking, run: () => void checkLimitsNow(client, provider).catch(() => {}) };
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={card?.identity.ariaLabel ?? `${name} limits`} data-status={card?.freshness.readStatus ?? "pending"}>
       <CardHeader card={card} provider={provider} title={title} now={now}
-        menu={<ActionMenu label={card?.account?.name ?? title} items={[checkNow, ...items, ...danger]} buttonRef={menuButtonRef} />} />
+        menu={<ActionMenu label={card?.account?.name ?? title} items={menu} buttonRef={menuButtonRef} />} />
       {children}
       <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">{footer}</footer>
     </section>
@@ -52,7 +54,7 @@ function CardHeader({ card, provider, title, now, menu }: { card: LimitCard | nu
         {beside && tags}
       </div>
       <div className="flex items-center gap-2.5">
-        {card?.active && !card.headline && <ActiveAccountDot />}
+        {card && isSignedIn(card) && !card.headline && <ActiveAccountDot />}
         {menu}
       </div>
       {!beside && tags}

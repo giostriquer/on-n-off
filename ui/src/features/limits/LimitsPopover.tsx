@@ -125,7 +125,7 @@ function PopoverProviderSection({
   now: number;
 }) {
   const name = providerLabel(provider);
-  const cards = limitColumn({ provider, entries: query.data, profiles: [], now })?.visible ?? null;
+  const cards = limitColumn({ provider, entries: query.data, profiles: [], nativeLogin: null, now })?.visible ?? null;
   const error = query.error ? displayError(parseInvokeError(query.error), name) : null;
   const errorBanner = error ? (
     <p
