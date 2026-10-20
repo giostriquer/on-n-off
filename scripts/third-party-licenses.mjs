@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const LICENSE_FILE = /^(licen[cs]e|copying|notice)/i;
+const LICENSE_FILE = /^(third[-_]party[-_])?(licen[cs]e|copying|notice)/i;
 const BUILD_OUTPUT = ["rolldown", "tailwindcss", "vite"];
 const TEXT_FROM = {
   "@tauri-apps/plugin-dialog": "@tauri-apps/api",

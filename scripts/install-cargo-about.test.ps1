@@ -61,8 +61,14 @@ try {
         }
     }
 
+    $packed = Join-Path $fixtureRoot "packed"
+    New-Item -ItemType Directory -Path (Join-Path $packed "cargo-about-0.9.2-tampered") -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $packed "cargo-about-0.9.2-tampered" "cargo-about"), "not cargo-about", [System.Text.UTF8Encoding]::new($false))
     $tampered = Join-Path $fixtureRoot "tampered.tar.gz"
-    [System.IO.File]::WriteAllText($tampered, "not cargo-about", [System.Text.UTF8Encoding]::new($false))
+    tar -czf $tampered -C $packed "cargo-about-0.9.2-tampered"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Packing the tampered archive failed"
+    }
     $githubPath = Join-Path $fixtureRoot "github-path.txt"
     [System.IO.File]::WriteAllText($githubPath, "", [System.Text.UTF8Encoding]::new($false))
 

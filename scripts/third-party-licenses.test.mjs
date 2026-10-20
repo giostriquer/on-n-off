@@ -56,8 +56,10 @@ test("the build tools whose code lands in the app are listed too, without their 
     "node_modules/vite/LICENSE.md": "vite license",
     "node_modules/rolldown/package.json": pkg("rolldown", "1.0.0", "MIT"),
     "node_modules/rolldown/LICENSE": "rolldown license",
+    "node_modules/rolldown/THIRD-PARTY-LICENSE": "esbuild license",
   });
   assert.deepEqual(npmPackages(root, ["vite"]), [{ name: "vite", version: "8.0.0", license: "MIT", texts: ["vite license"] }]);
+  assert.deepEqual(npmPackages(root, ["rolldown"])[0].texts, ["rolldown license", "esbuild license"], "vendored code's licenses come along");
   assert.throws(() => npmPackages(root, ["tailwindcss"]), /tailwindcss, which the build emits into the app, is not installed/);
 });
 
@@ -186,7 +188,7 @@ test("the command fetches the crates, runs cargo-about with its failure gates, a
     "src-tauri/Cargo.toml": "[package]\nname = \"webapp\"\n",
     "about.json": about,
     "bin/cargo": `#!/bin/sh\necho "$@" >> "$(dirname "$0")/cargo.log"\n`,
-    "bin/cargo-about": `#!/bin/sh\necho "$@" > "$(dirname "$0")/cargo-about.log"\n[ -n "$FAIL" ] && exit 3\ncat "$(dirname "$0")/../about.json"\n`,
+    "bin/cargo-about": `#!/bin/sh\n[ -f "$(dirname "$0")/cargo.log" ] || exit 4\necho "$@" > "$(dirname "$0")/cargo-about.log"\n[ -n "$FAIL" ] && exit 3\ncat "$(dirname "$0")/../about.json"\n`,
   });
   for (const tool of ["cargo", "cargo-about"]) chmodSync(join(root, "bin", tool), 0o755);
   mkdirSync(join(root, "scripts"));
