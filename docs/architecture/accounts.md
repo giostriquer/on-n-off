@@ -63,7 +63,11 @@ Renewal never outlives the sign-in itself: Anthropic ends each one at the `refre
 Claude Code stores with it, and only signing in again starts a new one. The account listing reads
 that date from the default store and from each saved login, in the vault or its home
 (`NativeAccount::sign_in_deadline`, `Home::sign_in_deadline`, `LoginView::sign_in_deadline`),
-credited only to the account the store's `oauthAccount` names. A sign-in awaiting use is newer than
+credited only to the account the store's `oauthAccount` names. A home reads its date once per login:
+it keeps the date in memory beside the home's login stamp (Login state, below) and reads the login
+again only once the stamp changed, so a listing does not reread a home's Keychain item with `-w`
+every time the account list refreshes; a home whose stamp cannot be taken shows no date rather than
+read its login. A sign-in awaiting use is newer than
 whatever the default store still holds for its account, so it reads only its own login; otherwise
 the default store's date comes first. The card warns through the last seven days ([PROVIDERS.md](../../PROVIDERS.md)). The date survives
 Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when.
