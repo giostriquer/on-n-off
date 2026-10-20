@@ -154,6 +154,8 @@ fn weekly_window(value: &MintWindow) -> Option<QuotaWindow> {
         length: Some(ONE_WEEK),
         used_percent: value.used_percent?,
         reset: reset(value),
+        role: None,
+        cycle_starts_on_first_message: false,
     })
 }
 
@@ -170,6 +172,8 @@ fn session_window(value: &MintWindow) -> Option<QuotaWindow> {
         length: Some(length),
         used_percent: value.used_percent?,
         reset: reset(value),
+        role: None,
+        cycle_starts_on_first_message: true,
     })
 }
 

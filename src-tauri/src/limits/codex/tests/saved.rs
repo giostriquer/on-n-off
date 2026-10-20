@@ -51,7 +51,14 @@ fn saved_codex_reads_scoped_quota_without_starting_a_cli() {
         .contains("chatgpt-account-id: team"));
     assert!(request.head.contains("Bearer fixture-access"));
     assert_eq!(dto.reading.plan.as_deref(), Some("pro"));
+    assert_eq!(dto.reading.plan_label.as_deref(), Some("Pro ×20"));
+    assert_eq!(dto.reading.plan_capacity, Some(20));
     assert_eq!(dto.reading.windows.len(), 3);
+    assert!(dto
+        .reading
+        .windows
+        .iter()
+        .all(|window| window.role.is_none() && !window.starts_on_first_message));
     let session = dto
         .reading
         .windows

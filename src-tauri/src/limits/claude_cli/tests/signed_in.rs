@@ -26,6 +26,31 @@ fn a_report_reads_as_the_signed_in_card_of_the_account_the_config_dir_names() {
     assert_eq!(account.label.as_deref(), Some("you@example.com"));
     assert_eq!(answer.reading.plan.as_deref(), Some("max ×20"));
     assert_eq!(answer.reading.windows.len(), 3);
+    let mut roles: Vec<(&str, Option<crate::dto::WindowRole>, bool)> = answer
+        .reading
+        .windows
+        .iter()
+        .map(|window| {
+            (
+                window.id.as_str(),
+                window.role,
+                window.starts_on_first_message,
+            )
+        })
+        .collect();
+    roles.sort_by_key(|(id, _, _)| *id);
+    assert_eq!(
+        roles,
+        [
+            ("session", None, false),
+            ("weekly_all", None, false),
+            (
+                "weekly_scoped:Fable",
+                Some(crate::dto::WindowRole::InnerRing),
+                false
+            ),
+        ]
+    );
 }
 
 #[test]

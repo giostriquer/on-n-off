@@ -285,7 +285,7 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
     if settings.limit_notifications {
         &crate::provider_catalogue::WITH_LIMITS
     } else if !settings.reset_alerts.is_empty() {
-        &[AgentId::Codex]
+        &crate::provider_catalogue::WITH_BANKED_RESETS
     } else {
         &[]
     }
@@ -301,7 +301,7 @@ async fn poll_once(
 ) -> Result<(), String> {
     let fresh = waiting
         .read(|waiting| waiting.any_due(polled_at))
-        .then_some(AgentId::Codex);
+        .then_some(crate::provider_catalogue::BANKED_RESETS_PROVIDER);
     let reads = io.read(watched, fresh).await?;
     let cards: Vec<ProviderLimitsDto> = reads
         .iter()

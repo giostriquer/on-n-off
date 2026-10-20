@@ -26,6 +26,9 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     limits: Some(LimitsFacts {
                         client: "Claude Code",
                         vendor: "Anthropic",
+                        on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                        sign_in_deadline: Some(SignInDeadline::Claude),
+                        ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Claude),
                     saved_accounts: true,
@@ -41,6 +44,13 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     limits: Some(LimitsFacts {
                         client: "Codex CLI",
                         vendor: "OpenAI",
+                        on_load: &[OnLoad::DropHiddenWindows],
+                        credits_spent: Some(CreditsSpent::Codex),
+                        session_rollouts: Some(SessionRollouts::Codex),
+                        banked_resets: Some(BankedResets::Codex),
+                        subscription_term: Some(SubscriptionTerm::Codex),
+                        paid_reset_offer: Some(PaidResetOffer::Codex),
+                        ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Codex),
                     saved_accounts: true,
@@ -80,6 +90,9 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     limits: Some(LimitsFacts {
                         client: "Muse Code",
                         vendor: "Meta",
+                        inherits_legacy_reading: true,
+                        on_load: &[OnLoad::MarkFirstMessageSessions],
+                        ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Muse),
                     saved_accounts: true,
@@ -207,8 +220,68 @@ fn each_fact_list_holds_exactly_the_providers_with_that_fact_in_tab_order() {
     };
     assert_eq!(WITH_LIMITS.to_vec(), with(|facts| facts.limits.is_some()));
     assert_eq!(
+        WITH_BANKED_RESETS.to_vec(),
+        with(|facts| facts
+            .limits
+            .is_some_and(|limits| limits.banked_resets.is_some()))
+    );
+    assert_eq!(
         WITH_SAVED_ACCOUNTS.to_vec(),
         with(|facts| facts.saved_accounts)
+    );
+}
+
+#[test]
+fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() {
+    for id in AgentId::ALL {
+        match id.facts().limits {
+            Some(facts) => assert_eq!(id.limits_facts(), facts, "{id:?}"),
+            None => assert_eq!(id.limits_facts(), LimitsFacts::NONE, "{id:?}"),
+        }
+    }
+    assert_eq!(
+        LimitsFacts::NONE,
+        LimitsFacts {
+            client: "",
+            vendor: "",
+            inherits_legacy_reading: false,
+            on_load: &[],
+            credits_spent: None,
+            session_rollouts: None,
+            banked_resets: None,
+            sign_in_deadline: None,
+            subscription_term: None,
+            paid_reset_offer: None,
+        }
+    );
+}
+
+#[test]
+fn a_named_row_names_its_client_and_vendor_and_holds_no_other_fact() {
+    assert_eq!(
+        LimitsFacts::named("Acme CLI", "Acme"),
+        LimitsFacts {
+            client: "Acme CLI",
+            vendor: "Acme",
+            ..LimitsFacts::NONE
+        }
+    );
+    for id in WITH_LIMITS {
+        let facts = id.limits_facts();
+        assert!(
+            !facts.client.is_empty() && !facts.vendor.is_empty(),
+            "{id:?}"
+        );
+    }
+    assert!(every_limits_row_is_named());
+}
+
+#[test]
+fn one_provider_banks_resets_and_its_alert_spend_and_reread_follow_it() {
+    assert_eq!(WITH_BANKED_RESETS, [BANKED_RESETS_PROVIDER]);
+    assert_eq!(
+        BANKED_RESETS_PROVIDER.limits_facts().banked_resets,
+        Some(BankedResets::Codex)
     );
 }
 
@@ -241,6 +314,21 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
 }
 
 #[test]
+fn each_card_feature_is_written_as_the_key_of_the_implementation_it_names() {
+    assert_eq!(
+        serde_json::to_value(SignInDeadline::Claude).unwrap(),
+        serde_json::json!(AgentId::Claude.key())
+    );
+    for value in [
+        serde_json::to_value(SubscriptionTerm::Codex).unwrap(),
+        serde_json::to_value(BankedResets::Codex).unwrap(),
+        serde_json::to_value(PaidResetOffer::Codex).unwrap(),
+    ] {
+        assert_eq!(value, serde_json::json!(AgentId::Codex.key()));
+    }
+}
+
+#[test]
 fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
     let keys = |ids: &[AgentId]| ids.iter().map(|id| id.key()).collect::<Vec<_>>();
     let keyed = |ids: &[AgentId]| {
@@ -270,12 +358,28 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
         AgentId::ALL.len(),
         "two providers sharing a key would be one provider to the UI"
     );
+    let limits_features: serde_json::Map<String, serde_json::Value> = WITH_LIMITS
+        .into_iter()
+        .map(|id| {
+            let facts = id.limits_facts();
+            (
+                id.key().to_string(),
+                serde_json::json!({
+                    "signInDeadline": facts.sign_in_deadline,
+                    "subscriptionTerm": facts.subscription_term,
+                    "bankedResets": facts.banked_resets,
+                    "paidResetOffer": facts.paid_reset_offer,
+                }),
+            )
+        })
+        .collect();
     let written = serde_json::json!({
         "tabOrder": keys(&AgentId::ALL),
         "railOrder": keys(&RAIL_ORDER),
         "notchDefault": keys(&crate::side_notch::model::NotchSettings::default().providers),
         "withLimits": keyed(&WITH_LIMITS),
         "withSavedAccounts": keyed(&WITH_SAVED_ACCOUNTS),
+        "limitsFeatures": limits_features,
         "providers": providers,
     });
     assert_eq!(

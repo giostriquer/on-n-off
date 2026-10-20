@@ -11,6 +11,7 @@ pub(crate) mod login;
 mod muse;
 pub(crate) mod outcome;
 mod pipeline;
+mod plan;
 mod reading;
 mod renewal;
 mod snapshots;
@@ -37,6 +38,7 @@ use crate::accounts::model::Identity;
 use crate::dto::LimitsStatus;
 use crate::dto::{AgentId, LimitsAccountDto, ProviderLimitsDto, Reading};
 use crate::paths;
+use crate::provider_catalogue::SessionRollouts;
 use outcome::Read;
 #[cfg(test)]
 use pipeline::finish;
@@ -205,17 +207,28 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRe
         };
     };
     let _provider_guard = provider_read_guard(agent);
+    read_accounts(agent, sources, |home| (reader.read)(home, force))
+}
+
+fn read_accounts(
+    agent: AgentId,
+    sources: Sources<'_>,
+    read: impl FnOnce(&Path) -> Read,
+) -> NativeRead {
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let (current, outcome) = outcome::signed_in(agent, (reader.read)(home, force));
+    let (current, outcome) = outcome::signed_in(agent, read(home));
     let store = SnapshotStore::for_home(home);
     let mut cards = aggregate_accounts(&store, current);
-    if agent == AgentId::Codex {
-        let before = cards.clone();
-        if codex_sessions::merge_recent(home, observed_at, &mut cards) > 0 {
-            store.save_changed(&before, &cards);
+    match agent.limits_facts().session_rollouts {
+        Some(SessionRollouts::Codex) => {
+            let before = cards.clone();
+            if codex_sessions::merge_recent(home, observed_at, &mut cards) > 0 {
+                store.save_changed(&before, &cards);
+            }
         }
+        None => {}
     }
     NativeRead { cards, outcome }
 }

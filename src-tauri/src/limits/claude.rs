@@ -8,7 +8,12 @@ use super::json::{humanize, optional_string};
 use super::outcome::{Read, ReadFailure};
 use super::window::{QuotaWindow, ResetInstant, Scope, FIVE_HOURS, ONE_WEEK};
 use crate::accounts::claude::SignedIn;
-use crate::dto::LimitsAccountDto;
+use crate::dto::{LimitsAccountDto, WindowRole};
+
+const SESSION: &str = "session";
+const WEEKLY_PREFIX: &str = "weekly_";
+const SCOPED_WEEKLY: &str = "weekly_scoped";
+const INNER_RING_MODEL: &str = "fable";
 
 pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
     let claude = SignedIn::resolve(home).ok()?;
@@ -48,19 +53,31 @@ fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
     let kind = optional_string(entry.get("kind"))?;
     let group = optional_string(entry.get("group"))?;
     let used_percent = entry.get("percent").and_then(Value::as_f64)?;
-    let named = scope_name(entry.get("scope"));
-    let (scope, length) = match (group.as_str(), kind.as_str()) {
-        ("session", _) => (Scope::AllModels, FIVE_HOURS),
-        ("weekly", "weekly_all") => (Scope::AllModels, ONE_WEEK),
+    let scoped = entry.get("scope");
+    let model = scoped.and_then(model_name);
+    let named = model
+        .clone()
+        .or_else(|| optional_string(scoped.and_then(|scope| scope.get("surface"))));
+    let (scope, length, role) = match (group.as_str(), kind.as_str()) {
+        (SESSION, _) => (Scope::AllModels, FIVE_HOURS, None),
+        ("weekly", "weekly_all") => (Scope::AllModels, ONE_WEEK, None),
         ("weekly", other) => {
-            let name = match &named {
-                Some(name) => name.clone(),
-                None => humanize(other.strip_prefix("weekly_").unwrap_or(other)),
+            let name = named
+                .clone()
+                .unwrap_or_else(|| humanize(other.strip_prefix(WEEKLY_PREFIX).unwrap_or(other)));
+            let model_key = if other == SCOPED_WEEKLY {
+                model.as_deref()
+            } else {
+                other.strip_prefix(WEEKLY_PREFIX)
             };
-            (Scope::Model(name), ONE_WEEK)
+            let role = model_key
+                .is_some_and(|key| key.eq_ignore_ascii_case(INNER_RING_MODEL))
+                .then_some(WindowRole::InnerRing);
+            (Scope::Model(name), ONE_WEEK, role)
         }
         _ => return None,
     };
+    let cycle_starts_on_first_message = group == SESSION;
     let id = match &named {
         Some(name) => format!("{kind}:{name}"),
         None => kind,
@@ -71,45 +88,77 @@ fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
         length: Some(length),
         used_percent,
         reset: reset(entry),
+        role,
+        cycle_starts_on_first_message,
     })
+}
+
+fn model_name(scope: &Value) -> Option<String> {
+    optional_string(
+        scope
+            .get("model")
+            .and_then(|model| model.get("display_name")),
+    )
 }
 
 fn reset(entry: &Value) -> Option<ResetInstant> {
     optional_string(entry.get("resets_at")).and_then(|text| ResetInstant::parse(&text))
 }
 
-fn scope_name(scope: Option<&Value>) -> Option<String> {
-    let scope = scope?;
-    optional_string(
-        scope
-            .get("model")
-            .and_then(|model| model.get("display_name")),
-    )
-    .or_else(|| optional_string(scope.get("surface")))
+struct LegacyWindow {
+    key: &'static str,
+    id: &'static str,
+    model: Option<&'static str>,
+    length: Duration,
+    cycle_starts_on_first_message: bool,
 }
 
+const LEGACY: [LegacyWindow; 4] = [
+    LegacyWindow {
+        key: "five_hour",
+        id: SESSION,
+        model: None,
+        length: FIVE_HOURS,
+        cycle_starts_on_first_message: true,
+    },
+    LegacyWindow {
+        key: "seven_day",
+        id: "weekly_all",
+        model: None,
+        length: ONE_WEEK,
+        cycle_starts_on_first_message: false,
+    },
+    LegacyWindow {
+        key: "seven_day_opus",
+        id: "weekly_opus",
+        model: Some("Opus"),
+        length: ONE_WEEK,
+        cycle_starts_on_first_message: false,
+    },
+    LegacyWindow {
+        key: "seven_day_sonnet",
+        id: "weekly_sonnet",
+        model: Some("Sonnet"),
+        length: ONE_WEEK,
+        cycle_starts_on_first_message: false,
+    },
+];
+
 fn legacy_windows(payload: &Value) -> Vec<QuotaWindow> {
-    const LEGACY: [(&str, &str, Option<&str>, Duration); 4] = [
-        ("five_hour", "session", None, FIVE_HOURS),
-        ("seven_day", "weekly_all", None, ONE_WEEK),
-        ("seven_day_opus", "weekly_opus", Some("Opus"), ONE_WEEK),
-        (
-            "seven_day_sonnet",
-            "weekly_sonnet",
-            Some("Sonnet"),
-            ONE_WEEK,
-        ),
-    ];
     LEGACY
         .iter()
-        .filter_map(|(key, id, model, length)| {
-            let entry = payload.get(*key)?;
+        .filter_map(|legacy| {
+            let entry = payload.get(legacy.key)?;
             Some(QuotaWindow {
-                id: (*id).to_string(),
-                scope: model.map_or(Scope::AllModels, |name| Scope::Model(name.to_string())),
-                length: Some(*length),
+                id: legacy.id.to_string(),
+                scope: legacy
+                    .model
+                    .map_or(Scope::AllModels, |name| Scope::Model(name.to_string())),
+                length: Some(legacy.length),
                 used_percent: entry.get("utilization").and_then(Value::as_f64)?,
                 reset: reset(entry),
+                role: None,
+                cycle_starts_on_first_message: legacy.cycle_starts_on_first_message,
             })
         })
         .collect()

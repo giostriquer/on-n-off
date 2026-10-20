@@ -118,30 +118,6 @@ export function formatUsedPercent(usedPercent: number): string {
   return `${Math.round(usedPercent)}%`;
 }
 
-const CODEX_PRO_TIERS: Record<string, number> = { pro: 20, prolite: 5 };
-
-function codexProTier(plan: string, provider?: string): number | undefined {
-  if (provider !== "codex") return undefined;
-  return CODEX_PRO_TIERS[plan.toLowerCase().replaceAll(/[ _-]/g, "")];
-}
-
-export function planLabel(plan: string | null | undefined, provider?: string): string {
-  const raw = plan?.trim().replaceAll("_", " ") ?? "";
-  if (!raw) return "";
-  const proTier = codexProTier(raw, provider);
-  if (proTier) return `Pro ×${proTier}`;
-  return raw.charAt(0).toUpperCase() + raw.slice(1);
-}
-
-export function planMultiplier(plan: string | null | undefined, provider?: string): number {
-  const raw = plan?.trim() ?? "";
-  const proTier = codexProTier(raw, provider);
-  if (proTier) return proTier;
-  const multiplier = /[×x]\s*(\d+)/i.exec(raw)?.[1];
-  if (multiplier) return Number(multiplier);
-  return raw.toLowerCase() === "max" ? 5 : 1;
-}
-
 export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {
   try {
     const format = new Intl.NumberFormat("en-US", { style: "currency", currency });

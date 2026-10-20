@@ -24,6 +24,8 @@ fn snapshot(
                 resets_at: resets_at.map(str::to_string),
                 window_seconds: Some(7 * 24 * 60 * 60),
                 observed_at: "2026-08-19T12:00:00Z".into(),
+                role: None,
+                starts_on_first_message: false,
             }],
             ..Reading::default()
         })
@@ -548,7 +550,10 @@ fn the_monitor_reads_only_what_its_settings_watch() {
         watched_providers(&settings(false, false)),
         &[] as &[AgentId]
     );
-    assert_eq!(watched_providers(&settings(false, true)), &[AgentId::Codex]);
+    assert_eq!(
+        watched_providers(&settings(false, true)),
+        crate::provider_catalogue::WITH_BANKED_RESETS
+    );
     assert_eq!(
         watched_providers(&settings(true, false)),
         crate::provider_catalogue::WITH_LIMITS

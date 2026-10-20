@@ -12,14 +12,6 @@ pub(crate) struct ClaudeIdentity {
     pub(crate) organization_id: Option<String>,
 }
 
-fn plan_label(subscription_type: Option<&str>, tier: Option<&str>) -> Option<String> {
-    match (subscription_type, tier) {
-        (Some("max"), Some("default_claude_max_5x")) => Some("max ×5".to_string()),
-        (Some("max"), Some("default_claude_max_20x")) => Some("max ×20".to_string()),
-        _ => subscription_type.map(str::to_string),
-    }
-}
-
 pub(super) struct ClaudeConfigAccount {
     pub(super) identity: ClaudeIdentity,
     pub(super) plan: Option<String>,
@@ -39,7 +31,7 @@ pub(super) fn read_claude_config_account(config_file: &Path) -> Option<ClaudeCon
             },
             organization_id: optional_string(account.get("organizationUuid")),
         },
-        plan: plan_label(
+        plan: super::plan::claude_plan(
             organization_type
                 .as_deref()
                 .and_then(|kind| kind.strip_prefix("claude_")),

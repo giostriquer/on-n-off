@@ -7,6 +7,13 @@ use crate::dto::{LimitWindowDto, LimitsResetCreditsDto};
 const NOW: &str = "2026-10-01T12:00:00Z";
 const RENEWS: &str = "2026-10-05T12:00:00Z";
 
+fn without_banked_resets() -> crate::dto::AgentId {
+    crate::dto::AgentId::ALL
+        .into_iter()
+        .find(|id| id.limits_facts().banked_resets.is_none())
+        .expect("a provider without banked resets")
+}
+
 fn at(value: &str) -> DateTime<Utc> {
     instant(value).unwrap()
 }
@@ -24,6 +31,8 @@ fn window(kind: LimitWindowKind, used: f64, resets_at: &str) -> LimitWindowDto {
         resets_at: Some(resets_at.into()),
         window_seconds: Some(604_800),
         observed_at: NOW.into(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 
@@ -34,7 +43,7 @@ fn card(
     observed_at: &str,
     banked: u32,
 ) -> ProviderLimitsDto {
-    ProviderLimitsDto::for_test(AgentId::Codex, account)
+    ProviderLimitsDto::for_test(crate::provider_catalogue::WITH_BANKED_RESETS[0], account)
         .labelled("you@example.com")
         .with_reading(Reading {
             windows: vec![LimitWindowDto {

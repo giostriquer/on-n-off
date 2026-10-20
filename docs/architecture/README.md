@@ -200,8 +200,9 @@ provider's own client:
   as after sleep, is kept. A spend that fails is not tried again.
 
   `limits_monitor` is the loop that does the I/O around the rule (`poll_once`, over a small `Io`
-  trait its tests fake). It polls while any alert is on, reading Codex alone when limit
-  notifications are off (`watched_providers`) and reading it afresh when a spend is due. It saves
+  trait its tests fake). It polls while any alert is on, reading only the providers that bank
+  resets (`WITH_BANKED_RESETS`, Codex) when limit notifications are off (`watched_providers`) and
+  reading that provider (`BANKED_RESETS_PROVIDER`) afresh when a spend is due. It saves
   its state, in its own file, before it tells anyone or schedules anything, and rolls the state
   back when the save fails, so the offer is made again. It spends through the same
   `limits_refresh::consume_codex_reset_credit` a click uses and says what came of it either way.
@@ -222,7 +223,22 @@ to `QuotaWindow` facts (id, scope, length, used percent, reset instant) and noth
 `QuotaWindow::into_dto` decides the kind, the label, the meter's range, the reset's spelling and
 `windowSeconds` (the rules are in the Common shape of [PROVIDERS.md](../../PROVIDERS.md)), and
 `QuotaWindow::idle` is the unused window a provider leaves out while it has not started (Muse's
-five-hour window). Every window that leaves `limits/` is within 0–100, which the notch helper
+five-hour window). What a surface does with a window beyond its kind travels on the window, set by
+the reader that understands the payload: its `role` (the side notch's inner ring, Claude's Fable
+week) and whether it starts with the first message, which the module reports only while the
+window is unused and has no reset. The notch and the card read those fields and never a label or
+a provider. A reading's plan is the reader's; its label and the capacity the card order weighs
+are `plan::describe`'s (`limits/plan.rs`), worked out where the window rules apply and never filed.
+Shared Limits code asks a provider's Limits facts (`AgentId::limits_facts`, provider catalogue
+below) rather than naming it: a saved profile's legacy reading (`SnapshotStore::remember`), what a
+remembered file changes as it loads (`StoredSnapshot::into_dto`), whether a read asked about credits
+spent or the subscription term (`limits/reading.rs`), whether session rollouts are merged
+(`limits::read_limits_in`) and whose banked resets the monitor and the alert follow
+(`BANKED_RESETS_PROVIDER`, the one provider a compile-time check allows). The plan's label and
+capacity hold by construction: `keep_remembered` drops whatever either reading carried and works
+them out again from the plan it kept.
+
+Every window that leaves `limits/` is within 0–100, which the notch helper
 needs, since it refuses a whole message that holds one meter outside it. Three clamps share that
 job, and each governs its own path:
 
@@ -499,14 +515,17 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 ### Provider catalogue
 
 `AgentId::ALL` lists every provider in tab order, and `AgentId::facts` gives each one row: key,
-display name, binary and aliases, whether it has a Limits reader, which `UsageProvider` reads its
-transcripts, and whether it offers saved accounts. The row is one exhaustive `match`, so a new
+display name, binary and aliases, its Limits facts if it has a Limits reader (`LimitsFacts`, which
+`AgentId::limits_facts` reads as `LimitsFacts::NONE` for a provider without one), which
+`UsageProvider` reads its transcripts, and whether it offers saved accounts. The Limits facts are
+what shared Limits code and the card model ask about a provider ([PROVIDERS.md](../../PROVIDERS.md),
+Common shape). The row is one exhaustive `match`, so a new
 provider does not compile without one; nothing in Rust makes a list name every variant, so a test
 walks the variants serde declares and requires each in `ALL` once. `UsageProvider`, the providers
 Usage reads, lives beside it, and its own variants are checked against the rows the same way.
 `RAIL_ORDER`, the side notch's order, is a literal of `ALL`'s length that a compile-time check
-holds to naming every provider; `WITH_LIMITS` and `WITH_SAVED_ACCOUNTS` are compile-time filters
-in `ALL`'s order. A provider string decoded by hand (scan-cache rows, CLI names) goes through
+holds to naming every provider; `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS` and `WITH_BANKED_RESETS` are
+compile-time filters in `ALL`'s order. A provider string decoded by hand (scan-cache rows, CLI names) goes through
 `UsageProvider::from_key` or `AgentId::from_binary`, and one neither knows is skipped, never taken
 for another provider. Settings, folded usage and IPC decode providers through serde, whose
 lowercase name a test holds equal to the row's key. Usage keys its buckets by `UsageProvider`
@@ -527,12 +546,16 @@ test and dev-mock helper, not a placeholder the app shows, and keeps every provi
 The UI knows the catalogue through a fixture Rust writes:
 `src-tauri/src/provider_catalogue/fixtures/providers.json` holds the tab order, the rail order, the
 notch default, the providers with Limits and with saved accounts as maps keyed by provider
-(`withLimits`, `withSavedAccounts`) and, by key, each row's name, binary and aliases, Limits reader,
+(`withLimits`, `withSavedAccounts`), each Limits provider's card features (`limitsFeatures`: the
+sign-in deadline, subscription term, banked resets and paid reset offer, each the key of the
+implementation it turns on or null) and, by key, each row's name, binary and aliases, Limits reader,
 Usage provider and saved accounts. A Rust test builds that document from `AgentId::ALL`, `facts()`,
 `RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS` and `NotchSettings::default()` and asserts the
 file equals it. `ui/src/lib/providers.ts` imports the
 file at build time and is the one place the UI learns a provider fact: `PROVIDER_IDS` (tabs),
-`RAIL_ORDER`, `LIMITS_PROVIDERS`, `ACCOUNT_PROVIDERS`, `USAGE_PROVIDERS`, `providerLabel`,
+`RAIL_ORDER`, `LIMITS_PROVIDERS`, `ACCOUNT_PROVIDERS`, `USAGE_PROVIDERS`, `LIMITS_FEATURE_ROWS`
+(which `LIMITS_FEATURES` in `ui/src/features/limits/limitFeatures.ts` types, and
+`limitFeatures.test.ts` holds to the fixture and to the implementations the card model has), `providerLabel`,
 `providerBinary`, `providerNames`, `providerRecord` and the guards `isAgentId`, `hasLimits` and
 `hasSavedAccounts`. Every screen's provider list, the Limits columns, the Add account menu, the
 remembered tab, the mock's agent list and the Usage and Overview sentences that name the providers
@@ -624,13 +647,13 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
-| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
-| Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps |
+| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
+| Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
-| Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
+| Account details | `plan` on `Reading`, with the `plan_label` and `plan_capacity` `plan::describe` works out from it (`limits/plan.rs`); a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
 | Signed-in state | `signedIn` on `LimitCard` (`ui/src/features/limits/limitCards.ts`), tested by `isSignedIn`, from the saved profile's `active` or the read's `currentAccount`, confirmed against the account list's `nativeObservationId` (`nativeLogin` on the account controller, `ui/src/features/accounts/AccountManager.tsx`); read by the card action plan and the active dot |

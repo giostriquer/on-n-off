@@ -98,14 +98,59 @@ adapter assumes today (change the adapter and this file together).
   share's included, and `windowSeconds` carries the length whenever it is known. A window's id is
   its identity, in snapshots, the limits monitor and the notch; its label is display text, and
   nothing matches a window by it, except loading a remembered Codex file written before the reader
-  dropped hidden buckets (Codex, below) and the notch's Fable ring (`side_notch/model.rs`), which
-  still finds Claude's Fable window by its label. Every window that leaves `limits/` is in range:
+  dropped hidden buckets (Codex, below). What a surface does with a window beyond its kind is the
+  window's own data, set by its reader. `role: "innerRing"` marks the window the side notch draws
+  as its inner ring: Claude's Fable week, which the Claude reader picks from the payload, a
+  per-model kind `weekly_fable` or a `weekly_scoped` limit whose `scope.model.display_name` is
+  Fable in any case. The payload names that model by nothing steadier: its `scope.model.id` has
+  been null or absent in every report seen, so a renamed model still drops the ring, but only the
+  reader, whose tests pin the payload, decides it, never the label. `startsOnFirstMessage` says a
+  window has not started and starts with the user's first message: a reader marks the windows
+  whose cycle starts that way (Claude's and Muse's sessions, and `QuotaWindow::idle`), and the
+  module sets the flag only while such a window is unused and has no reset. The card shows "Starts
+  with your first message" under a row from that flag alone. Both fields are left out when unset.
+  A reading remembered before they existed gets the flag as its file loads, on every unused session
+  without a reset, where its provider's sessions start that way (Limits facts, below); it has no
+  role until its account is read again.
+  Every window that leaves `limits/` is in range:
   built ones by `QuotaWindow::into_dto`, the Codex sessions merge's included, remembered ones as
   their file loads (`StoredSnapshot::into_dto`), and every read again in `pipeline::finish`; the
   workspace-credit share is clamped at those last two points, since both notches draw it as a window
   and the macOS helper refuses a whole message that holds one meter outside 0–100. Readings written
   before this rule keep the spelling and label they were written with and are read as they are:
   every reset is compared through `ResetInstant`, which reads any RFC 3339 spelling.
+
+- Plans (`limits/plan.rs`): a reading keeps its plan as its reader reported it (`plan`: Claude's
+  `max ×5`, `max ×20` or subscription type, Codex's plan id, Muse's tier name), and every reading
+  that leaves `limits/` also carries `planLabel`, the text the card shows, and `planCapacity`, the
+  multiplier the card order weighs usage left by (absent reads 1). `plan::describe` works both out
+  from the provider and the plan, in `pipeline::finish` and as a remembered file loads, and neither
+  is filed: Claude `max ×20` is **Max ×20** (20), `max ×5` **Max ×5** (5) and `max` **Max** (5);
+  Codex `pro` is **Pro ×20** (20) and `prolite`, in any case and with any space, `_` or `-`, **Pro ×5**
+  (5); any other plan is its text with `_` read as a space and its first letter capitalised, with no
+  capacity. A tier is its own provider's: Muse's `prolite` is **Prolite**. The same module maps
+  Claude's `organizationRateLimitTier` to its plan and lists Codex's workspace plans (credits
+  spent, below).
+
+- Per-provider Limits facts: one row each in the provider catalogue (`LimitsFacts`,
+  `AgentId::limits_facts`), which shared Limits code asks instead of naming a provider. It names
+  the provider's client and vendor, which the read outcome's messages use, and says
+  whether a saved profile's first reading inherits the reading its legacy id remembered (Muse,
+  a plain yes or no, since the mechanism is the same for any provider); what a remembered file
+  changes as it loads (`on_load`: Codex drops its hidden windows, Claude its banked resets, and
+  Claude and Muse mark an unused session without a reset as starting with the first message); and
+  which implementation, if any, gives the provider each of these: credits spent (Codex), session
+  rollouts as extra observations (Codex), banked resets (Codex), a saved sign-in's deadline
+  (Claude), the subscription term (Codex: asked by the read and shown by the card, one fact) and
+  the paid reset offer (Codex). Each of those is a closed enum naming the implementations it has
+  (`BankedResets::Codex`, `SignInDeadline::Claude`, …), so a row can only name one that exists,
+  and the code that runs it matches on it. Exactly one provider banks resets: a compile-time check
+  holds `WITH_BANKED_RESETS` to one entry, `BANKED_RESETS_PROVIDER`, whose card the banked reset
+  alert judges and whose read the limits monitor watches and repeats before a spend, because the
+  alert, its spend and its re-read are Codex's. The four card features are written into the
+  catalogue fixture as `limitsFeatures`, each the key of the implementation it names, and the
+  UI's `LIMITS_FEATURES` is that map, read through `LIMITS_IMPLEMENTATIONS`, the one list of the
+  implementations the card model has.
 
 - GitHub pull requests (`github/`, `github_monitor.rs`): the Pull requests screen is not a
   provider and stays outside `AgentAdapter`. It borrows the GitHub CLI's login by running
@@ -207,7 +252,9 @@ adapter assumes today (change the adapter and this file together).
    `every_declared_provider_is_in_the_catalogue_once` fails until it is in `AgentId::ALL`, whose
    position is its tab. The row states its key (the serde name settings, snapshots and the UI
    use), display name, CLI binary and any binary aliases, whether it has a Limits reader (which
-   also puts it on a fresh notch), which `UsageProvider` reads its transcripts (if any) and
+   also puts it on a fresh notch) and, if so, its Limits facts (`LimitsFacts`, started from
+   `LimitsFacts::named(client, vendor)`, which a compile-time check requires to name both), which
+   `UsageProvider` reads its transcripts (if any) and
    whether it offers saved accounts. Insert it into `RAIL_ORDER`, the side notch's order, which
    does not compile until it names every provider. Every Rust provider list is drawn from these;
    extend the catalogue's table test with the row, and copy the document
@@ -225,7 +272,7 @@ adapter assumes today (change the adapter and this file together).
    the rows `tsc` asks for: the provider's colours, toggles and display paths in `providers.ts`,
    its icon in `ProviderIcon.tsx`, and, for a provider with Limits or saved accounts, the records
    keyed by `LimitsProvider` or `AccountProvider`, which the fixture's `withLimits` and
-   `withSavedAccounts` widen to it. The notch helper still keeps its own list, Swift's `ProviderId`
+   `withSavedAccounts` widen to it; its card features come from the fixture's `limitsFeatures` row. The notch helper still keeps its own list, Swift's `ProviderId`
    (`src-tauri/macos/SideNotch/Sources/NotchCore/Models.swift`).
 4. Every write through `ConfigIo`; a regression test with a temp home (`paths::scratch_dir`) before the change.
 5. Document the layout here, and mark what is verified vs assumed.
@@ -238,7 +285,7 @@ Subscription dates share a per-account UI cache that account changes invalidate.
 ID token of the signed-in login or of the saved profile, decoded in process, with no request of its own.
 
 Claude plan labels come from the `oauthAccount` record every Claude usage read already checks
-(`limits/claude_config.rs`): `organizationType` names the subscription as `claude_<type>`, and
+(`limits/claude_config.rs`, mapped by `limits/plan.rs`): `organizationType` names the subscription as `claude_<type>`, and
 `claude_max` at `organizationRateLimitTier=default_claude_max_5x` displays **Max ×5**, at
 `default_claude_max_20x` **Max ×20**. Missing or unknown tiers keep **Max**; other subscription
 types keep their own label. This requires no request of its own.
@@ -278,7 +325,7 @@ Code 2.1.296): the field, the 30-day default, the emptied login keeping the date
 notice. **verified** (2026-10-12): a login renewed that morning kept its date three days out, and a
 login 31 days past its `/login` was refused at its next renewal.
 
-The Codex plan badge follows CodexBar's plan-code mapping: `pro` displays **Pro ×20**,
+The Codex plan badge follows CodexBar's plan-code mapping (`limits/plan.rs`): `pro` displays **Pro ×20**,
 and `prolite` (including separator variants) displays **Pro ×5**. Other providers keep their
 own plan names. The subscription badge to the left of the plan shows the term: a plan that renews is **Auto-renew**, one
 that will not is **No renewal**, filling with subtly textured amber through its last seven days and red
@@ -307,13 +354,13 @@ login after preserving its latest credential; it does not call logout. Native re
 which profile is active. A new sign-in for an already active identity is shown as ready to use.
 
 Limits and the tray popover order one provider's cards the same way: the active login first; then
-every account with usage left, the most usable capacity first, where the plan's multiplier weighs
-the percentage its fuller main window has left (a Max ×20 at 30% outranks an untouched Max ×5);
+every account with usage left, the most usable capacity first, where the reading's `planCapacity`
+weighs the percentage its fuller main window has left (a Max ×20 at 30% outranks an untouched Max ×5);
 then the accounts that are out of usage, the one whose last full window resets soonest first;
 accounts with no usage known last. Usage left always outranks waiting for a reset, and equal
 ranks keep the backend's order, newest observation first. The rule lives in the card model both
 surfaces render, `ui/src/features/limits/limitCards.ts`, on the shared `usageLeft` /
-`usableAgainAt` / `planMultiplier` helpers; the backend itself still hands accounts over newest
+`usableAgainAt` helpers and the capacity Rust reports (Plans, above); the backend itself still hands accounts over newest
 first.
 
 Native Codex file, keyring, and auto storage are handled explicitly. Ephemeral or alternate
