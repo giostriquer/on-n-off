@@ -120,9 +120,11 @@ describe("card order", () => {
     const unsized = sized("no capacity untouched", 0, null);
     const fiveAtThirty = sized("×5 at 30% left", 70, 5);
     expect(order([unsized, fiveAtThirty])).toEqual(["×5 at 30% left", "no capacity untouched"]);
+    const fiveAtTen = sized("×5 at 10% left", 90, 5);
+    expect(order([fiveAtTen, unsized])).toEqual(["no capacity untouched", "×5 at 10% left"]);
     const textOnly = account("a label that reads ×20", { weekly: [70, at(100)] }, { plan: "max ×20", planLabel: "Max ×20", planCapacity: undefined });
     const plain = account("plain untouched", { weekly: [0, at(100)] }, { plan: "pro", planLabel: "Pro", planCapacity: null });
-    expect(order([plain, textOnly])).toEqual(["plain untouched", "a label that reads ×20"]);
+    expect(order([textOnly, plain])).toEqual(["plain untouched", "a label that reads ×20"]);
   });
 
   it("shows the plan's label as the reading reports it, and none without one", () => {

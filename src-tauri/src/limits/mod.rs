@@ -158,10 +158,18 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<Prov
         )];
     };
     let _provider_guard = provider_read_guard(agent);
+    read_accounts(agent, sources, |home| read(home, force))
+}
+
+fn read_accounts(
+    agent: AgentId,
+    sources: Sources<'_>,
+    read: impl FnOnce(&Path) -> ProviderLimitsDto,
+) -> Vec<ProviderLimitsDto> {
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let current = read(home, force);
+    let current = read(home);
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current);
     match agent.limits_facts().session_rollouts {

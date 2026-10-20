@@ -1,6 +1,7 @@
 mod archived;
 mod memory;
 mod remembered_reading;
+mod rollouts;
 
 use super::*;
 use crate::dto::{
