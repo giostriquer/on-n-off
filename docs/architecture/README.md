@@ -392,7 +392,7 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | --- | --- |
 | `cli_locate.rs` | A GUI app does not inherit a terminal's `PATH`. Builds one merged search list and hands it to spawned CLIs as their `PATH`. |
 | `process.rs` | Child-process draining with a hard deadline; stdout and stderr drained concurrently, or a full pipe deadlocks. A cancellable wait also hands its caller each stdout line while the command runs (a sign-in's page). |
-| `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server` and `muse serve`. See below. |
+| `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server`. See below. |
 | `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
 | `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
@@ -465,12 +465,12 @@ own list; `PROVIDERS.md` names it under "When adding a provider".
 
 ### JSON-line sessions
 
-Codex's app-server and Muse's serve are read the same way, so one module, `json_line_session.rs`,
-owns the conversation and each reader keeps only what is its own: the command, its arguments and
+Codex's app-server is spoken to through one module, `json_line_session.rs`, which owns the
+conversation, so the reader keeps only what is its own: the command, its arguments and
 environment, the method names and answer types, the checks on what it is told, and the
 normalisation into a reading. A reader describes its CLI as a `Peer`: the name every message
-starts with ("Codex app-server", "Muse serve"), whether each line carries `"jsonrpc": "2.0"` (Muse
-requires it, Codex omits it), and what to say when the CLI exits before it answers `initialize`.
+starts with ("Codex app-server") and what to say when the CLI exits before it answers
+`initialize`. Lines carry no `"jsonrpc"` member, as Codex expects.
 
 - **One deadline and one line limit per session**, 30 seconds and 1 MiB, so a CLI that stops
   answering or writes an unbounded line fails the read rather than hanging it or filling memory.

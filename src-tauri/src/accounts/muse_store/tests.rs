@@ -27,8 +27,13 @@ fn keychain_token() -> Lookup {
     Ok(Some(r#"{"access_token":"keychain-token"}"#.to_string()))
 }
 
-fn bearer(login: &MuseLogin) -> Option<String> {
-    login.token.as_ref().map(AccessToken::authorization)
+fn state(login: &MuseLogin) -> String {
+    match &login.credential {
+        MuseCredential::Token(token) => token.authorization(),
+        MuseCredential::ApiKey => "api key".into(),
+        MuseCredential::Expired => "expired".into(),
+        MuseCredential::Unread => "unread".into(),
+    }
 }
 
 fn login_in(config: &Path, now_secs: i64, keychain: &dyn Fn() -> Lookup) -> MuseLogin {
@@ -45,7 +50,7 @@ fn an_inline_device_token_is_loaded_with_its_email() {
     let login = login_in(&config, NOW, &|| {
         panic!("an inline token never asks the Keychain")
     });
-    assert_eq!(bearer(&login).as_deref(), Some("Bearer device-token"));
+    assert_eq!(state(&login), "Bearer device-token");
     assert_eq!(login.email.as_deref(), Some("You@Example.com"));
 }
 
@@ -59,22 +64,24 @@ fn a_keychain_login_reads_only_the_bundle_access_token() {
         "api_key": "LLM|bundle-minted-secret"
     }"#;
     let login = login_in(&config, NOW, &|| Ok(Some(bundle.to_string())));
-    assert_eq!(
-        bearer(&login).as_deref(),
-        Some("Bearer bundle-access-token")
-    );
+    assert_eq!(state(&login), "Bearer bundle-access-token");
 }
 
 #[test]
-fn a_keychain_value_without_an_access_token_gives_no_token() {
+fn a_keychain_item_without_a_credential_is_no_login_and_a_malformed_one_is_unread() {
     let config = config_with_auth(KEYCHAIN_AUTH);
-    for value in [
-        r#"{"secret_schema_version":1,"refresh_token":"bundle-refresh-secret"}"#,
-        "bare-token-of-an-unknown-shape",
-        "",
+    for empty in [
+        Ok(None),
+        Ok(Some(
+            r#"{"secret_schema_version":1,"refresh_token":"bundle-refresh-secret"}"#.to_string(),
+        )),
     ] {
+        let read = LoginCache::new().login(&config, NOW, &|| empty.clone());
+        assert!(read.is_none(), "{empty:?}");
+    }
+    for value in ["bare-token-of-an-unknown-shape", ""] {
         let login = login_in(&config, NOW, &|| Ok(Some(value.to_string())));
-        assert!(login.token.is_none(), "{value}");
+        assert_eq!(state(&login), "unread", "{value}");
         assert_eq!(login.email.as_deref(), Some("you@example.com"), "{value}");
     }
 }
@@ -82,20 +89,17 @@ fn a_keychain_value_without_an_access_token_gives_no_token() {
 #[test]
 fn a_denied_or_expired_login_keeps_its_email() {
     let denied = login_in(&config_with_auth(KEYCHAIN_AUTH), NOW, &denied);
-    assert!(denied.token.is_none());
-    assert!(!denied.expired);
+    assert_eq!(state(&denied), "unread");
     assert_eq!(denied.email.as_deref(), Some("you@example.com"));
 
     let expired = config_with_auth(
         r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","expires_at":1800000000,"user_email":"you@example.com"}}}"#,
     );
     let login = login_in(&expired, NOW, &no_keychain);
-    assert!(login.token.is_none());
-    assert!(login.expired);
+    assert_eq!(state(&login), "expired");
     assert_eq!(login.email.as_deref(), Some("you@example.com"));
     let live = login_in(&expired, NOW - 1, &no_keychain);
-    assert!(live.token.is_some());
-    assert!(!live.expired);
+    assert_eq!(state(&live), "Bearer device-token");
 }
 
 #[test]
@@ -115,15 +119,38 @@ fn an_auth_file_without_a_meta_login_is_no_login() {
 }
 
 #[test]
-fn an_api_key_login_has_no_token_and_never_asks_the_keychain() {
-    let config = config_with_auth(
-        r#"{"providers":{"meta":{"mechanism":"apiKey","user_email":"you@example.com"}}}"#,
+fn an_api_key_login_reads_as_an_api_key_wherever_muse_keeps_it() {
+    let inline = config_with_auth(
+        r#"{"providers":{"meta":{"mechanism":"api_key","api_key":"k","user_email":"you@example.com"}}}"#,
     );
-    let login = login_in(&config, NOW, &|| {
-        panic!("an API-key login never asks the Keychain")
+    let login = login_in(&inline, NOW, &|| {
+        panic!("an inline API key never asks the Keychain")
     });
-    assert!(login.token.is_none());
+    assert_eq!(state(&login), "api key");
     assert_eq!(login.email.as_deref(), Some("you@example.com"));
+
+    let in_keychain = config_with_auth(
+        r#"{"providers":{"meta":{"mechanism":"api_key","storage":"keychain","user_email":"you@example.com"}}}"#,
+    );
+    let login = login_in(&in_keychain, NOW, &|| {
+        Ok(Some(
+            r#"{"secret_schema_version":1,"api_key":"k"}"#.to_string(),
+        ))
+    });
+    assert_eq!(state(&login), "api key");
+}
+
+#[test]
+fn login_metadata_without_a_credential_is_no_login_and_never_asks_the_keychain() {
+    for body in [
+        r#"{"providers":{"meta":{"mechanism":"apiKey","user_email":"you@example.com"}}}"#,
+        r#"{"providers":{"meta":{"user_email":"you@example.com","expires_at":1000}}}"#,
+    ] {
+        let read = LoginCache::new().login(&config_with_auth(body), NOW, &|| {
+            panic!("metadata without a credential never asks the Keychain")
+        });
+        assert!(read.is_none(), "{body}");
+    }
 }
 
 #[test]
@@ -134,8 +161,7 @@ fn an_expired_login_does_not_ask_the_keychain() {
     let login = login_in(&config, NOW, &|| {
         panic!("an expired login never asks the Keychain")
     });
-    assert!(login.token.is_none());
-    assert!(login.expired);
+    assert_eq!(state(&login), "expired");
 }
 
 #[test]
@@ -150,11 +176,9 @@ fn a_cached_login_expires_without_a_new_lookup() {
     };
     let cache = LoginCache::new();
     let fresh = cache.login(&config, NOW, &lookup).expect("login");
-    assert!(fresh.token.is_some());
-    assert!(!fresh.expired);
+    assert_eq!(state(&fresh), "Bearer keychain-token");
     let later = cache.login(&config, NOW + 100, &lookup).expect("login");
-    assert!(later.token.is_none());
-    assert!(later.expired);
+    assert_eq!(state(&later), "expired");
     assert_eq!(calls.get(), 1);
 }
 
@@ -173,7 +197,7 @@ fn the_keychain_is_read_again_only_when_auth_json_changes() {
     let cache = LoginCache::new();
     for _ in 0..2 {
         let login = cache.login(&config, NOW, &lookup).expect("login");
-        assert_eq!(bearer(&login).as_deref(), Some("Bearer keychain-token"));
+        assert_eq!(state(&login), "Bearer keychain-token");
     }
     assert_eq!(calls.get(), 1, "one Keychain lookup while auth.json stands");
 
@@ -205,17 +229,22 @@ fn a_denied_lookup_is_remembered_until_auth_json_changes() {
         Err("denied".to_string())
     };
     let cache = LoginCache::new();
-    assert!(cache
-        .login(&config, NOW, &denied)
-        .expect("login")
-        .token
-        .is_none());
-    assert!(cache
-        .login(&config, NOW, &denied)
-        .expect("login")
-        .token
-        .is_none());
+    for _ in 0..2 {
+        let login = cache.login(&config, NOW, &denied).expect("login");
+        assert_eq!(state(&login), "unread");
+    }
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+#[cfg(not(target_os = "macos"))]
+fn off_macos_a_keychain_stored_login_reads_as_unread() {
+    assert_eq!(SystemKeychain.read(), Err(UNREACHABLE.to_string()));
+    let login = login_in(&config_with_auth(KEYCHAIN_AUTH), NOW, &|| {
+        SystemKeychain.read()
+    });
+    assert_eq!(state(&login), "unread");
+    assert_eq!(login.email.as_deref(), Some("you@example.com"));
 }
 
 #[test]
@@ -224,8 +253,9 @@ fn an_expiry_of_another_shape_keeps_the_token() {
         let config = config_with_auth(&format!(
             r#"{{"providers":{{"meta":{{"mechanism":"oauth","access_token":"device-token","expires_at":{expires_at}}}}}}}"#
         ));
-        assert!(
-            login_in(&config, NOW, &no_keychain).token.is_some(),
+        assert_eq!(
+            state(&login_in(&config, NOW, &no_keychain)),
+            "Bearer device-token",
             "{expires_at}"
         );
     }
@@ -628,11 +658,10 @@ fn an_unreadable_login_file_is_refused_and_left_alone() {
 fn a_store_without_the_keychain_never_gets_a_cached_keychain_answer() {
     let config = config_with_auth(KEYCHAIN_AUTH);
     let cache = LoginCache::new();
-    assert!(cache
-        .login(&config, NOW, &keychain_token)
-        .unwrap()
-        .token
-        .is_some());
+    assert_eq!(
+        state(&cache.login(&config, NOW, &keychain_token).unwrap()),
+        "Bearer keychain-token"
+    );
 
     assert_eq!(cache.native(&config, None), Err(UNREACHABLE.to_string()));
 }

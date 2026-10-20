@@ -16,7 +16,6 @@ const METHOD_NOT_FOUND: i64 = -32601;
 pub(crate) struct Peer {
     name: &'static str,
     exited_early: &'static str,
-    jsonrpc: bool,
     timeout: Duration,
     line_limit: usize,
 }
@@ -26,16 +25,8 @@ impl Peer {
         Self {
             name,
             exited_early,
-            jsonrpc: false,
             timeout: DEADLINE,
             line_limit: LINE_LIMIT,
-        }
-    }
-
-    pub(crate) const fn jsonrpc(name: &'static str, exited_early: &'static str) -> Self {
-        Self {
-            jsonrpc: true,
-            ..Self::jsonrpc_lite(name, exited_early)
         }
     }
 
@@ -131,12 +122,11 @@ impl Session {
 
     pub(crate) fn run<R: DeserializeOwned, T>(
         mut self,
-        capabilities: Option<Value>,
         accept: impl FnOnce(&R) -> Result<(), String>,
         talk: impl FnOnce(R, &mut Conversation) -> Result<T, Failure>,
     ) -> Result<T, String> {
         let conversation = &mut self.conversation;
-        let answer = match conversation.request(initialize(capabilities)) {
+        let answer = match conversation.request(initialize()) {
             Ok(answer) => answer,
             Err(failure) => {
                 let exit = conversation.transport.finish();
@@ -173,9 +163,6 @@ impl Conversation {
 
     fn send(&mut self, id: Option<u64>, method: &str, params: Value) -> Result<(), Failure> {
         let mut message = Map::new();
-        if self.peer.jsonrpc {
-            message.insert("jsonrpc".to_string(), json!("2.0"));
-        }
         if let Some(id) = id {
             message.insert("id".to_string(), json!(id));
         }
@@ -185,16 +172,12 @@ impl Conversation {
     }
 }
 
-fn initialize(capabilities: Option<Value>) -> Request<'static> {
-    let mut params = json!({"clientInfo": {
+fn initialize() -> Request<'static> {
+    Request::new(1, "initialize").params(json!({"clientInfo": {
         "name": "on_n_off",
         "title": "on-n-off",
         "version": env!("CARGO_PKG_VERSION"),
-    }});
-    if let Some(capabilities) = capabilities {
-        params["capabilities"] = capabilities;
-    }
-    Request::new(1, "initialize").params(params)
+    }}))
 }
 
 fn answer<R: DeserializeOwned>(

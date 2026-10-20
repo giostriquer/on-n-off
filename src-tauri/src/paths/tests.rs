@@ -105,15 +105,7 @@ fn a_running_app_takes_its_home_from_on_n_off_home_then_userprofile_then_home() 
 
 #[test]
 fn only_the_paths_module_reads_the_process_home() {
-    const ALLOWED: [(&str, &str, &[&str]); 6] = [
-        (
-            "limits/muse.rs",
-            "hands a Muse serve child the home its roots were resolved from: sets, never reads",
-            &[
-                r#".env("HOME", home);"#,
-                r#"command.env("USERPROFILE", home);"#,
-            ],
-        ),
+    const ALLOWED: [(&str, &str, &[&str]); 5] = [
         (
             "accounts/claude.rs",
             "hands a Claude child a disposable OS home: sets, never reads",

@@ -2,7 +2,6 @@ use super::*;
 use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 
 const LITE: Peer = Peer::jsonrpc_lite("Acme server", "Acme CLI exited early; update it.");
-const STRICT: Peer = Peer::jsonrpc("Webapp serve", "Webapp CLI exited early; update it.");
 
 fn command(stub: &CliStub, name: &str) -> Command {
     stub.cli(&crate::paths::scratch_dir(name)).command()
@@ -29,11 +28,7 @@ fn opened<T>(
     session: Session,
     talk: impl FnOnce(&mut Conversation) -> Result<T, Failure>,
 ) -> Result<T, String> {
-    session.run(
-        None,
-        |_: &Value| Ok(()),
-        |_, conversation| talk(conversation),
-    )
+    session.run(|_: &Value| Ok(()), |_, conversation| talk(conversation))
 }
 
 #[test]
@@ -58,13 +53,13 @@ fn an_oversized_stdout_line_is_rejected_with_its_limit() {
     let mut process = process(
         &CliStub::new("acme").stdout(&"x".repeat(128)),
         "json-line-output-limit",
-        STRICT.within(ANSWER_DEADLINE, 64),
+        LITE.within(ANSWER_DEADLINE, 64),
     );
 
     let error = process.receive().unwrap_err();
     process.finish();
 
-    assert_eq!(error.message, "Webapp serve output line exceeded 64 bytes.");
+    assert_eq!(error.message, "Acme server output line exceeded 64 bytes.");
 }
 
 #[test]
@@ -106,11 +101,8 @@ fn stderr_never_reaches_a_message() {
 
 #[test]
 fn a_peer_allows_a_mebibyte_line_and_thirty_seconds_by_default() {
-    for (peer, jsonrpc) in [(LITE, false), (STRICT, true)] {
-        assert_eq!(peer.line_limit, 1024 * 1024);
-        assert_eq!(peer.timeout, Duration::from_secs(30));
-        assert_eq!(peer.jsonrpc, jsonrpc);
-    }
+    assert_eq!(LITE.line_limit, 1024 * 1024);
+    assert_eq!(LITE.timeout, Duration::from_secs(30));
 }
 
 #[test]
@@ -291,12 +283,12 @@ fn a_request_to_a_cli_that_has_already_exited_is_closed_and_gets_the_guidance() 
 #[test]
 fn an_early_broken_pipe_and_an_unsuccessful_exit_give_the_same_guidance() {
     let message = explained(
-        STRICT,
-        Failure::closed("Could not write to Webapp serve: Broken pipe"),
+        LITE,
+        Failure::closed("Could not write to Acme server: Broken pipe"),
         Some(exit_status(2)),
     );
 
-    assert_eq!(message, "Webapp CLI exited early; update it.");
+    assert_eq!(message, "Acme CLI exited early; update it.");
 }
 
 #[test]
@@ -349,54 +341,29 @@ fn a_request_waits_for_the_answer_with_its_id() {
 }
 
 #[test]
-fn a_lite_peer_gets_bare_lines_and_a_strict_peer_gets_jsonrpc_on_every_line() {
-    for (peer, stamp) in [(LITE, ""), (STRICT, r#""jsonrpc":"2.0","#)] {
-        let script = initialize_then([json!({"id": 2, "result": {}})]);
+fn the_handshake_sends_only_the_client_and_every_line_is_bare_json() {
+    let script = initialize_then([json!({"id": 2, "result": {}})]);
 
-        script
-            .session(peer)
-            .run(
-                Some(json!({"acme": true})),
-                |_: &Value| Ok(()),
-                |_, conversation| {
-                    conversation
-                        .request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
-                },
-            )
-            .unwrap();
+    opened(script.session(LITE), |conversation| {
+        conversation.request::<Value>(Request::new(2, "acme/read").params(json!({"a": 1})))
+    })
+    .unwrap();
 
-        let lines: Vec<String> = script
-            .sent()
-            .iter()
-            .map(|message| serde_json::to_string(message).unwrap())
-            .collect();
-        assert_eq!(
-            lines,
-            [
-                format!(
-                    r#"{{{stamp}"id":1,"method":"initialize","params":{{"clientInfo":{{"name":"on_n_off","title":"on-n-off","version":"{}"}},"capabilities":{{"acme":true}}}}}}"#,
-                    env!("CARGO_PKG_VERSION")
-                ),
-                format!(r#"{{{stamp}"method":"initialized","params":{{}}}}"#),
-                format!(r#"{{{stamp}"id":2,"method":"acme/read","params":{{"a":1}}}}"#),
-            ]
-        );
-    }
-}
-
-#[test]
-fn a_handshake_without_capabilities_sends_only_the_client() {
-    let script = initialize_then([]);
-
-    opened(script.session(LITE), |_| Ok(())).unwrap();
-
+    let lines: Vec<String> = script
+        .sent()
+        .iter()
+        .map(|message| serde_json::to_string(message).unwrap())
+        .collect();
     assert_eq!(
-        script.sent()[0]["params"],
-        json!({"clientInfo": {
-            "name": "on_n_off",
-            "title": "on-n-off",
-            "version": env!("CARGO_PKG_VERSION"),
-        }})
+        lines,
+        [
+            format!(
+                r#"{{"id":1,"method":"initialize","params":{{"clientInfo":{{"name":"on_n_off","title":"on-n-off","version":"{}"}}}}}}"#,
+                env!("CARGO_PKG_VERSION")
+            ),
+            r#"{"method":"initialized","params":{}}"#.to_string(),
+            r#"{"id":2,"method":"acme/read","params":{"a":1}}"#.to_string(),
+        ]
     );
 }
 
@@ -408,7 +375,6 @@ fn a_rejected_answer_ends_the_handshake_before_initialized_with_its_own_message(
     let error = script
         .session(LITE)
         .run(
-            None,
             |answer: &Value| {
                 Err(format!(
                     "Acme server used {}.",
@@ -492,13 +458,13 @@ fn a_protocol_error_names_the_peer_the_method_and_the_code() {
 #[test]
 fn a_malformed_answer_names_the_peer_and_the_method() {
     let error = opened(
-        initialize_then([json!({"id": 2, "result": "many"})]).session(STRICT),
-        |conversation| conversation.request::<u32>(Request::new(2, "webapp/count")),
+        initialize_then([json!({"id": 2, "result": "many"})]).session(LITE),
+        |conversation| conversation.request::<u32>(Request::new(2, "acme/count")),
     )
     .unwrap_err();
 
     assert!(
-        error.starts_with("Webapp serve `webapp/count` returned a malformed response: "),
+        error.starts_with("Acme server `acme/count` returned a malformed response: "),
         "{error}"
     );
 }
