@@ -11,6 +11,7 @@ const neverContacted = {
   "https://api.openai.com/auth": "the namespace of a claim in the Codex ID token",
   "https://auth.meta.com/": "the sign-in page Muse prints, opened in the browser",
   "https://cursor.com/install": "the install command shown for the Cursor CLI",
+  "https://cursor.com/install?win32=true": "the install command shown for the Cursor CLI on Windows",
 };
 
 function sourceUrls() {
@@ -22,7 +23,7 @@ function sourceUrls() {
 
 const updateRedirects = ["release-assets.githubusercontent.com"];
 
-const excluded = (url) => Object.keys(neverContacted).some((literal) => url.startsWith(literal));
+const excluded = (url) => Object.hasOwn(neverContacted, url);
 
 function contactedHosts() {
   const hosts = new Set(sourceUrls().filter((match) => !excluded(match[0])).map((match) => match[1]));
@@ -45,5 +46,5 @@ test("the README's Privacy section names exactly the hosts the app itself contac
 
 test("every URL the scan sets aside still appears in the scanned source, so the exclusions cannot go stale", () => {
   const urls = sourceUrls().map((match) => match[0]);
-  for (const literal of Object.keys(neverContacted)) assert.ok(urls.some((url) => url.startsWith(literal)), literal);
+  for (const literal of Object.keys(neverContacted)) assert.ok(urls.includes(literal), literal);
 });
