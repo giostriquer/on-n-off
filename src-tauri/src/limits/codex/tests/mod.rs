@@ -2,7 +2,7 @@ mod figures;
 mod saved;
 
 use super::*;
-use crate::dto::LimitsWorkspaceCreditsDto;
+use crate::dto::{LimitWindowKind, LimitsWorkspaceCreditsDto};
 use serde_json::json;
 
 const APP_SERVER_CAPTURE: &str = r#"{
@@ -39,36 +39,22 @@ const APP_SERVER_CAPTURE: &str = r#"{
 #[test]
 fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
     let payload: RateLimitsResponse = serde_json::from_str(APP_SERVER_CAPTURE).unwrap();
-    let parsed = parse_codex(&payload);
 
-    assert_eq!(parsed.plan.as_deref(), Some("pro"));
-    let windows: Vec<(&str, &str, LimitWindowKind, f64, Option<u64>)> = parsed
-        .windows
-        .iter()
-        .map(|window| {
-            (
-                window.id.as_str(),
-                window.label.as_str(),
-                window.kind,
-                window.used_percent,
-                window.window_seconds,
-            )
-        })
-        .collect();
+    assert_eq!(parse_codex(&payload).plan.as_deref(), Some("pro"));
     assert_eq!(
-        windows,
-        [(
-            "primary",
-            "Weekly · all models",
-            LimitWindowKind::Weekly,
-            14.0,
-            Some(604_800),
-        )]
+        quota_windows(&payload),
+        [QuotaWindow {
+            id: "primary".into(),
+            scope: Scope::AllModels,
+            length: Some(Duration::from_secs(604_800)),
+            used_percent: 14.0,
+            reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0),
+        }]
     );
-    assert_eq!(parsed.credits, None);
+    assert_eq!(parse_codex(&payload).credits, None);
 }
 
-fn with_extra_buckets(buckets: &[(&str, &str)]) -> Reading {
+fn with_extra_buckets(buckets: &[(&str, &str)]) -> Vec<QuotaWindow> {
     let mut by_id = serde_json::Map::new();
     by_id.insert(
         "codex".into(),
@@ -87,15 +73,11 @@ fn with_extra_buckets(buckets: &[(&str, &str)]) -> Reading {
         "rateLimitsByLimitId": by_id
     }))
     .unwrap();
-    parse_codex(&payload)
+    quota_windows(&payload)
 }
 
-fn ids(reading: &Reading) -> Vec<&str> {
-    reading
-        .windows
-        .iter()
-        .map(|window| window.id.as_str())
-        .collect()
+fn ids(windows: &[QuotaWindow]) -> Vec<&str> {
+    windows.iter().map(|window| window.id.as_str()).collect()
 }
 
 #[test]
@@ -136,20 +118,48 @@ fn the_reader_drops_the_reserve_and_spark_buckets_by_name_whatever_their_id() {
 }
 
 #[test]
-fn the_reader_keeps_every_other_codex_model_limit() {
-    let reading = with_extra_buckets(&[("gpt_luna", "GPT-5.6-Luna")]);
-    let labels: Vec<&str> = reading
-        .windows
-        .iter()
-        .map(|window| window.label.as_str())
-        .collect();
+fn a_model_named_with_the_label_separator_is_matched_by_its_whole_name() {
+    let reading = with_extra_buckets(&[("team_split", "Team · GPT-Reserve")]);
     assert_eq!(
-        labels,
+        ids(&reading),
+        ["primary", "extra:team_split", "extra:team_split:secondary"]
+    );
+}
+
+#[test]
+fn the_reader_keeps_every_other_codex_model_limit() {
+    let windows = with_extra_buckets(&[("gpt_luna", "GPT-5.6-Luna")]);
+    let facts: Vec<(&Scope, Option<Duration>)> = windows
+        .iter()
+        .map(|window| (&window.scope, window.length))
+        .collect();
+    let luna = Scope::Model("GPT-5.6-Luna".into());
+    assert_eq!(
+        facts,
         [
-            "Weekly · all models",
-            "5 hour · GPT-5.6-Luna",
-            "Weekly · GPT-5.6-Luna"
+            (&Scope::AllModels, Some(Duration::from_secs(604_800))),
+            (&luna, Some(Duration::from_secs(18_000))),
+            (&luna, Some(Duration::from_secs(604_800))),
         ]
+    );
+}
+
+#[test]
+fn a_bucket_without_a_name_or_a_length_is_an_extra_limit_of_unknown_length() {
+    let payload: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex"},
+        "rateLimitsByLimitId": {"mystery": {"limitId": "mystery", "primary": {"usedPercent": 3}}}
+    }))
+    .unwrap();
+    assert_eq!(
+        quota_windows(&payload),
+        [QuotaWindow {
+            id: "extra:mystery".into(),
+            scope: Scope::Model("extra limit".into()),
+            length: None,
+            used_percent: 3.0,
+            reset: None,
+        }]
     );
 }
 
@@ -166,13 +176,19 @@ fn uses_the_single_bucket_fallback_and_maps_credits() {
         "rateLimitsByLimitId": null
     }))
     .unwrap();
-    let parsed = parse_codex(&payload);
 
-    assert_eq!(parsed.windows.len(), 1);
-    assert_eq!(parsed.windows[0].used_percent, 100.0);
-    assert_eq!(parsed.windows[0].label, "30 minute · all models");
     assert_eq!(
-        parsed.credits,
+        quota_windows(&payload),
+        [QuotaWindow {
+            id: "primary".into(),
+            scope: Scope::AllModels,
+            length: Some(Duration::from_secs(1_800)),
+            used_percent: 140.0,
+            reset: None,
+        }]
+    );
+    assert_eq!(
+        parse_codex(&payload).credits,
         Some(LimitsCreditsDto {
             balance: "3".to_string(),
             unlimited: false,
@@ -600,25 +616,4 @@ fn no_share_without_an_individual_limit() {
     assert_eq!(parse_codex(&plain).workspace_credits, None);
     assert_eq!(parse_codex(&reached_only).workspace_credits, None);
     assert_eq!(parse_codex(&unreadable).workspace_credits, None);
-}
-
-#[test]
-fn a_reset_time_within_two_seconds_is_the_same_instant() {
-    let at = |value: &str| {
-        DateTime::parse_from_rfc3339(value)
-            .unwrap()
-            .with_timezone(&Utc)
-    };
-    let reset = at("2026-10-05T12:00:00Z");
-
-    for (other, same) in [
-        ("2026-10-05T12:00:00+00:00", true),
-        ("2026-10-05T12:00:02Z", true),
-        ("2026-10-05T11:59:58Z", true),
-        ("2026-10-05T12:00:03Z", false),
-        ("2026-10-05T11:59:57Z", false),
-    ] {
-        assert_eq!(same_reset_instant(reset, at(other)), same, "{other}");
-        assert_eq!(same_reset_instant(at(other), reset), same, "{other}");
-    }
 }

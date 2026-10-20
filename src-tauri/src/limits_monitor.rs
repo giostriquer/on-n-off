@@ -12,6 +12,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{
     AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
 };
+use crate::limits::window::{cycle_turned_over, Observation, ResetInstant};
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 use crate::read_revision::{announce, Source};
@@ -432,8 +433,19 @@ fn observe_window(
             return Some((before.clone(), None));
         }
     }
-    let reset =
-        before.is_some_and(|before| reset_detected(before, used_percent, resets_at, incoming_at));
+    let reset = before.is_some_and(|before| {
+        cycle_turned_over(
+            Observation {
+                used_percent: before.used_percent,
+                reset: before.resets_at.as_deref().and_then(ResetInstant::parse),
+            },
+            Observation {
+                used_percent,
+                reset: resets_at.and_then(ResetInstant::parse),
+            },
+            incoming_at.with_timezone(&Utc),
+        )
+    });
     let was_exhausted =
         before.is_some_and(|before| before.exhausted || before.used_percent >= 100.0);
     let kind = if before.is_none() {
@@ -460,25 +472,6 @@ fn observe_window(
         },
         kind,
     ))
-}
-
-fn reset_detected(
-    before: &WindowObservation,
-    used_percent: f64,
-    resets_at: Option<&str>,
-    incoming_at: chrono::DateTime<chrono::FixedOffset>,
-) -> bool {
-    let previous = before
-        .resets_at
-        .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok());
-    let timestamp_advanced = previous
-        .zip(resets_at.and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok()))
-        .is_some_and(|(previous, current)| current > previous);
-    let reset_passed = previous.is_some_and(|previous| previous <= incoming_at);
-    let drop = before.used_percent - used_percent;
-
-    (timestamp_advanced || reset_passed) && drop > 0.5
 }
 
 fn load_state(path: &Path) -> MonitorState {

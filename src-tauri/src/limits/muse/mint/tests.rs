@@ -133,17 +133,19 @@ fn mint_reading(body: Value) -> Parsed {
     normalized(body).expect("mint reading").expect("parsed")
 }
 
-fn window_of(parsed: &Parsed, kind: LimitWindowKind) -> &LimitWindowDto {
-    parsed
-        .reading
-        .windows
+fn facts(body: Value) -> Vec<QuotaWindow> {
+    quota_windows(&mint_response(body)).expect("quota windows")
+}
+
+fn session(facts: &[QuotaWindow]) -> &QuotaWindow {
+    facts
         .iter()
-        .find(|window| window.kind == kind)
-        .expect("window")
+        .find(|window| window.id == "session")
+        .expect("session window")
 }
 
 #[test]
-fn a_mint_response_normalizes_to_a_card_with_both_windows() {
+fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
     let parsed = mint_reading(mint_body());
     let account = parsed.account.as_ref().expect("account");
     assert_eq!(account.id, scoped_you());
@@ -152,41 +154,42 @@ fn a_mint_response_normalizes_to_a_card_with_both_windows() {
     assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
     assert_eq!(parsed.reading.windows.len(), 2);
 
-    let weekly = window_of(&parsed, LimitWindowKind::Weekly);
-    assert_eq!(weekly.id, "weekly");
-    assert_eq!(weekly.label, "Weekly · all models");
-    assert_eq!(weekly.window_seconds, None);
-    assert_eq!(weekly.used_percent, 22.0);
     assert_eq!(
-        weekly.resets_at.as_deref(),
-        Some("2025-10-15T03:46:40.000Z")
-    );
-
-    let session = window_of(&parsed, LimitWindowKind::Session);
-    assert_eq!(session.id, "session");
-    assert_eq!(session.label, "5 hour · all models");
-    assert_eq!(session.used_percent, 41.0);
-    assert_eq!(session.window_seconds, Some(18_000));
-    assert_eq!(
-        session.resets_at.as_deref(),
-        Some("2025-10-09T08:53:20.000Z")
+        facts(mint_body()),
+        [
+            QuotaWindow {
+                id: "weekly".into(),
+                scope: Scope::AllModels,
+                length: Some(ONE_WEEK),
+                used_percent: 22.0,
+                reset: DateTime::from_timestamp(1_760_500_000, 0),
+            },
+            QuotaWindow {
+                id: "session".into(),
+                scope: Scope::AllModels,
+                length: Some(FIVE_HOURS),
+                used_percent: 41.0,
+                reset: DateTime::from_timestamp(1_760_000_000, 0),
+            },
+        ]
     );
 }
 
 #[test]
-fn a_usage_outside_zero_to_a_hundred_percent_is_clamped() {
+fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
     let mut body = mint_body();
     body["subs_usage"]["weekly"]["used_percent"] = json!(140);
     body["subs_usage"]["window"]["used_percent"] = json!(-3);
-    let parsed = mint_reading(body);
+    body["subs_usage"]["window"]["resets_at"] = json!(1_760_000_000.5);
+    body["subs_usage"]["weekly"]["resets_at"] = json!(-1);
+    let facts = facts(body);
+    let used: Vec<f64> = facts.iter().map(|window| window.used_percent).collect();
+    assert_eq!(used, [140.0, -3.0]);
     assert_eq!(
-        window_of(&parsed, LimitWindowKind::Weekly).used_percent,
-        100.0
+        session(&facts).reset,
+        DateTime::from_timestamp_millis(1_760_000_000_500)
     );
-    assert_eq!(
-        window_of(&parsed, LimitWindowKind::Session).used_percent,
-        0.0
-    );
+    assert_eq!(facts[0].reset, None);
 }
 
 #[test]
@@ -194,17 +197,14 @@ fn a_session_window_without_a_duration_is_the_five_hour_window() {
     for duration in [json!(null), json!(0), json!(-5)] {
         let mut body = mint_body();
         body["subs_usage"]["window"]["window_duration_mins"] = duration.clone();
-        let parsed = mint_reading(body);
-        let session = window_of(&parsed, LimitWindowKind::Session);
-        assert_eq!(session.label, "5 hour · all models", "{duration}");
-        assert_eq!(session.window_seconds, Some(18_000), "{duration}");
+        assert_eq!(session(&facts(body)).length, Some(FIVE_HOURS), "{duration}");
     }
     let mut body = mint_body();
     body["subs_usage"]["window"]["window_duration_mins"] = json!(120);
-    let parsed = mint_reading(body);
-    let session = window_of(&parsed, LimitWindowKind::Session);
-    assert_eq!(session.label, "2 hour · all models");
-    assert_eq!(session.window_seconds, Some(7_200));
+    assert_eq!(
+        session(&facts(body)).length,
+        Some(Duration::from_secs(7_200))
+    );
 }
 
 #[test]
@@ -222,19 +222,13 @@ fn the_plan_is_the_tier_name_else_a_tier_that_reads_as_a_name() {
 #[test]
 fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
     let idle = json!({"is_subs_active": true, "subs_tier_name": "Wonder", "subs_usage": null});
-    let parsed = mint_reading(idle);
+    let parsed = mint_reading(idle.clone());
     assert_eq!(
         parsed.account.as_ref().map(|account| account.id.as_str()),
         Some(scoped_you().as_str())
     );
     assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
-    assert_eq!(parsed.reading.windows.len(), 1);
-    let session = window_of(&parsed, LimitWindowKind::Session);
-    assert_eq!(session.id, "session");
-    assert_eq!(session.label, "5 hour · all models");
-    assert_eq!(session.used_percent, 0.0);
-    assert_eq!(session.resets_at, None);
-    assert_eq!(session.window_seconds, Some(18_000));
+    assert_eq!(facts(idle), [QuotaWindow::idle("session", FIVE_HOURS)]);
 
     let unnamed = json!({"is_subs_active": true, "subs_tier_name": "27681631238169137"});
     assert_eq!(mint_reading(unnamed).reading.plan, None);

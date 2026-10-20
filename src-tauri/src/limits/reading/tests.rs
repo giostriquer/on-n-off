@@ -1,6 +1,6 @@
 use super::*;
 use crate::dto::LimitWindowKind;
-use crate::limits::json::window;
+use crate::limits::window::fixture;
 use serde_json::{json, Value};
 
 fn observed(
@@ -13,7 +13,7 @@ fn observed(
 ) -> LimitWindowDto {
     LimitWindowDto {
         observed_at: observed_at.to_string(),
-        ..window(id, label, kind, used_percent, resets_at.map(str::to_string))
+        ..fixture(id, label, kind, used_percent, resets_at.map(str::to_string))
     }
 }
 

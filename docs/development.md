@@ -54,6 +54,10 @@ source carries no comments (see [Code comments](#code-comments)).
   from the rule (`ui/src/lib/appSettings.ts`) is checked against `reset_alert/fixtures/rule.json`
   by `ui/src/lib/resetAlertRule.test.ts`, and a Rust test keeps the fixture equal to the rule, so a
   change to one side fails until the other follows.
+- A quota window: built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts a
+  reader maps, which decides its kind, label, range and reset spelling for every provider. Find a
+  window by its id, never by its label, and compare reset times only as `ResetInstant`s
+  ([why](architecture/README.md#limits)).
 - How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
   (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
   keeps its own failure count and passes its own interval; it never restates the formula. The UI's

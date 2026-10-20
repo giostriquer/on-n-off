@@ -186,9 +186,10 @@ provider's own client:
   two seconds of each other are the same cycle: Codex reports that time to the second, the same
   window's time can differ by a second or two from one response to the next, and a remembered
   window can spell the same instant differently, all of which an exact match took for a new week.
-  The tolerance is the one the Codex sessions merge matches a window by
-  (`limits::same_reset_instant`), and the saved cycle stays the string Codex sent; one that does
-  not read as a time is another cycle. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
+  The tolerance is `ResetInstant`'s (`limits/window.rs`), the one the Codex sessions merge matches
+  a window by and the limits monitor compares by, and the saved cycle stays the string the reading
+  carried; one that does not read as a time is another cycle. The alert never asks whether usage
+  dropped: a cycle is its reset instant alone, since an account can be low again in the next one. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
   time comes the reset is used only if a fresh read still finds the signed-in account low in the
   same cycle; a read that fails leaves it waiting, and one found more than fifteen minutes late,
   as after sleep, is kept. A spend that fails is not tried again.
@@ -210,6 +211,25 @@ provider's own client:
   equal to what the rule does. The card's own "how much is left" (`usageLeft`,
   `limitPresentation.ts`) counts a window past its reset as 0% used, because a reading ages on
   screen; the rule judges live readings and does not.
+
+Every quota window is built in one place, `limits/window.rs`. A reader maps its provider's answer
+to `QuotaWindow` facts (id, scope, length, used percent, reset instant) and nothing else;
+`QuotaWindow::into_dto` decides the kind, the label, the meter's range, the reset's spelling and
+`windowSeconds` (the rules are in the Common shape of [PROVIDERS.md](../../PROVIDERS.md)), and
+`QuotaWindow::idle` is the unused window a provider leaves out while it has not started (Muse's
+five-hour window). Two points keep every window that leaves `limits/` within 0–100 whatever wrote
+it, `window::keep_in_range` in `pipeline::finish` (every read, signed-in or saved) and in
+`StoredSnapshot::into_dto` (every remembered reading), and the Codex sessions merge builds the
+window it advances through the module; the notch helper would otherwise refuse the whole message.
+Reset times are compared only as `ResetInstant`s, parsed from a window's `resetsAt` once: two
+within two seconds are one instant, and one is later than another only beyond that, because Codex
+reports a window's reset to the second and the same window's can differ by a second or two from one
+response to the next. That equality is not transitive, so a `ResetInstant` is never a map key.
+Whether a window's cycle turned over between two observations is `window::cycle_turned_over`: its
+reset instant moved later, or the saved one has passed by the new observation's time (an idle
+window reports none), and in either case its usage dropped by more than half a point. The limits
+monitor's reset notice is that rule; the banked reset alert's cycle is the reset instant alone
+(above).
 
 Saved profiles are read beside the signed-in account (`accounts/usage.rs`). A saved Claude account
 is read in its home ([accounts.md](accounts.md#homes)) by the same Claude Code report, expecting the
@@ -530,7 +550,8 @@ the code today; a change that moves one updates its row.
 | Term | Where it lives |
 | --- | --- |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
-| Quota window | `LimitWindowDto` (`dto/limits.rs`) |
+| Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps |
+| Reset instant | `ResetInstant` (`limits/window.rs`), parsed from a window's `resetsAt`; compared by the limits monitor (`window::cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |

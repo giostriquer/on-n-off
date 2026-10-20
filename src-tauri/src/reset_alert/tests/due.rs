@@ -53,7 +53,7 @@ fn an_offer_is_spent_ten_minutes_later_under_its_own_key() {
     let spend = &waiting.0["acct"];
 
     assert_eq!(spend.account_id(), "acct");
-    assert_eq!(spend.cycle, at(RENEWS));
+    assert_eq!(spend.cycle, ResetInstant::from(at(RENEWS)));
     assert_eq!(spend.due_at, minutes_after_now(10));
     assert_eq!(spend.idempotency_key(), spend.idempotency_key);
     assert!(uuid::Uuid::parse_str(spend.idempotency_key()).is_ok());
@@ -350,6 +350,8 @@ fn a_spend_whose_reset_time_reads_a_second_or_two_apart_is_still_made() {
         "2026-10-05T12:00:01Z",
         "2026-10-05T11:59:58+00:00",
         "2026-10-05T12:00:00+00:00",
+        "2026-10-05T12:00:01.000Z",
+        "2026-10-05T11:59:59.692Z",
     ] {
         let mut waiting = scheduled();
 

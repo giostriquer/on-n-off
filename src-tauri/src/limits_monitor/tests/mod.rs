@@ -322,30 +322,38 @@ fn advancing_the_reset_timestamp_after_usage_notifies_once() {
 }
 
 #[test]
-fn a_large_drop_without_a_new_reset_instant_is_not_a_reset() {
-    let mut state = MonitorState::default();
-    let reset_at = Some("2026-08-24T12:00:00Z");
-    assert!(observe(
-        &mut state,
-        &[snapshot(
+fn a_reset_time_read_a_second_apart_is_not_a_reset() {
+    for jittered in [
+        "2026-08-24T12:00:01Z",
+        "2026-08-24T11:59:59.000Z",
+        "2026-08-24T12:00:00.000+00:00",
+    ] {
+        let mut state = MonitorState::default();
+        let before = snapshot(
             AgentId::Codex,
             "account-a",
             "me@example.com",
             80.0,
-            reset_at,
-        )],
-    )
-    .is_empty());
+            Some("2026-08-24T12:00:00Z"),
+        );
+        assert!(observe(&mut state, &[before]).is_empty());
 
-    let events = observe(
-        &mut state,
-        &[observed_at(
-            snapshot(AgentId::Codex, "account-a", "me@example.com", 8.0, reset_at),
-            "2026-08-19T13:00:00Z",
-        )],
-    );
+        let events = observe(
+            &mut state,
+            &[observed_at(
+                snapshot(
+                    AgentId::Codex,
+                    "account-a",
+                    "me@example.com",
+                    79.0,
+                    Some(jittered),
+                ),
+                "2026-08-19T13:00:00Z",
+            )],
+        );
 
-    assert!(events.is_empty());
+        assert!(events.is_empty(), "{jittered}: {events:?}");
+    }
 }
 
 #[test]
@@ -378,46 +386,6 @@ fn an_older_observation_never_notifies_or_replaces_the_baseline() {
         state.providers[&AgentId::Codex].windows["weekly"].used_percent,
         80.0
     );
-}
-
-#[test]
-fn a_moved_reset_instant_is_a_reset_only_past_half_a_point_of_drop() {
-    for (now, resets) in [(49.5, false), (49.4, true)] {
-        let mut state = MonitorState::default();
-        assert!(observe(
-            &mut state,
-            &[snapshot(
-                AgentId::Codex,
-                "account-a",
-                "me@example.com",
-                50.0,
-                Some("2026-08-24T12:00:00Z"),
-            )],
-        )
-        .is_empty());
-
-        let events = observe(
-            &mut state,
-            &[observed_at(
-                snapshot(
-                    AgentId::Codex,
-                    "account-a",
-                    "me@example.com",
-                    now,
-                    Some("2026-08-24T12:05:00Z"),
-                ),
-                "2026-08-19T13:00:00Z",
-            )],
-        );
-
-        let kinds: Vec<_> = events.iter().map(|event| event.kind).collect();
-        let expected = if resets {
-            vec![LimitEventKind::Reset]
-        } else {
-            vec![]
-        };
-        assert_eq!(kinds, expected, "50% to {now}%");
-    }
 }
 
 #[test]

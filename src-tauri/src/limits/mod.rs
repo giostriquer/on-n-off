@@ -13,11 +13,12 @@ mod pipeline;
 mod reading;
 mod renewal;
 mod snapshots;
+pub(crate) mod window;
 
 #[cfg(test)]
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
-pub(crate) use codex::{read_saved_codex, same_reset_instant, CodexEndpoints};
+pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use muse::mint::read_saved as read_saved_muse;
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};

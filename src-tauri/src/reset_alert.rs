@@ -7,7 +7,7 @@ use crate::dto::{
     AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto,
     ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
-use crate::limits::same_reset_instant;
+use crate::limits::window::ResetInstant;
 
 const SPEND_CAP_PERCENT: u8 = 5;
 const LOWEST_SHARE_PERCENT: u8 = 1;
@@ -139,7 +139,7 @@ pub struct Waiting(HashMap<String, WaitingSpend>);
 pub struct WaitingSpend {
     account_id: String,
     account_label: Option<String>,
-    cycle: DateTime<Utc>,
+    cycle: ResetInstant,
     due_at: DateTime<Utc>,
     idempotency_key: String,
 }
@@ -222,13 +222,13 @@ impl AlertMemory {
                 None => entry.low = None,
                 Some((reading, offer)) => {
                     let confirmed = entry.low.as_ref().is_some_and(|low| {
-                        saved_cycle_is(&low.cycle, offer.renews_at)
+                        saved_cycle_is(&low.cycle, offer.cycle())
                             && is_newer(&reading.observed_at, &low.observed_at)
                     });
                     let offered = entry
                         .offered_cycle
                         .as_deref()
-                        .is_some_and(|offered| saved_cycle_is(offered, offer.renews_at));
+                        .is_some_and(|offered| saved_cycle_is(offered, offer.cycle()));
                     if confirmed && !offered {
                         entry.offered_cycle = Some(reading.cycle.clone());
                         offers.push(offer);
@@ -263,7 +263,7 @@ fn low_reading(
         .iter()
         .find(|window| window.kind == LimitWindowKind::Weekly)?;
     let cycle = weekly.resets_at.as_deref()?;
-    let renews_at = instant(cycle)?;
+    let renews_at = ResetInstant::parse(cycle)?.at();
     if renews_at - now < chrono::Duration::hours(i64::from(alert.min_hours_to_renewal)) {
         return None;
     }
@@ -297,8 +297,14 @@ fn instant(value: &str) -> Option<DateTime<Utc>> {
         .map(|at| at.with_timezone(&Utc))
 }
 
-fn saved_cycle_is(saved: &str, cycle: DateTime<Utc>) -> bool {
-    instant(saved).is_some_and(|saved| same_reset_instant(saved, cycle))
+fn saved_cycle_is(saved: &str, cycle: ResetInstant) -> bool {
+    ResetInstant::parse(saved).is_some_and(|saved| saved == cycle)
+}
+
+impl Offer {
+    fn cycle(&self) -> ResetInstant {
+        self.renews_at.into()
+    }
 }
 
 fn is_newer(later: &str, earlier: &str) -> bool {
@@ -347,8 +353,7 @@ impl Waiting {
                 let deciding_alert = match codex {
                     CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
                         low_reading(card, alert, now).is_some_and(|(_, offer)| {
-                            offer.account_id == account
-                                && same_reset_instant(offer.renews_at, spend.cycle)
+                            offer.account_id == account && offer.cycle() == spend.cycle
                         })
                     }),
                     CodexNow::NobodySignedIn | CodexNow::Unknown => None,
@@ -366,7 +371,7 @@ impl Waiting {
             let spend = WaitingSpend {
                 account_id: offer.account_id.clone(),
                 account_label: offer.account_label.clone(),
-                cycle: offer.renews_at,
+                cycle: offer.cycle(),
                 due_at: now + chrono::Duration::minutes(SPEND_DELAY_MINUTES),
                 idempotency_key: uuid::Uuid::new_v4().to_string(),
             };
