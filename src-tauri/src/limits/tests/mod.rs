@@ -45,6 +45,52 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
 }
 
 #[test]
+fn a_login_is_verified_only_by_a_read_that_answered_for_it() {
+    assert_eq!(
+        verify_signed_in(AgentId::Codex, false),
+        Err("a test build has no user home".to_string())
+    );
+    let home = scratch_dir("limits-verify");
+    let refused = |provider| {
+        outcome::verified(provider, Some(&ReadFailure::Unavailable(String::new()))).unwrap_err()
+    };
+    let missing_claude = home.join("no-such-claude");
+    assert_eq!(
+        crate::accounts::native::with_test_cli(&missing_claude, || {
+            verify_signed_in_at(AgentId::Claude, false, &home)
+        }),
+        Err(refused(AgentId::Claude)),
+        "Claude Code is not installed"
+    );
+    assert_eq!(
+        verify_signed_in_at(AgentId::Muse, false, &home),
+        Err(refused(AgentId::Muse)),
+        "Muse is signed out"
+    );
+    let config = crate::paths::muse_config_for(&home);
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("auth.json"),
+        json!({"providers": {"meta": {"access_token": "device-token", "user_email": "you@example.com", "expires_at": 1}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        verify_signed_in_at(AgentId::Muse, false, &home),
+        Err(refused(AgentId::Muse)),
+        "Muse's login has expired"
+    );
+    assert!(verify_signed_in_at(AgentId::Cursor, false, &home).is_err());
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn without_a_user_home_no_native_login_is_named() {
+    for provider in AgentId::ALL {
+        assert_eq!(native_login(provider), None, "{provider:?}");
+    }
+}
+
+#[test]
 fn a_provider_has_a_limits_reader_exactly_when_the_catalogue_says_so() {
     for id in AgentId::ALL {
         assert_eq!(

@@ -161,28 +161,35 @@ pub(crate) fn read_served(agent: AgentId, force: bool) -> (Served, u64) {
         cache,
         interval,
         force,
-        &|force| crate::limits::read_limits(agent, force),
+        &Native {
+            read: &|force| crate::limits::read_limits(agent, force),
+            login: &|| crate::limits::native_login(agent),
+        },
         &|entries| crate::limits::unarchive_signed_in(agent, entries),
         &|force, entries| crate::accounts::usage::refresh(agent, force, entries),
         &|entries| crate::limits::flag_archived(agent, entries),
     )
 }
 
+struct Native<'a> {
+    read: &'a dyn Fn(bool) -> NativeRead,
+    login: &'a dyn Fn() -> Option<String>,
+}
+
 fn read_provider(
     cache: &Cache,
     interval: Duration,
     force: bool,
-    native: &dyn Fn(bool) -> NativeRead,
+    native: &Native<'_>,
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
     saved: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>),
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Served, u64) {
     let mut unarchived = false;
-    let native_login = || crate::limits::native_login(cache.provider);
     let (served, reading) =
-        read_through_cache(cache, interval, force, &native_login, |force, refresh| {
+        read_through_cache(cache, interval, force, native.login, |force, refresh| {
             let (mut cards, outcome) = if refresh.native {
-                let NativeRead { mut cards, outcome } = native(force);
+                let NativeRead { mut cards, outcome } = (native.read)(force);
                 unarchived = unarchive(&cards);
                 if !refresh.saved {
                     cards = keep_saved_cards(cards, refresh.previous);

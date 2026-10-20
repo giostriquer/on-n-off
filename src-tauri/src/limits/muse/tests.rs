@@ -2,7 +2,7 @@ use super::mint::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
 use crate::dto::LimitWindowKind;
 use crate::http::RateLimitReset;
-use crate::limits::outcome::tests::every_failure_keeps_the_account_its_answer_names;
+use crate::limits::outcome::tests::{every_failure_keeps_the_account_its_answer_names, Expected};
 use serde_json::json;
 
 fn login(email: Option<&str>, credential: MuseCredential) -> Option<MuseLogin> {
@@ -222,40 +222,40 @@ fn minted(root: &Path, email: Option<&str>) -> Read {
     )
 }
 
-fn every_failing_path(root: &Path, email: Option<&str>) -> Vec<Read> {
-    let mut reads = vec![
+fn every_failing_path(root: &Path, email: Option<&str>) -> Vec<(Read, Expected)> {
+    let mint = |answer: fn() -> Result<mint::MintResponse, HttpError>| {
+        read_current(root, installed, |_| signed_in(email), |_| answer())
+    };
+    let stored = |credential| {
         read_current(
-            root,
-            installed,
-            |_| signed_in(email),
-            |_| Err(HttpError::Status(500)),
-        ),
-        read_current(
-            root,
-            installed,
-            |_| signed_in(email),
-            |_| Ok(mint_response(json!({"subs_usage": null}))),
-        ),
-        read_current(
-            root,
-            installed,
-            |_| signed_in(email),
-            |_| Ok(mint_response(json!({"is_subs_active": false}))),
-        ),
-    ];
-    for credential in [
-        MuseCredential::Expired,
-        MuseCredential::Unread,
-        MuseCredential::ApiKey,
-    ] {
-        reads.push(read_current(
             root,
             installed,
             |_| login(email, credential),
             mint_must_not_run,
-        ));
-    }
-    reads
+        )
+    };
+    vec![
+        (mint(|| Err(HttpError::Status(500))), |failure| {
+            *failure == ReadFailure::RequestFailed("HTTP 500".into())
+        }),
+        (
+            mint(|| Ok(mint_response(json!({"subs_usage": null})))),
+            |failure| *failure == ReadFailure::NoUsage,
+        ),
+        (
+            mint(|| Ok(mint_response(json!({"is_subs_active": false})))),
+            |failure| *failure == ReadFailure::Unsupported(Unsupported::Inactive),
+        ),
+        (stored(MuseCredential::Expired), |failure| {
+            *failure == ReadFailure::LoginRefused
+        }),
+        (stored(MuseCredential::Unread), |failure| {
+            *failure == ReadFailure::Unavailable(UNREAD.into())
+        }),
+        (stored(MuseCredential::ApiKey), |failure| {
+            *failure == ReadFailure::Unsupported(Unsupported::ApiKey)
+        }),
+    ]
 }
 
 #[test]

@@ -302,3 +302,32 @@ fn saved_scoped_history_never_hides_a_current_unscoped_error() {
     );
     assert!(listed[0].reading.windows.is_empty());
 }
+
+#[test]
+fn a_read_that_names_its_account_keeps_that_name_over_the_remembered_one() {
+    for remembered_name in [Some("old@x"), None] {
+        let home = scratch_dir("limits-memory-new-name");
+        let store = SnapshotStore::for_home(&home);
+        let mut stored = ok_snapshot(AgentId::Codex, "acct-a", "old@x", 5.0);
+        stored.account.as_mut().unwrap().label = remembered_name.map(str::to_string);
+        store.save(&stored).unwrap();
+
+        let remembered = store.remember(ok_snapshot(AgentId::Codex, "acct-a", "new@x", 9.0));
+
+        assert_eq!(
+            remembered.card.account.unwrap().label.as_deref(),
+            Some("new@x"),
+            "{remembered_name:?}"
+        );
+        assert_eq!(
+            store.load(AgentId::Codex)[0]
+                .account
+                .as_ref()
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("new@x"),
+            "{remembered_name:?}"
+        );
+    }
+}
