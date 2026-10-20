@@ -129,7 +129,11 @@ impl Listed {
             .get(self.observation_id())
             .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
             .map(|at| at.timestamp_millis());
-        let deadline = Deadline::at(listed_end.or(self.ends_at_ms));
+        let deadline = Deadline::at(if active {
+            listed_end
+        } else {
+            listed_end.or(self.ends_at_ms)
+        });
         let standing = if active {
             Standing::SignedIn
         } else {

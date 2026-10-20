@@ -348,6 +348,46 @@ fn an_unread_saved_profile_carries_its_login_state_as_the_account_list_decides_i
 }
 
 #[test]
+fn the_signed_in_profile_is_dated_only_by_the_end_the_account_list_handed_over() {
+    const NOW: i64 = 1_790_000_000_000;
+    const DAY: i64 = 86_400_000;
+    let account = identity(AgentId::Claude, "renewed", "team");
+    let roster = roster_with_logins_for_test(
+        AgentId::Claude,
+        &[(account.clone(), "renewed@example.com")],
+        &[],
+        &[],
+        &|_| (Some(NOW - DAY), None),
+    );
+    let mut signed_in = scoped(&account, "renewed@example.com");
+    signed_in.current_account = true;
+    let stated = |ends: &SignInDeadlines| {
+        let column = column(&[signed_in.clone()], &roster, ends, NOW);
+        let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
+        (
+            profile["loginState"].clone(),
+            profile.get("signInEndsAt").cloned(),
+        )
+    };
+
+    assert_eq!(
+        stated(&no_ends()),
+        (serde_json::json!({"state": "usable"}), None),
+        "the saved copy's passed end never dates the login signed in again in the terminal"
+    );
+    assert_eq!(
+        stated(&SignInDeadlines::from([(
+            account.observation_key(),
+            "2026-10-05T12:00:00Z".into()
+        )])),
+        (
+            serde_json::json!({"state": "ending", "endsAt": "2026-10-05T12:00:00Z"}),
+            Some(serde_json::json!("2026-10-05T12:00:00Z"))
+        )
+    );
+}
+
+#[test]
 fn an_unread_entry_is_archived_as_its_profile_is() {
     let put_away = identity(AgentId::Codex, "put-away", "team");
     let kept = identity(AgentId::Codex, "kept", "team");
