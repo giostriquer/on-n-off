@@ -252,8 +252,9 @@ adapter assumes today (change the adapter and this file together).
    `every_declared_provider_is_in_the_catalogue_once` fails until it is in `AgentId::ALL`, whose
    position is its tab. The row states its key (the serde name settings, snapshots and the UI
    use), display name, CLI binary and any binary aliases, whether it has a Limits reader (which
-   also puts it on a fresh notch) and, if so, its Limits facts (`LimitsFacts`: its client and
-   vendor, the rest from `LimitsFacts::NONE`), which `UsageProvider` reads its transcripts (if any) and
+   also puts it on a fresh notch) and, if so, its Limits facts (`LimitsFacts`, started from
+   `LimitsFacts::named(client, vendor)`, which a compile-time check requires to name both), which
+   `UsageProvider` reads its transcripts (if any) and
    whether it offers saved accounts. Insert it into `RAIL_ORDER`, the side notch's order, which
    does not compile until it names every provider. Every Rust provider list is drawn from these;
    extend the catalogue's table test with the row, and copy the document

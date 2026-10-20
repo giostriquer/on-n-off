@@ -257,6 +257,26 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
 }
 
 #[test]
+fn a_named_row_names_its_client_and_vendor_and_holds_no_other_fact() {
+    assert_eq!(
+        LimitsFacts::named("Acme CLI", "Acme"),
+        LimitsFacts {
+            client: "Acme CLI",
+            vendor: "Acme",
+            ..LimitsFacts::NONE
+        }
+    );
+    for id in WITH_LIMITS {
+        let facts = id.limits_facts();
+        assert!(
+            !facts.client.is_empty() && !facts.vendor.is_empty(),
+            "{id:?}"
+        );
+    }
+    assert!(every_limits_row_is_named());
+}
+
+#[test]
 fn one_provider_banks_resets_and_its_alert_spend_and_reread_follow_it() {
     assert_eq!(WITH_BANKED_RESETS, [BANKED_RESETS_PROVIDER]);
     assert_eq!(

@@ -83,6 +83,14 @@ impl LimitsFacts {
         subscription_term: None,
         paid_reset_offer: None,
     };
+
+    pub const fn named(client: &'static str, vendor: &'static str) -> Self {
+        Self {
+            client,
+            vendor,
+            ..Self::NONE
+        }
+    }
 }
 
 impl AgentId {
@@ -102,11 +110,9 @@ impl AgentId {
                 binary: "claude",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Claude Code",
-                    vendor: "Anthropic",
                     on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
                     sign_in_deadline: Some(SignInDeadline::Claude),
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Claude Code", "Anthropic")
                 }),
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
@@ -117,15 +123,13 @@ impl AgentId {
                 binary: "codex",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Codex CLI",
-                    vendor: "OpenAI",
                     on_load: &[OnLoad::DropHiddenWindows],
                     credits_spent: Some(CreditsSpent::Codex),
                     session_rollouts: Some(SessionRollouts::Codex),
                     banked_resets: Some(BankedResets::Codex),
                     subscription_term: Some(SubscriptionTerm::Codex),
                     paid_reset_offer: Some(PaidResetOffer::Codex),
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Codex CLI", "OpenAI")
                 }),
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
@@ -154,11 +158,9 @@ impl AgentId {
                 binary: "muse",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    client: "Muse Code",
-                    vendor: "Meta",
                     inherits_legacy_reading: true,
                     on_load: &[OnLoad::MarkFirstMessageSessions],
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Muse Code", "Meta")
                 }),
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: true,
@@ -261,6 +263,24 @@ const _: () = assert!(
 );
 
 pub const BANKED_RESETS_PROVIDER: AgentId = WITH_BANKED_RESETS[0];
+
+const _: () = assert!(
+    every_limits_row_is_named(),
+    "every provider with Limits names its client and vendor: start its row from LimitsFacts::named"
+);
+
+const fn every_limits_row_is_named() -> bool {
+    let mut i = 0;
+    while i < AgentId::ALL.len() {
+        if let Some(facts) = AgentId::ALL[i].facts().limits {
+            if facts.client.is_empty() || facts.vendor.is_empty() {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    true
+}
 
 const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;
