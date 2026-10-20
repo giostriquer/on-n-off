@@ -432,7 +432,7 @@ pub async fn set_account_category(
     account_id: String,
     category: String,
 ) -> Result<Option<String>, AdapterError> {
-    if !agent_id.facts().limits_reader {
+    if agent_id.facts().limits.is_none() {
         return Err(AdapterError::message(
             "This provider has no Limits accounts to name.",
         ));

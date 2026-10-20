@@ -33,14 +33,19 @@ A read that fails waits the Limits **failure backoff** before it is made again
 (`limits_refresh::failure_backoff`): its interval doubled for each failure in a row, at most
 sixteen intervals and never more than an hour; a success starts the count over. Each read keeps
 its own count and passes its own interval: a provider's native read (the cache's freshness,
-`cache_is_fresh`) and each saved profile's poll (`accounts/usage.rs`, which also waits out a
-Retry-After that is longer) count the failure they just had, so the first one waits two intervals.
+`cache_is_fresh`) and each saved profile's poll (`accounts/usage.rs`) count the failure they just
+had, so the first one waits two intervals, and both wait out a rate limit's Retry-After when that
+is longer. Which failures count, and how long a Retry-After holds the read, is the read outcome's
+(`limits/outcome.rs`, [Limits](README.md#limits)): a failed card counts, while signed out, not
+installed and unsupported wait the ordinary interval, since reading again cannot help until the user
+acts.
 Each Codex backend figure, per account (`limits/backend_memo.rs`), counts only the failures before
 its latest one, as it was specified when it was added: it waits one interval after its first
 failure in a row, half what the other reads wait at each later step, until both reach sixteen
 intervals or the hour. So a failing native read never delays the other provider, and a failing
 figure never delays the usage read it rides on. A forced read bypasses the native
-backoff but not a saved profile's after a failure, nor a backend figure's.
+backoff but not the native read's Retry-After, nor a saved profile's backoff after a failure, nor a
+backend figure's.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

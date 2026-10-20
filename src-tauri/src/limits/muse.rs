@@ -1,22 +1,15 @@
 use std::path::Path;
 
-use super::pipeline::finish;
-use super::Parsed;
+use super::outcome::{Read, ReadFailure, Unsupported};
 use crate::accounts::model::AccessToken;
 use crate::accounts::muse_store::{MuseCredential, MuseLogin};
 use crate::cli_locate::resolve_provider_cli;
-use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitsAccountDto};
 use crate::http::HttpError;
 
 pub(super) mod mint;
 
-#[derive(Debug, PartialEq, Eq)]
-enum ReadFailure {
-    NotInstalled,
-    SignedOut,
-    Unsupported(String),
-    Failed(LimitsAccountDto, String),
-}
+const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.";
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
     match label
@@ -32,48 +25,13 @@ fn account_dto(label: Option<String>) -> LimitsAccountDto {
     }
 }
 
-fn finish_read(read: Result<Parsed, ReadFailure>) -> ProviderLimitsDto {
-    match read {
-        Ok(parsed) => finish(AgentId::Muse, LimitsStatus::Ok, None, parsed),
-        Err(ReadFailure::NotInstalled) => finish(
-            AgentId::Muse,
-            LimitsStatus::SignedOut,
-            Some(
-                "Install Muse Code and sign in with `muse` to see subscription limits.".to_string(),
-            ),
-            Parsed::default(),
-        ),
-        Err(ReadFailure::SignedOut) => finish(
-            AgentId::Muse,
-            LimitsStatus::SignedOut,
-            Some("Sign in with `muse` to see subscription limits.".to_string()),
-            Parsed::default(),
-        ),
-        Err(ReadFailure::Unsupported(message)) => finish(
-            AgentId::Muse,
-            LimitsStatus::Unsupported,
-            Some(message),
-            Parsed::default(),
-        ),
-        Err(ReadFailure::Failed(account, message)) => finish(
-            AgentId::Muse,
-            LimitsStatus::Failed,
-            Some(message),
-            Parsed {
-                account: Some(account),
-                ..Parsed::default()
-            },
-        ),
-    }
-}
-
-pub(super) fn muse_current(home: &Path) -> ProviderLimitsDto {
-    finish_read(read_current(
+pub(super) fn muse_current(home: &Path) -> Read {
+    read_current(
         home,
         || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
         crate::accounts::muse_store::signed_in,
         |token| mint::fetch(mint::KEY_ENDPOINT, token),
-    ))
+    )
 }
 
 fn read_current(
@@ -81,30 +39,25 @@ fn read_current(
     installed: impl FnOnce() -> bool,
     signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
     mint: impl FnOnce(&AccessToken) -> Result<mint::MintResponse, HttpError>,
-) -> Result<Parsed, ReadFailure> {
+) -> Read {
     let Some(MuseLogin { email, credential }) = signed_in(&crate::paths::muse_config_for(home))
     else {
-        return Err(if installed() {
+        return Read::anonymous(if installed() {
             ReadFailure::SignedOut
         } else {
             ReadFailure::NotInstalled
         });
     };
-    match credential {
-        MuseCredential::Token(token) => mint::current_read(email, mint(&token)),
-        MuseCredential::ApiKey => Err(ReadFailure::Unsupported(
-            "Muse is signed in with an API key, which has no subscription limits.".to_string(),
-        )),
-        MuseCredential::Expired => Err(ReadFailure::Failed(
-            account_dto(email),
-            "Muse's login has expired. Sign in with `muse` again to see subscription limits."
-                .to_string(),
-        )),
-        MuseCredential::Unread => Err(ReadFailure::Failed(
-            account_dto(email),
-            "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.".to_string(),
-        )),
-    }
+    let account = Some(account_dto(email.clone()));
+    let answer = match credential {
+        MuseCredential::Token(token) => mint(&token)
+            .map_err(ReadFailure::from)
+            .and_then(|response| mint::answer(email, &response)),
+        MuseCredential::ApiKey => Err(ReadFailure::Unsupported(Unsupported::ApiKey)),
+        MuseCredential::Expired => Err(ReadFailure::LoginRefused),
+        MuseCredential::Unread => Err(ReadFailure::Unavailable(UNREAD.to_string())),
+    };
+    Read { account, answer }
 }
 
 #[cfg(test)]

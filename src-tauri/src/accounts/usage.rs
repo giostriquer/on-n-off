@@ -5,8 +5,10 @@ use super::{
 };
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
-    http::{HttpError, RateLimitReset},
-    limits::{SavedReadError, SavedReadUrls},
+    limits::{
+        outcome::{self, Context},
+        Backoff, ReadFailure, SavedReadUrls,
+    },
 };
 use std::{
     collections::HashMap,
@@ -25,7 +27,7 @@ struct Attempt {
 }
 pub(super) struct FetchResult {
     pub(super) login: Option<Login>,
-    pub(super) result: Result<ProviderLimitsDto, SavedReadError>,
+    pub(super) result: Result<ProviderLimitsDto, ReadFailure>,
 }
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
@@ -159,8 +161,10 @@ fn poll_with(
     let fingerprint = super::view(profile.identity.provider, &fetched_login)
         .ok()?
         .fingerprint();
-    let result = fetched.result;
-    let mut outcome = attempt_outcome(&result);
+    let result = fetched
+        .result
+        .and_then(|card| outcome::accepted(&profile.identity, card));
+    let mut outcome = attempt_outcome(Context::SavedLogin, profile, &result);
     let held = ticket.holding(profile, fingerprint.clone());
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
@@ -181,20 +185,13 @@ fn poll_with(
 fn publish(
     home: &Path,
     profile: &Profile,
-    result: Result<ProviderLimitsDto, SavedReadError>,
+    result: Result<ProviderLimitsDto, ReadFailure>,
     outcome: &mut AttemptOutcome,
     lease: &dyn Fn() -> Option<Store>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let _lease = lease()?;
     match result {
         Ok(mut dto) => {
-            if dto
-                .account
-                .as_ref()
-                .is_none_or(|a| a.id != profile.identity.observation_key())
-            {
-                return None;
-            }
             if let Some(account) = &mut dto.account {
                 if account.label.is_none() {
                     account.label.clone_from(&profile.email);
@@ -220,7 +217,7 @@ fn hold_back(
     outcome: AttemptOutcome,
     interval: Duration,
 ) {
-    let failures = if outcome.error.is_some() {
+    let failures = if outcome.counted {
         previous.map_or(1, |a| a.failures.saturating_add(1))
     } else {
         0
@@ -303,7 +300,7 @@ fn poll_home(
     ticket: &Ticket,
     force: bool,
     open: &dyn Fn() -> Result<Store, String>,
-    read: &dyn Fn(&Profile) -> Result<ProviderLimitsDto, SavedReadError>,
+    read: &dyn Fn(&Profile) -> Result<ProviderLimitsDto, ReadFailure>,
 ) -> Option<Result<ProviderLimitsDto, String>> {
     let held = ticket.holding_home(profile)?;
     let generation = profile.home.clone()?;
@@ -321,8 +318,8 @@ fn poll_home(
             return previous.error.clone().map(Err);
         }
     }
-    let result = read(profile);
-    let mut outcome = home_outcome(&result);
+    let result = read(profile).and_then(|card| outcome::accepted(&profile.identity, card));
+    let mut outcome = attempt_outcome(Context::AccountHome, profile, &result);
     let published = publish(home, profile, result, &mut outcome, &|| {
         let store = open().ok()?;
         store.recheck(&held).ok()?;
@@ -339,28 +336,13 @@ fn poll_home(
     published
 }
 
-fn home_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
-    let failed = |error: &str| AttemptOutcome::failed(error, false, Duration::ZERO);
-    match result {
-        Err(SavedReadError::Http(HttpError::Unauthorized)) => {
-            failed("This account's saved login has ended. Sign in again.")
-        }
-        Err(SavedReadError::OtherAccount) => {
-            failed("This account's saved login now signs in as a different account. Sign in again.")
-        }
-        _ => AttemptOutcome {
-            rejected: false,
-            ..attempt_outcome(result)
-        },
-    }
-}
-
 const UNSAVED: &str = "Could not save the latest usage reading.";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AttemptOutcome {
     error: Option<String>,
     rejected: bool,
+    counted: bool,
     retry: Duration,
 }
 
@@ -369,48 +351,41 @@ impl AttemptOutcome {
         Self {
             error: Some(error.to_string()),
             rejected,
+            counted: true,
             retry,
+        }
+    }
+
+    fn answered() -> Self {
+        Self {
+            error: None,
+            rejected: false,
+            counted: false,
+            retry: Duration::ZERO,
         }
     }
 }
 
-fn attempt_outcome(result: &Result<ProviderLimitsDto, SavedReadError>) -> AttemptOutcome {
-    match result {
-        Ok(_) => AttemptOutcome {
-            error: None,
-            rejected: false,
-            retry: Duration::ZERO,
-        },
-        Err(SavedReadError::Http(HttpError::Unauthorized)) => AttemptOutcome::failed(
-            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
-            true,
-            Duration::ZERO,
-        ),
-        Err(SavedReadError::OtherAccount) => AttemptOutcome::failed(
-            "This saved login now signs in as a different account. Sign in again.",
-            true,
-            Duration::ZERO,
-        ),
-        Err(SavedReadError::Unavailable(why)) => AttemptOutcome::failed(why, false, Duration::ZERO),
-        Err(SavedReadError::Http(HttpError::RateLimited(reset))) => {
-            let seconds = match reset {
-                RateLimitReset::RetryAfter(s) => *s,
-                RateLimitReset::At(at) => {
-                    at.saturating_sub(chrono::Utc::now().timestamp()).max(0) as u64
-                }
-                RateLimitReset::Unknown => 0,
-            };
-            AttemptOutcome::failed(
-                "Usage refresh is rate limited. The last reading is retained.",
-                false,
-                Duration::from_secs(seconds.min(86400)),
-            )
-        }
-        Err(_) => AttemptOutcome::failed(
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-            Duration::ZERO,
-        ),
+fn attempt_outcome(
+    context: Context,
+    profile: &Profile,
+    result: &Result<ProviderLimitsDto, ReadFailure>,
+) -> AttemptOutcome {
+    let Err(failure) = result else {
+        return AttemptOutcome::answered();
+    };
+    let verdict = outcome::verdict(
+        profile.identity.provider,
+        context,
+        failure,
+        chrono::Utc::now().timestamp(),
+    );
+    let Backoff { counted, floor } = verdict.backoff;
+    AttemptOutcome {
+        error: Some(verdict.message),
+        rejected: verdict.parks_login,
+        counted,
+        retry: floor,
     }
 }
 
@@ -434,7 +409,7 @@ fn fetch_profile_at(
         now,
         &|login| {
             super::adapter(profile.identity.provider)
-                .map_err(|_| HttpError::Unauthorized)?
+                .map_err(|_| ReadFailure::LoginRefused)?
                 .read_usage(&profile.identity, login, now, urls)
         },
         &|| {
@@ -446,8 +421,9 @@ fn fetch_profile_at(
                 )
             })
             .map_err(|_| {
-                HttpError::Network("Private account renewal requires recovery or sign-in.".into())
-                    .into()
+                ReadFailure::Unavailable(
+                    "Private account renewal requires recovery or sign-in.".to_string(),
+                )
             })
         },
     )
@@ -456,16 +432,16 @@ fn fetch_profile_at(
 fn fetch_with(
     profile: &Profile,
     now: i64,
-    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, SavedReadError>,
-    renew: &dyn Fn() -> Result<Login, SavedReadError>,
+    read: &dyn Fn(&Login) -> Result<ProviderLimitsDto, ReadFailure>,
+    renew: &dyn Fn() -> Result<Login, ReadFailure>,
 ) -> FetchResult {
     let mut login = profile.login.clone();
     let result = (|| {
-        let current = login.as_mut().ok_or(HttpError::Unauthorized)?;
-        let view =
-            super::view(profile.identity.provider, current).map_err(|_| HttpError::Unauthorized)?;
+        let current = login.as_mut().ok_or(ReadFailure::LoginRefused)?;
+        let view = super::view(profile.identity.provider, current)
+            .map_err(|_| ReadFailure::LoginRefused)?;
         if view.identity().ok().as_ref() != Some(&profile.identity) {
-            return Err(HttpError::Unauthorized.into());
+            return Err(ReadFailure::LoginRefused);
         }
         let expired = view.renewal_due(now);
         drop(view);
@@ -475,7 +451,7 @@ fn fetch_with(
             renewed = true;
         }
         let mut result = read(current);
-        if matches!(result, Err(SavedReadError::Http(HttpError::Unauthorized)))
+        if matches!(result, Err(ReadFailure::LoginRefused))
             && profile.usage_renewal_owned
             && !renewed
         {

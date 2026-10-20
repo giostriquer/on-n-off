@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::{AgentId, LimitsStatus};
 use serde_json::json;
 
 const CAPTURED: &str = r#"{
@@ -160,7 +161,7 @@ fn the_signed_in_card_is_claude_codes_report_read_in_a_config_dir_without_histor
         .write(&bin);
 
     let cards = crate::accounts::native::with_test_cli(&stub, || {
-        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+        crate::limits::read_limits_at(AgentId::Claude, false, &home).cards
     });
 
     let card = &cards[0];
@@ -219,7 +220,7 @@ fn a_read_clears_the_usage_config_dir_another_account_left_and_nothing_beside_it
         .write(&bin);
 
     let cards = crate::accounts::native::with_test_cli(&stub, || {
-        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+        crate::limits::read_limits_at(AgentId::Claude, false, &home).cards
     });
 
     assert_eq!(cards[0].status, LimitsStatus::Ok, "{:?}", cards[0].message);
@@ -243,7 +244,7 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
     assert!(!super::usage_config_dir(&home).exists());
 
     let cards = crate::accounts::native::with_test_cli(&stub, || {
-        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+        crate::limits::read_limits_at(AgentId::Claude, false, &home).cards
     });
 
     assert_eq!(
@@ -252,10 +253,7 @@ fn a_config_dir_claude_code_has_not_made_yet_still_asks_it() {
         "{:?}",
         cards[0].message
     );
-    assert_eq!(
-        cards[0].message.as_deref(),
-        Some("Sign in with `claude` to see subscription limits.")
-    );
+    assert!(cards[0].account.is_none());
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -265,13 +263,10 @@ fn without_claude_code_the_card_asks_for_it() {
     let missing = home.join("no-such-claude");
 
     let cards = crate::accounts::native::with_test_cli(&missing, || {
-        crate::limits::read_limits_at(AgentId::Claude, false, &home)
+        crate::limits::read_limits_at(AgentId::Claude, false, &home).cards
     });
 
     assert_eq!(cards[0].status, LimitsStatus::SignedOut);
-    assert_eq!(
-        cards[0].message.as_deref(),
-        Some("Install Claude Code and sign in with `claude` to see subscription limits.")
-    );
+    assert!(cards[0].account.is_none());
     let _ = std::fs::remove_dir_all(&home);
 }

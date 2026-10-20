@@ -220,12 +220,34 @@ the accounts adapter dispatches (`Adapter::read_usage`): the backend body app-se
 app-server for a saved profile would write its credential to disk. Neither renews a login itself:
 Claude Code renews a home's login, a Codex login on-n-off owns renews before its read, and one it
 does not own is never renewed. A saved read tells a refused login, one that now signs in as another
-account and a rate limit apart (`SavedReadError`), and the poll backs off accordingly: a vault
-login refused, or now signing in as another account, waits for a new login; any other failure waits
-the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
+account and a rate limit apart (its read outcome, below), and the poll backs off accordingly: a
+vault login refused, or now signing in as another account, waits for a new login; any other failure
+waits the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
 or a rate limit's Retry-After when that is longer. Every card a
 saved poll produces says so (`saved_profile`), which is how the UI knows a remembered reading from a
 saved profile read live.
+
+What a read comes to is decided once, by the **read outcome** module (`limits/outcome.rs`). Every
+reader only detects: it hands back the account it knew before reading (`Read::account`, the one
+the login on disk names) and either its answer or one failure of a closed set (`ReadFailure`): not
+installed, signed out, unsupported (an API-key login, an account type, unfinished billing, an
+inactive subscription, a provider with no limits), a refused login, another account, an account
+changed during the read, a rate limit with its reset, or unavailable with the source's own reason.
+One function per read context turns that into everything its caller needs: the signed-in card
+(`signed_in`), a saved login's or an account home's card and hold (`verdict` with
+`Context::SavedLogin` or `Context::AccountHome`, which `accounts/usage.rs` records), a sign-in's
+first usage (`first_usage`) and a login's verification (`verified`). The verdict is the card's
+status and its message, from one wording table filled with the provider's facts (display name, CLI,
+client and vendor, from the provider catalogue); whether the card keeps the account; whether the
+failure counts toward failure backoff and how long a Retry-After holds the next read; and, for a
+saved login, whether the login is parked until a new one. Every failure after the account is known
+keeps it on the card, so the account's remembered reading stands in on the current card and no
+second, remembered card appears for it; only not installed and signed out, where nobody is signed
+in, name no account. Whether an answer is accepted, a reading with something observed for the
+expected account, is decided there too (`accepted`, and inside `saved_card` and `first_usage`):
+an answer that observed nothing fails as "<client> reported no usage." on every card, current or
+saved. A read that knows the account but not its name (Codex's, before app-server answers) keeps
+the name its remembered reading has (`SnapshotStore::remember`).
 
 Because each CLI stores one login at a time, successful reads are remembered per account (numbers
 only, under `~/.on-n-off/limits/`) so an account the user has switched away from stays visible
@@ -538,7 +560,8 @@ the code today; a change that moves one updates its row.
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
 | Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id; the rule (its bounds, offers once a weekly cycle, waiting spends and the share a spend is held to) is `reset_alert.rs`, whose `plan` `limits_monitor.rs` performs; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the numbers the UI restates (`ui/src/lib/appSettings.ts`, `resetSpendLimit` among them) are checked against `src-tauri/src/reset_alert/fixtures/rule.json` |
-| Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
+| Read outcome | `limits/outcome.rs`: `ReadFailure` and `Read`, which every reader returns, and the per-context mappings `signed_in`, `verdict` (with `Context`), `saved_card`, `first_usage`, `accepted` and `verified`; the wording facts are `LimitsFacts` in the provider catalogue |
+| Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`, with the Retry-After floor the read's `Backoff` carries), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects); `accounts/muse_store.rs` reads Muse Code's device login for its Limits read only |
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |

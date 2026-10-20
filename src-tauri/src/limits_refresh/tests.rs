@@ -8,6 +8,19 @@ use std::time::{Duration, Instant};
 
 mod adaptive;
 
+fn native_read(cards: Vec<ProviderLimitsDto>) -> NativeRead {
+    let counted = cards
+        .iter()
+        .any(|card| card.current_account && card.status == LimitsStatus::Failed);
+    NativeRead {
+        cards,
+        backoff: Backoff {
+            counted,
+            floor: Duration::ZERO,
+        },
+    }
+}
+
 fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> ProviderLimitsDto {
     ProviderLimitsDto {
         status,
@@ -19,7 +32,11 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
 #[test]
 fn every_provider_with_a_limits_reader_has_its_own_cache_and_no_other_has_one() {
     for id in AgentId::ALL {
-        assert_eq!(cache_for(id).is_some(), id.facts().limits_reader, "{id:?}");
+        assert_eq!(
+            cache_for(id).is_some(),
+            id.facts().limits.is_some(),
+            "{id:?}"
+        );
     }
     let sources: Vec<Source> = crate::provider_catalogue::WITH_LIMITS
         .into_iter()
@@ -87,24 +104,12 @@ fn automatic_failures_back_off_for_every_consumer() {
         1,
         false
     ));
-    assert!(current_read_failed(&[snapshot(
-        "current",
-        true,
-        LimitsStatus::Failed
-    )]));
-    assert!(!current_read_failed(&[snapshot(
-        "remembered",
-        false,
-        LimitsStatus::Failed
-    )]));
-    assert_eq!(
-        next_failure_count(1, &[snapshot("current", true, LimitsStatus::Failed)]),
-        2
-    );
-    assert_eq!(
-        next_failure_count(2, &[snapshot("current", true, LimitsStatus::Ok)]),
-        0
-    );
+    let counted = Backoff {
+        counted: true,
+        floor: Duration::ZERO,
+    };
+    assert_eq!(next_failure_count(1, counted), 2);
+    assert_eq!(next_failure_count(2, Backoff::default()), 0);
 }
 
 #[test]
@@ -161,6 +166,49 @@ fn a_native_read_that_keeps_failing_waits_the_limits_failure_backoff() {
 }
 
 #[test]
+fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
+    use std::cell::Cell;
+    let cache = Cache::new(Source::LimitsMuse);
+    let interval = Duration::from_secs(300);
+    let reads = Cell::new(0);
+    let read = |force| {
+        read_through_cache(&cache, interval, force, |_, refresh| {
+            if refresh.native {
+                reads.set(reads.get() + 1);
+            }
+            NativeRead {
+                cards: vec![snapshot("current", true, LimitsStatus::Failed)],
+                backoff: Backoff {
+                    counted: true,
+                    floor: Duration::from_secs(7200),
+                },
+            }
+        })
+    };
+    let age = |seconds| {
+        cache.read.lock().unwrap().as_mut().unwrap().refreshed_at =
+            Instant::now() - Duration::from_secs(seconds);
+    };
+
+    read(false);
+    age(failure_backoff(interval, 1).as_secs() + 1);
+    read(false);
+    read(true);
+    assert_eq!(
+        reads.get(),
+        1,
+        "read the provider again inside the Retry-After"
+    );
+    age(7200);
+    read(false);
+    assert_eq!(
+        reads.get(),
+        2,
+        "the read waits no longer than its Retry-After"
+    );
+}
+
+#[test]
 fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
     let cache = Arc::new(Cache::new(Source::LimitsClaude));
     let calls = Arc::new(AtomicUsize::new(0));
@@ -175,7 +223,7 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
                 read_through_cache(&cache, Duration::from_secs(300), false, |_, _| {
                     calls.fetch_add(1, Ordering::SeqCst);
                     thread::sleep(Duration::from_millis(25));
-                    Vec::new()
+                    native_read(Vec::new())
                 })
                 .1
             })
@@ -196,7 +244,7 @@ fn shared_cache_coalesces_automatic_consumers_and_force_bypasses_it() {
     read_through_cache(&cache, Duration::from_secs(300), true, |force, _| {
         assert!(force);
         calls.fetch_add(1, Ordering::SeqCst);
-        Vec::new()
+        native_read(Vec::new())
     });
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
@@ -207,7 +255,7 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
     let interval = Duration::from_secs(5 * 60);
 
     let (_, first) = read_through_cache(&cache, interval, false, |_, _| {
-        vec![snapshot("current", true, LimitsStatus::Failed)]
+        native_read(vec![snapshot("current", true, LimitsStatus::Failed)])
     });
     assert_eq!(first, Reading::Replaced(1));
 
@@ -223,7 +271,7 @@ fn only_a_read_that_replaces_the_cache_is_announced() {
 
     let (refreshed, forced) = read_through_cache(&cache, interval, true, |force, _| {
         assert!(force);
-        vec![snapshot("current", true, LimitsStatus::Ok)]
+        native_read(vec![snapshot("current", true, LimitsStatus::Ok)])
     });
     assert_eq!(
         forced,
@@ -252,7 +300,7 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
     let interval = Duration::from_secs(5 * 60);
 
     let (_, failed) = read_through_cache(&cache, interval, true, |_, _| {
-        vec![snapshot("current", true, LimitsStatus::Failed)]
+        native_read(vec![snapshot("current", true, LimitsStatus::Failed)])
     });
     assert!(
         failed.replaced(),
@@ -277,6 +325,7 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
             snapshot("forgotten", false, LimitsStatus::Ok),
         ],
         consecutive_failures: 0,
+        retry_floor: Duration::ZERO,
     });
 
     let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
@@ -312,6 +361,7 @@ fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
         saved_refreshed_at: Instant::now(),
         entries,
         consecutive_failures: 0,
+        retry_floor: Duration::ZERO,
     });
     cache
 }
@@ -428,10 +478,10 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     let changes = std::cell::Cell::new(true);
     let native = |_| {
         log.borrow_mut().push("native");
-        vec![
+        native_read(vec![
             snapshot("signed-in", true, LimitsStatus::Ok),
             snapshot("put-away", false, LimitsStatus::Ok),
-        ]
+        ])
     };
     let unarchive = |_: &[ProviderLimitsDto]| {
         assert!(

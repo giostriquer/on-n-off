@@ -104,22 +104,21 @@ fn prepare_login(
     }
     let usage = usage
         .filter(|dto| {
-            dto.provider == identity.provider
-                && dto.status == crate::dto::LimitsStatus::Ok
-                && dto.account.as_ref().is_some_and(|account| {
-                    account.id == identity.observation_key()
-                        && match (
-                            account.label.as_deref(),
-                            super::view(identity.provider, &latest)
-                                .ok()
-                                .and_then(|latest| latest.email()),
-                        ) {
-                            (Some(observed), Some(email)) => {
-                                observed.trim().eq_ignore_ascii_case(&email)
-                            }
-                            _ => false,
-                        }
-                })
+            dto.provider == identity.provider && dto.status == crate::dto::LimitsStatus::Ok
+        })
+        .and_then(|dto| crate::limits::outcome::accepted(&identity, dto).ok())
+        .filter(|dto| {
+            dto.account.as_ref().is_some_and(|account| {
+                match (
+                    account.label.as_deref(),
+                    super::view(identity.provider, &latest)
+                        .ok()
+                        .and_then(|latest| latest.email()),
+                ) {
+                    (Some(observed), Some(email)) => observed.trim().eq_ignore_ascii_case(&email),
+                    _ => false,
+                }
+            })
         })
         .map(|mut dto| {
             dto.current_account = false;

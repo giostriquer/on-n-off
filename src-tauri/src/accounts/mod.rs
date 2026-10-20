@@ -88,7 +88,7 @@ trait Adapter: Sync {
         login: &store::Login,
         now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::ReadFailure>;
     fn homes(&self) -> Option<HomeAt>;
     fn renews_privately(&self) -> bool {
         self.homes().is_none()
@@ -148,7 +148,7 @@ trait Home: Send + Sync {
     fn read_usage(
         &self,
         identity: &model::Identity,
-    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError>;
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::ReadFailure>;
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline>;
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }

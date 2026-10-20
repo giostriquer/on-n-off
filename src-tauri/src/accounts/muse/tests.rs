@@ -372,14 +372,17 @@ fn verification_accepts_its_own_account_and_refuses_another_or_a_rejected_token(
         verdict
     };
 
+    let verified = |failure| crate::limits::outcome::verified(AgentId::Muse, &Err(failure));
     assert_eq!(verdict("200 OK", mint("You@Example.com")), Ok(()));
     assert_eq!(
         verdict("200 OK", mint("someone@example.com")),
-        Err("Muse answered for a different account. Sign in again.".into())
+        verified(ReadFailure::OtherAccount)
     );
-    assert!(verdict("401 Unauthorized", "{}".into())
-        .unwrap_err()
-        .contains("could not be verified"));
+    assert_eq!(
+        verdict("401 Unauthorized", "{}".into()),
+        verified(ReadFailure::LoginRefused)
+    );
+    assert!(verified(ReadFailure::LoginRefused).is_err());
 }
 
 #[cfg(target_os = "macos")]

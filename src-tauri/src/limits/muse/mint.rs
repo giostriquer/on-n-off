@@ -2,11 +2,12 @@ use chrono::{DateTime, SecondsFormat};
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{account_dto, ReadFailure};
+use super::account_dto;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
-use crate::limits::{saved_card, Parsed, SavedReadError, SavedReadUrls};
+use crate::limits::outcome::{saved_card, verified, ReadFailure, Unsupported};
+use crate::limits::{Parsed, SavedReadUrls};
 
 pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
 
@@ -74,7 +75,26 @@ pub(crate) fn read_saved(
     identity: &Identity,
     token: &AccessToken,
     urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<ProviderLimitsDto, ReadFailure> {
+    saved_answer(identity, token, urls).and_then(|parsed| saved_card(identity, parsed))
+}
+
+pub(crate) fn verify(
+    identity: &Identity,
+    token: &AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<(), String> {
+    verified(
+        identity.provider,
+        &saved_answer(identity, token, urls).map(drop),
+    )
+}
+
+fn saved_answer(
+    identity: &Identity,
+    token: &AccessToken,
+    urls: &SavedReadUrls<'_>,
+) -> Result<Parsed, ReadFailure> {
     let response = fetch(urls.muse, token)?;
     let email = response
         .user_email
@@ -82,87 +102,50 @@ pub(crate) fn read_saved(
         .map(str::trim)
         .filter(|email| !email.is_empty());
     if email.is_some_and(|email| email.to_lowercase() != identity.user_id) {
-        return Err(SavedReadError::OtherAccount);
+        return Err(ReadFailure::OtherAccount);
     }
-    match normalize(email.map(str::to_string), &response) {
-        Some(Ok(parsed)) => saved_card(identity, parsed),
-        Some(Err(_)) => Err(SavedReadError::Unavailable(
-            "This Muse subscription is inactive or awaiting payment.",
-        )),
-        None => Err(SavedReadError::Unavailable(
-            "Muse shows no recent usage for this account.",
-        )),
-    }
+    answer(email.map(str::to_string), &response)
 }
 
-pub(super) fn current_read(
-    email: Option<String>,
-    answer: Result<MintResponse, HttpError>,
-) -> Result<Parsed, ReadFailure> {
-    let why = match answer {
-        Ok(response) => match normalize(email.clone(), &response) {
-            Some(read) => return read,
-            None => "Meta's answer had no subscription usage for this Muse account.".to_string(),
-        },
-        Err(HttpError::Unauthorized) => {
-            "Meta did not accept Muse's login. Sign in with `muse` again to see subscription limits."
-                .to_string()
-        }
-        Err(HttpError::RateLimited(_)) => {
-            "Meta is limiting how often Muse usage can be read. on-n-off will read it again later."
-                .to_string()
-        }
-        Err(error) => {
-            format!("The Muse usage read failed ({error}). on-n-off will read it again later.")
-        }
-    };
-    Err(ReadFailure::Failed(account_dto(email), why))
-}
-
-fn normalize(
+pub(super) fn answer(
     email: Option<String>,
     response: &MintResponse,
-) -> Option<Result<Parsed, ReadFailure>> {
+) -> Result<Parsed, ReadFailure> {
     if response.require_payment {
-        return Some(Err(ReadFailure::Unsupported(
-            "Muse subscription billing is incomplete; finish it in Muse to see subscription limits."
-                .to_string(),
-        )));
+        return Err(ReadFailure::Unsupported(Unsupported::BillingIncomplete));
     }
     if response.is_subs_active == Some(false) {
-        return Some(Err(ReadFailure::Unsupported(
-            "This Muse subscription is inactive, so it has no subscription limits to show."
-                .to_string(),
-        )));
+        return Err(ReadFailure::Unsupported(Unsupported::Inactive));
     }
     let usage = match &response.subs_usage {
-        Some(usage) => usage,
-        None if response.is_subs_active == Some(true) => &IDLE_USAGE,
-        None => return None,
+        Some(usage) => Some(usage),
+        None if response.is_subs_active == Some(true) => Some(&IDLE_USAGE),
+        None => None,
     };
-    let windows: Vec<LimitWindowDto> = [
-        usage.weekly.as_ref().and_then(weekly_window),
-        usage.window.as_ref().and_then(session_window),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-    if windows.is_empty() {
-        return None;
-    }
+    let windows: Vec<LimitWindowDto> = usage
+        .into_iter()
+        .flat_map(|usage| {
+            [
+                usage.weekly.as_ref().and_then(weekly_window),
+                usage.window.as_ref().and_then(session_window),
+            ]
+        })
+        .flatten()
+        .collect();
+    let tier = usage.map_or("", |usage| usage.tier.trim());
     let plan = Some(response.subs_tier_name.trim())
         .filter(|name| !name.is_empty())
-        .or(Some(usage.tier.trim()))
+        .or(Some(tier))
         .filter(|name| name.chars().any(char::is_alphabetic))
         .map(str::to_string);
-    Some(Ok(Parsed {
+    Ok(Parsed {
         account: Some(account_dto(email)),
         reading: Reading {
             plan,
             windows,
             ..Reading::default()
         },
-    }))
+    })
 }
 
 fn weekly_window(value: &MintWindow) -> Option<LimitWindowDto> {

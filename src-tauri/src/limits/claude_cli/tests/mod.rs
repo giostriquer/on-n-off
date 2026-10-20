@@ -1,7 +1,8 @@
 use super::*;
 use crate::cli::AgentCli;
 use crate::cli_stub::CliStub;
-use crate::dto::{AgentId, LimitWindowKind, LimitsStatus};
+use crate::dto::{LimitWindowKind, LimitsStatus};
+use crate::limits::outcome::no_usage;
 use std::time::Duration;
 
 const REPORT: &str = r#"{"type":"system","subtype":"init","apiKeySource":"none","claude_code_version":"2.1.284"}
@@ -38,7 +39,7 @@ fn home(config: &str, stdout: &str, stub: CliStub) -> (tempfile::TempDir, AgentC
     (dir, cli)
 }
 
-fn read(dir: &tempfile::TempDir, cli: &AgentCli) -> Result<ProviderLimitsDto, SavedReadError> {
+fn read(dir: &tempfile::TempDir, cli: &AgentCli) -> Result<ProviderLimitsDto, ReadFailure> {
     read_usage_within(
         &|| cli.command(),
         &dir.path().join(".claude.json"),
@@ -156,7 +157,7 @@ fn a_config_dir_naming_another_account_is_never_asked() {
         CliStub::new("claude").log_args("args.txt", false),
     );
 
-    assert_eq!(read(&dir, &cli).unwrap_err(), SavedReadError::OtherAccount);
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::OtherAccount);
     assert!(!dir.path().join("args.txt").exists(), "claude was started");
 }
 
@@ -168,7 +169,7 @@ fn a_config_dir_naming_the_user_in_another_organization_is_never_asked() {
         CliStub::new("claude").log_args("args.txt", false),
     );
 
-    assert_eq!(read(&dir, &cli).unwrap_err(), SavedReadError::OtherAccount);
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::OtherAccount);
     assert!(!dir.path().join("args.txt").exists(), "claude was started");
 }
 
@@ -180,10 +181,7 @@ fn a_config_dir_naming_no_account_is_a_login_to_sign_in_again() {
         CliStub::new("claude").log_args("args.txt", false),
     );
 
-    assert_eq!(
-        read(&dir, &cli).unwrap_err(),
-        SavedReadError::Http(HttpError::Unauthorized)
-    );
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::SignedOut);
     assert!(!dir.path().join("args.txt").exists(), "claude was started");
 }
 
@@ -202,7 +200,7 @@ fn a_report_after_which_the_config_dir_names_another_account_is_dropped() {
         .stdout_file("report.jsonl")
         .cli(dir.path());
 
-    assert_eq!(read(&dir, &cli).unwrap_err(), SavedReadError::OtherAccount);
+    assert_eq!(read(&dir, &cli).unwrap_err(), ReadFailure::OtherAccount);
 }
 
 #[test]
@@ -210,12 +208,7 @@ fn output_without_a_usage_report_reads_as_no_card() {
     let output = "{\"type\":\"system\",\"subtype\":\"init\"}\nnot json\n{\"type\":\"result\",\"subtype\":\"success\"}";
     let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
 
-    assert!(matches!(
-        read(&dir, &cli),
-        Err(SavedReadError::Unavailable(
-            "Claude Code reported no usage."
-        ))
-    ));
+    assert_eq!(read(&dir, &cli).unwrap_err(), no_usage(AgentId::Claude));
 }
 
 #[test]
@@ -223,12 +216,7 @@ fn a_report_of_windows_it_cannot_read_reads_as_no_card() {
     let output = r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"lunar","group":"lunar","percent":1}]}}}"#;
     let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
 
-    assert!(matches!(
-        read(&dir, &cli),
-        Err(SavedReadError::Unavailable(
-            "Claude Code reported no usage."
-        ))
-    ));
+    assert_eq!(read(&dir, &cli).unwrap_err(), no_usage(AgentId::Claude));
 }
 
 #[test]
@@ -239,12 +227,10 @@ fn claude_code_failing_reads_as_unavailable_not_as_a_refused_login() {
         CliStub::new("claude").exit(1),
     );
 
-    assert!(matches!(
-        read(&dir, &cli),
-        Err(SavedReadError::Unavailable(
-            "Claude Code could not report usage."
-        ))
-    ));
+    assert_eq!(
+        read(&dir, &cli).unwrap_err(),
+        ReadFailure::Unavailable(UNREPORTED.into())
+    );
 }
 
 #[test]
@@ -260,7 +246,7 @@ fn a_claude_code_too_old_to_leave_customizations_out_says_to_update_it() {
 
     assert_eq!(
         read(&dir, &cli).unwrap_err(),
-        SavedReadError::Unavailable(OUTDATED)
+        ReadFailure::Unavailable(OUTDATED.into())
     );
     let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
     let runs: Vec<&str> = args.lines().collect();
@@ -281,10 +267,7 @@ fn a_claude_code_that_is_not_installed_says_so() {
         ANSWER,
     );
 
-    assert_eq!(
-        result.unwrap_err(),
-        SavedReadError::Unavailable("Claude Code is not installed.")
-    );
+    assert_eq!(result.unwrap_err(), ReadFailure::NotInstalled);
 }
 
 #[test]
@@ -303,12 +286,10 @@ fn claude_code_that_does_not_answer_in_time_reads_as_unavailable() {
         Duration::from_millis(300),
     );
 
-    assert!(matches!(
-        result,
-        Err(SavedReadError::Unavailable(
-            "Claude Code could not report usage."
-        ))
-    ));
+    assert_eq!(
+        result.unwrap_err(),
+        ReadFailure::Unavailable(UNREPORTED.into())
+    );
     assert!(
         started.elapsed() < Duration::from_secs(4),
         "waited for the stub"
@@ -347,10 +328,7 @@ fn a_config_dir_claude_code_says_is_signed_out_is_a_login_to_sign_in_again() {
         ANSWER,
     );
 
-    assert_eq!(
-        result.unwrap_err(),
-        SavedReadError::Http(HttpError::Unauthorized)
-    );
+    assert_eq!(result.unwrap_err(), ReadFailure::SignedOut);
     let args = std::fs::read_to_string(status_dir.path().join("args.txt")).unwrap();
     assert_eq!(args.trim(), "auth status --json");
 }
@@ -370,12 +348,7 @@ fn no_report_from_a_config_dir_still_signed_in_reads_as_unavailable() {
         ANSWER,
     );
 
-    assert!(matches!(
-        result,
-        Err(SavedReadError::Unavailable(
-            "Claude Code reported no usage."
-        ))
-    ));
+    assert_eq!(result.unwrap_err(), no_usage(AgentId::Claude));
 }
 
 #[test]
@@ -394,12 +367,7 @@ fn no_report_and_a_status_claude_code_cannot_give_reads_as_unavailable() {
         ANSWER,
     );
 
-    assert!(matches!(
-        result,
-        Err(SavedReadError::Unavailable(
-            "Claude Code reported no usage."
-        ))
-    ));
+    assert_eq!(result.unwrap_err(), no_usage(AgentId::Claude));
 }
 
 mod signed_in;

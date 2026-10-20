@@ -8,6 +8,7 @@ use crate::accounts::{
     model,
     store::{ChangeKind, Database},
 };
+use crate::http::RateLimitReset;
 use serde_json::json;
 fn profile() -> Profile {
     let mut db = super::super::store::Database::default();
@@ -196,7 +197,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
                 calls.set(calls.get() + 1);
                 FetchResult {
                     login: p.login.clone(),
-                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(7200)).into()),
+                    result: Err(ReadFailure::RateLimited(RateLimitReset::RetryAfter(7200))),
                 }
             },
         );
@@ -226,71 +227,38 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     .is_ok());
 }
 #[test]
-fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
-    const SIGN_IN: &str =
-        "Usage refresh needs sign-in again or renewal by the client that owns this login.";
-    const OTHER: &str = "This saved login now signs in as a different account. Sign in again.";
-    const RATE: &str = "Usage refresh is rate limited. The last reading is retained.";
-    const UNAVAILABLE: &str = "Usage refresh is unavailable. The last reading is retained.";
-    let rate = |reset| Err(HttpError::RateLimited(reset).into());
-    for (result, expected) in [
-        (
-            Ok(reading(&profile())),
-            AttemptOutcome {
-                error: None,
-                rejected: false,
-                retry: Duration::ZERO,
-            },
-        ),
-        (
-            Err(HttpError::Unauthorized.into()),
-            AttemptOutcome::failed(SIGN_IN, true, Duration::ZERO),
-        ),
-        (
-            Err(SavedReadError::OtherAccount),
-            AttemptOutcome::failed(OTHER, true, Duration::ZERO),
-        ),
-        (
-            Err(SavedReadError::Unavailable("Update Claude Code.")),
-            AttemptOutcome::failed("Update Claude Code.", false, Duration::ZERO),
-        ),
-        (
-            rate(RateLimitReset::RetryAfter(30)),
-            AttemptOutcome::failed(RATE, false, Duration::from_secs(30)),
-        ),
-        (
-            rate(RateLimitReset::RetryAfter(10_000_000)),
-            AttemptOutcome::failed(RATE, false, Duration::from_secs(86400)),
-        ),
-        (
-            rate(RateLimitReset::At(0)),
-            AttemptOutcome::failed(RATE, false, Duration::ZERO),
-        ),
-        (
-            rate(RateLimitReset::Unknown),
-            AttemptOutcome::failed(RATE, false, Duration::ZERO),
-        ),
-        (
-            Err(HttpError::Status(503).into()),
-            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
-        ),
-        (
-            Err(HttpError::Network("offline".into()).into()),
-            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
-        ),
+fn a_poll_holds_back_as_the_verdict_of_its_read_context_says() {
+    let p = profile();
+    for failure in [
+        ReadFailure::LoginRefused,
+        ReadFailure::OtherAccount,
+        ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
+        ReadFailure::Unavailable("The source said why.".into()),
     ] {
-        assert_eq!(attempt_outcome(&result), expected, "{:?}", result.err());
+        for context in [Context::SavedLogin, Context::AccountHome] {
+            let verdict = outcome::verdict(p.identity.provider, context, &failure, 0);
+            assert_eq!(
+                attempt_outcome(context, &p, &Err(failure.clone())),
+                AttemptOutcome {
+                    error: Some(verdict.message),
+                    rejected: verdict.parks_login,
+                    counted: verdict.backoff.counted,
+                    retry: verdict.backoff.floor,
+                },
+                "{failure:?} in {context:?}"
+            );
+        }
     }
+    assert_eq!(
+        attempt_outcome(Context::SavedLogin, &p, &Ok(reading(&p))),
+        AttemptOutcome::answered()
+    );
 }
 
 #[test]
 fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry_after() {
     let failed = |retry| AttemptOutcome::failed("failed", false, Duration::from_secs(retry));
-    let answered = AttemptOutcome {
-        error: None,
-        rejected: false,
-        retry: Duration::ZERO,
-    };
+    let answered = AttemptOutcome::answered();
     for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
         let backoff = |failures| crate::limits_refresh::failure_backoff(interval, failures);
         for (before, outcome, failures, wait) in [
@@ -341,37 +309,17 @@ fn attempt(home: &Path, p: &Profile) -> Attempt {
 }
 
 #[test]
-fn a_poll_that_read_nothing_says_why() {
+fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
     use std::cell::Cell;
-    for (error, message, sticky) in [
-        (
-            HttpError::Unauthorized.into(),
-            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
-            true,
-        ),
-        (
-            SavedReadError::OtherAccount,
-            "This saved login now signs in as a different account. Sign in again.",
-            true,
-        ),
-        (
-            HttpError::RateLimited(RateLimitReset::RetryAfter(30)).into(),
-            "Usage refresh is rate limited. The last reading is retained.",
-            false,
-        ),
-        (
-            HttpError::Status(503).into(),
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-        ),
-        (
-            HttpError::Network("offline".into()).into(),
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-        ),
+    for error in [
+        ReadFailure::LoginRefused,
+        ReadFailure::OtherAccount,
+        ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
+        ReadFailure::Unavailable("The source said why.".into()),
     ] {
         let home = tempfile::tempdir().unwrap();
         let p = stored(home.path());
+        let verdict = outcome::verdict(p.identity.provider, Context::SavedLogin, &error, 0);
         let fetches = Cell::new(0);
         let poll = || {
             poll_with(
@@ -389,10 +337,46 @@ fn a_poll_that_read_nothing_says_why() {
                 },
             )
         };
-        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
-        assert_eq!(attempt(home.path(), &p).rejected, sticky, "{error:?}");
-        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
+        assert_eq!(poll(), Some(Err(verdict.message.clone())), "{error:?}");
+        assert_eq!(
+            attempt(home.path(), &p).rejected,
+            verdict.parks_login,
+            "{error:?}"
+        );
+        assert_eq!(poll(), Some(Err(verdict.message)), "{error:?}");
         assert_eq!(fetches.get(), 1, "{error:?}");
+    }
+}
+
+#[test]
+fn an_answer_for_another_account_or_with_nothing_observed_is_not_published() {
+    for (case, answer) in [
+        ("another account", {
+            let mut card = reading(&profile());
+            card.account.as_mut().unwrap().id = "profile:someone-else".into();
+            card
+        }),
+        ("nothing observed", {
+            let mut card = reading(&profile());
+            card.reading.windows.clear();
+            card
+        }),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let p = stored(home.path());
+        let result = poll_with(
+            home.path(),
+            &p,
+            &ticket(home.path()),
+            false,
+            &|| Ok(open(home.path())),
+            &|p| FetchResult {
+                login: p.login.clone(),
+                result: Ok(answer.clone()),
+            },
+        );
+        assert!(matches!(result, Some(Err(_))), "{case}: {result:?}");
+        assert!(!home.path().join(".on-n-off/limits").exists(), "{case}");
     }
 }
 
@@ -446,7 +430,7 @@ fn a_new_credential_retries_a_previously_rejected_account() {
         &|p| {
             FetchResult {
                 login: p.login.clone(),
-                result: Err(HttpError::Unauthorized.into()),
+                result: Err(ReadFailure::LoginRefused),
             }
         }
     )
@@ -489,11 +473,10 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
                 FetchResult {
                     login: Some(login),
                     result: Err(if rejected {
-                        HttpError::Unauthorized
+                        ReadFailure::LoginRefused
                     } else {
-                        HttpError::RateLimited(RateLimitReset::RetryAfter(1800))
-                    }
-                    .into()),
+                        ReadFailure::RateLimited(RateLimitReset::RetryAfter(1800))
+                    }),
                 }
             },
         );

@@ -55,9 +55,9 @@ impl super::Adapter for Claude {
         _: &Login,
         _: i64,
         _: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        Err(crate::limits::SavedReadError::Unavailable(
-            "This account's login has not moved into its home yet; the next read tries again.",
+    ) -> Result<ProviderLimitsDto, crate::limits::ReadFailure> {
+        Err(crate::limits::ReadFailure::Unavailable(
+            NOT_MOVED.to_string(),
         ))
     }
 
@@ -70,6 +70,9 @@ impl super::Adapter for Claude {
         }
     }
 }
+
+pub(crate) const NOT_MOVED: &str =
+    "This account's login has not moved into its home yet; the next read tries again.";
 
 const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
 

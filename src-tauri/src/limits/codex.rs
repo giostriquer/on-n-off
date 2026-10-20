@@ -6,15 +6,15 @@ use std::path::Path;
 use serde_json::Value;
 
 use super::json::window;
-use super::pipeline::finish;
-use super::{codex_app_server, credits_spent, renewal, saved_card, Parsed};
-use super::{SavedReadError, SavedReadUrls};
+use super::outcome::{saved_card, Read, ReadFailure};
+use super::SavedReadUrls;
+use super::{codex_app_server, credits_spent, renewal, Parsed};
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{
     AgentId, LimitWindowDto, LimitWindowKind, LimitsBankedResetDto, LimitsCreditsDto,
-    LimitsPriceDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsStatus,
-    LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading, ResetCreditOutcome,
+    LimitsPriceDto, LimitsResetCreditsDto, LimitsResetOfferDto, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
 use crate::http::{get_json, HttpError};
 use crate::paths;
@@ -362,31 +362,14 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
     })
 }
 
-pub(super) fn codex_limits(home: &Path, force: bool) -> ProviderLimitsDto {
-    let figures = |card: &mut Parsed, access: Option<&CodexAccess>| {
-        backend_figures(card, access, CODEX, Utc::now());
-    };
-    match codex_app_server::read(home, force, figures) {
-        Ok(parsed) => finish(AgentId::Codex, LimitsStatus::Ok, None, parsed),
-        Err(codex_app_server::AppServerFailure::SignedOut) => finish(
-            AgentId::Codex,
-            LimitsStatus::SignedOut,
-            Some("Sign in with `codex` to see subscription limits.".to_string()),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Unsupported(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Unsupported,
-            Some(message),
-            Parsed::default(),
-        ),
-        Err(codex_app_server::AppServerFailure::Failed(message)) => finish(
-            AgentId::Codex,
-            LimitsStatus::Failed,
-            Some(message),
-            Parsed::default(),
-        ),
-    }
+pub(super) fn codex_read(home: &Path, force: bool) -> Read {
+    codex_app_server::read(
+        home,
+        force,
+        |card: &mut Parsed, access: Option<&CodexAccess>| {
+            backend_figures(card, access, CODEX, Utc::now());
+        },
+    )
 }
 
 #[cfg(test)]
@@ -436,7 +419,7 @@ pub(crate) fn read_saved_codex(
     identity: &Identity,
     token: AccessToken,
     urls: &SavedReadUrls<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<ProviderLimitsDto, ReadFailure> {
     let urls = urls.codex;
     let bearer = token.authorization();
     let headers = [
@@ -450,7 +433,7 @@ pub(crate) fn read_saved_codex(
         .and_then(Value::as_str)
         .is_some_and(|id| id != identity.workspace_id)
     {
-        return Err(SavedReadError::OtherAccount);
+        return Err(ReadFailure::OtherAccount);
     }
     let details = (banked_reset_count(&payload["rate_limit_reset_credits"])
         .is_some_and(|count| count > 0))
@@ -492,7 +475,10 @@ fn backend_figures(
         .and_then(|access| renewal::read_backed_off(access, urls.subscriptions, interval, now));
 }
 
-fn parse_codex_usage(payload: &Value, reset_details: Option<&Value>) -> Result<Reading, HttpError> {
+fn parse_codex_usage(
+    payload: &Value,
+    reset_details: Option<&Value>,
+) -> Result<Reading, ReadFailure> {
     use serde_json::json;
     fn window(value: &Value) -> Value {
         if value.is_null() {

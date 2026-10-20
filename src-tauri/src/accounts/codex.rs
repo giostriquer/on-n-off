@@ -7,7 +7,7 @@ use super::{
     transaction::{Native, NativeGuard, ReadBack},
     usage_renew, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, ProviderLimitsDto};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use serde_json::Value;
 use std::{
@@ -54,10 +54,10 @@ impl super::Adapter for Codex {
         login: &Login,
         _now_ms: i64,
         urls: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
+    ) -> Result<ProviderLimitsDto, crate::limits::ReadFailure> {
         let token = CodexLogin::of(login)
             .access_token()
-            .ok_or(crate::http::HttpError::Unauthorized)?;
+            .ok_or(crate::limits::ReadFailure::LoginRefused)?;
         crate::limits::read_saved_codex(identity, token, urls)
     }
 
@@ -172,15 +172,7 @@ impl CodexNative {
     }
 
     fn verify_signed_in(&self, force: bool) -> Result<(), String> {
-        let entries = crate::limits::read_limits(AgentId::Codex, force);
-        if entries
-            .iter()
-            .any(|v| v.current_account && v.status == LimitsStatus::Ok)
-        {
-            Ok(())
-        } else {
-            Err("The CLI login could not be verified. Check connectivity or sign in again.".into())
-        }
+        crate::limits::verify_signed_in(AgentId::Codex, force)
     }
 }
 

@@ -37,7 +37,7 @@ fn a_saved_login_without_an_access_token_is_refused_before_any_request() {
             1_000_000,
             &refused(&url),
         );
-    assert_eq!(result.err(), Some(HttpError::Unauthorized.into()));
+    assert_eq!(result.err(), Some(ReadFailure::LoginRefused));
 }
 
 const NOW: i64 = 1_000_000;
@@ -62,8 +62,8 @@ fn a_saved_claude_login_in_the_vault_is_never_sent() {
         let fetched = fetch(&p, &refused(&url));
         assert_eq!(
             fetched.result.err(),
-            Some(SavedReadError::Unavailable(
-                "This account's login has not moved into its home yet; the next read tries again."
+            Some(ReadFailure::Unavailable(
+                crate::accounts::claude::NOT_MOVED.into()
             )),
             "{expires_at}"
         );

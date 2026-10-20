@@ -50,6 +50,11 @@ impl SnapshotStore {
             };
         };
         let existing = read_stored(&path);
+        if let (Some(account), Some(stored)) = (card.account.as_mut(), existing.as_ref()) {
+            if account.label.is_none() {
+                account.label.clone_from(&stored.account.label);
+            }
+        }
         if let Some(remembered) = existing.clone().or_else(|| self.predecessor(&card)) {
             keep_remembered(&mut card, remembered.into_dto(Utc::now()).reading);
         }

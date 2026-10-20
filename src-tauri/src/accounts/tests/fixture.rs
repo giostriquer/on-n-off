@@ -100,7 +100,7 @@ pub(super) struct Homes {
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
-    pub answer: Mutex<Option<crate::limits::SavedReadError>>,
+    pub answer: Mutex<Option<crate::limits::ReadFailure>>,
 }
 
 struct FakeHome(Arc<Homes>, PathBuf);
@@ -151,7 +151,7 @@ impl Home for FakeHome {
     fn read_usage(
         &self,
         identity: &Identity,
-    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError> {
+    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::ReadFailure> {
         self.0.read.lock().unwrap().push(self.1.clone());
         if let Some(answer) = self.0.answer.lock().unwrap().clone() {
             return Err(answer);

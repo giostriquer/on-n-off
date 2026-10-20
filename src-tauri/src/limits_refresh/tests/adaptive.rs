@@ -43,7 +43,7 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
             native_reads.set(native_reads.get() + 1);
             let mut card = quota(used, current);
             card.status = status;
-            vec![card]
+            native_read(vec![card])
         };
         let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
         let read = || {
@@ -84,7 +84,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
         if reads.get() > 1 {
             entries.push(quota(40.0, false));
         }
-        entries
+        native_read(entries)
     };
     let saved_card = {
         let mut card = quota(98.0, false);
@@ -136,7 +136,7 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
     let saved_reads = Cell::new(0);
     let native = |_| {
         native_reads.set(native_reads.get() + 1);
-        vec![quota(used.get(), true)]
+        native_read(vec![quota(used.get(), true)])
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
     let read = |force| {
@@ -209,7 +209,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
         if native_reads.get() > 1 {
             card.status = LimitsStatus::Failed;
         }
-        vec![card]
+        native_read(vec![card])
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
     let read = || {
@@ -266,7 +266,7 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
         window.kind = crate::dto::LimitWindowKind::Session;
         window.used_percent = session.get();
         card.reading.windows.push(window);
-        vec![card]
+        native_read(vec![card])
     };
     let read = |force| {
         read_provider(
@@ -311,9 +311,9 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
         if switched.get() {
             let mut card = quota(20.0, false);
             card.current_account = true;
-            vec![card]
+            native_read(vec![card])
         } else {
-            vec![quota(95.0, true)]
+            native_read(vec![quota(95.0, true)])
         }
     };
     let saved = |_, entries: &mut Vec<ProviderLimitsDto>| entries.push(quota(98.0, false));
@@ -361,7 +361,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &cache,
         Duration::from_secs(1800),
         false,
-        &|_| vec![scoped.clone()],
+        &|_| native_read(vec![scoped.clone()]),
         &|_| false,
         &|_, _| panic!("saved accounts are not due"),
         &|_| {},

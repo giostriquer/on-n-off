@@ -40,7 +40,7 @@ fn automatic_renewal_renews_only_an_owned_login_and_never_a_shadow() {
                     &|_| {
                         reads.set(reads.get() + 1);
                         if unauthorized {
-                            Err(HttpError::Unauthorized.into())
+                            Err(ReadFailure::LoginRefused)
                         } else {
                             Ok(reading(&p))
                         }
@@ -103,7 +103,7 @@ fn owned_renewal_uses_the_rotated_credential_for_usage() {
             &|login| {
                 reads.set(reads.get() + 1);
                 if fingerprint(login) == old {
-                    Err(HttpError::Unauthorized.into())
+                    Err(ReadFailure::LoginRefused)
                 } else {
                     assert_eq!(fingerprint(login), fingerprint(&rotated));
                     Ok(reading(&p))
@@ -129,14 +129,14 @@ fn a_login_that_signs_in_as_another_account_is_never_renewed_for_it() {
             1_000_000,
             &|_| {
                 reads.set(reads.get() + 1);
-                Err(SavedReadError::OtherAccount)
+                Err(ReadFailure::OtherAccount)
             },
             &|| {
                 renewals.set(renewals.get() + 1);
                 Ok(p.login.clone().unwrap())
             },
         );
-        assert_eq!(result.result.err(), Some(SavedReadError::OtherAccount));
+        assert_eq!(result.result.err(), Some(ReadFailure::OtherAccount));
         assert_eq!((reads.get(), renewals.get()), (1, 0), "owned: {owned}");
     }
 }

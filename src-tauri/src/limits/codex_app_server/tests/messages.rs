@@ -5,12 +5,12 @@ use std::time::Duration;
 
 fn app_server(stub: CliStub, name: &str, timeout: Duration, line_limit: usize) -> Session {
     let root = crate::paths::scratch_dir(name);
-    match begin(
+    match Session::start(
         APP_SERVER.within(timeout, line_limit),
         stub.cli(&root).command(),
     ) {
         Ok(session) => session,
-        Err(error) => panic!("{error}"),
+        Err(error) => panic!("{error:?}"),
     }
 }
 
@@ -31,14 +31,13 @@ fn chatgpt() -> Value {
 }
 
 #[test]
-fn a_missing_codex_cli_says_how_to_install_it() {
+fn a_missing_codex_cli_is_not_installed() {
     let root = crate::paths::scratch_dir("codex-app-server-missing");
-    let error = begin(APP_SERVER, Command::new(root.join("codex"))).err();
+    let error = Session::start(APP_SERVER, Command::new(root.join("codex")))
+        .err()
+        .map(not_started);
 
-    assert_eq!(
-        error.as_deref(),
-        Some("Codex CLI not found. Install or configure `codex`, then refresh Limits.")
-    );
+    assert_eq!(error, Some(ReadFailure::NotInstalled));
 }
 
 #[test]

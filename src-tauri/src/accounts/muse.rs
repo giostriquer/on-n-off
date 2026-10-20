@@ -8,8 +8,7 @@ use super::{
     Home, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::{AgentId, ProviderLimitsDto};
-use crate::http::HttpError;
-use crate::limits::{read_saved_muse, SavedReadError, SavedReadUrls};
+use crate::limits::{read_saved_muse, verify_saved_muse, ReadFailure, SavedReadUrls};
 use serde_json::Value;
 use std::{
     ffi::OsString,
@@ -62,10 +61,10 @@ impl super::Adapter for Muse {
         login: &Login,
         _now_ms: i64,
         urls: &SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, SavedReadError> {
+    ) -> Result<ProviderLimitsDto, ReadFailure> {
         let token = MuseView::of(login)
             .access_token()
-            .ok_or(HttpError::Unauthorized)?;
+            .ok_or(ReadFailure::LoginRefused)?;
         read_saved_muse(identity, &token, urls)
     }
 
@@ -197,15 +196,7 @@ impl Native for MuseNative {
         let token = MuseView::of(&login)
             .access_token()
             .ok_or("The Muse login has no access token.")?;
-        match read_saved_muse(&identity, &token, &self.urls) {
-            Ok(_) | Err(SavedReadError::Unavailable(_)) => Ok(()),
-            Err(SavedReadError::OtherAccount) => {
-                Err("Muse answered for a different account. Sign in again.".into())
-            }
-            Err(_) => Err(
-                "The Muse login could not be verified. Check connectivity or sign in again.".into(),
-            ),
-        }
+        verify_saved_muse(&identity, &token, &self.urls)
     }
 }
 
@@ -288,8 +279,8 @@ impl Home for MuseHome {
         self.store.write(None)
     }
 
-    fn read_usage(&self, identity: &Identity) -> Result<ProviderLimitsDto, SavedReadError> {
-        let token = self.store.token().ok_or(HttpError::Unauthorized)?;
+    fn read_usage(&self, identity: &Identity) -> Result<ProviderLimitsDto, ReadFailure> {
+        let token = self.store.token().ok_or(ReadFailure::LoginRefused)?;
         read_saved_muse(identity, &token, &self.store.urls)
     }
 
