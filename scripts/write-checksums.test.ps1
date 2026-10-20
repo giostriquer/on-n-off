@@ -54,6 +54,7 @@ try {
     New-Item -ItemType Directory -Path $assets -Force | Out-Null
     [System.IO.File]::WriteAllText((Join-Path $assets "on-n-off_1.2.3_x64-setup.exe"), "installer", [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText((Join-Path $assets "latest.json"), "{}", [System.Text.UTF8Encoding]::new($false))
+    New-Item -ItemType Directory -Path (Join-Path $assets "nested") -Force | Out-Null
     $sumsPath = Join-Path $assets "SHA256SUMS.txt"
 
     $written = Invoke-Writer -Directory $assets -OutputPath $sumsPath
@@ -79,12 +80,18 @@ try {
     }
 
     $rerun = Invoke-Writer -Directory $assets -OutputPath $sumsPath
-    if ($rerun.ExitCode -ne 0 -or [System.IO.File]::ReadAllText($sumsPath) -cne $expected) {
-        $failures += "A second run must not list the checksum file itself. Got: $([System.IO.File]::ReadAllText($sumsPath))"
+    $rerunText = [System.IO.File]::ReadAllText($sumsPath)
+    if ($rerun.ExitCode -ne 0 -or $rerunText -match "SHA256SUMS\.txt") {
+        $failures += "A second run must not list the checksum file itself. Got: $rerunText"
+    }
+    if ($rerunText -cne $actual) {
+        $failures += "A second run must write the same bytes as the first. Got: $rerunText"
     }
 
     $shasum = Get-Command shasum -ErrorAction SilentlyContinue
-    if ($null -ne $shasum) {
+    if ($null -eq $shasum) {
+        Write-Output "shasum is not installed here; skipped the shasum -a 256 -c check"
+    } else {
         Push-Location $assets
         try {
             $verify = & $shasum.Source -a 256 -c "SHA256SUMS.txt" 2>&1

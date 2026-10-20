@@ -10,7 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-$outputFullPath = [System.IO.Path]::GetFullPath($OutputPath)
+$outputFullPath = $PSCmdlet.GetUnresolvedProviderPathFromPSPath($OutputPath)
 $checksumLines = @(Get-ChildItem -LiteralPath $Directory -File |
     Where-Object { $_.FullName -ne $outputFullPath } |
     Sort-Object Name |
