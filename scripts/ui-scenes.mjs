@@ -76,10 +76,16 @@ export const SCENES = [
 export async function chooseScenes(argv, available = SCENES) {
   const { values, positionals } = parseArgs({ args: argv, options: { layout: { type: "boolean" }, csp: { type: "boolean" } }, allowPositionals: true });
   if (values.layout && values.csp) throw new Error("--layout and --csp are separate runs");
-  if (values.csp && positionals.length > 0) throw new Error("--csp runs every built-in scene and takes no scene file");
+  if (values.csp) return { csp: true, scenes: policyScenes(available, positionals) };
   const scenes = values.layout ? layoutScenes(available, positionals) : await fileScenes(available, positionals);
   scenes.forEach(validateScene);
-  return scenes;
+  return { csp: false, scenes };
+}
+
+function policyScenes(available, files) {
+  if (files.length > 0) throw new Error("--csp runs every built-in scene and takes no scene file");
+  available.forEach(validateScene);
+  return available.map(({ limitsColumns, popoverHeaders, checkMuseChart, ...scene }) => scene);
 }
 
 function layoutScenes(available, files) {

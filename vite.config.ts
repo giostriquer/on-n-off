@@ -37,5 +37,7 @@ export default defineConfig({
     outDir: path.resolve(__dirname, "ui/dist"),
     emptyOutDir: true,
     manifest: true,
+    assetsInlineLimit: 0,
+    modulePreload: { polyfill: false },
   },
 });

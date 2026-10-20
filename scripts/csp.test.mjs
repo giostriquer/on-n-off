@@ -1,51 +1,42 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { cspHeader } from "./csp.mjs";
+import { appPolicy, cspHeader } from "./csp.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const conf = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"));
-const csp = conf.app.security.csp;
-const sources = (directive) => [csp[directive] ?? []].flat().flatMap((value) => String(value).split(/\s+/)).filter(Boolean);
+const policy = appPolicy(root);
+const IPC_BRIDGE = ["ipc:", "http://ipc.localhost"];
 
-test("the webview runs under a content security policy", () => {
-  assert.equal(typeof csp, "object");
-  assert.notEqual(csp, null);
+test("the webview runs under exactly this content security policy", () => {
+  assert.deepEqual(policy, {
+    "default-src": ["'self'"],
+    "script-src": ["'self'"],
+    "style-src": ["'self'"],
+    "style-src-attr": ["'unsafe-inline'"],
+    "img-src": ["'self'"],
+    "font-src": ["'self'"],
+    "connect-src": IPC_BRIDGE,
+    "object-src": ["'none'"],
+    "base-uri": ["'none'"],
+    "form-action": ["'none'"],
+    "frame-ancestors": ["'none'"],
+  });
 });
 
-test("scripts come only from the app bundle: no inline script, no eval, no remote host", () => {
-  assert.deepEqual(sources("default-src"), ["'self'"]);
-  assert.deepEqual(sources("script-src"), ["'self'"]);
-});
-
-test("stylesheets come only from the app bundle; only style attributes may be inline", () => {
-  assert.deepEqual(sources("style-src"), ["'self'"]);
-  assert.deepEqual(sources("style-src-attr"), ["'unsafe-inline'"]);
-  assert.equal(csp["style-src-elem"], undefined);
-});
-
-test("the page talks only to the Tauri IPC bridge", () => {
-  assert.deepEqual(sources("connect-src"), ["ipc:", "http://ipc.localhost"]);
-});
-
-test("plugins, base rewrites, form posts and framing are refused", () => {
-  for (const directive of ["object-src", "base-uri", "form-action", "frame-ancestors"]) {
-    assert.deepEqual(sources(directive), ["'none'"], directive);
-  }
-});
-
-test("no directive allows eval or a remote host", () => {
-  for (const directive of Object.keys(csp)) {
-    for (const source of sources(directive)) {
-      assert.ok(!/unsafe-eval|wasm-unsafe-eval/.test(source), `${directive} ${source}`);
-      assert.ok(!/^(https?:|wss?:|\*)/.test(source) || source === "http://ipc.localhost", `${directive} ${source}`);
+test("every source is a keyword or the Tauri IPC bridge: no host, scheme, data: or blob: source", () => {
+  for (const [directive, sources] of Object.entries(policy)) {
+    for (const source of sources) {
+      assert.ok(/^'[a-z-]+'$/.test(source) || IPC_BRIDGE.includes(source), `${directive} ${source}`);
+      assert.ok(!/unsafe-eval/.test(source), `${directive} ${source}`);
     }
   }
+  assert.ok(!Object.keys(policy).some((directive) => /^script-src-/.test(directive)), "no script-src-elem or -attr widens script-src");
 });
 
-test("index.html carries no inline style, script or handler that the policy would refuse", () => {
+test("index.html loads its script from a file and carries no inline handler, style or style element", () => {
   const html = readFileSync(join(root, "ui", "index.html"), "utf8");
   assert.doesNotMatch(html, /\sstyle\s*=/i);
   assert.doesNotMatch(html, /\son[a-z]+\s*=/i);
@@ -53,9 +44,20 @@ test("index.html carries no inline style, script or handler that the policy woul
   assert.doesNotMatch(html, /<style\b/i);
 });
 
+test("no UI source renders a style element or injects raw HTML", () => {
+  const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "ui/src/*.tsx", "ui/src/*.ts"], { cwd: root, encoding: "utf8" })
+    .split("\0")
+    .filter((file) => file && !/\.test\.tsx?$/.test(file) && !file.startsWith("ui/src/dev/"));
+  for (const file of files) {
+    const source = readFileSync(join(root, file), "utf8");
+    assert.doesNotMatch(source, /<style\b/, file);
+    assert.doesNotMatch(source, /dangerouslySetInnerHTML/, file);
+  }
+});
+
 test("the header form joins each directive's sources in order", () => {
   assert.equal(
-    cspHeader({ "default-src": "'self'", "connect-src": ["ipc:", "http://ipc.localhost"] }),
+    cspHeader({ "default-src": ["'self'"], "connect-src": ["ipc:", "http://ipc.localhost"] }),
     "default-src 'self'; connect-src ipc: http://ipc.localhost",
   );
 });

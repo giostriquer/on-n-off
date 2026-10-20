@@ -308,7 +308,6 @@ export function AppShell() {
           onConfirm={() => void confirmUninstall()}
         />
       ) : null}
-
     </div>
   );
 }

@@ -68,12 +68,12 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
-  # The card and popover header layout rules, measured in headless Chromium; a required check
-  # (docs/development.md, Visual verification).
+  # The card and popover header layout rules, then every scene under the content security policy,
+  # measured in headless Chromium; a required check (docs/development.md, Visual verification).
   layout:
     name: layout
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - *checkout
       - *setup-bun
@@ -89,6 +89,18 @@ jobs:
           UI_SHOTS_DIR: .tmp/ui-shots
         run: bun run ui:layout
 
+      # Every scene again, from the production build, under the content security policy in
+      # tauri.conf.json (docs/development.md, Content security policy).
+      - name: Build frontend
+        timeout-minutes: 5
+        run: bun run build
+
+      - name: Check every scene under the content security policy
+        timeout-minutes: 10
+        env:
+          UI_SHOTS_DIR: .tmp/ui-shots/csp
+        run: bun run ui:csp
+
       - name: Keep the layout captures
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -96,30 +108,6 @@ jobs:
           name: layout-captures
           path: .tmp/ui-shots
           if-no-files-found: warn
-
-  # Every ui-scenes scene, from the production build, under the content security policy in
-  # tauri.conf.json (docs/development.md, Content security policy).
-  csp:
-    name: csp
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - *checkout
-      - *setup-bun
-      - *install-frontend
-
-      - name: Install Chromium for the CSP check
-        timeout-minutes: 5
-        run: bunx playwright install --with-deps chromium
-
-      - name: Build frontend
-        run: bun run build
-
-      - name: Check every scene under the content security policy
-        timeout-minutes: 10
-        env:
-          UI_SHOTS_DIR: .tmp/ui-csp
-        run: bun run ui:csp
 
   # The native legs, one call of verify.yml per OS: a lint job and a test job each, in parallel.
   # Their check runs are `windows / lint`, `windows / test` and so on, none of them named like a

@@ -465,3 +465,23 @@ test("Dependabot keeps the pins of every workflow and local action current", { s
     .map((entry) => `/.github/actions/${entry.name}`);
   assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });
+
+test("the required layout job also runs every scene of the production build under the content security policy", { skip }, () => {
+  const layout = load("ci").jobs.layout;
+  assert.ok(requiredChecks.includes(layout.name));
+  const layoutCheck = step(layout, "Check the Limits card and popover header layout");
+  const build = step(layout, "Build frontend");
+  const check = step(layout, "Check every scene under the content security policy");
+  const captures = step(layout, "Keep the layout captures");
+  assert.equal(build.run, "bun run build");
+  assert.equal(check.run, "bun run ui:csp");
+  assert.ok(layoutCheck.index < build.index && build.index < check.index && check.index < captures.index);
+  for (const bounded of [build, check]) {
+    assert.ok(bounded["timeout-minutes"] <= 10, bounded.name);
+    assert.equal(bounded.if, undefined, bounded.name);
+    assert.equal(bounded["continue-on-error"], undefined, bounded.name);
+  }
+  assert.ok(check.env.UI_SHOTS_DIR.startsWith(`${captures.with.path}/`), "a failed policy run keeps its captures");
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts["ui:csp"], "bun scripts/ui-shots.mjs --csp");
+});
