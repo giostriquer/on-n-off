@@ -17,7 +17,7 @@ fn offer() -> Offer {
         account_id: "acct".into(),
         account_label: Some("you@example.com".into()),
         left_percent: 5.0,
-        renews_at: at(RENEWS),
+        cycle: at(RENEWS).into(),
         automatic: true,
     }
 }

@@ -8,7 +8,7 @@ use super::{account_dto, ReadFailure};
 use crate::accounts::model::{AccessToken, Identity};
 use crate::dto::{ProviderLimitsDto, Reading};
 use crate::http::HttpError;
-use crate::limits::window::{QuotaWindow, Scope, FIVE_HOURS, ONE_WEEK};
+use crate::limits::window::{QuotaWindow, ResetInstant, Scope, FIVE_HOURS, ONE_WEEK};
 use crate::limits::{saved_card, Parsed, SavedReadError, SavedReadUrls};
 
 pub(crate) const KEY_ENDPOINT: &str = "https://api.meta.ai/muse-code/key";
@@ -192,11 +192,12 @@ fn session_window(value: &MintWindow) -> Option<QuotaWindow> {
     })
 }
 
-fn reset(value: &MintWindow) -> Option<DateTime<Utc>> {
+fn reset(value: &MintWindow) -> Option<ResetInstant> {
     value
         .resets_at
         .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
-        .and_then(|seconds| DateTime::from_timestamp_millis((seconds * 1000.0) as i64))
+        .and_then(|seconds| DateTime::<Utc>::from_timestamp_millis((seconds * 1000.0) as i64))
+        .map(ResetInstant::from)
 }
 
 #[cfg(test)]

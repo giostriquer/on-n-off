@@ -162,14 +162,14 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 scope: Scope::AllModels,
                 length: Some(ONE_WEEK),
                 used_percent: 22.0,
-                reset: DateTime::from_timestamp(1_760_500_000, 0),
+                reset: DateTime::from_timestamp(1_760_500_000, 0).map(ResetInstant::from),
             },
             QuotaWindow {
                 id: "session".into(),
                 scope: Scope::AllModels,
                 length: Some(FIVE_HOURS),
                 used_percent: 41.0,
-                reset: DateTime::from_timestamp(1_760_000_000, 0),
+                reset: DateTime::from_timestamp(1_760_000_000, 0).map(ResetInstant::from),
             },
         ]
     );
@@ -187,7 +187,7 @@ fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
     assert_eq!(used, [140.0, -3.0]);
     assert_eq!(
         session(&facts).reset,
-        DateTime::from_timestamp_millis(1_760_000_000_500)
+        DateTime::from_timestamp_millis(1_760_000_000_500).map(ResetInstant::from)
     );
     assert_eq!(facts[0].reset, None);
 }

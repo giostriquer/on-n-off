@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use chrono::{DateTime, Datelike, Duration, SecondsFormat, Utc};
 use serde::Deserialize;
 
-use super::window::{QuotaWindow, ResetInstant, Scope};
+use super::codex::{main_windows, RateLimitWindow};
+use super::window::{QuotaWindow, ResetInstant};
 use crate::dto::{LimitWindowDto, ProviderLimitsDto};
 
 const LOOKBACK_DAYS: i64 = 8;
@@ -35,15 +36,8 @@ struct TokenCountPayload {
 #[derive(Deserialize)]
 struct SessionRateLimits {
     limit_id: Option<String>,
-    primary: Option<SessionRateWindow>,
-    secondary: Option<SessionRateWindow>,
-}
-
-#[derive(Deserialize)]
-struct SessionRateWindow {
-    used_percent: Option<f64>,
-    window_minutes: Option<u64>,
-    resets_at: Option<i64>,
+    primary: Option<RateLimitWindow>,
+    secondary: Option<RateLimitWindow>,
 }
 
 pub(super) fn merge_recent(
@@ -215,31 +209,14 @@ fn parse_event(line: &str) -> Vec<SessionWindow> {
     if limits.limit_id.as_deref() != Some("codex") {
         return Vec::new();
     }
-    [(limits.primary, "primary"), (limits.secondary, "secondary")]
+    main_windows(limits.primary.as_ref(), limits.secondary.as_ref())
         .into_iter()
-        .filter_map(|(window, id)| parse_window(window.as_ref()?, id, timestamp))
+        .filter(|window| window.length.is_some() && window.reset.is_some())
+        .map(|window| SessionWindow {
+            window,
+            observed_at: timestamp,
+        })
         .collect()
-}
-
-fn parse_window(
-    value: &SessionRateWindow,
-    id: &'static str,
-    observed_at: DateTime<Utc>,
-) -> Option<SessionWindow> {
-    let window_seconds = value.window_minutes?.checked_mul(60)?;
-    let reset = value
-        .resets_at
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))?;
-    Some(SessionWindow {
-        window: QuotaWindow {
-            id: id.to_string(),
-            scope: Scope::AllModels,
-            length: Some(std::time::Duration::from_secs(window_seconds)),
-            used_percent: value.used_percent?,
-            reset: Some(reset),
-        },
-        observed_at,
-    })
 }
 
 fn matches_window(
@@ -252,7 +229,7 @@ fn matches_window(
         && window.window_seconds == observed.window_seconds
         && ResetInstant::of(window)
             .zip(ResetInstant::of(observed))
-            .is_some_and(|(remembered, seen)| remembered == seen)
+            .is_some_and(|(remembered, seen)| remembered.same_cycle_as(seen))
         && DateTime::parse_from_rfc3339(&window.observed_at)
             .is_ok_and(|existing| observed_at > existing.with_timezone(&Utc))
 }

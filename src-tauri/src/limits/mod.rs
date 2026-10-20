@@ -13,7 +13,7 @@ mod pipeline;
 mod reading;
 mod renewal;
 mod snapshots;
-pub(crate) mod window;
+mod window;
 
 #[cfg(test)]
 pub(crate) use codex::codex_card;
@@ -22,6 +22,7 @@ pub(crate) use codex::{read_saved_codex, CodexEndpoints};
 pub(crate) use muse::mint::read_saved as read_saved_muse;
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
+pub(crate) use window::{cycle_turned_over, Observation, ResetInstant};
 
 use std::collections::BTreeSet;
 use std::path::Path;

@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use serde_json::Value;
 
 use super::claude_cli;
@@ -74,10 +73,8 @@ fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
     })
 }
 
-fn reset(entry: &Value) -> Option<DateTime<Utc>> {
-    optional_string(entry.get("resets_at"))
-        .and_then(|text| ResetInstant::parse(&text))
-        .map(ResetInstant::at)
+fn reset(entry: &Value) -> Option<ResetInstant> {
+    optional_string(entry.get("resets_at")).and_then(|text| ResetInstant::parse(&text))
 }
 
 fn scope_name(scope: Option<&Value>) -> Option<String> {

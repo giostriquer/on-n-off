@@ -42,16 +42,21 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
 
     assert_eq!(parse_codex(&payload).plan.as_deref(), Some("pro"));
     assert_eq!(
-        quota_windows(&payload),
+        windows_of(&payload),
         [QuotaWindow {
             id: "primary".into(),
             scope: Scope::AllModels,
             length: Some(Duration::from_secs(604_800)),
             used_percent: 14.0,
-            reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0),
+            reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0).map(ResetInstant::from),
         }]
     );
     assert_eq!(parse_codex(&payload).credits, None);
+}
+
+fn windows_of(payload: &RateLimitsResponse) -> Vec<QuotaWindow> {
+    let (main_id, main) = main_bucket(payload);
+    quota_windows(payload, &main_id, main)
 }
 
 fn with_extra_buckets(buckets: &[(&str, &str)]) -> Vec<QuotaWindow> {
@@ -73,7 +78,7 @@ fn with_extra_buckets(buckets: &[(&str, &str)]) -> Vec<QuotaWindow> {
         "rateLimitsByLimitId": by_id
     }))
     .unwrap();
-    quota_windows(&payload)
+    windows_of(&payload)
 }
 
 fn ids(windows: &[QuotaWindow]) -> Vec<&str> {
@@ -152,7 +157,7 @@ fn a_bucket_without_a_name_or_a_length_is_an_extra_limit_of_unknown_length() {
     }))
     .unwrap();
     assert_eq!(
-        quota_windows(&payload),
+        windows_of(&payload),
         [QuotaWindow {
             id: "extra:mystery".into(),
             scope: Scope::Model("extra limit".into()),
@@ -178,7 +183,7 @@ fn uses_the_single_bucket_fallback_and_maps_credits() {
     .unwrap();
 
     assert_eq!(
-        quota_windows(&payload),
+        windows_of(&payload),
         [QuotaWindow {
             id: "primary".into(),
             scope: Scope::AllModels,
@@ -483,7 +488,7 @@ fn maps_a_business_members_share_of_the_workspace_credits() {
             limit: "25000".to_string(),
             used: "8000".to_string(),
             used_percent: 32.0,
-            resets_at: Some("2026-09-21T14:13:20+00:00".to_string()),
+            resets_at: Some("2026-09-21T14:13:20.000Z".to_string()),
             reached: false,
         })
     );
