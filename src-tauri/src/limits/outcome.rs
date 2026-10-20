@@ -146,7 +146,7 @@ pub(super) fn signed_in(provider: AgentId, read: Read) -> (ProviderLimitsDto, Na
 
 fn signed_in_status(failure: &ReadFailure) -> LimitsStatus {
     match failure {
-        ReadFailure::NotInstalled | ReadFailure::SignedOut => LimitsStatus::SignedOut,
+        failure if failure.names_nobody() => LimitsStatus::SignedOut,
         ReadFailure::Unsupported(_) => LimitsStatus::Unsupported,
         _ => LimitsStatus::Failed,
     }

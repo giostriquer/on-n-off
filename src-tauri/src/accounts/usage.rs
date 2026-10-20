@@ -198,13 +198,14 @@ fn publish(
             }
             let mut remembered = crate::limits::remember(home, dto);
             if remembered.saved.is_err() {
-                remembered.card.status = LimitsStatus::Failed;
-                remembered.card.message = Some(UNSAVED.to_string());
-                *outcome = Some(SavedVerdict {
+                let unsaved = SavedVerdict {
                     message: UNSAVED.to_string(),
                     parks_login: false,
                     retry: Duration::ZERO,
-                });
+                };
+                remembered.card.status = LimitsStatus::Failed;
+                remembered.card.message = Some(unsaved.message.clone());
+                *outcome = Some(unsaved);
             }
             Some(Ok(remembered.card))
         }

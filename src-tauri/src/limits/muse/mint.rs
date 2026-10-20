@@ -111,7 +111,7 @@ pub(super) fn answer(
     if response.is_subs_active == Some(false) {
         return Err(ReadFailure::Unsupported(Unsupported::Inactive));
     }
-    let windows = quota_windows(response).unwrap_or_default();
+    let windows = quota_windows(response);
     let tier = response
         .subs_usage
         .as_ref()
@@ -131,8 +131,8 @@ pub(super) fn answer(
     })
 }
 
-fn quota_windows(response: &MintResponse) -> Option<Vec<QuotaWindow>> {
-    let windows: Vec<QuotaWindow> = match &response.subs_usage {
+fn quota_windows(response: &MintResponse) -> Vec<QuotaWindow> {
+    match &response.subs_usage {
         Some(usage) => [
             usage.weekly.as_ref().and_then(weekly_window),
             usage.window.as_ref().and_then(session_window),
@@ -143,9 +143,8 @@ fn quota_windows(response: &MintResponse) -> Option<Vec<QuotaWindow>> {
         None if response.is_subs_active == Some(true) => {
             vec![QuotaWindow::idle(SESSION, FIVE_HOURS)]
         }
-        None => return None,
-    };
-    (!windows.is_empty()).then_some(windows)
+        None => Vec::new(),
+    }
 }
 
 fn weekly_window(value: &MintWindow) -> Option<QuotaWindow> {

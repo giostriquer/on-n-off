@@ -319,3 +319,42 @@ fn without_claude_code_the_card_asks_for_it() {
     assert!(cards[0].account.is_none());
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn the_native_login_is_the_account_a_read_records() {
+    let identity = crate::accounts::model::Identity {
+        provider: AgentId::Claude,
+        user_id: "user".into(),
+        workspace_id: "team".into(),
+    };
+    for (config, expected) in [
+        (
+            Some(json!({"oauthAccount": {"accountUuid": "user", "organizationUuid": "team"}})),
+            identity.observation_key(),
+        ),
+        (None, "default".to_string()),
+    ] {
+        let home = crate::paths::scratch_dir("limits-claude-native-login");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        if let Some(config) = &config {
+            std::fs::write(home.join(".claude.json"), config.to_string()).unwrap();
+        }
+        let reader = crate::limits::limits_reader(AgentId::Claude).unwrap();
+        let read = crate::accounts::native::with_test_cli(&home.join("no-such-claude"), || {
+            (reader.read)(&home, false)
+        });
+        let (_, outcome) = crate::limits::outcome::signed_in(AgentId::Claude, read);
+
+        assert_eq!(
+            outcome.login.as_deref(),
+            Some(expected.as_str()),
+            "{config:?}"
+        );
+        assert_eq!(
+            crate::limits::native_login_at(AgentId::Claude, &home),
+            outcome.login,
+            "{config:?}"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
+}

@@ -135,7 +135,7 @@ fn mint_reading(body: Value) -> Parsed {
 }
 
 fn facts(body: Value) -> Vec<QuotaWindow> {
-    quota_windows(&mint_response(body)).expect("quota windows")
+    quota_windows(&mint_response(body))
 }
 
 fn session(facts: &[QuotaWindow]) -> &QuotaWindow {

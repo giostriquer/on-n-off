@@ -26,8 +26,7 @@ fn account_dto(label: Option<String>) -> LimitsAccountDto {
 }
 
 pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
-    crate::accounts::muse_store::signed_in(&crate::paths::muse_config_for(home))
-        .map(|login| account_dto(login.email))
+    crate::accounts::muse_store::login_email(&crate::paths::muse_config_for(home)).map(account_dto)
 }
 
 pub(super) fn muse_current(home: &Path) -> Read {

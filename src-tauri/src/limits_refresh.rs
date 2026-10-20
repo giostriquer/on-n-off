@@ -422,18 +422,21 @@ where
         Some(previous) if !saved => previous.saved_refreshed_at,
         _ => finished_at,
     };
-    let native = match (outcome, previous) {
-        (None, Some(previous)) => previous.native,
-        (outcome, previous) => NativeState::after(
+    let native_state = match (outcome, previous) {
+        (Some(outcome), previous) if native => NativeState::after(
             previous.as_ref().map(|previous| &previous.native),
-            outcome.unwrap_or_default(),
+            outcome,
             finished_at,
         ),
+        (None, Some(previous)) if !native => previous.native,
+        _ => {
+            unreachable!("a read reports a native outcome exactly when it read the native account")
+        }
     };
     *cached = Some(CachedRead {
         entries,
         saved_refreshed_at,
-        native,
+        native: native_state,
     });
     (
         cache.served(cached.as_ref()),

@@ -294,3 +294,49 @@ fn a_login_without_an_email_is_the_default_account_on_every_path() {
         every_failing_path(&root, None),
     );
 }
+
+#[test]
+fn the_native_login_is_the_account_a_read_records_without_asking_the_keychain() {
+    use crate::accounts::muse_store::LoginCache;
+    let bundle = r#"{"secret_schema_version":1,"access_token":"keychain-token"}"#;
+    for (auth, expected) in [
+        (
+            Some(
+                r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","user_email":"You@Example.com"}}}"#,
+            ),
+            Some(scoped_you()),
+        ),
+        (
+            Some(
+                r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+            ),
+            Some(scoped_you()),
+        ),
+        (
+            Some(r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token"}}}"#),
+            Some(super::super::DEFAULT_ACCOUNT.to_string()),
+        ),
+        (None, None),
+    ] {
+        let home = crate::paths::scratch_dir("muse-native-login");
+        let config = crate::paths::muse_config_for(&home);
+        if let Some(auth) = auth {
+            std::fs::create_dir_all(&config).unwrap();
+            std::fs::write(config.join("auth.json"), auth).unwrap();
+        }
+        let read = read_current(
+            &home,
+            installed,
+            |config| LoginCache::new().login(config, 0, &|| Ok(Some(bundle.to_string()))),
+            |_| Err(HttpError::Status(503)),
+        );
+        let (_, outcome) = crate::limits::outcome::signed_in(AgentId::Muse, read);
+
+        assert_eq!(outcome.login, expected, "{auth:?}");
+        assert_eq!(
+            crate::limits::native_login_at(AgentId::Muse, &home),
+            outcome.login,
+            "{auth:?}"
+        );
+    }
+}

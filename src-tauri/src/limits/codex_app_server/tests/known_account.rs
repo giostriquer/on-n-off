@@ -88,3 +88,23 @@ fn without_a_login_nobody_is_named() {
     assert!(read.account.is_none());
     assert_eq!(read.answer.err(), Some(ReadFailure::SignedOut));
 }
+
+#[test]
+fn the_native_login_is_the_account_a_read_records() {
+    let signed_in_home = signed_in_home("codex-native-login");
+    let signed_out_home = crate::paths::scratch_dir("codex-native-login-none");
+    std::fs::create_dir_all(signed_out_home.join(".codex")).unwrap();
+    for (home, signed_in) in [(&signed_in_home, true), (&signed_out_home, false)] {
+        let (_, outcome) = crate::limits::outcome::signed_in(
+            AgentId::Codex,
+            read(home, |_| Err(ReadFailure::NotInstalled)),
+        );
+
+        assert_eq!(outcome.login.is_some(), signed_in);
+        assert_eq!(
+            crate::limits::native_login_at(AgentId::Codex, home),
+            outcome.login,
+            "signed in: {signed_in}"
+        );
+    }
+}

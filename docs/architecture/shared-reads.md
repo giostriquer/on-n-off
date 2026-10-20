@@ -47,8 +47,9 @@ figure never delays the usage read it rides on. A forced read bypasses the nativ
 backoff but not the native read's Retry-After, nor a saved profile's backoff after a failure, nor a
 backend figure's. The native Retry-After holds only the login it was answered for: while it holds,
 the cache asks the provider's reader which account the native login names now
-(`limits::native_login`, the same lookup the read itself makes before asking; a Muse login kept in
-the Keychain is answered from memory while `auth.json` stands),
+(`limits::native_login`: the account `.claude.json` names for Claude, the login metadata's account
+for Codex, and for Muse only the email `auth.json` records (`muse_store::login_email`), so the
+lookup never asks the Keychain; a test per provider holds it to the account a read records),
 and a login changed outside on-n-off, such as `muse login` in a terminal, is read at once. The
 cache keeps the native read's state apart from the saved accounts' (`NativeState`): a native read
 replaces it whole, and a saved-accounts refresh leaves it as it was.

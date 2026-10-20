@@ -142,7 +142,12 @@ pub(super) fn read(
     force: bool,
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
 ) -> Read {
-    read_with(home, force, start_read, after_identity)
+    read_with(
+        home,
+        force,
+        |codex_home| Ok(launch(codex_home)?),
+        after_identity,
+    )
 }
 
 fn read_with(
@@ -176,10 +181,6 @@ fn start(codex_home: &Path) -> Result<Session, String> {
         }
         NotStarted::Failed(message) => message,
     })
-}
-
-fn start_read(codex_home: &Path) -> Result<Session, ReadFailure> {
-    Ok(launch(codex_home)?)
 }
 
 impl From<NotStarted> for ReadFailure {
