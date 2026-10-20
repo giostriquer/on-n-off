@@ -81,7 +81,11 @@ source carries no comments (see [Code comments](#code-comments)).
   `limitColumn`, which takes the entries alone; a fact a card needs about its saved profile is added
   to the column (and to `ProfileDto` through `Roster::of`, which the account list shares), read
   without a credential, never joined from the account list again
-  ([why](architecture/accounts.md#the-limits-column)).
+  ([why](architecture/accounts.md#the-limits-column)). Removing or archiving a card's account is
+  one command naming that account (`remove_limits_account`, `set_limits_account_archived`, in
+  `limits_refresh/account_actions.rs`), which reads the ids it takes along from the column it
+  serves and announces the change; the UI sends no ids of its own and patches no cache
+  ([why](architecture/accounts.md#remove-account)).
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
   shell, header, tags, ⋯ menu and footer from the card model; a card adds only its body. Which
   actions a card offers, in what order and whether each is enabled, is the card action plan's

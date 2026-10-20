@@ -233,6 +233,17 @@ function usageSummaryFor(input: { sinceDay: string; untilDay: string; timeZone: 
   };
 }
 
+const listeners = new Map<number, { event: string; handler: number }>();
+let nextListener = 1;
+
+function announce(source: string) {
+  for (const [id, { event, handler }] of listeners) {
+    if (event !== "shared-read-changed") continue;
+    const callback = (window as unknown as Record<string, unknown>)[`_${handler}`];
+    if (typeof callback === "function") callback({ event, id, payload: { source } });
+  }
+}
+
 const handlers: Record<string, Handler> = {
   list_agents: () => AGENTS,
   feature_flags: () => ({ masterCut: false }),
@@ -273,6 +284,16 @@ const handlers: Record<string, Handler> = {
   set_account_category: (args) => limits.setCategory(args.agentId, args.accountId, args.category),
   set_limits_archived: (args) => limits.setArchived(args.agentId, args.accountIds, args.archived),
   forget_limits_snapshot: (args) => limits.forgetSnapshot(args.agentId, args.accountId),
+  remove_limits_account: (args) => {
+    const changed = limits.removeAccount(args.agentId, args.accountId);
+    if (changed.column) announce(`limits:${String(args.agentId)}`);
+    if (changed.vault) announce("accounts");
+  },
+  set_limits_account_archived: (args) => {
+    if (!limits.setAccountArchived(args.agentId, args.accountId, args.archived)) return;
+    announce(`limits:${String(args.agentId)}`);
+    announce("accounts");
+  },
   read_codex_subscription: (args) => limits.readCodexSubscription(args.accountId),
   consume_codex_reset_credit: () => "reset",
   pending_reset_spends: () => pendingSpends,
@@ -303,8 +324,14 @@ const handlers: Record<string, Handler> = {
     console.info("[mock] open_url", args.url);
   },
   "plugin:app|version": () => "0.0.0-mock",
-  "plugin:event|listen": () => 1,
-  "plugin:event|unlisten": () => undefined,
+  "plugin:event|listen": (args) => {
+    const id = nextListener++;
+    listeners.set(id, { event: String(args.event), handler: Number(args.handler) });
+    return id;
+  },
+  "plugin:event|unlisten": (args) => {
+    listeners.delete(Number(args.eventId));
+  },
   "plugin:dialog|open": () => null,
 };
 

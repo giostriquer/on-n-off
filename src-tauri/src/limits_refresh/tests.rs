@@ -6,6 +6,7 @@ use std::sync::{
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod account_actions;
 mod adaptive;
 mod column;
 
@@ -491,48 +492,10 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
     assert_eq!(served.entries[0].status, LimitsStatus::Failed);
 }
 
-#[test]
-fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_success() {
-    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
-    *cache.read.lock().unwrap() = Some(cached(vec![
-        snapshot("current", true, LimitsStatus::Ok),
-        snapshot("forgotten", false, LimitsStatus::Ok),
-    ]));
-
-    let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
-    assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
-        1
-    );
-    assert_eq!(
-        dropped,
-        Reading::Replaced(1),
-        "the other window lists remembered accounts too, so it has to be told this one is gone"
-    );
-
-    let already_gone = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
-    assert_eq!(
-        already_gone,
-        Reading::Unchanged(1),
-        "nothing was removed, so nobody is sent to re-read"
-    );
-
-    let result = forget_through_cache(&cache, "current", || Err("disk failed".into()));
-    assert_eq!(result, Err("disk failed".into()));
-    assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
-        1
-    );
-}
-
 fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     *cache.read.lock().unwrap() = Some(cached(entries));
     cache
-}
-
-fn ids(values: &[&str]) -> Vec<String> {
-    values.iter().map(|value| (*value).to_string()).collect()
 }
 
 fn flags(cache: &Cache) -> Vec<bool> {
@@ -543,115 +506,6 @@ fn flags(cache: &Cache) -> Vec<bool> {
         .iter()
         .map(|entry| entry.archived)
         .collect()
-}
-
-#[test]
-fn archiving_flags_the_shared_entries_after_the_disk_write_and_never_the_signed_in_card() {
-    let cache = seeded(vec![
-        snapshot("signed-in", true, LimitsStatus::Ok),
-        snapshot("saved", false, LimitsStatus::Ok),
-        snapshot("legacy", false, LimitsStatus::Ok),
-    ]);
-
-    let archived = archive_through_cache(
-        &cache,
-        &ids(&["signed-in", "saved", "legacy"]),
-        true,
-        || {
-            assert!(
-                cache.read.try_lock().is_err(),
-                "written under the cache lock"
-            );
-            Ok(true)
-        },
-    );
-    assert_eq!(archived, Ok((Reading::Replaced(1), true)));
-    assert_eq!(flags(&cache), [false, true, true]);
-
-    let again = archive_through_cache(&cache, &ids(&["saved"]), true, || Ok(false));
-    assert_eq!(again, Ok((Reading::Unchanged(1), false)));
-
-    let unarchived = archive_through_cache(&cache, &ids(&["legacy"]), false, || Ok(true));
-    assert_eq!(unarchived, Ok((Reading::Replaced(2), true)));
-    assert_eq!(flags(&cache), [false, true, false]);
-
-    let failed =
-        archive_through_cache(
-            &cache,
-            &ids(&["legacy"]),
-            true,
-            || Err("disk failed".into()),
-        );
-    assert_eq!(failed, Err("disk failed".into()));
-    assert_eq!(flags(&cache), [false, true, false], "nothing changed");
-}
-
-#[test]
-fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
-    let cache = seeded(vec![
-        snapshot("signed-in", true, LimitsStatus::Ok),
-        snapshot("saved", false, LimitsStatus::Ok),
-    ]);
-    let _ = read_revision::take_announced();
-    let rereads = std::cell::Cell::new(0);
-    let reread = |force: bool| {
-        assert!(cache.read.try_lock().is_ok(), "read again outside the lock");
-        assert!(
-            force,
-            "forced, so a held-back poll cannot leave it remembered"
-        );
-        rereads.set(rereads.get() + 1);
-    };
-    let relists = std::cell::Cell::new(0);
-    let relist = || {
-        assert!(cache.read.try_lock().is_ok(), "relisted outside the lock");
-        relists.set(relists.get() + 1);
-    };
-
-    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(true), reread, relist).unwrap();
-    assert_eq!(
-        read_revision::take_announced(),
-        [Source::LimitsCodex, Source::Accounts]
-    );
-    assert_eq!(rereads.get(), 0, "archiving reads no provider");
-    assert_eq!(
-        relists.get(),
-        1,
-        "the archive changed, so the roster is read again"
-    );
-
-    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(false), reread, relist).unwrap();
-    assert!(read_revision::take_announced().is_empty());
-    assert_eq!(
-        relists.get(),
-        1,
-        "an archive that changed nothing relists nothing"
-    );
-
-    set_archived_with(&cache, &ids(&["saved"]), false, || Ok(true), reread, relist).unwrap();
-    assert_eq!(
-        read_revision::take_announced(),
-        [Source::LimitsCodex, Source::Accounts]
-    );
-    assert_eq!((rereads.get(), relists.get()), (1, 2));
-
-    let refused = set_archived_with(&cache, &[], true, || Ok(true), reread, relist);
-    assert!(refused.is_err(), "no account named");
-    let failed = set_archived_with(
-        &cache,
-        &ids(&["saved"]),
-        false,
-        || Err("disk".into()),
-        reread,
-        relist,
-    );
-    assert_eq!(failed, Err("disk".into()));
-    assert_eq!(
-        (rereads.get(), relists.get()),
-        (1, 2),
-        "a failed unarchive reads nothing"
-    );
-    assert!(read_revision::take_announced().is_empty());
 }
 
 #[test]
@@ -723,7 +577,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
             login: &no_login,
         };
         read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag)
-            .0
+            .served
             .entries
     };
 

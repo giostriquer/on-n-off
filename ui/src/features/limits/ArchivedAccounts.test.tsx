@@ -66,7 +66,7 @@ describe("the archived accounts list", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
 
     await waitFor(() => expect(onUnarchive).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(onUnarchive).mock.calls[0][0]).toMatchObject({ id: "profile:unread", forget: [{ accountId: "profile:unread" }] });
+    expect(vi.mocked(onUnarchive).mock.calls[0][0]).toMatchObject({ id: "profile:unread" });
   });
 
   it("offers nothing while the account controls are blocked", () => {

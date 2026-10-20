@@ -64,11 +64,17 @@ it writes it unless a reread happened while it ran, which loses nothing: the ver
 parked are not part of the roster, and the column looks them up when it is served. `limits_refresh::roster_changed` rereads it with
 the session's key alone (`Store::open_unlocked`) after every vault write: an account change
 (`account_changed`, before the provider is read again), automatic remembering, unlock, a category
-edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and the account list
-(`Notify::listed`). With the vault locked this session either keeps the roster it has. The sign-in
+edit or forget (`Notify::roster`), Remove account, archive and unarchive
+(`limits_refresh::account_actions`), and the account list (`Notify::listed`). With the vault locked
+this session either keeps the roster it has. The sign-in
 ends have one writer, the account list, which hands them over with that reread
 (`limits_refresh::accounts_listed`), under one bump. Each bumps the revision and announces only when
 what it holds changed, and the reads that answer the announcement are served from the cache.
+Remove account and Archive account change the cards they name in the cache, reread the roster
+with them, and announce once for the whole action: the Limits read once if either changed, the
+account list once if the vault or the archive did; an unarchive's forced read of the provider
+announces its own replacement first, and the unarchive then announces only what that read did not
+([accounts.md](accounts.md#remove-account)).
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll
@@ -156,7 +162,7 @@ Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the thre
 is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
 query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
 `accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`)
-and call its operations (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`,
+and call its operations (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`,
 `refreshGithubPrs`, `rereadPendingResetSpends`, `rereadAccountListsAndPreference`,
 `accountChanged`, `cachedAccountList`, `setCategoryLocally`); they never
 write a key. Each module also exports its source's entry for the

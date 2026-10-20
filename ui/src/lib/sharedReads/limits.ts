@@ -64,7 +64,7 @@ export function setCategoryLocally(client: QueryClient, provider: LimitsProvider
   }));
 }
 
-export function updateLimits(
+function updateLimits(
   client: QueryClient,
   provider: LimitsProvider,
   update: (entries: LimitsColumnEntry[]) => LimitsColumnEntry[],

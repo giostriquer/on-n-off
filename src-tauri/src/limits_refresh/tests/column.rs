@@ -321,41 +321,6 @@ fn an_account_change_reads_the_provider_afresh_and_relists_the_saved_profiles_ev
 }
 
 #[test]
-fn archiving_an_unread_saved_profile_reaches_the_column_through_the_roster() {
-    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
-    read(&cache, "me", false, &|_, _| {
-        Some(roster_of(&["spare"], &[]))
-    });
-    let spare = saved("spare").observation_key();
-    let archived = || {
-        let profiles = [(saved("spare"), "spare@example.com")];
-        Some(roster_for_test(
-            AgentId::Codex,
-            &profiles,
-            std::slice::from_ref(&spare),
-            &[],
-        ))
-    };
-
-    set_archived_with(
-        &cache,
-        std::slice::from_ref(&spare),
-        true,
-        || Ok(true),
-        |_| {},
-        || {
-            reread_roster(&cache, archived);
-        },
-    )
-    .unwrap();
-
-    let column = served_column(&cache);
-    assert!(column
-        .iter()
-        .any(|entry| entry.unread && entry.card.archived));
-}
-
-#[test]
 fn a_roster_reread_racing_the_saved_poll_keeps_the_verdict_the_poll_parked() {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     let away = saved("away").observation_key();

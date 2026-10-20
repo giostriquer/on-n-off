@@ -1,13 +1,12 @@
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
 import { useMemo, useRef, useState, type RefCallback, type RefObject } from "react";
-import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import type { UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { LimitsColumnEntry } from "$lib/limitsTypes";
-import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
 import { ArchivedAccounts } from "./ArchivedAccounts";
@@ -87,35 +86,38 @@ function ProviderColumn({
   now: number;
   addAccount: RefObject<HTMLButtonElement | null>;
 }) {
-  const queryClient = useQueryClient();
   const name = providerLabel(provider);
   const manager = useAccountManagement();
   const column = limitColumn({ provider, entries: query.data, nativeLogin: manager?.nativeLogin ?? null, now });
-  const [forgetError, setForgetError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const archivedDisclosure = useRef<HTMLButtonElement | null>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
   const visibleKeys = column?.visible.map(card => card.key) ?? [];
   const menu = (key: string | undefined) => (key === undefined ? undefined : menus.current.get(key));
   const handOffCard = useFocusHandoff<"archive" | "remove">(visibleKeys, (index, action) =>
     [action === "archive" ? archivedDisclosure.current : null, menu(visibleKeys[index]), menu(visibleKeys[index - 1]), addAccount.current]);
-  const error = query.error ? displayError(parseInvokeError(query.error), name) : forgetError;
+  const error = query.error ? displayError(parseInvokeError(query.error), name) : actionError;
   const blocked = manager?.blocked ?? false;
 
-  async function forget({ forget: steps }: CardAccount) {
-    setForgetError(null);
-    const ids = steps.map(({ accountId }) => accountId);
+  async function reported(verb: string, change: () => Promise<void>) {
+    setActionError(null);
     try {
-      for (const { accountId, expectedEmail } of steps) await api.forgetLimitsSnapshot(provider, accountId, expectedEmail);
-      updateLimits(queryClient, provider, (entries) =>
-        entries.filter((entry) => entry.currentAccount || !entry.account || !ids.includes(entry.account.id)),
-      );
+      await change();
     } catch (reason: unknown) {
-      setForgetError(`Could not remove that account: ${displayError(parseInvokeError(reason), name)}`);
+      setActionError(`Could not ${verb} that account: ${displayError(parseInvokeError(reason), name)}`);
       throw reason;
     }
   }
 
-  async function archive(key: string, account: CardAccount) {
+  function remove({ id }: CardAccount) {
+    return reported("remove", () => api.removeLimitsAccount(provider, id));
+  }
+
+  function setArchived({ id }: CardAccount, archived: boolean) {
+    return reported(archived ? "archive" : "unarchive", () => api.setLimitsAccountArchived(provider, id, archived));
+  }
+
+  async function archiveCard(key: string, account: CardAccount) {
     try {
       await setArchived(account, true);
     } catch {
@@ -124,28 +126,9 @@ function ProviderColumn({
     handOffCard(key, "archive");
   }
 
-  async function forgetCard(key: string, account: CardAccount) {
-    await forget(account);
+  async function removeCard(key: string, account: CardAccount) {
+    await remove(account);
     handOffCard(key, "remove");
-  }
-
-  async function remove(account: CardAccount, forgetIt = () => forget(account)) {
-    if (manager) await manager.removeAccount(account.profile?.id, forgetIt);
-    else await forgetIt();
-  }
-
-  async function setArchived({ forget: steps }: CardAccount, archived: boolean) {
-    setForgetError(null);
-    const ids = steps.map(({ accountId }) => accountId);
-    try {
-      await api.setLimitsArchived(provider, ids, archived);
-    } catch (reason: unknown) {
-      const verb = archived ? "archive" : "unarchive";
-      setForgetError(`Could not ${verb} that account: ${displayError(parseInvokeError(reason), name)}`);
-      throw reason;
-    }
-    updateLimits(queryClient, provider, (entries) => entries.map((entry) =>
-      !entry.currentAccount && entry.account && ids.includes(entry.account.id) ? { ...entry, archived } : entry));
   }
 
   if (!column) {
@@ -166,8 +149,8 @@ function ProviderColumn({
           now={now}
           error={index === 0 ? error : null}
           checking={query.isFetching}
-          onArchive={(account) => archive(card.key, account)}
-          onRemove={(account) => remove(account, () => forgetCard(card.key, account))}
+          onArchive={(account) => archiveCard(card.key, account)}
+          onRemove={(account) => removeCard(card.key, account)}
           menuButtonRef={(node) => {
             if (node) menus.current.set(card.key, node);
             else menus.current.delete(card.key);

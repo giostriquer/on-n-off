@@ -177,6 +177,23 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
+pub(crate) fn check_history(
+    home: &Path,
+    agent: AgentId,
+    replaced: &[LimitsAccountDto],
+) -> Result<(), String> {
+    SnapshotStore::for_home(home).check_card_history(agent, replaced)
+}
+
+pub(crate) fn forget_history(
+    home: &Path,
+    agent: AgentId,
+    account_id: &str,
+    replaced: &[LimitsAccountDto],
+) -> Result<Vec<String>, String> {
+    SnapshotStore::for_home(home).forget_card(agent, account_id, replaced)
+}
+
 #[derive(Clone, Copy)]
 struct Reader {
     read: fn(&Path, bool) -> Read,
@@ -272,11 +289,6 @@ pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {
 
 pub(crate) fn archived(home: &Path, provider: AgentId) -> BTreeSet<String> {
     SnapshotStore::for_home(home).archived(provider)
-}
-
-pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<bool, String> {
-    let home = paths::user_home().map_err(|error| error.message)?;
-    set_archived_at(&home, agent, ids, archived)
 }
 
 pub(crate) fn set_archived_at(

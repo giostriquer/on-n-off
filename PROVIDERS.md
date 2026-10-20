@@ -462,8 +462,8 @@ popover. This survives cache reloads without transferring unscoped usage; other 
 workspaces remain separate. Muse is
 the exception: its legacy id, `email:` and the lowercased email, names the whole identity, so a
 Muse card's first successful scoped reading takes the weekly window its legacy card last read when
-the reading has none of its own, and the legacy card is then superseded. Forget
-removes the selected card and its superseded legacy cache. Unattributed Codex session
+the reading has none of its own, and the legacy card is then superseded. Remove account
+removes the selected card and the superseded legacy cache its column entry folded in. Unattributed Codex session
 events cannot update a profile-scoped saved observation.
 
 See [accounts architecture and validation boundaries](docs/architecture/accounts.md).

@@ -17,7 +17,7 @@ const announced = vi.hoisted(() => new Set<(change: { source: string }) => void>
 
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, addAccount, accountAction,
-  forgetLimitsSnapshot: vi.fn().mockResolvedValue(undefined), setLimitsArchived: vi.fn().mockResolvedValue(undefined),
+  removeLimitsAccount: vi.fn().mockResolvedValue(undefined), setLimitsAccountArchived: vi.fn().mockResolvedValue(undefined),
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   cancelAccountLogin: vi.fn().mockResolvedValue(undefined), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: (listener: (change: { source: string }) => void) => {
