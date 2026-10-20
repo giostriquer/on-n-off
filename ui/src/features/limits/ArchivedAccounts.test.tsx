@@ -14,9 +14,11 @@ const unread: SavedProfile = {
 function archived(): LimitCard[] {
   const column = limitColumn({
     provider: "codex",
-    entries: [okCodex(), staleCodex({ account: { id: "team", label: "history@codex.example" }, archived: true })],
-    profiles: [unread],
-    categories: { "profile:unread": "Client B" },
+    entries: [
+      okCodex(), staleCodex({ account: { id: "team", label: "history@codex.example" }, archived: true }),
+      { provider: "codex", status: "ok", account: { id: unread.observationId, label: unread.email }, currentAccount: false, windows: [],
+        unread: true, archived: true, profile: unread, category: "Client B" },
+    ],
     nativeLogin: null,
     now: Date.parse(NOW),
   });

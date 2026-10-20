@@ -173,8 +173,8 @@ The epoch and the recovery journal are private to the store.
 ## Login state
 
 Every listed profile carries one login state (`loginState` on `ProfileDto`, `LoginState` in
-`accounts/login_state.rs`), and it is all a Limits card reads to ask for a new sign-in, for every
-provider:
+`accounts/login_state.rs`), and so does the profile on each Limits column entry; it is all a Limits
+card reads to ask for a new sign-in, for every provider:
 
 - `usable`: nothing says otherwise;
 - `ending`, with the date its sign-in ends: the adapter knows the date (Claude's
@@ -191,9 +191,28 @@ account's state is its date alone, `usable`, `ending` or `ended`, never `missing
 `otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
 failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
 in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
-account list is read; the UI reads the account list again just after the nearest `ending` date
-it has not been read since, and when the window shows again after such a date passed while it was
-hidden ([shared-reads.md](shared-reads.md)).
+account list is read and whenever the Limits column is served; the UI reads the account list again
+just after the nearest `ending` date it has not been read since, and when the window shows again
+after such a date passed while it was hidden ([shared-reads.md](shared-reads.md)).
+
+The Limits column states each profile as the account list would (`Roster::in_column`,
+`accounts/roster.rs`, through the one `stated` the listing uses too), from facts it already holds and
+with no login, Keychain item or stamp read, when the column is served:
+
+- signed in for the account of the read the column is served with (its current card), not the
+  native store's;
+- the signed-in login's date only from the ends the account list last handed over
+  (`Notify::listed`), never from the saved copy: a login that reached its end and was signed in
+  again in the terminal has a later end than the copy, so it shows no date until the account list
+  hands its native one over;
+- a saved login's date from those ends, else the end recorded on the profile (`sign_in_end`,
+  recorded when a login is saved and when a home's is first read), never by opening the login;
+- the verdict the saved poll parked, looked up in memory as the column is served
+  (`usage::parked_for`), for the login the roster listed (`LoginKey`: the vault login's fingerprint,
+  taken from the vault already unlocked for the roster, or the profile's home). The verdict is not
+  part of the roster, so a reread that overtakes the poll and wins the roster cannot drop it, and the
+  read that ran the poll announces the column. A new login in the same home shows once the saved
+  poll reads it, which the Limits read that follows the account change runs.
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's
@@ -223,12 +242,10 @@ the same refusal in the vault waited for a new login.
 The poll's attempts live in memory, as its holds always have, and are not kept across a restart:
 the first saved poll after a restart finds nothing held, reads every saved login and parks a
 refused one again, so the state comes back within one Limits read; until then the listing says
-usable, or ending or ended from the date. A poll that changes a profile's parked verdict, or the
-generation a verdict is parked for, says so (`hold_back` compares the attempt it records with the
-one it replaces), and the Limits read that ran it announces the account list once its cache lock
-is released
-(`limits_refresh::read_provider`), as it does for an account it unarchived. The account list
-answers unforced, which reads the verdicts and polls nothing, so the exchange ends there.
+usable, or ending or ended from the date. A poll that parks or clears a verdict changes the roster
+its saved refresh lists for the Limits column, so the Limits read that ran it carries the new state
+with its own announcement; the account list is not announced for it, since nothing outside Limits
+shows a login state, and reads the verdicts when it is next read.
 
 ## Provider adapters
 
@@ -371,7 +388,9 @@ beside one asks first, as Codex does.
   A category belongs to the account, not to a saved login: the vault's `categories` map holds one
   text per provider and card account id (the observation key), so every Limits card can have one,
   for every provider, saved or not. `read_account_categories` and `set_account_category` need no
-  account adapter, and the setter answers with the stored text. `Database` keeps a saved login's
+  account adapter, and the setter answers with the stored text. The Limits cards take their
+  categories from the Limits read's roster (the Limits column, below), which a saved edit or
+  forget rereads (`Notify::roster`); the UI no longer reads the categories itself. `Database` keeps a saved login's
   profile copy in step with the map on every set and forget, and a login saved after its card was
   named takes the category, so an older app version still shows it; a profile category from an
   older version moves into the map when the vault loads. Forget drops the categories of every id
@@ -447,7 +466,8 @@ dates read from the logins, through `read_revision` once its leases are released
 remove for the provider whose card they add or remove. Use and sign out do so even when their
 native half fails, because a rollback or a failed logout may still have changed the native login;
 a sign-in does so only once published, and a change refused before it wrote anything is not
-announced. A category edit announces only the account list, which also invalidates the categories.
+announced. A category edit or forget announces the account list and rereads the provider's Limits
+roster, which announces the Limits read when the roster changed.
 
 ## Archived accounts
 
@@ -468,9 +488,11 @@ signed-in card cannot be archived.
   and no renewal of any kind. A private renewal runs only inside a poll, so it never runs for an archived login, and the
   renewal rules above are unchanged. If a provider expires an unused login meanwhile, unarchiving
   shows the usual sign-in-again state.
-- **Shown.** The shared read flags archived cards (`archived`), after the legacy history they
-  replaced is hidden, and the account list flags archived profiles. The Limits screen lists them
-  collapsed under each provider's cards, with Unarchive and Remove account; the popover shows none.
+- **Shown.** The shared read flags archived cards (`archived`), and its column folds the legacy
+  history they replaced into them and flags a saved profile no read answered for as archived when
+  its profile is, unless it is the native login (`limits::column`). The account list flags archived
+  profiles too. The Limits screen lists them collapsed under each provider's cards, with Unarchive
+  and Remove account; the popover shows none.
 - **What unarchives.** Unarchive, which then reads the provider again, forced, so the account comes
   back polled. Save account, Add account and Sign in again, as they undo a Remove. And becoming the
   signed-in account, whether the switch happened in on-n-off or in the provider's CLI: a provider
@@ -598,6 +620,46 @@ Remove account removes a saved login first when there is one, as the archived li
 card with no saved login, Archive account and Remove account act on its usage history only.
 Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
+
+### The Limits column
+
+Both Limits surfaces, the screen and the menu-bar popover, render one column per provider, and
+that column is the Limits read's (`read_limits`, served by `limits_refresh::read_column` as
+`ColumnEntryDto`s and built by `limits::column`). Each entry is a `ProviderLimitsDto` with the
+account facts a card needs beside it: its saved profile (`profile`, the same `ProfileDto` the account
+list gives), its category (`category`), the legacy history it replaced (`replaced`, which Remove
+account and Archive account act on with it) and, for a saved profile no read answered for yet, an
+entry of its own (`unread`). The card model (`limitColumn`) therefore joins nothing, and the popover
+lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
+own.
+
+The saved profiles and categories are the provider's roster (`Roster`, `accounts/roster.rs`),
+which the Limits cache owns under a lock of its own and two writers replace
+([shared-reads.md](shared-reads.md#the-mechanism)). The saved refresh the read already makes
+(`accounts::usage::refresh_and_list`) lists it from the vault it loaded to poll, with no second
+decrypt; one that could not poll because the provider's own login could not be read (a malformed
+config, a denied Keychain probe, a login that names no account) rereads it with the session's key
+(`Roster::read`), so the saved profiles stay listed. Every vault write rereads it too
+(`limits_refresh::roster_changed`): an account change (`account_changed`, before the provider is
+read again), automatic remembering when it saves a login or is turned on, unlock, a category edit or
+forget (all through `Notify::roster`), archive and unarchive, and the account list once it has read
+the vault (`Notify::listed`), which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
+the roster alike (`Roster::of`, given each profile's facts: the listing's read its native login,
+deadlines and verdicts; the roster's are its recorded end alone). Who is signed
+in is not part of the roster: the column marks active the profile of the account the latest native
+read names, and none when that read names nobody (not installed, signed out), so a switch made in
+the CLI moves the active dot and the actions with the next native read.
+
+Building and rereading the roster add no credential or Keychain read to the Limits path: the
+reread opens the vault only with the key this session has already unlocked
+(`Store::open_unlocked`, through `SessionKeys::peek`), never asking the OS store, and neither reads
+a native login or a home's login. A sign-in's end needs a login's credentials (a home's Keychain
+item on macOS), so the column carries the end the account list last read
+(`Roster::sign_in_deadlines`, as instants, which `Accounts::list` hands over through `Notify::listed` to
+`limits_refresh::accounts_listed`, with the roster reread, announcing the Limits read once and only
+when either changed): the screen, whose account manager lists the
+accounts, shows it as before, and the popover shows it whenever the account list has been read in
+this session.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.
 Operations remain busy through readback, and a sign-out confirmation is checked against the
@@ -609,15 +671,18 @@ vault and reloads accounts; it does not start sign-in, create a vault, or change
 Card headers never display workspace IDs. Saved profiles keep their verified workspace identity;
 accounts that share an email are told apart by their plan badge when usage reports one, and by the
 optional category otherwise.
-When a saved profile has an actual scoped usage observation, the card list also suppresses its
-legacy observation using the verified provider, legacy identity key and matching email. The
-legacy key has one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for
-Claude, `email:` and the lowercased email for Muse, and none for providers without saved
-accounts. Every scoped card, the current Codex card and a saved account's failed first read
-included, and every listed profile carry it as `legacyId`; the UI join reads the profile's. So
-the join does not depend on the snapshot's optional `legacyId`, which older app versions can
-drop when rewriting history. It does not transfer old quotas or delete history, and preserves
-current legacy observations and accounts without a verified scoped replacement. Muse is the one
+When a scoped account has a successful reading, the column folds into it the legacy observation it
+replaces, by one rule (`snapshots::supersedes`, which Forget also uses): the scoped card's legacy id
+names the legacy card, which is not the signed-in read, and both carry the same email, compared
+trimmed and ignoring ASCII case only (a non-ASCII letter's case is not folded). The legacy key has
+one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for Claude, `email:` and
+the lowercased email for Muse, and none for providers without saved accounts. Every scoped card, the
+current Codex card and a saved account's failed first read included, and every listed profile carry
+it as `legacyId`; when a scoped snapshot lost its own, which older app versions can drop when
+rewriting history, the column takes the saved profile's. The Codex sessions merge never advances a
+folded legacy card (`codex_sessions::merge_recent`). The fold does not transfer old quotas or delete
+history, and preserves current legacy observations and accounts without a verified scoped
+replacement. Muse is the one
 exception to the transfer rule, because its legacy key is the whole identity
 (`Identity::legacy_key_is_whole`): when a Muse card's first successful scoped reading has no weekly
 window, the snapshot store fills it from the legacy snapshot with the same legacy id and email, the

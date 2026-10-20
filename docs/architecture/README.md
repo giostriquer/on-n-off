@@ -305,7 +305,7 @@ Claude Code renews a home's login, a Codex login on-n-off owns renews before its
 does not own is never renewed. A saved read tells a refused login, one that now signs in as another
 account and a rate limit apart (its read outcome, below), and the poll backs off accordingly: a
 login refused, or now signing in as another account, waits for a new login, in the vault or in its
-home alike, and the account list says so as the profile's login state
+home alike, and the profile's login state says so, on the account list and on its Limits column entry
 ([accounts.md](accounts.md#login-state)); any other failure
 waits the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
 or a rate limit's Retry-After when that is longer. Every card a
@@ -353,11 +353,27 @@ with its last observation time rather than vanishing. What a later read keeps of
 reading, after it answers and after it fails, is one policy, in `limits/reading.rs`, which a read
 applies once, keeping from its account's file as it writes over it (`SnapshotStore::remember`).
 
+Which cards a provider shows is the Limits read's: the shared read serves each provider's **Limits
+column** (`limits_refresh::read_column`, built by `limits::column` from the cards it read), one
+entry per account. It folds the legacy history a scoped account replaced into that account's entry,
+by the one rule Forget also uses (`snapshots::supersedes`), lists each saved profile no read
+answered for as an entry of its own (`unread`), and carries beside each entry its saved profile and
+its category, from the provider's roster the cache keeps beside the cards; the saved profile of the
+account the native read names is the active one. The column is built only when the UI asks for it
+(`read_limits`), and the UI types it `LimitsColumnEntry`. Both surfaces render that column
+through one card model, `limitColumn({ provider, entries, nativeLogin, now })`
+(`ui/src/features/limits/limitCards.ts`), so the popover lists the same accounts, counts and copy as
+the screen; only the screen's account manager adds the account list's word on who is signed in
+(`nativeLogin`). The Rust consumers (the notch, the monitor) read only the signed-in card and keep
+the cards as read (`Served::entries`). [accounts.md](accounts.md#the-limits-column) has what the
+column reads and what it leaves out to open no credential.
+
 What a card's reading is worth now, its read standing, is one rule, `ReadStanding::of`
-(`limits/standing.rs`), worked out from the card as it leaves the Limits read, after that policy,
-the saved poll and the archive flags: the `read_limits` command sends each card with its standing
-(`LimitsCardDto`, `dto/limits.rs`), and the notch model asks it of the signed-in card
-(`NotchProvider::current`). No card stores a standing, so no surface can see one that went stale
+(`limits/standing.rs`), worked out from the card as it leaves the Limits read, after the remember
+policy, the saved poll and the archive flags: the Limits column sends each entry with its standing
+(`ReadStanding::sent_with`, set as `limits::column` builds `ColumnEntryDto`), and the notch model
+asks it of the signed-in card (`NotchProvider::current`). An unread entry stands live, so the card
+shows its empty copy as before. No card stores a standing, so no surface can see one that went stale
 while the read was still changing the card.
 
 A card is live when its own read answered: the signed-in account's or a saved profile's. It is last
@@ -371,7 +387,7 @@ in the error tone for a failed read and muted otherwise; a remembered account ca
 standing never words a failure itself. Only defensively, for a card that did not answer yet carries
 no message, which no read produces, does it say the outcome's "<Provider> did not answer."
 (`outcome::unexplained`), so a surface never draws an empty line in its place. `standing` is
-left out of a live card, so a card an older version sent reads live. Every surface renders it
+left out of a live entry, so an entry an older version sent reads live. Every surface renders it
 without deciding it again: the card and the tray popover (`presentStanding`,
 `ui/src/features/limits/limitPresentation.ts`) and both notches (`frame::rail`,
 [side-notch.md](side-notch.md#what-each-cell-shows-is-decided-once)). They used to decide it three
@@ -404,15 +420,15 @@ action wherever it shows: in the menu of a card that is not signed in, and also 
 main button once a saved Codex subscription has ended without renewing.
 
 Every action decision reads the card's one signed-in state (`LimitCard.signedIn`). The card model
-takes the account's saved profile's word (`active`), or, with none, the read's (`currentAccount`);
-the account is `confirmed` once the account list names it as the native login
-(`nativeObservationId`) and is not being read again, `unconfirmed` until then, as after a switch,
-and `no` otherwise. Save account, Sign out and Use banked reset wait for `confirmed`. Without an
-account list the read's word stands as confirmed; the backend still checks the native login before
-a spend. A card's place in its column is not that state: it follows the provider's own read
-(`LimitCard.leads`: the read's `currentAccount`, or an unread saved profile's `active`), which
-leads the column even signed out or naming no account, so a signed-out Claude card with a saved
-profile leads its column without the active dot. The plan reads `leads` for two decisions only:
+takes the word of the provider's own read, which leads the column (`LimitCard.leads`: the read's
+`currentAccount`), when it names an account; the column marks active only that account's saved
+profile, so the profile's `active` never says otherwise and the card model does not read it. The
+account is `confirmed` once the account list names it as the native login (`nativeObservationId`)
+and is not being read again, `unconfirmed` until then, as after a switch, and `no` otherwise. Save
+account, Sign out and Use banked reset wait for `confirmed`. Without an account list the read's word
+stands as confirmed; the backend still checks the native login before a spend. A read naming no
+account still leads its column but signs no card in, and a saved profile no read answered for
+never leads. The plan reads `leads` for two decisions only:
 Use banked reset is offered only on the provider's own live read, whose numbers a spend acts on,
 and Archive account never takes Use account's place on it.
 
@@ -724,20 +740,21 @@ the code today; a change that moves one updates its row.
 | Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows painter (`side_notch/win_paint.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
-| Read standing | `ReadStanding` and `LastObserved` (`dto/limits.rs`), decided by `ReadStanding::of` (`limits/standing.rs`) from the card as it leaves: sent beside each card by the `read_limits` command (`LimitsCardDto`) and asked by `NotchProvider::current` (`side_notch/model.rs`); rendered by `presentStanding` (`ui/src/features/limits/limitPresentation.ts`) for the card and the tray popover and by `frame::rail` (`side_notch/model/frame.rs`) for both notches; the cases all three check are `limits/standing/fixtures/standing-cases.json`, with the checking text (`CHECKING_LIMITS` in the UI) |
+| Read standing | `ReadStanding` and `LastObserved` (`dto/limits.rs`), decided by `ReadStanding::of` (`limits/standing.rs`) from the card as it leaves: sent on each Limits column entry (`ColumnEntryDto.standing`, by `ReadStanding::sent_with` as `limits::column` builds it) and asked by `NotchProvider::current` (`side_notch/model.rs`); rendered by `presentStanding` (`ui/src/features/limits/limitPresentation.ts`) for the card and the tray popover and by `frame::rail` (`side_notch/model/frame.rs`) for both notches; the cases all three check are `limits/standing/fixtures/standing-cases.json`, with the checking text (`CHECKING_LIMITS` in the UI) |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` on `Reading`, with the `plan_label` and `plan_capacity` `plan::describe` works out from it (`limits/plan.rs`); a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when its read standing says so (`LastObserved::Remembered`, `limits/standing.rs`), and an archived one is listed apart |
-| Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
-| Signed-in state | `signedIn` on `LimitCard` (`ui/src/features/limits/limitCards.ts`), tested by `isSignedIn`, from the saved profile's `active` or the read's `currentAccount`, confirmed against the account list's `nativeObservationId` (`nativeLogin` on the account controller, `ui/src/features/accounts/AccountManager.tsx`); read by the card action plan and the active dot |
+| Limits column | `ColumnEntryDto` (`dto/limits.rs`), each entry with its read standing, built by `limits::column` (`limits/column.rs`) from the cards a read gives, the provider's `Roster` (`accounts/roster.rs`, owned by the Limits cache and written by the saved refresh and `limits_refresh::roster_changed`) and the sign-in ends the account list read; the active profile is the one the native read names; served by `limits_refresh::read_column` as the `read_limits` command; legacy history folded by `snapshots::supersedes`; rendered by `limitColumn` (`ui/src/features/limits/limitCards.ts`) on the Limits screen and the popover |
+| Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list` and in the Limits roster, which archive and unarchive reread and the Limits column flags an unread saved profile by; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
+| Signed-in state | `signedIn` on `LimitCard` (`ui/src/features/limits/limitCards.ts`), tested by `isSignedIn`, from the read that leads the column (`currentAccount`, the one entry whose `profile` the column marks `active`) naming an account, confirmed against the account list's `nativeObservationId` (`nativeLogin` on the account controller, `ui/src/features/accounts/AccountManager.tsx`); read by the card action plan and the active dot |
 | Card action plan | `cardActionPlan` (`ui/src/features/limits/cardActionPlan.ts`), from the card's `signedIn` and `leads`; bound to handlers by `useCardActions` (`cardActions.tsx`) and drawn by `LimitCardFrame`; a card not read yet offers only `checkNowEntry`, drawn by `PendingCardFrame` |
 | Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id; the rule (its bounds, offers once a weekly cycle, waiting spends and the share a spend is held to) is `reset_alert.rs`, whose `plan` `limits_monitor.rs` performs; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the numbers the UI restates (`ui/src/lib/appSettings.ts`, `resetSpendLimit` among them) are checked against `src-tauri/src/reset_alert/fixtures/rule.json` |
 | Read outcome | `limits/outcome.rs`: `ReadFailure` and `Read`, which every reader returns; the wording table `message` (with `Context` and `Saved`); the per-context mappings `signed_in` (with `NativeOutcome`), `saved` (`SavedVerdict`), `saved_card` and `first_usage` (the only makers of `Accepted`) and `verified`; the wording facts are `LimitsFacts` in the provider catalogue |
 | Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`, with the Retry-After floor its `NativeOutcome` gives, held only while the native login is the one it was read for), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects); `accounts/muse_store.rs` reads Muse Code's device login for its Limits read only |
-| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs` by one path (`poll`, which attempts, holds and parks a login by its `Generation`) over where the login is kept (`Kept`): in the vault, through the provider's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`, `read_saved_muse`), or in its home (`Home::read_usage`: Claude Code's own report, `read_usage` in `limits/claude_cli.rs`, or Muse's key-mint read); the date its home's sign-in ends is `sign_in_end`, and its card carries `saved_profile` |
-| Login state | `LoginState` (`accounts/login_state.rs`), on each listed profile as `loginState` (`ProfileDto`, `accounts::list`), from where the login is kept (`usage::kept`), its `Deadline` (the native store's, a vault login's view, or a home's recorded `SignInEnd`), and, for a profile not signed in (`Standing`), what the saved poll parked (`usage::parked`, kept in memory with the poll's holds by each login's `Generation`, a home's being its `Home::login_stamp`, which reads no secret; `accounts/usage.rs`); read by the card model as `LimitCard.login` and presented by `signInPresentation` (`ui/src/features/limits/loginState.ts`); the account list reads itself again when an `ending` date passes (`untilSignInEnds`, `ui/src/lib/sharedReads/accounts.ts`) |
+| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`), and listed for the Limits column in the provider's `Roster` (`accounts/roster.rs`, whose `Roster::of` the account list shares); its usage is polled in `accounts/usage.rs` by one path (`poll`, which attempts, holds and parks a login by its `Generation`) over where the login is kept (`Kept`): in the vault, through the provider's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`, `read_saved_muse`), or in its home (`Home::read_usage`: Claude Code's own report, `read_usage` in `limits/claude_cli.rs`, or Muse's key-mint read); the date its home's sign-in ends is `sign_in_end`, and its card carries `saved_profile` |
+| Login state | `LoginState` (`accounts/login_state.rs`), on each listed profile as `loginState` (`ProfileDto`, `accounts::list`), from where the login is kept (`usage::kept`), its `Deadline` (the native store's, a vault login's view, or a home's recorded `SignInEnd`), and, for a profile not signed in (`Standing`), what the saved poll parked (`usage::parked`, kept in memory with the poll's holds by each login's `Generation`, a home's being its `Home::login_stamp`, which reads no secret; `accounts/usage.rs`); the Limits column carries the same state on each entry's profile, stated when it is served (`Roster::in_column`, `accounts/roster.rs`), signed in for the served current card's account, the signed-in login dated only by the ends the account list last handed over and a saved one by those or its recorded `SignInEnd`, and its parked verdict looked up in memory for the login the roster listed (`usage::parked_for`, by `LoginKey`: the vault login's fingerprint or the home, with no stamp), never opening a login; read by the card model as `LimitCard.login` and presented by `signInPresentation` (`ui/src/features/limits/loginState.ts`); the account list reads itself again when an `ending` date passes (`untilSignInEnds`, `ui/src/lib/sharedReads/accounts.ts`) and hands its ends to the column (`Notify::listed`) |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |

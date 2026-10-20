@@ -69,6 +69,13 @@ profile Limits is polling, nor an archived account: one the user switched away f
 it, or a saved profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
 
+**Limits column**:
+Every account Limits shows for a provider, one entry each, as the Limits read gives it: the read
+accounts, with the legacy history a scoped account replaced folded into it, and each saved profile
+no read has answered for yet, each with its saved profile and category beside it. The Limits screen
+and the menu-bar popover show the same column.
+_Avoid_: card list, roster (the saved profiles it reads)
+
 **Read standing**:
 What a card's reading is worth now, decided once for every surface: live, when its own read
 answered; last observed, when it still holds a quota window or a figure that no read just gave,
@@ -79,11 +86,11 @@ in the error tone for a failed read. Before any read a card is checking.
 _Avoid_: freshness, status (the read's own outcome), stale
 
 **Signed-in state**:
-Whether a card's account is the one the provider's CLI uses: confirmed when its saved profile, or
-without one its read, says so and the account list names it; unconfirmed while the account list has
-yet to name it, as just after a switch; no otherwise. Every action that acts on the signed-in login
-waits for confirmed. A card's place in its column follows the read instead, so a signed-out read
-still leads.
+Whether a card's account is the one the provider's CLI uses: confirmed when the provider's own read,
+which leads the column, names it and the account list names it too; unconfirmed while the account
+list has yet to name it, as just after a switch; no otherwise. Every action that acts on the
+signed-in login waits for confirmed. A read that names no account still leads its column, with no
+card signed in.
 _Avoid_: active, current
 
 **Card action plan**:

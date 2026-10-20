@@ -19,7 +19,7 @@ import type {
   UpdaterBuildInfo,
 } from "./types";
 import type { GithubPrs } from "./githubTypes";
-import type { ProviderLimits, ResetCreditOutcome } from "./limitsTypes";
+import type { LimitsColumnEntry, ResetCreditOutcome } from "./limitsTypes";
 import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
 import type { UsageHistoryStatus, UsageSummary, UsageSummaryInput } from "./usageTypes";
 
@@ -145,7 +145,7 @@ export function clearUsageHistory(): Promise<UsageHistoryStatus> {
   return invoke("clear_usage_history");
 }
 
-export function readLimits(agentId: AgentId, force = false): Promise<ProviderLimits[]> {
+export function readLimits(agentId: AgentId, force = false): Promise<LimitsColumnEntry[]> {
   return invoke("read_limits", { agentId, force });
 }
 

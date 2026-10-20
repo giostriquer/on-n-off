@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
@@ -11,26 +11,25 @@ const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 const setLimitsArchived = vi.hoisted(() => vi.fn());
-const readAccountCategories = vi.hoisted(() => vi.fn());
 const setAccountCategory = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/api", () => ({
-  readLimits, readAccounts, accountAction: vi.fn(), forgetLimitsSnapshot, setLimitsArchived, readAccountCategories, setAccountCategory,
+  readLimits, readAccounts, accountAction: vi.fn(), forgetLimitsSnapshot, setLimitsArchived, setAccountCategory,
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
-const CURRENT: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const CURRENT: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
 const label = (provider: LimitsProvider) => CURRENT[provider]().account!.label!;
 const oldLabel = (provider: LimitsProvider) => `old@${provider}.example`;
 
-function remembered(provider: LimitsProvider): ProviderLimits {
+function remembered(provider: LimitsProvider): LimitsColumnEntry {
   return CURRENT[provider]({ currentAccount: false, standing: REMEMBERED, account: { id: `${provider}-old`, label: oldLabel(provider) } });
 }
 
-function answer(read: (provider: LimitsProvider) => ProviderLimits[] | Promise<ProviderLimits[]>) {
+function answer(read: (provider: LimitsProvider) => LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>) {
   readLimits.mockImplementation((provider: LimitsProvider) => Promise.resolve(read(provider)));
 }
 
@@ -55,7 +54,6 @@ beforeEach(() => {
   readLimits.mockReset();
   forgetLimitsSnapshot.mockReset().mockResolvedValue(undefined);
   setLimitsArchived.mockReset().mockResolvedValue(undefined);
-  readAccountCategories.mockReset().mockResolvedValue({});
   setAccountCategory.mockReset().mockImplementation(async (_provider: LimitsProvider, _account: string, category: string) => category.trim() || null);
 });
 
@@ -101,7 +99,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
   });
 
   it("offers Check limits now while its first read is pending, disabled there and nowhere else", async () => {
-    answer(read => read === provider ? new Promise<ProviderLimits[]>(() => {}) : [CURRENT[read]()]);
+    answer(read => read === provider ? new Promise<LimitsColumnEntry[]>(() => {}) : [CURRENT[read]()]);
     renderLimits();
     const pending = await screen.findByRole("region", { name: `${name} limits` });
     expect(pending.getAttribute("data-status")).toBe("pending");
@@ -151,7 +149,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(LIMITS_PROVIDERS.length));
     let finish!: () => void;
     readLimits.mockImplementation((read: LimitsProvider, force: boolean) => force
-      ? new Promise<ProviderLimits[]>(resolve => { finish = () => resolve([CURRENT[read]()]); })
+      ? new Promise<LimitsColumnEntry[]>(resolve => { finish = () => resolve([CURRENT[read]()]); })
       : Promise.resolve([CURRENT[read]()]));
     openMenu(current, label(provider));
     fireEvent.click(screen.getByRole("button", { name: "Check limits now" }));
@@ -166,8 +164,8 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
 });
 
 it("draws the card action plan's menu in its order, each item under its own label", async () => {
-  const old = okCodex({ currentAccount: false, standing: REMEMBERED, account: { id: "codex-old", label: "old@codex.example" } });
-  const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" } };
+  const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" as const } };
+  const old = okCodex({ currentAccount: false, standing: REMEMBERED, account: { id: "codex-old", label: "old@codex.example" }, profile });
   readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   answer(read => read === "codex" ? [okCodex(), old] : [CURRENT[read]()]);
   renderLimits();
@@ -186,9 +184,8 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     return within(region).getByRole("textbox", { name: "Category (optional)" });
   }
 
-  it("is shown from the store kept per account, saved login or not", async () => {
-    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Client A / research", "another-account": "Elsewhere" } });
-    answer(read => [CURRENT[read]()]);
+  it("is the one the Limits read gives its account, saved login or not", async () => {
+    answer(read => [CURRENT[read]({ category: "Client A / research" }), { ...remembered(read), category: "Elsewhere" }]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     expect(await within(current).findByText("Client A / research")).toBeInTheDocument();
@@ -196,8 +193,7 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
   });
 
   it("is edited from the menu without asking anything, and cleared by saving it blank, leaving other cards' categories", async () => {
-    readAccountCategories.mockResolvedValue({ [provider]: { [accountId(provider)]: "Old", [`${provider}-old`]: "Other card" } });
-    answer(read => [CURRENT[read](), remembered(read)]);
+    answer(read => [CURRENT[read]({ category: "Old" }), { ...remembered(read), category: "Other card" }]);
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     const other = card(`${name} limits · ${oldLabel(provider)}`);
@@ -241,21 +237,6 @@ describe.each(LIMITS_PROVIDERS)("a %s card's category", (provider) => {
     expect(save).toBeEnabled();
     expect(within(current).queryByText("Work", { selector: "div" })).toBeNull();
   });
-
-  it("still offers the card and its editor when the categories cannot be read", async () => {
-    readAccountCategories.mockRejectedValue(new Error("the vault is locked"));
-    answer(read => [CURRENT[read]()]);
-    renderLimits();
-    const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
-    await waitFor(() => expect(readAccountCategories).toHaveBeenCalled());
-    const editor = await openEditor(current);
-    expect(editor).toHaveValue("");
-    fireEvent.change(editor, { target: { value: "Work" } });
-    fireEvent.click(within(current).getByRole("button", { name: "Save category" }));
-    await waitFor(() => expect(setAccountCategory).toHaveBeenCalledWith(provider, accountId(provider), "Work"));
-    await waitFor(() => expect(within(current).queryByRole("textbox")).toBeNull());
-    expect(within(current).queryByRole("alert")).toBeNull();
-  });
 });
 
 it("does not steal focus when a category save finishes after its editor was dismissed", async () => {
@@ -282,7 +263,7 @@ it("does not steal focus when a category save finishes after its editor was dism
 });
 
 describe("card header", () => {
-  function answerClaudeCodex(claude: ProviderLimits[], codex: ProviderLimits[]) {
+  function answerClaudeCodex(claude: LimitsColumnEntry[], codex: LimitsColumnEntry[]) {
     readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
   }
 

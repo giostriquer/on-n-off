@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, GithubPrsDto, InstallItemsRequest,
-    InstallItemsResultDto, ItemStatusDto, LimitsCardDto, MarketplaceInspectDto,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ColumnEntryDto, GithubPrsDto,
+    InstallItemsRequest, InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto,
     PendingResetSpendDto, ProjectDto, ResetCreditOutcome, UpdateItemMode, UsageHistoryStatusDto,
     UsageSummaryDto, UsageSummaryInput,
 };
@@ -368,12 +368,9 @@ pub async fn clear_usage_history() -> Result<UsageHistoryStatusDto, AdapterError
 pub async fn read_limits(
     agent_id: AgentId,
     force: bool,
-) -> Result<Vec<LimitsCardDto>, AdapterError> {
+) -> Result<Vec<ColumnEntryDto>, AdapterError> {
     blocking("limits read", move || {
-        Ok(crate::limits_refresh::read_limits(agent_id, force)
-            .into_iter()
-            .map(LimitsCardDto::from)
-            .collect())
+        Ok(crate::limits_refresh::read_column(agent_id, force))
     })
     .await
 }

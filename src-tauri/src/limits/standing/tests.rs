@@ -14,10 +14,20 @@ fn every_card_stands_as_its_row_says_in_the_shape_the_ui_reads() {
 }
 
 #[test]
-fn the_limits_command_sends_each_card_as_it_is_with_its_standing_left_out_while_live() {
+fn the_limits_column_sends_each_card_as_it_is_with_its_standing_left_out_while_live() {
+    use crate::accounts::{Roster, SignInDeadlines};
     for case in fixture().cases {
         let card = case.card();
-        let mut sent = serde_json::to_value(LimitsCardDto::from(card.clone())).unwrap();
+        let column = crate::limits::column(
+            std::slice::from_ref(&card),
+            &Roster::default(),
+            &SignInDeadlines::new(),
+            0,
+        );
+        let [entry] = column.as_slice() else {
+            panic!("{}: one entry for one card", case.name);
+        };
+        let mut sent = serde_json::to_value(entry).unwrap();
         let standing = sent.as_object_mut().unwrap().remove("standing");
         assert_eq!(
             standing,

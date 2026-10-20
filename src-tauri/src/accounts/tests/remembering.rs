@@ -29,7 +29,11 @@ fn a_remembered_login_is_saved_once_and_announced() {
         );
         assert!(!vault.profiles[0].pending_activation);
         assert_eq!(*harness.native.resolved.borrow(), [provider]);
-        assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+        assert_eq!(
+            harness.heard(),
+            [(Heard::Accounts, true), (Heard::Roster(provider), true)],
+            "Limits lists the remembered login without waiting for a saved refresh"
+        );
 
         assert_eq!(
             harness.accounts().remember(provider),
@@ -49,9 +53,20 @@ fn turning_remembering_on_or_off_is_announced() {
     assert!(super::super::discovery::enabled(harness.path()).unwrap());
     harness.accounts().set_remembering(false).unwrap();
     assert!(!super::super::discovery::enabled(harness.path()).unwrap());
+    let turned = || {
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Claude), true),
+            (Heard::Roster(AgentId::Codex), true),
+            (Heard::Roster(AgentId::Muse), true),
+        ]
+    };
     assert_eq!(
         harness.heard(),
-        [(Heard::Accounts, true), (Heard::Accounts, true)]
+        [turned(), turned()]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
     );
 }
 
@@ -72,7 +87,7 @@ fn a_codex_generation_signed_out_of_is_not_remembered_again() {
 }
 
 fn notice(harness: &Harness, provider: AgentId) -> Option<String> {
-    harness.accounts().list(provider).unwrap().notice
+    harness.accounts().listing(provider).unwrap().0.notice
 }
 
 #[test]
@@ -113,7 +128,13 @@ fn a_successful_remembering_poll_clears_the_notice_and_is_heard_once() {
 
     harness.accounts().poll_remembering(AgentId::Claude);
 
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+    assert_eq!(
+        harness.heard(),
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Claude), true)
+        ]
+    );
     assert_eq!(notice(&harness, AgentId::Claude), None);
     assert_eq!(harness.vault().profiles.len(), 1);
 }
@@ -129,6 +150,14 @@ fn turning_remembering_on_clears_the_notices_and_is_heard_once() {
 
     harness.accounts().set_remembering(true).unwrap();
 
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+    assert_eq!(
+        harness.heard(),
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Claude), true),
+            (Heard::Roster(AgentId::Codex), true),
+            (Heard::Roster(AgentId::Muse), true),
+        ]
+    );
     assert_eq!(notice(&harness, AgentId::Claude), None);
 }

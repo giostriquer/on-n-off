@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId } from "$lib/types";
 import { AppSettingsProvider } from "$lib/useAppSettings";
@@ -31,7 +31,7 @@ function limits(
   id: string,
   label: string,
   currentAccount: boolean,
-): ProviderLimits {
+): LimitsColumnEntry {
   return {
     provider,
     status: "ok",

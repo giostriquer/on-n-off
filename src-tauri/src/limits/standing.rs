@@ -1,6 +1,5 @@
 use crate::dto::{
-    LastObserved, LimitsCardDto, LimitsStatus, MessageTone, ProviderLimitsDto, ReadStanding,
-    StandingMessage,
+    LastObserved, LimitsStatus, MessageTone, ProviderLimitsDto, ReadStanding, StandingMessage,
 };
 
 impl ReadStanding {
@@ -44,12 +43,9 @@ impl StandingMessage {
     }
 }
 
-impl From<ProviderLimitsDto> for LimitsCardDto {
-    fn from(card: ProviderLimitsDto) -> Self {
-        Self {
-            standing: ReadStanding::of(&card),
-            card,
-        }
+impl ReadStanding {
+    pub(crate) fn sent_with(card: &ProviderLimitsDto) -> Option<Self> {
+        Some(Self::of(card)).filter(|standing| *standing != Self::Live)
     }
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import written from "../../../../src-tauri/src/accounts/fixtures/login-states.json";
 import type { LoginState, SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan } from "./cardActionPlan";
 import { cardTags } from "./cardTags";
@@ -12,7 +12,7 @@ import { NOW, lastObserved, okClaude, okCodex, okMuse } from "./readingFixtures"
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
 const at = (days: number) => new Date(AT_NOW + days * DAY).toISOString();
-const READING: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const READING: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
 type Shown = {
   main: string | null;
@@ -28,7 +28,7 @@ function shown(provider: LimitsProvider, loginState: LoginState): Shown {
     id: `saved-${provider}`, observationId: account.id, legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },
     email: account.label, label: account.label!, savedAt: NOW, active: false, loginState,
   };
-  const card = limitCards({ provider, entries: [reading], profiles: [profile], nativeLogin: { observationId: "someone-else", settled: true }, now: AT_NOW })!
+  const card = limitCards({ provider, entries: [{ ...reading, profile }], nativeLogin: { observationId: "someone-else", settled: true }, now: AT_NOW })!
     .find(candidate => candidate.account?.id === account.id)!;
   const plan = cardActionPlan({
     card, now: AT_NOW, checking: false, archiving: false, removing: false, pendingSpend: null,

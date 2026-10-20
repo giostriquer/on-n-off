@@ -65,15 +65,16 @@ fn a_homes_generation_is_its_login_stamp_and_never_its_login() {
     };
     let reads = || *state.reads.lock().unwrap();
 
-    let (card, changed) = poll_once(false);
-    assert!(card.unwrap().is_err());
-    assert!(changed, "now refused");
+    assert!(poll_once(false).unwrap().is_err());
     assert_eq!(
         parked(home.path(), &p, Some(&kept())),
         Some(Parked::Refused)
     );
     super::elapse(home.path());
-    assert!(!poll_once(true).1, "held, nothing changed");
+    assert!(
+        poll_once(true).unwrap().is_err(),
+        "held, its verdict replayed"
+    );
     assert_eq!(reads(), 1, "parked until the login changes");
 
     *state.stamp.lock().unwrap() = "item written at 10:05".into();
@@ -82,8 +83,11 @@ fn a_homes_generation_is_its_login_stamp_and_never_its_login() {
         None,
         "a changed login is usable at once"
     );
-    let (card, changed) = poll_once(false);
-    assert!(card.unwrap().is_err());
-    assert!(changed, "refused again, for the new login");
+    assert!(poll_once(false).unwrap().is_err());
+    assert_eq!(
+        parked(home.path(), &p, Some(&kept())),
+        Some(Parked::Refused),
+        "refused again, for the new login"
+    );
     assert_eq!(reads(), 2);
 }

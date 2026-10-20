@@ -202,12 +202,6 @@ pub enum ReadStanding {
     Unavailable { message: StandingMessage },
 }
 
-impl ReadStanding {
-    pub fn is_live(&self) -> bool {
-        *self == Self::Live
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "why", rename_all = "camelCase")]
 pub enum LastObserved {
@@ -249,11 +243,20 @@ pub struct ProviderLimitsDto {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct LimitsCardDto {
+#[serde(rename_all = "camelCase")]
+pub struct ColumnEntryDto {
     #[serde(flatten)]
     pub card: ProviderLimitsDto,
-    #[serde(skip_serializing_if = "ReadStanding::is_live")]
-    pub standing: ReadStanding,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<ReadStanding>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<crate::accounts::ProfileDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replaced: Vec<LimitsAccountDto>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unread: bool,
 }
 
 #[cfg(test)]

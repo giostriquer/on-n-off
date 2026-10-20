@@ -5,6 +5,7 @@ mod claude_config;
 mod codex;
 mod codex_app_server;
 mod codex_sessions;
+mod column;
 pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
@@ -23,10 +24,11 @@ pub(crate) mod window_at;
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
 pub(crate) use codex::{read_saved_codex, CodexEndpoints};
+pub(crate) use column::column;
 pub(crate) use muse::mint::{read_saved as read_saved_muse, verify as verify_saved_muse};
 pub(crate) use outcome::{Accepted, NativeOutcome, ReadFailure};
 pub(crate) use reading::keep_remembered;
-pub(crate) use snapshots::{without_superseded, Remembered};
+pub(crate) use snapshots::Remembered;
 #[cfg(test)]
 pub(crate) use standing::cases as standing_cases;
 pub(crate) use window::{cycle_turned_over, Observation, ResetInstant};
@@ -261,7 +263,7 @@ fn aggregate_accounts(store: &SnapshotStore, current: ProviderLimitsDto) -> Vec<
         snapshot.account.as_ref().map(|account| &account.id) != current_account.as_ref()
     });
     let current = store.remember(current).card;
-    snapshots::without_superseded(std::iter::once(current).chain(remembered).collect())
+    std::iter::once(current).chain(remembered).collect()
 }
 
 pub(crate) fn remember(home: &Path, card: ProviderLimitsDto) -> Remembered {

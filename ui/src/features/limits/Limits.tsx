@@ -1,13 +1,12 @@
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
 import { useMemo, useRef, useState, type RefCallback, type RefObject } from "react";
-import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
+import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
-import type { ProviderLimits } from "$lib/limitsTypes";
-import { accountCategoriesQuery, markProfilesArchived } from "$lib/sharedReads/accounts";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
@@ -84,15 +83,14 @@ function ProviderColumn({
   addAccount,
 }: {
   provider: LimitsProvider;
-  query: UseQueryResult<ProviderLimits[]>;
+  query: UseQueryResult<LimitsColumnEntry[]>;
   now: number;
   addAccount: RefObject<HTMLButtonElement | null>;
 }) {
   const queryClient = useQueryClient();
   const name = providerLabel(provider);
   const manager = useAccountManagement();
-  const categories = useQuery(accountCategoriesQuery()).data?.[provider];
-  const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], categories, nativeLogin: manager?.nativeLogin ?? null, now });
+  const column = limitColumn({ provider, entries: query.data, nativeLogin: manager?.nativeLogin ?? null, now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const archivedDisclosure = useRef<HTMLButtonElement | null>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
@@ -148,7 +146,6 @@ function ProviderColumn({
     }
     updateLimits(queryClient, provider, (entries) => entries.map((entry) =>
       !entry.currentAccount && entry.account && ids.includes(entry.account.id) ? { ...entry, archived } : entry));
-    if (manager) markProfilesArchived(queryClient, manager.provider, ids, archived);
   }
 
   if (!column) {

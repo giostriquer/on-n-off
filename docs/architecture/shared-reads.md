@@ -54,6 +54,22 @@ and a login changed outside on-n-off, such as `muse login` in a terminal, is rea
 cache keeps the native read's state apart from the saved accounts' (`NativeState`): a native read
 replaces it whole, and a saved-accounts refresh leaves it as it was.
 
+The Limits read serves its column ([Limits](README.md#limits)), built from the cards the cache
+holds, the provider's roster of saved profiles and categories, and the sign-in ends the account
+list read. Both sit in the cache's listing, under one small lock of its own, never under the read
+lock that spans CLI and network reads, so nothing that writes them waits on a read in flight. The
+roster has two writers. The saved refresh lists it from the vault it loaded to poll, or, when it
+could not poll (the provider's login could not be read), rereads it with the session's key alone;
+it writes it unless a reread happened while it ran, which loses nothing: the verdicts its poll
+parked are not part of the roster, and the column looks them up when it is served. `limits_refresh::roster_changed` rereads it with
+the session's key alone (`Store::open_unlocked`) after every vault write: an account change
+(`account_changed`, before the provider is read again), automatic remembering, unlock, a category
+edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and the account list
+(`Notify::listed`). With the vault locked this session either keeps the roster it has. The sign-in
+ends have one writer, the account list, which hands them over with that reread
+(`limits_refresh::accounts_listed`), under one bump. Each bumps the revision and announces only when
+what it holds changed, and the reads that answer the announcement are served from the cache.
+
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll
 per provider and one for pull requests, each due as soon as the shared cache's revision is newer
@@ -139,10 +155,10 @@ Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the thre
 `limits:<provider>` sources), `githubPrs.ts`, `resetSpends.ts` and `accounts.ts`. A source module
 is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
 query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
-`accountListQuery`, `accountPreferenceQuery`, `accountCategoriesQuery`, `codexSubscriptionQuery`)
+`accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`)
 and call its operations (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`,
 `refreshGithubPrs`, `rereadPendingResetSpends`, `rereadAccountListsAndPreference`,
-`accountChanged`, `cachedAccountList`, `markProfilesArchived`, `setCategoryLocally`); they never
+`accountChanged`, `cachedAccountList`, `setCategoryLocally`); they never
 write a key. Each module also exports its source's entry for the
 announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
 table from those entries alone. A key changed in one place is therefore changed in both. The
@@ -172,7 +188,9 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   lists and the preference, not the subscription dates (`rereadAccountListsAndPreference`).
   An account list that holds an `ending` date later than its last read (`dataUpdatedAt`) reads
   itself again, unforced, so the card shows `ended` as Rust decides it rather than deciding it
-  itself: a second after the nearest such date while it is ahead (`untilSignInEnds`, at most the
+  itself (the listing hands its ends to the Limits column, `Notify::listed`, and the Limits read is
+  announced when the column changed; the column also decides `ended` whenever it is served, so its
+  own poll shows it within five minutes even with no account list mounted): a second after the nearest such date while it is ahead (`untilSignInEnds`, at most the
   longest timer), then every minute once it has passed, until a read made after it lands. A closed
   window is only hidden, and an interval tick is skipped while the document is hidden;
   `refetchIntervalInBackground` stays off, since it would run the listing's Keychain reads in the
@@ -181,8 +199,8 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   nothing otherwise). A read that lands after the date schedules nothing more, even if Rust still
   says `ending`, and a list in an error state schedules nothing, so a list that keeps failing is
   not read again every minute with the signed-in store reads its listing makes. A saved
-  poll that changes a login's parked verdict announces the account list as well (Login state in
-  [accounts.md](accounts.md#login-state)).
+  poll that changes a login's parked verdict reaches the Limits column with that Limits read's own
+  announcement and announces no account list (Login state in [accounts.md](accounts.md#login-state)).
 - **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not
   the screen, decides which accounts are due, including an active account close to its limit.
 

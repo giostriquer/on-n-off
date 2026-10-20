@@ -56,12 +56,13 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
 fn a_usage_refresh_without_a_vault_reads_nothing() {
     let harness = Harness::new();
     let mut entries = Vec::new();
-    harness
+    let roster = harness
         .accounts()
         .refresh_usage(AgentId::Claude, false, &mut entries, &|_, _| {
             panic!("fetched without a vault")
         });
     assert!(entries.is_empty());
+    assert_eq!(roster, Some(crate::accounts::Roster::default()));
     assert!(harness.native.resolved.borrow().is_empty());
 }
 

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { ProviderLimits, ReadStanding, StandingMessage } from "$lib/limitsTypes";
+import type { LimitsColumnEntry, ReadStanding, StandingMessage } from "$lib/limitsTypes";
 import { hasLimits, isAgentId } from "$lib/providers";
 import standings from "../../../../src-tauri/src/limits/standing/fixtures/standing-cases.json";
 import { limitCards } from "./limitCards";
@@ -39,8 +39,8 @@ function readStanding(value: unknown): ReadStanding {
 
 it.each(standings.cases)("draws $name as its read standing says, whatever the read's status", ({ provider, standing, card: shown }) => {
   if (!isAgentId(provider) || !hasLimits(provider)) throw new Error(`no Limits card for ${provider}`);
-  const reading: ProviderLimits = { provider, status: "ok", currentAccount: true, windows: [], standing: readStanding(standing) };
-  const [card] = limitCards({ provider, entries: [reading], profiles: [], nativeLogin: null, now: NOW }) ?? [];
+  const entry: LimitsColumnEntry = { provider, status: "ok", currentAccount: true, windows: [], standing: readStanding(standing) };
+  const [card] = limitCards({ provider, entries: [entry], nativeLogin: null, now: NOW }) ?? [];
   expect({ status: card.status, message: card.freshness.message }).toEqual(shown);
 });
 
