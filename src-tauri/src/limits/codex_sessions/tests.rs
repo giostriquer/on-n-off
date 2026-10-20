@@ -315,6 +315,26 @@ fn a_session_observation_does_not_match_a_window_without_an_exact_duration() {
 }
 
 #[test]
+fn a_session_slot_without_a_duration_never_advances_a_window_without_one() {
+    let home = scratch_dir("limits-codex-session-slot-without-duration");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"resets_at":1787614473}}}}"#,
+    )
+    .unwrap();
+    let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];
+    accounts[0].reading.windows[0].window_seconds = None;
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(merge_recent(&home, now, &mut accounts), 0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
+}
+
+#[test]
 fn duplicate_matching_windows_in_one_account_are_ambiguous() {
     let home = scratch_dir("limits-codex-session-duplicate-window");
     let sessions = home.join(".codex/sessions/2026/08/20");
