@@ -8,6 +8,7 @@ const skip = globalThis.Bun?.YAML ? false : "needs Bun's YAML parser";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const directory = join(root, ".github", "workflows");
 const load = (name) => globalThis.Bun.YAML.parse(readFileSync(join(directory, `${name}.yml`), "utf8"));
+const workflows = () => readdirSync(directory).filter((file) => file.endsWith(".yml")).map((file) => file.slice(0, -4)).sort();
 
 function step(job, name) {
   const index = job.steps.findIndex((candidate) => candidate.name === name);
@@ -38,7 +39,7 @@ function runnerLegs(job) {
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
-  for (const name of ["ci", "verify", "bundle", "release", "cache-prune", "audit"]) {
+  for (const name of workflows()) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const { label } of runnerLegs(job)) {
         const os = String(label).split("-")[0];
@@ -73,13 +74,13 @@ test("rustfmt fails the lint job before the cache restore and the slower setup",
 });
 
 test("only pull request runs cancel an in-progress run", { skip }, () => {
-  for (const name of ["ci", "audit"]) {
-    assert.equal(load(name).concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}", name);
+  const pullRequestsOnly = "${{ github.event_name == 'pull_request' }}";
+  const cancels = { ci: pullRequestsOnly, audit: pullRequestsOnly, verify: undefined, bundle: false, release: false, "cache-prune": false };
+  assert.deepEqual(workflows(), Object.keys(cancels).sort(), "every workflow declares whether it cancels a run in progress");
+  for (const [name, cancel] of Object.entries(cancels)) {
+    assert.equal(load(name).concurrency?.["cancel-in-progress"], cancel, name);
   }
   assert.equal(load("verify").concurrency, undefined, "verify.yml runs under ci.yml's group");
-  for (const name of ["bundle", "release", "cache-prune"]) {
-    assert.equal(load(name).concurrency["cancel-in-progress"], false, `${name}.yml has no pull request run to cancel`);
-  }
 });
 
 test("a failing frontend check does not hide the result of the next one", { skip }, () => {
@@ -438,8 +439,8 @@ test("cargo-deny comes from a pinned release whose checksum is verified before i
   const audit = load("audit");
   assert.match(String(audit.env.CARGO_DENY_VERSION), /^\d+\.\d+\.\d+$/);
   assert.match(String(audit.env.CARGO_DENY_SHA256), /^[0-9a-f]{64}$/);
-  assert.equal(audit.defaults.run.shell, "bash", "bash -e stops the step at a failed checksum");
   const install = step(audit.jobs.rust, "Install cargo-deny");
+  assert.equal(install.shell ?? audit.jobs.rust.defaults?.run?.shell ?? audit.defaults.run.shell, "bash", "bash -e stops the step at a failed checksum");
   assert.match(install.run, /\/releases\/download\/\$\{CARGO_DENY_VERSION\}\//);
   assert.match(install.run, /^echo "\$\{CARGO_DENY_SHA256\}  \S+" \| sha256sum -c -$/m);
   assert.ok(install.index < step(audit.jobs.rust, auditChecks.rust.name).index);
@@ -447,8 +448,7 @@ test("cargo-deny comes from a pinned release whose checksum is verified before i
 
 test("deny.toml audits the shipped targets with every feature and gives each ignored advisory a reason", { skip: globalThis.Bun?.TOML ? false : "needs Bun's TOML parser" }, () => {
   const deny = globalThis.Bun.TOML.parse(readFileSync(join(root, "src-tauri", "deny.toml"), "utf8"));
-  assert.deepEqual([...deny.graph.targets].sort(), ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]);
-  assert.equal(deny.graph["all-features"], true);
+  assert.deepEqual(deny.graph, { targets: ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"], "all-features": true });
   assert.equal(deny.advisories.unmaintained, "workspace");
   for (const entry of deny.advisories.ignore ?? []) {
     assert.match(String(entry.id), /^RUSTSEC-\d{4}-\d{4}$/);
@@ -459,6 +459,8 @@ test("deny.toml audits the shipped targets with every feature and gives each ign
 test("Dependabot keeps the pins of every workflow and local action current", { skip }, () => {
   const dependabot = globalThis.Bun.YAML.parse(readFileSync(join(root, ".github", "dependabot.yml"), "utf8"));
   const actions = dependabot.updates.find((update) => update["package-ecosystem"] === "github-actions");
-  const local = readdirSync(join(root, ".github", "actions")).map((name) => `/.github/actions/${name}`);
+  const local = readdirSync(join(root, ".github", "actions"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `/.github/actions/${entry.name}`);
   assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });

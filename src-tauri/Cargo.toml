@@ -49,7 +49,7 @@ base64 = "0.23"
 regex = "1"
 chrono = { version = "0.4.45", features = ["clock", "serde"] }
 chrono-tz = "0.10.4"
-tauri-plugin-updater = "2"
+tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "system-proxy"] }
 tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"

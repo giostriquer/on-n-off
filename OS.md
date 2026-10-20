@@ -70,6 +70,10 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
+- `tauri-plugin-updater` is built without its default `zip` feature. A Windows update is the signed
+  NSIS installer and a macOS one the `.app.tar.gz`, both of which the plugin installs without it,
+  so the `zip` crate and its advisories stay out of the build. Turn it back on only for a zipped
+  updater artifact.
 - Icons: `icon.icns` carries macOS margins + drop shadow; Windows `icon.ico` / PNGs must be full-bleed
   with transparent corners (no shadow). Regenerate the Windows set from the icns master, not the
   other way round.
@@ -153,16 +157,16 @@ Rust and Swift cache generations; the workflows and scripts own current keys.
   `bunx playwright install --with-deps chromium`, which takes the browser of the lockfile's
   Playwright. It is a required check (docs/development.md, Visual verification).
 - `audit.yml` checks both lockfiles against published advisories on every pull request, every
-  push to main and each Monday: `cargo deny check advisories` against `src-tauri/deny.toml`,
-  which limits the graph to the two shipped targets (so Linux-only crates such as `glib` and
-  `zbus` never fail it), fails unmaintained crates only when they are direct dependencies, and
-  lists each ignored advisory with its reason; and `bun audit`, which reads `bun.lock` alone. It
-  is not a required check: an advisory lands without a change here, and must not block unrelated
-  pull requests. cargo-deny is a pinned release whose SHA-256 the job verifies, run on the
-  image's own `stable` because `cargo metadata` needs no particular compiler. Dependabot
-  (`.github/dependabot.yml`) opens one grouped version-update PR per ecosystem each month, and
-  security updates for cargo and Actions as advisories land; it has no security updates for bun.
-  It skips `dtolnay/rust-toolchain`, which is pinned to a branch commit with no tags to follow.
+  push to main and each Monday: `cargo deny check advisories` and `bun audit`. It is not a
+  required check: an advisory lands without a change here, and must not block unrelated pull
+  requests. `src-tauri/deny.toml` limits the graph to the two shipped targets, so Linux-only
+  crates such as `glib` and `zbus` never fail it, and fails an unmaintained crate only when it is
+  a direct dependency. An advisory that does not apply goes in its `ignore` list with a `reason`.
+  cargo-deny is a pinned release whose SHA-256 the job verifies. Dependabot does not follow it:
+  bump `CARGO_DENY_VERSION` and `CARGO_DENY_SHA256` together by hand, and expect a red weekly run
+  when the advisory database outgrows an old cargo-deny, not only when an advisory lands.
+  Dependabot (`.github/dependabot.yml`) opens one grouped version-update PR per ecosystem each
+  month, and security updates for cargo and Actions as advisories land; it has none for bun.
 - Runner labels are pinned to exact images (`ubuntu-24.04`, `windows-2025-vs2026`, `macos-26`) and
   bumped deliberately on their own pull request, like `rust-toolchain.toml`: a `-latest` label moves
   to a new OS on GitHub's schedule. `scripts/workflows.test.mjs` holds the one image per OS that

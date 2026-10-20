@@ -73,13 +73,15 @@ configuration, transcripts and saved logins stay on your machine. The app itself
 - `chatgpt.com` and `auth.openai.com`, for Codex limits and subscription details and to renew saved
   Codex logins;
 - `api.meta.ai`, for Muse limits;
-- `api.github.com`, for pull requests, and `raw.githubusercontent.com` and `codeload.github.com`,
-  for plugin details and installs from GitHub;
-- `raw.githubusercontent.com`, for LiteLLM's public model price list behind usage estimates;
-- GitHub Releases, to check for updates.
+- `api.github.com`, for pull requests and to resolve skills and agents installed from GitHub;
+- `codeload.github.com`, to download those installs;
+- `raw.githubusercontent.com`, for plugin details and LiteLLM's public model price list behind
+  usage estimates;
+- `github.com`, for the update feed on GitHub Releases.
 
 Claude limits come from Claude Code's own usage report: on-n-off sends nothing to Anthropic itself.
-The agent CLIs it starts (`claude`, `codex`, `muse`, `gh`) make their own requests as usual.
+The agent CLIs it starts (`claude`, `codex`, `muse`, `gh`) make their own requests as usual,
+including installs from sources you enter.
 
 ## Contributing
 

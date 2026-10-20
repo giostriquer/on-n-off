@@ -43,8 +43,7 @@ switches or saves logins.
   Tests never touch a real home directory: they use the scratch roots described in the
   [development guide](docs/development.md#test-structure).
 - **No code comments.** Rationale goes in the guide that owns the subject
-  ([why](docs/development.md#code-comments)); CI rejects comment lines in Rust, TypeScript and
-  Swift sources.
+  ([why](docs/development.md#code-comments)); CI rejects comment lines in source files.
 - **Provider changes** update [PROVIDERS.md](PROVIDERS.md) in the same pull request.
 - **Both platforms.** Windows and macOS must both build; CI checks both.
 - **Placeholders only.** Fixtures, screenshots, docs and commit messages use invented data
@@ -52,14 +51,7 @@ switches or saves logins.
   Screenshots show mock data (`bun run ui:shots` renders the UI with it).
 
 Before you push, run the checks for what you touched, as listed in
-[Commands](docs/development.md#commands). At minimum:
-
-```sh
-bun run check
-bun run test
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-```
+[Commands](docs/development.md#commands).
 
 ## Pull requests
 
@@ -68,8 +60,7 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -
   `perf`, `refactor`, `docs`, `test` or `chore`.
 - Fill in the template: what changed, why, and how you verified it. Include before and after
   captures for visual changes.
-- The `frontend`, `layout`, `verify-windows` and `verify-macos` checks must pass. Pull requests
-  are squash-merged.
+- The required CI checks must pass. Pull requests are squash-merged.
 
 ## License
 

@@ -182,7 +182,7 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
 
 on-n-off source carries no code comments: rationale lives in the guide or PROVIDERS.md row that
 owns the subject. `scripts/no-code-comments.test.mjs` (run by `bun test scripts/` in CI) rejects a
-comment line in the Rust, TypeScript and Swift sources; compiler directives (`/// <reference …>`,
+comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler directives (`/// <reference …>`,
 `// @ts-expect-error`, Swift's tools-version line) are exempt.
 
 ## Test structure
