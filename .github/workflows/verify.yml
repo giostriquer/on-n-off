@@ -176,6 +176,9 @@ jobs:
       - name: Test Rust toolchain pruner
         run: ./scripts/prune-rust-toolchains.test.ps1
 
+      - name: Test release checksum writer
+        run: ./scripts/write-checksums.test.ps1
+
       # tauri-build needs ui/dist to exist before any cargo command compiles the crate.
       - &build-frontend
         name: Build frontend
