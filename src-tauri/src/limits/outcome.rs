@@ -226,6 +226,10 @@ pub(crate) fn verified(provider: AgentId, failure: Option<&ReadFailure>) -> Resu
     }
 }
 
+pub(crate) fn unexplained(provider: AgentId) -> String {
+    format!("{} did not answer.", provider.facts().display_name)
+}
+
 pub(crate) fn message(provider: AgentId, context: Context, failure: &ReadFailure) -> String {
     let facts = provider.facts();
     let (display, cli) = (facts.display_name, facts.binary);

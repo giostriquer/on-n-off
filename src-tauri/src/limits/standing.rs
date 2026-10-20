@@ -31,7 +31,10 @@ impl ReadStanding {
 impl StandingMessage {
     fn of(card: &ProviderLimitsDto) -> Self {
         Self {
-            text: card.message.clone().unwrap_or_default(),
+            text: card
+                .message
+                .clone()
+                .unwrap_or_else(|| super::outcome::unexplained(card.provider)),
             tone: if card.status == LimitsStatus::Failed {
                 MessageTone::Error
             } else {

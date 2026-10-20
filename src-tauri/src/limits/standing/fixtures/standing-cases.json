@@ -90,12 +90,12 @@
       "notch": { "notice": { "text": "Sign in with `claude` to see subscription limits.", "tone": "muted" }, "paused": "Refresh paused. Last observed values below." }
     },
     {
-      "name": "an expired login keeping its windows",
-      "provider": "claude", "account": "current", "status": "unauthenticated", "observes": "windows",
-      "message": "Access token expired.",
-      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Access token expired.", "tone": "muted" } },
-      "card": { "status": { "kind": "paused" }, "message": { "text": "Access token expired.", "tone": "muted" } },
-      "notch": { "notice": { "text": "Access token expired.", "tone": "muted" }, "paused": "Refresh paused. Last observed values below." }
+      "name": "a refused login keeping its windows",
+      "provider": "claude", "account": "current", "status": "failed", "observes": "windows",
+      "message": "Claude's login has ended. Sign in with `claude` again to see subscription limits.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "error" } },
+      "notch": { "notice": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "red" }, "paused": "Refresh paused. Last observed values below." }
     },
     {
       "name": "a login without subscription limits keeping its windows",
