@@ -5,7 +5,7 @@ import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex } from "./readingFixtures";
+import { NOW, lastObserved, okClaude, okCodex, unavailable } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -81,7 +81,7 @@ describe("a Claude sign-in's end", () => {
 
   it("once passed, replaces the signed-in card's sign-in hint and offers to sign in again", async () => {
     answer(
-      [{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits." }],
+      [{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }],
       [profile({ active: false, signInEndsAt: at(-1) })],
     );
     renderLimits();
@@ -97,7 +97,7 @@ describe("a Claude sign-in's end", () => {
     answer(
       [
         okClaude({ account: { id: "uuid-2", label: "now@claude.example" } }),
-        { ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", message: "This account's saved login has ended. Sign in again." },
+        { ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") },
       ],
       [profile({ active: false, signInEndsAt: at(-2) })],
     );
@@ -110,7 +110,7 @@ describe("a Claude sign-in's end", () => {
 
   it("while signing in again, offers to cancel that sign-in instead", async () => {
     addAccount.mockReturnValue(new Promise(() => {}));
-    answer([{ ...okClaude({ windows: [] }), status: "signedOut", message: null }], [profile({ active: false, signInEndsAt: at(-1) })]);
+    answer([{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Claude limits are unavailable.", "muted") }], [profile({ active: false, signInEndsAt: at(-1) })]);
     renderLimits();
     const card = await signedInCard();
     fireEvent.click(await within(card).findByRole("button", { name: "Sign in again" }));
@@ -120,7 +120,7 @@ describe("a Claude sign-in's end", () => {
 
   it("asks an account added but never used to sign in again, not to use a login that has ended", async () => {
     answer(
-      [{ ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", message: "This account's saved login has ended. Sign in again." }],
+      [{ ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") }],
       [profile({ active: false, pendingActivation: true, signInEndsAt: at(-1) })],
     );
     renderLimits();

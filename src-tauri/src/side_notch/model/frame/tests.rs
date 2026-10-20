@@ -545,24 +545,30 @@ fn a_provider_cell_says_what_its_read_standing_says_and_is_checking_until_read()
         (Some((standings.checking.as_str(), Tone::Muted)), None)
     );
     for case in standings.cases {
-        let mut card = case.card();
-        card.current_account = true;
-        card.standing = case.expected();
-        let cell = provider_cell_of(NotchProvider::current(vec![card]));
+        let reading = NotchProvider::current(vec![case.card()]);
+        if case.notch.is_null() {
+            assert_eq!(
+                reading, None,
+                "{}: only the signed-in account's card",
+                case.name
+            );
+            continue;
+        }
+        let cell = provider_cell_of(reading);
         assert_eq!(
-            serde_json::json!({ "notice": cell.notice, "paused": cell.paused.is_some() }),
+            serde_json::json!({
+                "notice": cell.notice,
+                "paused": cell.paused.as_ref().map(|paused| &paused.text),
+            }),
             case.notch,
             "{}",
             case.name
         );
-        if cell.paused.is_some() {
-            assert_eq!(
-                said(&cell.paused),
-                Some(("Refresh paused. Last observed values below.", Tone::Amber)),
-                "{}",
-                case.name
-            );
-        }
+        assert!(
+            cell.paused.iter().all(|paused| paused.tone == Tone::Amber),
+            "{}",
+            case.name
+        );
     }
 }
 

@@ -64,7 +64,6 @@ impl Case {
             current_account: matches!(self.account, Account::Current),
             saved_profile: matches!(self.account, Account::Saved),
             archived: false,
-            standing: ReadStanding::Live,
             reading: reading(self.observes),
         }
     }

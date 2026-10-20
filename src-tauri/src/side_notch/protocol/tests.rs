@@ -79,8 +79,8 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
         AgentId::Claude,
         serde_json::json!([
             {"provider":"claude","status":"ok","currentAccount":false,"plan":"remembered-plan","windows":[]},
-            {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[],
-             "standing":{"kind":"unavailable","message":{"text":"Sign in with `claude` to see subscription limits.","tone":"muted"}}}
+            {"provider":"claude","status":"signedOut","message":"Sign in with `claude` to see subscription limits.",
+             "currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[]}
         ]),
     );
     assert_eq!(cell["provider"], "claude");
@@ -88,7 +88,7 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
     assert_eq!(
         cell["notice"],
         serde_json::json!({"text":"Sign in with `claude` to see subscription limits.","tone":"muted"}),
-        "the signed-out read is spoken for by its standing's notice"
+        "the signed-out read is spoken for by its notice"
     );
     let reading = &cell["reading"];
     assert!(reading.get("status").is_none());

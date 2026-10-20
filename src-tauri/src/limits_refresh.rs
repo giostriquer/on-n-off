@@ -91,9 +91,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
 
 pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
     let Some(cache) = cache_for(agent) else {
-        let mut entries = crate::limits::read_limits(agent, force);
-        crate::limits::stand(&mut entries);
-        return (entries, 0);
+        return (crate::limits::read_limits(agent, force), 0);
     };
     let Some(_account_read) = crate::accounts::activity::read(agent) else {
         let read = cache
@@ -142,7 +140,6 @@ fn read_provider(
             saved(force, &mut entries);
         }
         flag(&mut entries);
-        crate::limits::stand(&mut entries);
         entries
     });
     announce(cache, reading);

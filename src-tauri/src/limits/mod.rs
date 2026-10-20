@@ -27,7 +27,6 @@ pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 #[cfg(test)]
 pub(crate) use standing::cases as standing_cases;
-pub(crate) use standing::stand;
 pub(crate) use window::{cycle_turned_over, Observation, ResetInstant};
 
 use std::collections::BTreeSet;

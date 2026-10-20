@@ -74,14 +74,13 @@ export type StandingMessage = { text: string; tone: "error" | "muted" };
 
 export type ReadStanding =
   | { kind: "live" }
-  | { kind: "lastObserved"; why: "remembered"; message?: StandingMessage | null }
-  | { kind: "lastObserved"; why: "readFailed" | "signedOut" | "savedRefreshPaused"; message: StandingMessage }
+  | { kind: "lastObserved"; why: "remembered" }
+  | { kind: "lastObserved"; why: "readPaused" | "savedRefreshPaused"; message: StandingMessage }
   | { kind: "unavailable"; message: StandingMessage };
 
 export type ProviderLimits = {
   provider: AgentId;
   status: LimitsStatus;
-  message?: string | null;
   account?: LimitsAccount | null;
   currentAccount: boolean;
   savedProfile?: boolean;

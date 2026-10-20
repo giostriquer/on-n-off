@@ -13,6 +13,7 @@ export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "rem
 export type StandingPresentation = {
   status: CardStatus | null;
   message: StandingMessage | null;
+  answered: boolean;
 };
 
 export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow | undefined; rest: LimitWindow[] } {
@@ -94,16 +95,18 @@ export function observedAtText(entry: ProviderLimits): string | null {
   return newest === null ? null : formatObservedAt(new Date(newest).toISOString());
 }
 
-export function presentStanding(standing: ReadStanding = { kind: "live" }): StandingPresentation {
+const LIVE: StandingPresentation = { status: null, message: null, answered: true };
+
+export function presentStanding(standing: ReadStanding | undefined): StandingPresentation {
+  if (!standing) return LIVE;
   switch (standing.kind) {
-    case "live": return { status: null, message: null };
-    case "unavailable": return { status: null, message: standing.message };
+    case "live": return LIVE;
+    case "unavailable": return { status: null, message: standing.message, answered: false };
     case "lastObserved":
       switch (standing.why) {
-        case "savedRefreshPaused": return { status: { kind: "savedRefresh", detail: standing.message.text }, message: null };
-        case "remembered": return { status: { kind: "remembered" }, message: standing.message ?? null };
-        case "readFailed":
-        case "signedOut": return { status: { kind: "paused" }, message: standing.message };
+        case "remembered": return { status: { kind: "remembered" }, message: null, answered: true };
+        case "readPaused": return { status: { kind: "paused" }, message: standing.message, answered: false };
+        case "savedRefreshPaused": return { status: { kind: "savedRefresh", detail: standing.message.text }, message: null, answered: false };
       }
   }
 }

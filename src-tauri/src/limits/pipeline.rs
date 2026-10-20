@@ -1,7 +1,7 @@
 use chrono::{SecondsFormat, Utc};
 
 use super::{window, Parsed};
-use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto, ReadStanding};
+use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
 
 pub(super) fn finish(
     provider: AgentId,
@@ -27,7 +27,6 @@ pub(super) fn finish(
         current_account: true,
         saved_profile: false,
         archived: false,
-        standing: ReadStanding::Live,
         reading: parsed.reading,
     }
 }

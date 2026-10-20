@@ -1,8 +1,6 @@
 use super::*;
 use crate::dto::GithubPrsDto;
-use crate::dto::{
-    LimitWindowDto, LimitWindowKind, LimitsStatus, ReadStanding, Reading, WindowRole,
-};
+use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading, WindowRole};
 use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
 use crate::side_notch::sessions::LiveSession;
@@ -42,7 +40,6 @@ fn projected(
     let mut card = crate::limits::signed_in_card(provider, "acct", reading);
     card.status = status;
     card.message = message.map(str::to_owned);
-    card.standing = ReadStanding::of(&card);
     NotchProvider::current(vec![card]).expect("a signed-in account")
 }
 

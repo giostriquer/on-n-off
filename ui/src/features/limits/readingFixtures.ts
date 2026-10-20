@@ -5,11 +5,11 @@ export const NOW = "2026-08-17T20:00:00Z";
 
 export const REMEMBERED: ReadStanding = { kind: "lastObserved", why: "remembered" };
 
-export function lastObserved(why: "readFailed" | "signedOut" | "savedRefreshPaused", text: string, tone: StandingMessage["tone"] = why === "signedOut" ? "muted" : "error"): ReadStanding {
+export function lastObserved(why: "readPaused" | "savedRefreshPaused", text: string, tone: StandingMessage["tone"]): ReadStanding {
   return { kind: "lastObserved", why, message: { text, tone } };
 }
 
-export function unavailable(text: string, tone: StandingMessage["tone"] = "muted"): ReadStanding {
+export function unavailable(text: string, tone: StandingMessage["tone"]): ReadStanding {
   return { kind: "unavailable", message: { text, tone } };
 }
 
@@ -82,6 +82,6 @@ export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLim
   };
 }
 
-export function statusOnly(provider: AgentId, status: LimitsStatus, message: string, tone: StandingMessage["tone"] = "muted"): ProviderLimits {
-  return { provider, status, message, currentAccount: true, windows: [], standing: unavailable(message, tone) };
+export function statusOnly(provider: AgentId, status: LimitsStatus, text: string, tone: StandingMessage["tone"]): ProviderLimits {
+  return { provider, status, currentAccount: true, windows: [], standing: unavailable(text, tone) };
 }

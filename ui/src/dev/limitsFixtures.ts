@@ -255,7 +255,6 @@ function sameEmailWorkspacesAccounts(): AccountsReading {
 function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
   return [live, {
     ...live, currentAccount: false, savedProfile: true, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
-    message: "Saved usage access has expired. The last reading is retained.",
     standing: savedRefreshPausedBy("Saved usage access has expired. The last reading is retained."),
   }];
 }
@@ -349,7 +348,7 @@ function claudeSignInAccounts(): AccountsReading {
 function claudeSignIn(): ProviderLimits[] {
   return [CLAUDE[0], {
     ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, ...reported("max ×5"),
-    status: "failed", message: "This account's saved login has ended. Sign in again.",
+    status: "failed",
     standing: savedRefreshPausedBy("This account's saved login has ended. Sign in again."),
   }];
 }

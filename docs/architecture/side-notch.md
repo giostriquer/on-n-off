@@ -76,17 +76,18 @@ drew only the cells that had been read into the first slots of a rail sized for 
   provider list or pull request settings at all.
 - **A provider cell**: its reading (from `NotchProvider::current`, below: meter data only, the
   windows and what the rings name), its sessions, and what its card's read standing says
-  (`ReadStanding`, decided once in Rust as the shared read finishes the card;
-  [why](README.md#limits)). A live card says nothing above its windows, even without any. A card
-  last observed shows the amber "Refresh paused. Last observed values below.", whatever it still
-  holds: windows, a workspace share, or only figures the notch does not draw, such as a credit
-  balance; above it, the standing's message as its notice. An unavailable card shows the
-  standing's message alone, the provider's own or "<Provider> limits are unavailable.", the card's
-  words. A message's tone is the card's: a failed read's message is red (`error`), any other muted.
-  The notch used to decide this itself: "Usage unavailable." where the card said "Claude limits are
-  unavailable.", always muted where the card is red, and paused only over windows or a share. The
-  read's status, message and standing never reach the drawers: the notice and the paused line are
-  what they say.
+  (`ReadStanding::of`, which `NotchProvider::current` asks of the signed-in card and keeps to
+  itself; [why](README.md#limits)). A live card says nothing above its windows, even without any. A
+  card last observed shows an amber paused line, whatever it still holds: "Refresh paused. Last
+  observed values below." over windows or a workspace share, and "Refresh paused." when it holds
+  only figures the notch does not draw, such as a credit balance, rather than pointing at values
+  that are not there. Above it, the standing's message is its notice. An unavailable card shows
+  the standing's message alone, the provider's own or "<Provider> limits are unavailable.", the
+  card's words. A message's tone is the card's: a failed read's message is red (`error`), any other
+  muted. The notch used to decide this itself: "Usage unavailable." where the card said "Claude
+  limits are unavailable.", always muted where the card is red, and paused only over windows or a
+  share. The read's status, message and standing never reach the drawers: the notice and the
+  paused line are what they say.
 - **The pull request cell**: whether the read is readable (`ok`, or stale), the hint as its notice
   when the read is not `ok` (amber over rows it still shows, muted when it shows none), and, only
   when readable, the lists in their own order with their titles, at most 25 rows each and only rows
@@ -143,7 +144,8 @@ still worded by each drawer. What VoiceOver says for a rail cell is built in Not
 (`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided
 fields alone: a cell not read yet is "updating", one without a headline says its notice, a ring
 whose meter is unreadable says "usage unavailable", as its popover row does, and the paused line adds
-"refresh paused, last observed".
+"refresh paused, last observed" after the headline's figure, or "refresh paused" before the notice
+of a cell without a headline.
 
 A drawer never decides what a cell says. A new badge, notice or rule goes in `model/frame.rs` and
 reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the

@@ -25,7 +25,6 @@ import {
   usageLeft,
   type CardStatus,
   type LimitWindowPresentation,
-  type StandingPresentation,
 } from "./limitPresentation";
 
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
@@ -153,8 +152,6 @@ function compare(a: number, b: number): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-const UNREAD: StandingPresentation = { status: null, message: null };
-
 type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 
 function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, nativeLogin: NativeLogin | null, now: number): LimitCard {
@@ -165,7 +162,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
   const label = profile?.email ?? account?.label ?? null;
-  const presentation = reading ? presentStanding(reading.standing) : UNREAD;
+  const presentation = presentStanding(reading?.standing);
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
@@ -193,7 +190,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentWindow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
-    empty: hasWindows || readStatus !== "ok" || message ? null
+    empty: hasWindows || !presentation.answered || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
     freshness: {

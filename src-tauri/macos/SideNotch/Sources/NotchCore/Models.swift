@@ -284,7 +284,9 @@ public struct ProviderCell: Codable, Equatable, Sendable {
     let period =
       headline.map { _ in "weekly" }
       ?? (reading == nil ? "updating" : (notice?.text ?? "unavailable"))
-    guard let headline = headline else { return "\(name), \(period)" }
+    guard let headline = headline else {
+      return self.paused == nil ? "\(name), \(period)" : "\(name), refresh paused, \(period)"
+    }
     func use(_ quota: Quota) -> String {
       guard quota.percent(at: now) != nil else { return "usage unavailable" }
       return "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : "")

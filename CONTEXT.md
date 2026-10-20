@@ -64,10 +64,10 @@ _Avoid_: cache, snapshot (the file that stores it)
 **Read standing**:
 What a card's reading is worth now, decided once for every surface: live, when its own read
 answered; last observed, when it still holds a quota window or a figure that no read just gave,
-because the read failed, it reached no account it could read, a saved profile's refresh is paused,
-or it is a remembered reading; unavailable, when its read did not answer and it holds nothing. The
-last two carry the message every surface shows, in the error tone for a failed read. Before any read
-a card is checking.
+because the signed-in read is paused (it failed or reached no account it could read), a saved
+profile's refresh is paused, or it is a remembered reading; unavailable, when its read did not
+answer and it holds nothing. A paused or unavailable card carries the message every surface shows,
+in the error tone for a failed read. Before any read a card is checking.
 _Avoid_: freshness, status (the read's own outcome), stale
 
 **Signed-in state**:

@@ -405,7 +405,7 @@ pub fn pixel_aligned(value: f64, display_scale: f64) -> f64 {
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 #[derive(Clone, Debug, PartialEq)]
 pub struct NotchProvider {
-    pub standing: ReadStanding,
+    standing: ReadStanding,
     pub windows: Vec<LimitWindowDto>,
     headline_window_id: Option<String>,
     inner_ring: Option<InnerRing>,
@@ -427,6 +427,7 @@ pub enum InnerRing {
 impl NotchProvider {
     pub fn current(entries: Vec<ProviderLimitsDto>) -> Option<Self> {
         let card = entries.into_iter().find(|entry| entry.current_account)?;
+        let standing = ReadStanding::of(&card);
         let windows = card.reading.windows;
         let workspace_credits = card.reading.workspace_credits;
         let headline_window_id = windows
@@ -435,7 +436,7 @@ impl NotchProvider {
             .map(|window| window.id.clone());
         let inner_ring = inner_ring(&windows, workspace_credits.as_ref());
         Some(Self {
-            standing: card.standing,
+            standing,
             windows,
             headline_window_id,
             inner_ring,

@@ -1,16 +1,36 @@
 use crate::dto::{
-    LastObservedWhy, LimitsStatus, MessageTone, ProviderLimitsDto, ReadStanding, StandingMessage,
+    LastObserved, LimitsCardDto, LimitsStatus, MessageTone, ProviderLimitsDto, ReadStanding,
+    StandingMessage,
 };
-
-pub(crate) fn stand(cards: &mut [ProviderLimitsDto]) {
-    for card in cards {
-        card.standing = ReadStanding::of(card);
-    }
-}
 
 impl ReadStanding {
     pub(crate) fn of(card: &ProviderLimitsDto) -> Self {
-        let message = (card.status != LimitsStatus::Ok).then(|| StandingMessage {
+        let observed = card.reading.has_observations();
+        let remembered = !card.current_account && !card.saved_profile;
+        if card.status == LimitsStatus::Ok {
+            return if observed && remembered {
+                Self::LastObserved(LastObserved::Remembered)
+            } else {
+                Self::Live
+            };
+        }
+        let message = StandingMessage::of(card);
+        if !observed {
+            return Self::Unavailable { message };
+        }
+        Self::LastObserved(if card.saved_profile {
+            LastObserved::SavedRefreshPaused { message }
+        } else if remembered {
+            LastObserved::Remembered
+        } else {
+            LastObserved::ReadPaused { message }
+        })
+    }
+}
+
+impl StandingMessage {
+    fn of(card: &ProviderLimitsDto) -> Self {
+        Self {
             text: card.message.clone().unwrap_or_else(|| {
                 format!("{} limits are unavailable.", card.provider.display_name())
             }),
@@ -19,24 +39,16 @@ impl ReadStanding {
             } else {
                 MessageTone::Muted
             },
-        });
-        if !card.reading.has_observations() {
-            return message.map_or(Self::Live, |message| Self::Unavailable { message });
         }
-        let why = if card.saved_profile && message.is_some() {
-            LastObservedWhy::SavedRefreshPaused
-        } else if !card.current_account && !card.saved_profile {
-            LastObservedWhy::Remembered
-        } else {
-            match card.status {
-                LimitsStatus::Ok => return Self::Live,
-                LimitsStatus::Failed => LastObservedWhy::ReadFailed,
-                LimitsStatus::SignedOut
-                | LimitsStatus::Unauthenticated
-                | LimitsStatus::Unsupported => LastObservedWhy::SignedOut,
-            }
-        };
-        Self::LastObserved { why, message }
+    }
+}
+
+impl From<ProviderLimitsDto> for LimitsCardDto {
+    fn from(card: ProviderLimitsDto) -> Self {
+        Self {
+            standing: ReadStanding::of(&card),
+            card,
+        }
     }
 }
 

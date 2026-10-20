@@ -54,8 +54,6 @@ fn pinned_limits(agent: AgentId) -> Vec<ProviderLimitsDto> {
         ]),
         AgentId::Codex => serde_json::json!([
             {"provider":"codex","status":"failed","currentAccount":true,"message":"Codex did not answer.",
-             "standing":{"kind":"lastObserved","why":"readFailed",
-                 "message":{"text":"Codex did not answer.","tone":"error"}},
              "account":{"id":"acct-codex","label":"you@example.com"},"windows":[
                 {"id":"weekly","label":"Weekly","kind":"weekly","usedPercent":22.0,
                  "resetsAt":"2026-09-04T00:00:00Z","observedAt":"2026-09-01T09:30:00Z"}

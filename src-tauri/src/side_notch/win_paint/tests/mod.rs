@@ -1,7 +1,7 @@
 use super::*;
 use crate::dto::{
     GithubPrsDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto, ReadStanding, Reading,
+    ProviderLimitsDto, Reading,
 };
 use crate::side_notch::model::frame::{self, ProviderCell};
 use crate::side_notch::model::{Display, NotchProvider, NotchPullRequests, NotchSettings};
@@ -50,9 +50,8 @@ fn decided(
         .pop()
         .expect("the model decided a cell")
 }
-fn projected(mut card: ProviderLimitsDto) -> ProviderCell {
+fn projected(card: ProviderLimitsDto) -> ProviderCell {
     let provider = card.provider;
-    card.standing = ReadStanding::of(&card);
     let reading = NotchProvider::current(vec![card]).expect("a signed-in account");
     let only = NotchSettings {
         providers: vec![provider],

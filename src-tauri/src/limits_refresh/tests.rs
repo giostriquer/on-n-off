@@ -502,55 +502,6 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     );
 }
 
-#[test]
-fn every_card_of_a_finished_read_carries_its_standing_saved_profiles_included() {
-    use crate::dto::{LastObservedWhy, ReadStanding};
-    let cache = Cache::new(Source::LimitsClaude);
-    let observed = |mut card: ProviderLimitsDto| {
-        card.reading.credits = Some(crate::dto::LimitsCreditsDto {
-            balance: "1".into(),
-            unlimited: false,
-        });
-        card
-    };
-    let native = |_| {
-        vec![
-            observed(snapshot("signed-in", true, LimitsStatus::Failed)),
-            observed(snapshot("history", false, LimitsStatus::Ok)),
-        ]
-    };
-    let saved = |_, entries: &mut Vec<ProviderLimitsDto>| {
-        let mut card = observed(snapshot("saved", false, LimitsStatus::Failed));
-        card.saved_profile = true;
-        entries.push(card);
-    };
-    let entries = read_provider(
-        &cache,
-        Duration::from_secs(300),
-        false,
-        &native,
-        &|_| false,
-        &saved,
-        &|_| {},
-    )
-    .0;
-    let why = |why| ReadStanding::LastObserved { why, message: None };
-    assert_eq!(
-        entries
-            .iter()
-            .map(|entry| match &entry.standing {
-                ReadStanding::LastObserved { why: w, .. } => why(*w),
-                other => other.clone(),
-            })
-            .collect::<Vec<_>>(),
-        [
-            why(LastObservedWhy::ReadFailed),
-            why(LastObservedWhy::Remembered),
-            why(LastObservedWhy::SavedRefreshPaused)
-        ]
-    );
-}
-
 struct Lease<'a>(&'a std::cell::RefCell<Vec<&'static str>>);
 
 impl Drop for Lease<'_> {

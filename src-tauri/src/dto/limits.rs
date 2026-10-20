@@ -194,19 +194,12 @@ impl Reading {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ReadStanding {
-    #[default]
     Live,
-    LastObserved {
-        why: LastObservedWhy,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        message: Option<StandingMessage>,
-    },
-    Unavailable {
-        message: StandingMessage,
-    },
+    LastObserved(LastObserved),
+    Unavailable { message: StandingMessage },
 }
 
 impl ReadStanding {
@@ -215,13 +208,12 @@ impl ReadStanding {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum LastObservedWhy {
-    ReadFailed,
-    SignedOut,
-    SavedRefreshPaused,
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "why", rename_all = "camelCase")]
+pub enum LastObserved {
     Remembered,
+    ReadPaused { message: StandingMessage },
+    SavedRefreshPaused { message: StandingMessage },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -252,10 +244,16 @@ pub struct ProviderLimitsDto {
     pub saved_profile: bool,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub archived: bool,
-    #[serde(default, skip_serializing_if = "ReadStanding::is_live")]
-    pub standing: ReadStanding,
     #[serde(flatten)]
     pub reading: Reading,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct LimitsCardDto {
+    #[serde(flatten)]
+    pub card: ProviderLimitsDto,
+    #[serde(skip_serializing_if = "ReadStanding::is_live")]
+    pub standing: ReadStanding,
 }
 
 #[cfg(test)]
@@ -273,7 +271,6 @@ impl ProviderLimitsDto {
             current_account: true,
             saved_profile: false,
             archived: false,
-            standing: ReadStanding::Live,
             reading: Reading::default(),
         }
     }

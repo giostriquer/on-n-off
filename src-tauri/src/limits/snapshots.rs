@@ -7,9 +7,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::reading::{keep_remembered, newest, parse_observed_at};
-use crate::dto::{
-    AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, ReadStanding, Reading,
-};
+use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::provider_catalogue::OnLoad;
 use crate::usage::cache_io::atomic_write;
 
@@ -245,7 +243,6 @@ impl StoredSnapshot {
             current_account: false,
             saved_profile: false,
             archived: false,
-            standing: ReadStanding::Live,
             reading,
         }
     }

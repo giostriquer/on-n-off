@@ -172,7 +172,7 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
   });
 
   it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
-    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", currentAccount: true, windows: [] }], profiles: [], nativeLogin: null, now: AT_NOW })![0];
     const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
     expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
     expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
@@ -269,7 +269,7 @@ describe("Sign in again in place of the footer's action", () => {
 
   it("is offered once a saved Claude sign-in ended, read or not, signed out or never used", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})] })).toBe("signInAgain");
-    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut", message: null }], profiles: [claudeProfile({})] })).toBe("signInAgain");
+    expect(main({ entries: [{ ...okClaude({ windows: [] }), status: "signedOut" }], profiles: [claudeProfile({})] })).toBe("signInAgain");
     expect(main({ entries: [reading("claude", { currentAccount: false, savedProfile: true, status: "failed" })], profiles: [claudeProfile({ pendingActivation: true })] })).toBe("signInAgain");
   });
 

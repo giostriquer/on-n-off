@@ -559,6 +559,13 @@ final class NotchTests {
       "Codex, Codex limits are unavailable.")
     expectEqual(
       ProviderCell(
+        provider: .codex, reading: reading(windows: []),
+        notice: Notice(text: "Codex did not answer.", tone: .red),
+        paused: Notice(text: "Refresh paused.", tone: .amber)
+      ).spoken(name: "Codex", at: now),
+      "Codex, refresh paused, Codex did not answer.")
+    expectEqual(
+      ProviderCell(
         provider: .muse,
         reading: Reading(windows: [])
       ).spoken(name: "Muse", at: now),
