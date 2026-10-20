@@ -303,15 +303,29 @@ fn an_unread_saved_profile_carries_its_login_state_as_the_account_list_decides_i
         .iter()
         .map(|identity| (identity.clone(), identity.user_id.as_str()))
         .collect();
-    let roster =
-        roster_with_logins_for_test(AgentId::Claude, &profiles, &[], &[], &|user| match user {
-            "signed-in" => (None, Some(Parked::Refused)),
-            "ended" => (Some(NOW - DAY), Some(Parked::Refused)),
-            "ending" => (Some(NOW - DAY), None),
-            "refused" => (None, Some(Parked::Refused)),
-            "elsewhere" => (Some(NOW + 3 * DAY), Some(Parked::OtherAccount)),
-            _ => (None, None),
-        });
+    let roster = roster_with_logins_for_test(
+        std::path::Path::new("/Users/me/column-login-states"),
+        AgentId::Claude,
+        &profiles,
+        &[],
+        &[],
+        &|user| match user {
+            "ended" | "ending" => Some(NOW - DAY),
+            "elsewhere" => Some(NOW + 3 * DAY),
+            _ => None,
+        },
+    );
+    for (user, parked) in [
+        ("signed-in", Parked::Refused),
+        ("ended", Parked::Refused),
+        ("refused", Parked::Refused),
+        ("elsewhere", Parked::OtherAccount),
+    ] {
+        roster.park_for_test(
+            &identity(AgentId::Claude, user, "team").observation_key(),
+            parked,
+        );
+    }
     let mut current = reading(AgentId::Claude, &named[0].observation_key(), "signed-in");
     current.current_account = true;
     let listed = SignInDeadlines::from([(
@@ -353,11 +367,12 @@ fn the_signed_in_profile_is_dated_only_by_the_end_the_account_list_handed_over()
     const DAY: i64 = 86_400_000;
     let account = identity(AgentId::Claude, "renewed", "team");
     let roster = roster_with_logins_for_test(
+        std::path::Path::new("/Users/me/column-renewed"),
         AgentId::Claude,
         &[(account.clone(), "renewed@example.com")],
         &[],
         &[],
-        &|_| (Some(NOW - DAY), None),
+        &|_| Some(NOW - DAY),
     );
     let mut signed_in = scoped(&account, "renewed@example.com");
     signed_in.current_account = true;

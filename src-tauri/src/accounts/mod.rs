@@ -349,6 +349,7 @@ impl Accounts {
         let read_ends = std::cell::RefCell::new(Vec::new());
         let roster = Roster::of(
             &db,
+            home,
             provider,
             &crate::limits::archived(home, provider),
             chrono::Utc::now().timestamp_millis(),

@@ -88,7 +88,8 @@ impl Saved {
             .polled(force)
             .0
             .expect("the saved refresh lists its profiles");
-        let profile = roster.profiles()[0].in_column(
+        let profile = roster.in_column(
+            &roster.profiles()[0],
             &crate::accounts::SignInDeadlines::new(),
             None,
             chrono::Utc::now().timestamp_millis(),
@@ -161,6 +162,21 @@ impl Saved {
 
     fn state(&self) -> Value {
         login_states(&self.harness, self.provider).remove(0)
+    }
+
+    fn column_state(&self) -> Value {
+        let roster = crate::accounts::Roster::recorded(
+            &self.harness.vault(),
+            self.harness.path(),
+            self.provider,
+        );
+        let profile = roster.in_column(
+            &roster.profiles()[0],
+            &crate::accounts::SignInDeadlines::new(),
+            None,
+            chrono::Utc::now().timestamp_millis(),
+        );
+        serde_json::to_value(profile).unwrap()["loginState"].clone()
     }
 }
 
@@ -325,6 +341,14 @@ fn a_new_login_is_usable_again_and_the_saved_refresh_lists_each_state_it_reaches
         saved.answering(None);
         saved.sign_in_again("g2");
         assert_eq!(saved.state(), usable, "{provider:?} in {kept:?}");
+        assert_eq!(
+            saved.column_state(),
+            match kept {
+                Kept::Vault => usable.clone(),
+                Kept::Home => other.clone(),
+            },
+            "{provider:?} in {kept:?}: the column drops a verdict once the vault login is another, and keeps a home's until the poll reads it, since it takes no stamp"
+        );
         assert_eq!(
             saved.poll(false),
             usable,

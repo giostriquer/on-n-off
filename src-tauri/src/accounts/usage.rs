@@ -24,6 +24,32 @@ enum Generation {
     Home { id: String, stamp: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum LoginKey {
+    Vault(String),
+    Home(String),
+}
+
+impl Generation {
+    fn is_for(&self, login: &LoginKey) -> bool {
+        match (self, login) {
+            (Self::Vault(fingerprint), LoginKey::Vault(listed)) => fingerprint == listed,
+            (Self::Home { id, .. }, LoginKey::Home(listed)) => id == listed,
+            _ => false,
+        }
+    }
+}
+
+pub(super) fn login_key(profile: &Profile) -> Option<LoginKey> {
+    match (&profile.login, profile.home.as_deref()) {
+        (Some(login), _) => super::view(profile.identity.provider, login)
+            .ok()
+            .map(|view| LoginKey::Vault(view.fingerprint())),
+        (None, Some(id)) => Some(LoginKey::Home(id.to_owned())),
+        (None, None) => None,
+    }
+}
+
 #[derive(Clone)]
 struct Attempt {
     generation: Generation,
@@ -186,41 +212,48 @@ fn refresh_profiles(
     Some(super::Roster::recorded(&db, home, provider))
 }
 
-fn attempt_key(home: &Path, profile: &Profile) -> String {
-    format!("{}:{}", home.display(), profile.id)
+fn attempt_key(home: &Path, profile_id: &str) -> String {
+    format!("{}:{profile_id}", home.display())
+}
+
+fn parked_attempt(home: &Path, profile_id: &str) -> Option<(Generation, Parked)> {
+    let attempts = ATTEMPTS.get()?.lock().ok()?;
+    let attempt = attempts.get(&attempt_key(home, profile_id))?;
+    Some((attempt.generation.clone(), attempt.parked?))
 }
 
 pub(super) fn parked(home: &Path, profile: &Profile, kept: Option<&Kept<'_>>) -> Option<Parked> {
-    let attempt = ATTEMPTS
-        .get()?
-        .lock()
-        .ok()?
-        .get(&attempt_key(home, profile))?
-        .clone();
-    let parked = attempt.parked?;
+    let (parked_for, parked) = parked_attempt(home, &profile.id)?;
     match kept?.generation(profile) {
-        Ok(now) => (now == attempt.generation).then_some(parked),
+        Ok(now) => (now == parked_for).then_some(parked),
         Err(_) => Some(parked),
     }
 }
 
-pub(super) fn recorded_parked(home: &Path, profile: &Profile) -> Option<Parked> {
-    let attempt = ATTEMPTS
-        .get()?
-        .lock()
-        .ok()?
-        .get(&attempt_key(home, profile))?
-        .clone();
-    let parked = attempt.parked?;
-    let same = match (&attempt.generation, &profile.login, profile.home.as_deref()) {
-        (Generation::Vault(fingerprint), Some(login), _) => {
-            super::view(profile.identity.provider, login)
-                .is_ok_and(|view| view.fingerprint() == *fingerprint)
-        }
-        (Generation::Home { id, .. }, None, Some(home)) => id == home,
-        _ => false,
+pub(super) fn parked_for(home: &Path, profile_id: &str, login: &LoginKey) -> Option<Parked> {
+    let (parked_for, parked) = parked_attempt(home, profile_id)?;
+    parked_for.is_for(login).then_some(parked)
+}
+
+#[cfg(test)]
+pub(super) fn park_for_test(home: &Path, profile_id: &str, login: &LoginKey, parked: Parked) {
+    let generation = match login {
+        LoginKey::Vault(fingerprint) => Generation::Vault(fingerprint.clone()),
+        LoginKey::Home(id) => Generation::Home {
+            id: id.clone(),
+            stamp: String::new(),
+        },
     };
-    same.then_some(parked)
+    ATTEMPTS.get_or_init(Mutex::default).lock().unwrap().insert(
+        attempt_key(home, profile_id),
+        Attempt {
+            generation,
+            next: Instant::now(),
+            failures: 0,
+            error: None,
+            parked: Some(parked),
+        },
+    );
 }
 
 struct Held {
@@ -239,7 +272,7 @@ fn poll(
     open: &dyn Fn() -> Result<Store, String>,
     fetch: &dyn Fn(&Profile) -> FetchResult,
 ) -> Polled {
-    let key = attempt_key(home, profile);
+    let key = attempt_key(home, &profile.id);
     let attempts = ATTEMPTS.get_or_init(Mutex::default);
     let Ok(previous) = attempts.lock().map(|attempts| attempts.get(&key).cloned()) else {
         return None;

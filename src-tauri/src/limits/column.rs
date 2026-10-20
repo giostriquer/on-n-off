@@ -28,7 +28,7 @@ pub(crate) fn column(
             ColumnEntryDto {
                 profile: id
                     .and_then(|id| roster.profile(id))
-                    .map(|profile| profile.in_column(ends, signed_in, now_ms)),
+                    .map(|profile| roster.in_column(profile, ends, signed_in, now_ms)),
                 category: id.and_then(|id| roster.category(id)).map(str::to_owned),
                 replaced: cards
                     .iter()
@@ -87,7 +87,7 @@ fn unread(
             archived: profile.archived(),
             reading: Reading::default(),
         },
-        profile: Some(profile.in_column(ends, None, now_ms)),
+        profile: Some(roster.in_column(profile, ends, None, now_ms)),
         category: roster.category(id).map(str::to_owned),
         replaced: Vec::new(),
         unread: true,

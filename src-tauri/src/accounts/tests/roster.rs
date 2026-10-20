@@ -15,9 +15,14 @@ fn answered(harness: &Harness, provider: AgentId) -> Option<Roster> {
         })
 }
 
-fn in_column(listed: &crate::accounts::Listed) -> serde_json::Value {
-    serde_json::to_value(listed.in_column(&crate::accounts::SignInDeadlines::new(), None, 0))
-        .unwrap()
+fn in_column(roster: &Roster, listed: &crate::accounts::Listed) -> serde_json::Value {
+    serde_json::to_value(roster.in_column(
+        listed,
+        &crate::accounts::SignInDeadlines::new(),
+        None,
+        0,
+    ))
+    .unwrap()
 }
 
 #[test]
@@ -60,7 +65,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
     let read: Vec<_> = roster
         .profiles()
         .iter()
-        .map(|p| serde_json::to_value(p.in_column(&ends, Some(&signed_in), now)).unwrap())
+        .map(|p| serde_json::to_value(roster.in_column(p, &ends, Some(&signed_in), now)).unwrap())
         .collect();
     let shown = serde_json::to_value(&listed).unwrap()["profiles"].clone();
     assert_eq!(serde_json::Value::from(read), shown);
@@ -72,7 +77,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
         roster
             .profiles()
             .iter()
-            .map(|p| in_column(p)["active"].clone())
+            .map(|p| in_column(&roster, p)["active"].clone())
             .collect::<Vec<_>>(),
         [false, false],
         "who is signed in is the native read's, decided as the column is built"
@@ -197,7 +202,8 @@ fn the_saved_refresh_dates_a_vault_login_by_its_recorded_end_or_the_ends_the_acc
     let in_column = |ends: &crate::accounts::SignInDeadlines| {
         [&recorded, &unrecorded].map(|identity| {
             let profile = roster.profile(&identity.observation_key()).unwrap();
-            serde_json::to_value(profile.in_column(ends, None, 0)).unwrap()["signInEndsAt"].clone()
+            serde_json::to_value(roster.in_column(profile, ends, None, 0)).unwrap()["signInEndsAt"]
+                .clone()
         })
     };
 

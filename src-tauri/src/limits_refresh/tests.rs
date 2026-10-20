@@ -692,13 +692,18 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
             .push(if force { "saved, forced" } else { "saved" });
         entries.push(snapshot(&saved_id, false, LimitsStatus::Ok));
         verdict.get().map(|verdict| {
-            crate::accounts::roster_with_logins_for_test(
+            let roster = crate::accounts::roster_with_logins_for_test(
+                std::path::Path::new("/Users/me/replacing-read"),
                 AgentId::Claude,
                 &[(parked.clone(), "saved@example.com")],
                 &[],
                 &[],
-                &|_| (None, verdict),
-            )
+                &|_| None,
+            );
+            if let Some(verdict) = verdict {
+                roster.park_for_test(&saved_id, verdict);
+            }
+            roster
         })
     };
     let flag = |entries: &mut [ProviderLimitsDto]| {

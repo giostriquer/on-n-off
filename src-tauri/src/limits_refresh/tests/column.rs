@@ -349,3 +349,33 @@ fn archiving_an_unread_saved_profile_reaches_the_column_through_the_roster() {
         .iter()
         .any(|entry| entry.unread && entry.card.archived));
 }
+
+#[test]
+fn a_roster_reread_racing_the_saved_poll_keeps_the_verdict_the_poll_parked() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    let away = saved("away").observation_key();
+    let roster = || {
+        crate::accounts::roster_with_logins_for_test(
+            std::path::Path::new("/Users/me/racing-reread"),
+            AgentId::Codex,
+            &[(saved("away"), "away@example.com")],
+            &[],
+            &[],
+            &|_| None,
+        )
+    };
+    read(&cache, "me", false, &|_, _| {
+        reread_roster(&cache, || Some(roster()));
+        let polled = roster();
+        polled.park_for_test(&away, crate::limits::outcome::Parked::Refused);
+        Some(polled)
+    });
+
+    let column = served_column(&cache);
+    let state = column
+        .iter()
+        .find(|entry| entry.card.account.as_ref().is_some_and(|a| a.id == away))
+        .and_then(|entry| entry.profile.as_ref())
+        .map(|profile| serde_json::to_value(profile).unwrap()["loginState"].clone());
+    assert_eq!(state, Some(serde_json::json!({"state": "refused"})));
+}
