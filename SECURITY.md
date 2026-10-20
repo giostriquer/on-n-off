@@ -47,9 +47,11 @@ Out of scope:
 
 ## Verifying a download
 
-Each release lists SHA-256 checksums in `SHA256SUMS.txt` and carries GitHub artifact
-attestations:
+Each release carries GitHub artifact attestations:
 
 ```sh
 gh attestation verify <downloaded file> --repo giostriquer/on-n-off
 ```
+
+It also lists SHA-256 checksums in `SHA256SUMS.txt`. Compare a file's checksum
+(`shasum -a 256 <file>` on macOS, `Get-FileHash <file>` in PowerShell) with its line there.

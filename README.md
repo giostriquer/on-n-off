@@ -18,7 +18,7 @@ app for Windows and macOS.
 
 Support varies by provider; Cursor currently supports browsing installed items.
 Codex account switching requires its running clients to be closed; Claude Code can stay open.
-Browser-connected subscription renewal details are available for Codex on macOS.
+Codex cards also show how long the subscription is paid for and whether it renews.
 
 ## Install
 
@@ -80,8 +80,8 @@ configuration, transcripts and saved logins stay on your machine. The app itself
 - `github.com`, for the update feed on GitHub Releases.
 
 Claude limits come from Claude Code's own usage report: on-n-off sends nothing to Anthropic itself.
-The agent CLIs it starts (`claude`, `codex`, `muse`, `gh`) make their own requests as usual,
-including installs from sources you enter.
+The tools it starts (`claude`, `codex`, `agy`, `muse`, `gh` and `npx`) make their own requests as
+usual, including installs from sources you enter.
 
 ## Contributing
 
