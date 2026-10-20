@@ -220,7 +220,7 @@ fn quota_window(id: String, scope: Scope, entry: &RateLimitWindow) -> QuotaWindo
         used_percent: entry.used_percent,
         reset: reset_at_epoch(entry.resets_at),
         role: None,
-        starts_on_first_message: false,
+        cycle_starts_on_first_message: false,
     }
 }
 

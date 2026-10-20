@@ -165,11 +165,11 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
 }
 
 #[test]
-fn a_failed_read_that_reported_its_plan_keeps_that_plans_capacity_never_the_remembered_one() {
+fn a_kept_plan_always_reads_as_its_own_label_and_capacity() {
     let remembered = Reading {
         plan: Some("pro".to_string()),
-        plan_label: Some("Pro ×20".to_string()),
-        plan_capacity: Some(20),
+        plan_label: Some("Stale label".to_string()),
+        plan_capacity: Some(99),
         windows: vec![observed(
             "weekly",
             "Weekly · all models",
@@ -180,18 +180,38 @@ fn a_failed_read_that_reported_its_plan_keeps_that_plans_capacity_never_the_reme
         )],
         ..Reading::default()
     };
-    let own = Reading {
-        plan: Some("plus".to_string()),
-        plan_label: Some("Plus".to_string()),
-        ..Reading::default()
+    let failed = |reading: Reading| ProviderLimitsDto {
+        status: LimitsStatus::Failed,
+        ..ProviderLimitsDto::for_test(crate::dto::AgentId::Codex, "acct-1").with_reading(reading)
+    };
+    let plan = |card: &ProviderLimitsDto| {
+        (
+            card.reading.plan.clone(),
+            card.reading.plan_label.clone(),
+            card.reading.plan_capacity,
+        )
     };
 
-    let merged = own.keeping(remembered, Outcome::Failed);
-
-    assert_eq!(merged.windows.len(), 1, "the remembered reading stands in");
+    let mut unreported = failed(Reading::default());
+    keep_remembered(&mut unreported, remembered.clone());
     assert_eq!(
-        (merged.plan, merged.plan_label, merged.plan_capacity),
-        (Some("plus".to_string()), Some("Plus".to_string()), None)
+        unreported.reading.windows.len(),
+        1,
+        "the remembered reading stands in"
+    );
+    assert_eq!(
+        plan(&unreported),
+        (Some("pro".into()), Some("Pro ×20".into()), Some(20))
+    );
+
+    let mut reported = failed(Reading {
+        plan: Some("plus".to_string()),
+        ..Reading::default()
+    });
+    keep_remembered(&mut reported, remembered);
+    assert_eq!(
+        plan(&reported),
+        (Some("plus".into()), Some("Plus".into()), None)
     );
 }
 
@@ -213,8 +233,6 @@ fn a_count_lapses_at_its_expiry_itself() {
 fn every_field(tag: &str, used: f64) -> Value {
     json!({
         "plan": tag,
-        "planLabel": tag,
-        "planCapacity": used as u32,
         "windows": [{"id": tag, "label": tag, "kind": "weekly", "usedPercent": used,
                      "observedAt": "2026-08-17T10:00:00.000Z"},
                     {"id": format!("{tag}-session"), "label": tag, "kind": "session",
@@ -282,19 +300,12 @@ fn the_remember_policy_field_by_field() {
     ];
     let (own, remembered) = (every_field("own", 1.0), every_field("remembered", 2.0));
     for (field, cells) in table {
-        let described: &[&str] = if field == "plan" {
-            &["plan", "planLabel", "planCapacity"]
-        } else {
-            &[field]
-        };
         for (outcome, cell) in outcomes.into_iter().zip(cells) {
             let mut unreported = own.clone();
             if field == "windows" {
                 unreported[field] = json!([own[field][1]]);
             } else {
-                for key in described {
-                    unreported.as_object_mut().unwrap().remove(*key);
-                }
+                unreported.as_object_mut().unwrap().remove(field);
             }
             let kept = serde_json::to_value(
                 reading(unreported).keeping(reading(remembered.clone()), outcome),
@@ -318,14 +329,6 @@ fn the_remember_policy_field_by_field() {
                 expected,
                 "{field} not reported, {outcome:?}"
             );
-            for key in &described[1..] {
-                let expected = matches!(cell, Remembered).then(|| remembered[*key].clone());
-                assert_eq!(
-                    kept.get(*key).cloned(),
-                    expected,
-                    "{key} with {field} not reported, {outcome:?}"
-                );
-            }
 
             let kept = serde_json::to_value(
                 reading(own.clone()).keeping(reading(remembered.clone()), outcome),
@@ -341,9 +344,6 @@ fn the_remember_policy_field_by_field() {
                 _ => own[field].clone(),
             };
             assert_eq!(kept[field], expected, "{field} reported, {outcome:?}");
-            for key in &described[1..] {
-                assert_eq!(kept[*key], own[*key], "{key} reported, {outcome:?}");
-            }
         }
     }
 }

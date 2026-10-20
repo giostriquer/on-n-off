@@ -197,7 +197,7 @@ provider's own client:
   `limits_monitor` is the loop that does the I/O around the rule (`poll_once`, over a small `Io`
   trait its tests fake). It polls while any alert is on, reading only the providers that bank
   resets (`WITH_BANKED_RESETS`, Codex) when limit notifications are off (`watched_providers`) and
-  reading Codex afresh when a spend is due. It saves
+  reading that provider (`BANKED_RESETS_PROVIDER`) afresh when a spend is due. It saves
   its state, in its own file, before it tells anyone or schedules anything, and rolls the state
   back when the save fails, so the offer is made again. It spends through the same
   `limits_refresh::consume_codex_reset_credit` a click uses and says what came of it either way.
@@ -226,9 +226,12 @@ a provider. A reading's plan is the reader's; its label and the capacity the car
 are `plan::describe`'s (`limits/plan.rs`), worked out where the window rules apply and never filed.
 Shared Limits code asks a provider's Limits facts (`AgentId::limits_facts`, provider catalogue
 below) rather than naming it: a saved profile's legacy reading (`SnapshotStore::remember`), what a
-remembered file loses as it loads (`StoredSnapshot::into_dto`), whether a read asked the backend
-figures (`limits/reading.rs`), whether session rollouts are merged (`limits::read_limits_in`) and
-whose banked resets the monitor and the alert follow.
+remembered file changes as it loads (`StoredSnapshot::into_dto`), whether a read asked about credits
+spent or the subscription term (`limits/reading.rs`), whether session rollouts are merged
+(`limits::read_limits_in`) and whose banked resets the monitor and the alert follow
+(`BANKED_RESETS_PROVIDER`, the one provider a compile-time check allows). The plan's label and
+capacity hold by construction: `keep_remembered` drops whatever either reading carried and works
+them out again from the plan it kept.
 
 Every window that leaves `limits/` is within 0–100, which the notch helper
 needs, since it refuses a whole message that holds one meter outside it. Three clamps share that
@@ -578,7 +581,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
-| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
+| Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |

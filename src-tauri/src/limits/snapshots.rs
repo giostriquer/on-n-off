@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use super::reading::{keep_remembered, newest, parse_observed_at};
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
-use crate::provider_catalogue::LoadCleanup;
+use crate::provider_catalogue::OnLoad;
 use crate::usage::cache_io::atomic_write;
 
 mod archive;
@@ -226,10 +226,14 @@ impl StoredSnapshot {
         let mut reading = self.reading.known_at(now);
         super::window::keep_in_range(&mut reading);
         super::plan::describe_reading(self.provider, &mut reading);
-        match self.provider.limits_facts().load_cleanup {
-            Some(LoadCleanup::HiddenWindows) => super::codex::drop_hidden(&mut reading.windows),
-            Some(LoadCleanup::ResetCredits) => reading.reset_credits = None,
-            None => {}
+        for step in self.provider.limits_facts().on_load {
+            match step {
+                OnLoad::DropHiddenWindows => super::codex::drop_hidden(&mut reading.windows),
+                OnLoad::DropResetCredits => reading.reset_credits = None,
+                OnLoad::MarkFirstMessageSessions => {
+                    super::window::mark_first_message_sessions(&mut reading.windows);
+                }
+            }
         }
         ProviderLimitsDto {
             provider: self.provider,

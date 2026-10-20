@@ -1,14 +1,9 @@
 import { describe, expect, it } from "vitest";
 import rustCatalogue from "../../../../src-tauri/src/provider_catalogue/fixtures/providers.json";
 import { LIMITS_PROVIDERS } from "$lib/providers";
-import { LIMITS_FEATURES, type LimitsFeatures } from "./limitFeatures";
+import { LIMITS_FEATURES, LIMITS_IMPLEMENTATIONS } from "./limitFeatures";
 
-const IMPLEMENTED: { readonly [Feature in keyof LimitsFeatures]: readonly NonNullable<LimitsFeatures[Feature]>[] } = {
-  signInDeadline: ["claude"],
-  subscriptionTerm: ["codex"],
-  bankedResets: ["codex"],
-  paidResetOffer: ["codex"],
-};
+const FEATURES = Object.keys(LIMITS_IMPLEMENTATIONS) as (keyof typeof LIMITS_IMPLEMENTATIONS)[];
 
 describe("the Limits features Rust keeps", () => {
   it("are the catalogue's rows, one for each Limits provider", () => {
@@ -18,10 +13,12 @@ describe("the Limits features Rust keeps", () => {
 
   it("name only an implementation the card model has, or none", () => {
     for (const provider of LIMITS_PROVIDERS) {
-      expect(Object.keys(LIMITS_FEATURES[provider]).sort(), provider).toEqual(Object.keys(IMPLEMENTED).sort());
-      for (const feature of Object.keys(IMPLEMENTED) as (keyof LimitsFeatures)[]) {
-        const named = LIMITS_FEATURES[provider][feature];
-        expect(named === null || (IMPLEMENTED[feature] as readonly string[]).includes(named), `${provider} ${feature}: ${named}`).toBe(true);
+      const row: Record<string, string | null> = rustCatalogue.limitsFeatures[provider];
+      expect(Object.keys(row).sort(), provider).toEqual([...FEATURES].sort());
+      for (const feature of FEATURES) {
+        const named = row[feature];
+        const known: readonly string[] = LIMITS_IMPLEMENTATIONS[feature];
+        expect(named === null || known.includes(named), `${provider} ${feature}: ${named}`).toBe(true);
       }
     }
   });

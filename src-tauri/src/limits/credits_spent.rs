@@ -6,17 +6,20 @@ use super::backend_memo::PerAccount;
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
 use crate::dto::{LimitsCreditsSpentDto, ProviderLimitsDto};
+use crate::provider_catalogue::CreditsSpent;
 
 pub(crate) const CODEX_CREDIT_USAGE_URL: &str =
     "https://chatgpt.com/backend-api/wham/usage/daily-workspace-user-token-usage-breakdown";
 
 pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
-    card.provider.limits_facts().backend_figures
-        && card
-            .reading
-            .plan
-            .as_deref()
-            .is_some_and(super::plan::is_codex_workspace_plan)
+    matches!(
+        card.provider.limits_facts().credits_spent,
+        Some(CreditsSpent::Codex)
+    ) && card
+        .reading
+        .plan
+        .as_deref()
+        .is_some_and(super::plan::is_codex_workspace_plan)
 }
 
 pub(crate) fn query_url(base: &str, today: NaiveDate) -> String {

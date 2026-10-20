@@ -1,7 +1,7 @@
 use super::model::frame::{CellData, Notice, PrCell, RailData};
 use super::model::{workspace_share_wording, InnerRing, NotchProvider, NotchSnapshot, ShowMode};
 use super::sessions::LiveSession;
-use crate::dto::{AgentId, LimitWindowDto};
+use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind};
 use serde::{Deserialize, Serialize};
 
 pub const MAX_MESSAGE: usize = 262_144;
@@ -70,7 +70,7 @@ enum MessageCell<'a> {
 struct MessageProvider<'a> {
     provider: AgentId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    reading: Option<NativeReading>,
+    reading: Option<NativeReading<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     notice: Option<&'a Notice>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -80,8 +80,8 @@ struct MessageProvider<'a> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct NativeReading {
-    windows: Vec<LimitWindowDto>,
+struct NativeReading<'a> {
+    windows: Vec<NativeWindow<'a>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     headline_window_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -100,10 +100,38 @@ struct NativeWorkspaceCredits {
     renewed: String,
 }
 
-impl From<&NotchProvider> for NativeReading {
-    fn from(reading: &NotchProvider) -> Self {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NativeWindow<'a> {
+    id: &'a str,
+    label: &'a str,
+    kind: LimitWindowKind,
+    used_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resets_at: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    window_seconds: Option<u64>,
+    observed_at: &'a str,
+}
+
+impl<'a> From<&'a LimitWindowDto> for NativeWindow<'a> {
+    fn from(window: &'a LimitWindowDto) -> Self {
         Self {
-            windows: reading.windows.iter().map(helper_window).collect(),
+            id: &window.id,
+            label: &window.label,
+            kind: window.kind,
+            used_percent: window.used_percent,
+            resets_at: window.resets_at.as_deref(),
+            window_seconds: window.window_seconds,
+            observed_at: &window.observed_at,
+        }
+    }
+}
+
+impl<'a> From<&'a NotchProvider> for NativeReading<'a> {
+    fn from(reading: &'a NotchProvider) -> Self {
+        Self {
+            windows: reading.windows.iter().map(NativeWindow::from).collect(),
             headline_window_id: reading.headline_window_id().map(str::to_owned),
             inner_ring: reading.inner_ring().cloned(),
             workspace_credits: reading.workspace_credits.as_ref().map(|share| {
@@ -116,14 +144,6 @@ impl From<&NotchProvider> for NativeReading {
                 }
             }),
         }
-    }
-}
-
-fn helper_window(window: &LimitWindowDto) -> LimitWindowDto {
-    LimitWindowDto {
-        role: None,
-        starts_on_first_message: false,
-        ..window.clone()
     }
 }
 

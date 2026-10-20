@@ -64,10 +64,11 @@ source carries no comments (see [Code comments](#code-comments)).
   What a surface does with a window beyond its kind (the notch's inner ring, a row that starts
   with the first message) is a field the reader sets on the window, never a label or provider
   match in the surface.
-- A provider fact a Limits module asks (a legacy reading, a load clean-up, backend figures, extra
-  observations, banked resets, a card feature): its `LimitsFacts` row in the provider catalogue,
-  through `AgentId::limits_facts`, never a `match` on `AgentId` in shared Limits code. A plan's
-  label and capacity: `limits/plan.rs`, never the UI.
+- A provider fact a Limits module asks (a legacy reading, a load step, credits spent, session
+  rollouts, banked resets, a card feature): its `LimitsFacts` row in the provider catalogue,
+  through `AgentId::limits_facts`, never a `match` on `AgentId` in shared Limits code. A fact that
+  selects an implementation is a closed enum naming the ones that exist, and the code that runs it
+  matches on that enum. A plan's label and capacity: `limits/plan.rs`, never the UI.
 - How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
   (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
   keeps its own failure count and passes its own interval; it never restates the formula. The UI's
@@ -83,9 +84,11 @@ source carries no comments (see [Code comments](#code-comments)).
   `useAccountCardActions`, which has none without an account manager. The card model reads each
   per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: it is the catalogue fixture's
-  `limitsFeatures`, which Rust writes from each provider's `LimitsFacts`, so a new provider has a row
-  once Rust gives it one, `limitFeatures.test.ts` fails when a row names an implementation the card
-  model lacks, and reusing a feature means reusing that implementation. A new header tag kind (`cardTags.ts`)
+  `limitsFeatures`, which Rust writes from each provider's `LimitsFacts`, read through
+  `LIMITS_IMPLEMENTATIONS`, the one list of the implementations the card model has, which also
+  types each feature. A new provider has a row once Rust gives it one, `limitFeatures.test.ts`
+  fails when a row names an implementation that list lacks, and reusing a feature means reusing
+  that implementation. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
   order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.

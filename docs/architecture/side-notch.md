@@ -106,8 +106,9 @@ the current account's card:
 - **The inner ring**: the window its reader gave the inner-ring role (`role: "innerRing"`,
   Claude's Fable week), by id, or else a Codex business member's workspace-credit share, chosen the
   same way. The model asks the role, never the provider or the label. The helper is told the ring
-  by id, so the windows its message carries leave the role and the first-message flag out, and the
-  protocol's messages are unchanged. The share's meter is the
+  by id, and each window its message carries is a `NativeWindow` (`protocol.rs`) borrowing only the
+  seven fields protocol 7 has always sent, so no later window field reaches the helper by
+  accident. The share's meter is the
   limits reader's `used_percent`; its amounts are worded once in `model.rs`
   (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
   reset.

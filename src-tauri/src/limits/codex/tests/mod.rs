@@ -50,10 +50,29 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
             used_percent: 14.0,
             reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0).map(ResetInstant::from),
             role: None,
-            starts_on_first_message: false,
+            cycle_starts_on_first_message: false,
         }]
     );
     assert_eq!(parse_codex(&payload).credits, None);
+}
+
+#[test]
+fn a_codex_session_never_says_it_starts_with_the_first_message_and_its_files_are_not_marked() {
+    let payload: RateLimitsResponse = serde_json::from_value(json!({
+        "rateLimits": {"limitId": "codex",
+            "primary": {"usedPercent": 0, "windowDurationMins": 300},
+            "secondary": {"usedPercent": 0, "windowDurationMins": 10080}}
+    }))
+    .unwrap();
+
+    let windows = parse_codex(&payload).windows;
+
+    assert_eq!(windows.len(), 2);
+    assert!(windows.iter().all(|window| !window.starts_on_first_message));
+    assert!(!AgentId::Codex
+        .limits_facts()
+        .on_load
+        .contains(&crate::provider_catalogue::OnLoad::MarkFirstMessageSessions));
 }
 
 fn windows_of(payload: &RateLimitsResponse) -> Vec<QuotaWindow> {
@@ -167,7 +186,7 @@ fn a_bucket_without_a_name_or_a_length_is_an_extra_limit_of_unknown_length() {
             used_percent: 3.0,
             reset: None,
             role: None,
-            starts_on_first_message: false,
+            cycle_starts_on_first_message: false,
         }]
     );
 }
@@ -226,7 +245,7 @@ fn uses_the_single_bucket_fallback_and_maps_credits() {
             used_percent: 140.0,
             reset: None,
             role: None,
-            starts_on_first_message: false,
+            cycle_starts_on_first_message: false,
         }]
     );
     assert_eq!(

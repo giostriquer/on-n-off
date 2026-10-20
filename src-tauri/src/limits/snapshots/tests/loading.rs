@@ -1,5 +1,5 @@
 use super::*;
-use crate::provider_catalogue::LoadCleanup;
+use crate::provider_catalogue::OnLoad;
 
 #[test]
 fn obsolete_v1_snapshots_are_ignored_without_rewriting_them() {
@@ -174,7 +174,10 @@ fn a_remembered_reset_count_is_dropped_as_the_snapshot_loads_exactly_where_the_p
         let mut loaded = store.load(provider);
         loaded.sort_by_key(|card| card.account.as_ref().map(|account| account.id.clone()));
 
-        let dropped = provider.limits_facts().load_cleanup == Some(LoadCleanup::ResetCredits);
+        let dropped = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::DropResetCredits);
         let ids: Vec<&str> = loaded
             .iter()
             .filter_map(|card| card.account.as_ref().map(|account| account.id.as_str()))
@@ -344,7 +347,10 @@ fn only_a_provider_whose_files_drop_hidden_windows_loses_windows_named_like_them
         card.reading.windows.push(named_like_hidden);
         store.save(&card).unwrap();
 
-        let hides = provider.limits_facts().load_cleanup == Some(LoadCleanup::HiddenWindows);
+        let hides = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::DropHiddenWindows);
         assert_eq!(
             store.load(provider)[0].reading.windows.len(),
             if hides { 1 } else { 2 },
@@ -388,4 +394,63 @@ fn a_remembered_file_out_of_range_loads_in_range_and_stays_as_written() {
         Some(100.0)
     );
     assert!(fs::read_to_string(&path).unwrap().contains("140"));
+}
+
+#[test]
+fn a_file_written_before_the_first_message_flag_marks_an_idle_session_where_its_provider_says() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let home = scratch_dir(&format!("limits-snap-first-message-{}", provider.key()));
+        let store = SnapshotStore::for_home(&home);
+        let window = |id: &str, kind: &str, used: f64, resets_at: Option<&str>| {
+            let mut window = serde_json::json!({"id": id, "label": id, "kind": kind,
+                "usedPercent": used, "observedAt": "2026-08-17T10:00:00.000Z"});
+            if let Some(at) = resets_at {
+                window["resetsAt"] = serde_json::json!(at);
+            }
+            window
+        };
+        let old_shape = serde_json::json!({
+            "schemaVersion": 2, "provider": provider,
+            "account": {"id": "acct-1", "label": "a@x"},
+            "windows": [
+                window("weekly", "weekly", 0.0, None),
+                window("idle", "session", 0.0, None),
+                window("used", "session", 4.0, None),
+                window("started", "session", 0.0, Some("2026-08-17T15:00:00Z")),
+                window("model", "model", 0.0, None)
+            ],
+            "observedAt": "2026-08-17T10:00:00.000Z"
+        });
+        fs::create_dir_all(store.dir()).unwrap();
+        let path = store.dir().join(file_name(provider, "acct-1"));
+        fs::write(&path, old_shape.to_string()).unwrap();
+
+        let loaded = store.load(provider).remove(0);
+
+        let marks = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::MarkFirstMessageSessions);
+        let flagged: Vec<(&str, bool)> = loaded
+            .reading
+            .windows
+            .iter()
+            .map(|window| (window.id.as_str(), window.starts_on_first_message))
+            .collect();
+        assert_eq!(
+            flagged,
+            [
+                ("weekly", false),
+                ("idle", marks),
+                ("used", false),
+                ("started", false),
+                ("model", false)
+            ],
+            "{provider:?}"
+        );
+        assert!(!fs::read_to_string(&path)
+            .unwrap()
+            .contains("startsOnFirstMessage"));
+        let _ = fs::remove_dir_all(&home);
+    }
 }

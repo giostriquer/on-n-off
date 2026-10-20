@@ -35,6 +35,7 @@ use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 use crate::http::HttpError;
 use crate::paths;
+use crate::provider_catalogue::SessionRollouts;
 use pipeline::finish;
 use snapshots::SnapshotStore;
 
@@ -163,11 +164,14 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<Prov
     let current = read(home, force);
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current);
-    if agent.limits_facts().session_rollouts {
-        let before = accounts.clone();
-        if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
-            store.save_changed(&before, &accounts);
+    match agent.limits_facts().session_rollouts {
+        Some(SessionRollouts::Codex) => {
+            let before = accounts.clone();
+            if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
+                store.save_changed(&before, &accounts);
+            }
         }
+        None => {}
     }
     accounts
 }

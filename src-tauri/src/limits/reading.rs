@@ -31,6 +31,7 @@ impl Outcome {
 pub(crate) fn keep_remembered(card: &mut ProviderLimitsDto, remembered: Reading) {
     let outcome = Outcome::of(card);
     card.reading = std::mem::take(&mut card.reading).keeping(remembered, outcome);
+    super::plan::describe_reading(card.provider, &mut card.reading);
 }
 
 impl Reading {
@@ -50,8 +51,8 @@ impl Reading {
         };
         let Self {
             plan,
-            plan_label,
-            plan_capacity,
+            plan_label: _,
+            plan_capacity: _,
             windows,
             credits,
             workspace_credits,
@@ -62,8 +63,8 @@ impl Reading {
         } = self;
         let Self {
             plan: remembered_plan,
-            plan_label: remembered_plan_label,
-            plan_capacity: remembered_plan_capacity,
+            plan_label: _,
+            plan_capacity: _,
             windows: remembered_windows,
             credits: remembered_credits,
             workspace_credits: remembered_share,
@@ -72,11 +73,10 @@ impl Reading {
             reset_credits: remembered_resets,
             reset_offer: _,
         } = remembered;
-        let keeps_plan = failed && plan.is_none();
         Self {
             plan: kept(plan, remembered_plan, failed),
-            plan_label: kept(plan_label, remembered_plan_label, keeps_plan),
-            plan_capacity: kept(plan_capacity, remembered_plan_capacity, keeps_plan),
+            plan_label: None,
+            plan_capacity: None,
             windows: if failed {
                 merged(windows, remembered_windows)
             } else {

@@ -23,7 +23,7 @@ fn fact(scope: Scope, length: Option<Duration>, used_percent: f64) -> QuotaWindo
         used_percent,
         reset: None,
         role: None,
-        starts_on_first_message: false,
+        cycle_starts_on_first_message: false,
     }
 }
 
@@ -190,7 +190,7 @@ fn an_idle_window_is_unused_has_no_reset_counts_for_all_models_and_starts_with_t
 #[test]
 fn a_window_says_it_starts_with_the_first_message_only_while_it_has_not_started() {
     let starting = || QuotaWindow {
-        starts_on_first_message: true,
+        cycle_starts_on_first_message: true,
         ..fact(Scope::AllModels, Some(FIVE_HOURS), 0.0)
     };
     assert!(starting().into_dto().starts_on_first_message);
