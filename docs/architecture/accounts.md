@@ -538,11 +538,13 @@ The saved profiles and categories are the provider's roster (`Roster`, `accounts
 which the Limits cache owns under a lock of its own and two writers replace
 ([shared-reads.md](shared-reads.md#the-mechanism)). The saved refresh the read already makes
 (`accounts::usage::refresh_and_list`) lists it from the vault it loaded to poll, with no second
-decrypt; one that did not load the vault (the native login could not be read) keeps the previous
-roster. Every vault writer outside an in-app account change asks `Notify::roster`, which rereads it
-(`limits_refresh::roster_changed`): automatic remembering when it saves a login or is turned on,
-unlock, a category edit or forget, and archive and unarchive. An in-app account change already reads
-the provider again, saved accounts included. One builder lists a profile for the account list and
+decrypt; one that could not poll because the provider's own login could not be read (a malformed
+config, a denied Keychain probe, a login that names no account) rereads it with the session's key
+(`Roster::read`), so the saved profiles stay listed. Every vault write rereads it too
+(`limits_refresh::roster_changed`): an account change (`account_changed`, before the provider is
+read again), automatic remembering when it saves a login or is turned on, unlock, a category edit or
+forget (all through `Notify::roster`), archive and unarchive, and the account list once it has read
+the vault, which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
 the roster alike (`Roster::of`, given the sign-in-end lookup; the roster's is none). Who is signed
 in is not part of the roster: the column marks active the profile of the account the latest native
 read names, and none when that read names nobody (not installed, signed out), so a switch made in

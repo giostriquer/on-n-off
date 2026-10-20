@@ -14,7 +14,7 @@ function email(label: string | null | undefined): string | null {
   return label?.trim().replace(/[A-Z]/g, letter => letter.toLowerCase()) || null;
 }
 
-function supersedes(scoped: ProviderLimits, legacy: ProviderLimits): boolean {
+export function supersedes(scoped: ProviderLimits, legacy: ProviderLimits): boolean {
   const [now, before] = [scoped.account, legacy.account];
   return !!now && !!before && !legacy.currentAccount && scoped.provider === legacy.provider && scoped.status === "ok"
     && now.id.startsWith(PROFILE_KEY) && !before.id.startsWith(PROFILE_KEY) && now.legacyId === before.id

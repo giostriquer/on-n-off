@@ -288,6 +288,7 @@ fn sign_in_ends_at(
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     let listed = Accounts::live()?.list(provider)?;
     crate::limits_refresh::sign_in_deadlines_listed(provider, listed.sign_in_deadlines());
+    crate::limits_refresh::roster_changed(provider);
     Ok(listed)
 }
 pub fn unlock() -> Result<(), String> {

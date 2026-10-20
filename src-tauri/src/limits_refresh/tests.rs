@@ -602,25 +602,40 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
         );
         rereads.set(rereads.get() + 1);
     };
+    let relists = std::cell::Cell::new(0);
+    let relist = || {
+        assert!(cache.read.try_lock().is_ok(), "relisted outside the lock");
+        relists.set(relists.get() + 1);
+    };
 
-    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(true), reread).unwrap();
+    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(true), reread, relist).unwrap();
     assert_eq!(
         read_revision::take_announced(),
         [Source::LimitsCodex, Source::Accounts]
     );
-    assert_eq!(rereads.get(), 0, "archiving reads nothing");
+    assert_eq!(rereads.get(), 0, "archiving reads no provider");
+    assert_eq!(
+        relists.get(),
+        1,
+        "the archive changed, so the roster is read again"
+    );
 
-    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(false), reread).unwrap();
+    set_archived_with(&cache, &ids(&["saved"]), true, || Ok(false), reread, relist).unwrap();
     assert!(read_revision::take_announced().is_empty());
+    assert_eq!(
+        relists.get(),
+        1,
+        "an archive that changed nothing relists nothing"
+    );
 
-    set_archived_with(&cache, &ids(&["saved"]), false, || Ok(true), reread).unwrap();
+    set_archived_with(&cache, &ids(&["saved"]), false, || Ok(true), reread, relist).unwrap();
     assert_eq!(
         read_revision::take_announced(),
         [Source::LimitsCodex, Source::Accounts]
     );
-    assert_eq!(rereads.get(), 1);
+    assert_eq!((rereads.get(), relists.get()), (1, 2));
 
-    let refused = set_archived_with(&cache, &[], true, || Ok(true), reread);
+    let refused = set_archived_with(&cache, &[], true, || Ok(true), reread, relist);
     assert!(refused.is_err(), "no account named");
     let failed = set_archived_with(
         &cache,
@@ -628,9 +643,14 @@ fn archiving_is_announced_and_unarchiving_then_reads_the_provider_again() {
         false,
         || Err("disk".into()),
         reread,
+        relist,
     );
     assert_eq!(failed, Err("disk".into()));
-    assert_eq!(rereads.get(), 1, "a failed unarchive reads nothing");
+    assert_eq!(
+        (rereads.get(), relists.get()),
+        (1, 2),
+        "a failed unarchive reads nothing"
+    );
     assert!(read_revision::take_announced().is_empty());
 }
 

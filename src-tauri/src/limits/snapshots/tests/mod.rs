@@ -1,6 +1,7 @@
 mod file_shape;
 mod legacy_reading;
 mod loading;
+mod supersedes;
 
 use super::*;
 use crate::dto::{AgentId, LimitWindowKind, LimitsCreditsDto, LimitsStatus, ProviderLimitsDto};

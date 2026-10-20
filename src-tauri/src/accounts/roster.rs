@@ -96,11 +96,6 @@ impl ProfileDto {
         self.archived
     }
 
-    #[cfg(test)]
-    pub(crate) fn active(&self) -> bool {
-        self.active
-    }
-
     pub(crate) fn in_column(&self, ends: &SignInDeadlines, signed_in: Option<&str>) -> Self {
         Self {
             sign_in_ends_at: ends.get(&self.observation_id).cloned(),

@@ -56,16 +56,18 @@ replaces it whole, and a saved-accounts refresh leaves it as it was.
 
 The Limits read serves its column ([Limits](README.md#limits)), built from the cards the cache
 holds, the provider's roster of saved profiles and categories, and the sign-in ends the account
-list read. The roster and the sign-in ends each sit in the cache under a small lock of their own,
-never under the read lock that spans CLI and network reads, so nothing that writes them waits on a
-read in flight. The roster has two writers: the saved refresh, from the vault it already loaded
-(and only when it loaded one; a saved refresh that could not keeps the previous roster, as does one
-a reread overtook), and `limits_refresh::roster_changed`, which every vault writer outside an
-in-app account change asks for (`Notify::roster`: automatic remembering, unlock, a category edit or
-forget, archive and unarchive) and which rereads the vault with the session's key alone
-(`Store::open_unlocked`). The sign-in ends have one, the account list
-(`limits_refresh::sign_in_deadlines_listed`). Each bumps the revision and announces only when what
-it holds changed, and the reads that answer the announcement are served from the cache.
+list read. Both sit in the cache's listing, under one small lock of its own, never under the read
+lock that spans CLI and network reads, so nothing that writes them waits on a read in flight. The
+roster has two writers. The saved refresh lists it from the vault it loaded to poll, or, when it
+could not poll (the provider's login could not be read), rereads it with the session's key alone;
+it writes it unless a reread happened while it ran. `limits_refresh::roster_changed` rereads it with
+the session's key alone (`Store::open_unlocked`) after every vault write: an account change
+(`account_changed`, before the provider is read again), automatic remembering, unlock, a category
+edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and after the account
+list has read the vault. With the vault locked this session either keeps the roster it has. The
+sign-in ends have one writer, the account list (`limits_refresh::sign_in_deadlines_listed`). Each
+bumps the revision and announces only when what it holds changed, and the reads that answer the
+announcement are served from the cache.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

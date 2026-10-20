@@ -75,7 +75,7 @@ impl super::Accounts {
         if let Some(homes) = &homes {
             refresh_homes(home, provider, force, entries, native, &open, homes);
         }
-        listed
+        listed.or_else(|| super::Roster::read(home, provider))
     }
 }
 

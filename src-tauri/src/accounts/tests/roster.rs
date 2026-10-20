@@ -137,3 +137,28 @@ fn unlocking_the_vault_tells_limits_every_roster_changed() {
         ]
     );
 }
+
+#[test]
+fn the_saved_refresh_lists_the_saved_profiles_when_the_signed_in_login_cannot_be_identified() {
+    let harness = Harness::new();
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
+    let mut unreadable = claude("a", "a2");
+    unreadable.account = serde_json::json!({});
+    harness.signed_in(Some(unreadable));
+
+    let roster = answered(&harness, AgentId::Claude);
+
+    assert_eq!(
+        roster.map(|roster| roster
+            .profiles()
+            .iter()
+            .map(|p| p.email().unwrap_or_default().to_string())
+            .collect::<Vec<_>>()),
+        Some(vec![
+            "a@example.com".to_string(),
+            "b@example.com".to_string()
+        ]),
+        "the saved profiles stay listed even though no saved poll could run"
+    );
+}

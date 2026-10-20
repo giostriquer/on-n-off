@@ -64,13 +64,13 @@ struct Refresh<'a> {
 struct Listing {
     roster: Option<Roster>,
     rereads: u64,
+    ends: SignInDeadlines,
 }
 
 struct Cache {
     provider: AgentId,
     read: Mutex<Option<CachedRead>>,
     listing: Mutex<Listing>,
-    ends: Mutex<SignInDeadlines>,
     revision: Revision,
     source: Source,
 }
@@ -83,8 +83,8 @@ impl Cache {
             listing: Mutex::new(Listing {
                 roster: None,
                 rereads: 0,
+                ends: SignInDeadlines::new(),
             }),
-            ends: Mutex::new(SignInDeadlines::new()),
             revision: Revision::new(),
             source,
         }
@@ -97,12 +97,13 @@ impl Cache {
     }
 
     fn column(&self, entries: &[ProviderLimitsDto]) -> Vec<ColumnEntryDto> {
-        let roster = self.listing().roster.clone().unwrap_or_default();
-        let ends = self
-            .ends
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone();
+        let (roster, ends) = {
+            let listing = self.listing();
+            (
+                listing.roster.clone().unwrap_or_default(),
+                listing.ends.clone(),
+            )
+        };
         crate::limits::column(entries, &roster, &ends)
     }
 
@@ -328,9 +329,8 @@ pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<()
         |force| {
             let _ = read_limits(agent, force);
         },
-    )?;
-    roster_changed(agent);
-    Ok(())
+        || roster_changed(agent),
+    )
 }
 
 pub(crate) fn roster_changed(agent: AgentId) {
@@ -360,14 +360,11 @@ pub(crate) fn sign_in_deadlines_listed(agent: AgentId, ends: SignInDeadlines) {
 }
 
 fn ends_through_cache(cache: &Cache, ends: SignInDeadlines) -> Reading {
-    let mut held = cache
-        .ends
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if *held == ends {
+    let mut listing = cache.listing();
+    if listing.ends == ends {
         return Reading::Unchanged(cache.revision.current());
     }
-    *held = ends;
+    listing.ends = ends;
     Reading::Replaced(cache.revision.bump())
 }
 
@@ -377,6 +374,7 @@ fn set_archived_with(
     archived: bool,
     write: impl FnOnce() -> Result<bool, String>,
     reread: impl FnOnce(bool),
+    relist: impl FnOnce(),
 ) -> Result<(), String> {
     if ids.is_empty() {
         return Err("No account to archive.".to_string());
@@ -385,6 +383,7 @@ fn set_archived_with(
     announce(cache, reading);
     if changed {
         read_revision::announce(Source::Accounts);
+        relist();
     }
     if !archived {
         reread(true);
@@ -576,13 +575,25 @@ fn cache_is_fresh(
 }
 
 pub(crate) fn account_changed(agent: AgentId) {
-    if let Some(cache) = cache_for(agent) {
-        *cache
-            .read
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    let read = || {
+        let _ = read_limits(agent, false);
+    };
+    match (cache_for(agent), crate::paths::user_home()) {
+        (Some(cache), Ok(home)) => {
+            account_changed_in(cache, || Roster::read(&home, agent), read);
+        }
+        (Some(cache), Err(_)) => account_changed_in(cache, || None, read),
+        (None, _) => read(),
     }
-    let _ = read_limits(agent, false);
+}
+
+fn account_changed_in(cache: &Cache, relist: impl FnOnce() -> Option<Roster>, read: impl FnOnce()) {
+    *cache
+        .read
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    announce(cache, reread_roster(cache, relist));
+    read();
 }
 
 #[cfg(test)]

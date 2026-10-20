@@ -1,6 +1,6 @@
 use super::*;
 use crate::accounts::model::Identity;
-use crate::accounts::{roster_for_test, ProfileDto};
+use crate::accounts::roster_for_test;
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, Reading};
 use crate::limits::window::fixture;
 
@@ -314,7 +314,12 @@ fn the_signed_in_profile_is_the_one_the_native_read_names_and_none_when_it_names
     let active = |column: &[ColumnEntryDto]| {
         column
             .iter()
-            .filter(|entry| entry.profile.as_ref().is_some_and(ProfileDto::active))
+            .filter(|entry| {
+                entry
+                    .profile
+                    .as_ref()
+                    .is_some_and(|p| serde_json::to_value(p).unwrap()["active"] == true)
+            })
             .map(|entry| entry.card.account.as_ref().unwrap().id.clone())
             .collect::<Vec<_>>()
     };

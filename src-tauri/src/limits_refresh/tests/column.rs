@@ -71,7 +71,12 @@ fn unread(column: &[ColumnEntryDto]) -> Vec<String> {
 fn signed_in(column: &[ColumnEntryDto]) -> Vec<String> {
     column
         .iter()
-        .filter(|entry| entry.profile.as_ref().is_some_and(|p| p.active()))
+        .filter(|entry| {
+            entry
+                .profile
+                .as_ref()
+                .is_some_and(|p| serde_json::to_value(p).unwrap()["active"] == true)
+        })
         .map(|entry| entry.card.account.as_ref().unwrap().id.clone())
         .collect()
 }
@@ -249,4 +254,63 @@ fn the_sign_in_ends_the_account_list_read_reach_the_column_and_are_announced_onl
     let column = served_column(&cache);
     let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
     assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
+}
+
+#[test]
+fn an_account_change_relists_the_saved_profiles_even_when_the_native_read_cannot() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    read(&cache, "me", false, &|_, _| {
+        Some(roster_of(&["kept", "removed"], &[]))
+    });
+    assert_eq!(
+        unread(&served_column(&cache)),
+        ["kept@example.com", "removed@example.com"]
+    );
+
+    account_changed_in(
+        &cache,
+        || Some(roster_of(&["kept"], &[])),
+        || read(&cache, "me", false, &|_, _| None),
+    );
+
+    assert_eq!(
+        unread(&served_column(&cache)),
+        ["kept@example.com"],
+        "the removed profile does not linger although the saved refresh listed nothing"
+    );
+}
+
+#[test]
+fn archiving_an_unread_saved_profile_reaches_the_column_through_the_roster() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    read(&cache, "me", false, &|_, _| {
+        Some(roster_of(&["spare"], &[]))
+    });
+    let spare = saved("spare").observation_key();
+    let archived = || {
+        let profiles = [(saved("spare"), "spare@example.com")];
+        Some(roster_for_test(
+            AgentId::Codex,
+            &profiles,
+            std::slice::from_ref(&spare),
+            &[],
+        ))
+    };
+
+    set_archived_with(
+        &cache,
+        std::slice::from_ref(&spare),
+        true,
+        || Ok(true),
+        |_| {},
+        || {
+            reread_roster(&cache, archived);
+        },
+    )
+    .unwrap();
+
+    let column = served_column(&cache);
+    assert!(column
+        .iter()
+        .any(|entry| entry.unread && entry.card.archived));
 }
