@@ -70,6 +70,14 @@ export type LimitsResetOffer = {
   price?: LimitsPrice | null;
 };
 
+export type StandingMessage = { text: string; tone: "error" | "muted" };
+
+export type ReadStanding =
+  | { kind: "live" }
+  | { kind: "lastObserved"; why: "remembered"; message?: StandingMessage | null }
+  | { kind: "lastObserved"; why: "readFailed" | "signedOut" | "savedRefreshPaused"; message: StandingMessage }
+  | { kind: "unavailable"; message: StandingMessage };
+
 export type ProviderLimits = {
   provider: AgentId;
   status: LimitsStatus;
@@ -78,6 +86,7 @@ export type ProviderLimits = {
   currentAccount: boolean;
   savedProfile?: boolean;
   archived?: boolean;
+  standing?: ReadStanding;
   plan?: string | null;
   planLabel?: string | null;
   planCapacity?: number | null;

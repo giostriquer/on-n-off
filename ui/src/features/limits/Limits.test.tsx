@@ -6,7 +6,7 @@ import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
+import { NOW, lastObserved, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -213,7 +213,8 @@ describe("Limits", () => {
   });
 
   it("says the signed-in account's refresh is paused above its message, with nothing to sign into or forget", async () => {
-    answer([okClaude({ status: "unauthenticated", message: "Access token expired — send a prompt with `claude` to renew it, then refresh here." })], [okCodex()]);
+    const message = "Access token expired — send a prompt with `claude` to renew it, then refresh here.";
+    answer([okClaude({ status: "unauthenticated", message, standing: lastObserved("signedOut", message) })], [okCodex()]);
     renderLimits();
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     expect(within(claude).getByText("Refresh paused.")).toBeTruthy();
@@ -298,7 +299,7 @@ describe("Limits", () => {
   });
 
   it("draws a failed read's message as an error and a prompt to sign in as muted text", async () => {
-    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.")]);
+    answer([statusOnly("claude", "failed", "Could not reach the Claude usage service (HTTP 503).", "error")], [statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.")]);
     renderLimits();
     const failed = await waitFor(() => within(card("Claude limits")).getByText("Could not reach the Claude usage service (HTTP 503)."));
     expect(failed).toHaveClass("text-[var(--trip)]");
@@ -633,7 +634,8 @@ it("says a remembered reading is a remembered account, and no saved profile's re
     okCodex(),
     staleCodex(),
     okCodex({ account: { id: "acct-live", label: "live@codex.example" }, currentAccount: false, savedProfile: true }),
-    okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, savedProfile: true, status: "failed", message: "Saved usage credential is no longer accepted." }),
+    okCodex({ account: { id: "acct-saved", label: "saved@codex.example" }, currentAccount: false, savedProfile: true, status: "failed", message: "Saved usage credential is no longer accepted.",
+      standing: lastObserved("savedRefreshPaused", "Saved usage credential is no longer accepted.") }),
   ]);
   renderLimits();
   const remembered = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
@@ -648,7 +650,7 @@ it("says a remembered reading is a remembered account, and no saved profile's re
 
 it("quietly identifies last-known usage and reveals the reason on focus", async () => {
   const reason = "Saved usage credential is no longer accepted.";
-  answer([okClaude()], [okCodex({currentAccount:false, savedProfile:true, status:"failed", message:reason})]);
+  answer([okClaude()], [okCodex({currentAccount:false, savedProfile:true, status:"failed", message:reason, standing:lastObserved("savedRefreshPaused", reason)})]);
   renderLimits();
   const region = await screen.findByRole("region", {name: "Codex limits · work@codex.example"});
   const badge = within(region).getByRole("button", {name:"Usage status: Last known usage"});

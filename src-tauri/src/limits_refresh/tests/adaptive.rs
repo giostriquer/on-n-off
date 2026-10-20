@@ -116,7 +116,9 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     let (entries, revision) = read();
     assert_eq!(reads.get(), 2);
     assert_eq!(saved_reads.get(), 1);
-    assert_eq!(entries, [quota(100.0, true), saved_card.clone()]);
+    let mut kept = vec![quota(100.0, true), saved_card.clone()];
+    crate::limits::stand(&mut kept);
+    assert_eq!(entries, kept);
     assert_eq!(revision, 2);
     age_native(&cache, 300);
     assert_eq!(

@@ -79,19 +79,21 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
         AgentId::Claude,
         serde_json::json!([
             {"provider":"claude","status":"ok","currentAccount":false,"plan":"remembered-plan","windows":[]},
-            {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[]}
+            {"provider":"claude","status":"signedOut","currentAccount":true,"account":{"id":"private-id","label":"private-label"},"plan":"max","windows":[],
+             "standing":{"kind":"unavailable","message":{"text":"Sign in with `claude` to see subscription limits.","tone":"muted"}}}
         ]),
     );
     assert_eq!(cell["provider"], "claude");
     assert_eq!(cell["sessions"], serde_json::json!([]));
     assert_eq!(
         cell["notice"],
-        serde_json::json!({"text":"Usage unavailable.","tone":"muted"}),
-        "the signed-out read is spoken for by its notice"
+        serde_json::json!({"text":"Sign in with `claude` to see subscription limits.","tone":"muted"}),
+        "the signed-out read is spoken for by its standing's notice"
     );
     let reading = &cell["reading"];
     assert!(reading.get("status").is_none());
     assert!(reading.get("message").is_none());
+    assert!(reading.get("standing").is_none());
     assert!(reading.get("account").is_none());
     assert!(
         reading.get("plan").is_none(),
@@ -170,9 +172,9 @@ fn every_cell_travels_in_rail_order_and_a_cell_not_read_yet_carries_only_its_not
         message["cells"],
         serde_json::json!([
             {"kind":"provider","provider":"claude",
-             "notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]},
+             "notice":{"text":"Checking limits…","tone":"muted"},"sessions":[]},
             {"kind":"provider","provider":"muse",
-             "notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]},
+             "notice":{"text":"Checking limits…","tone":"muted"},"sessions":[]},
             {"kind":"pullRequests","label":"—",
              "notice":{"text":"Checking pull requests…","tone":"muted"}}
         ])

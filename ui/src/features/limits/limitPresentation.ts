@@ -1,18 +1,18 @@
 import { formatObservedAt, hasElapsed, parseInstant } from "$lib/limitsFormat";
-import type { LimitWindow, LimitsCreditsSpent, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitWindow, LimitsCreditsSpent, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits, ReadStanding, StandingMessage } from "$lib/limitsTypes";
 import { shareAt, windowAt, type WindowAt } from "$lib/windowAt";
 
 export type Gauge = Pick<WindowAt, "usedNow" | "usedFigure" | "meter">;
 
 export type LimitWindowPresentation = Gauge & { text: string; note: string };
 
+export const CHECKING_LIMITS = "Checking limits…";
+
 export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
 
-export type LimitAccountPresentation = {
+export type StandingPresentation = {
   status: CardStatus | null;
-  message: string | null;
-  lastKnown: boolean;
-  updatedAt: string | null;
+  message: StandingMessage | null;
 };
 
 export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow | undefined; rest: LimitWindow[] } {
@@ -81,16 +81,6 @@ export function presentCreditsSpent(spent: LimitsCreditsSpent): { value: string;
   };
 }
 
-export function hasObservations(entry: ProviderLimits): boolean {
-  return (
-    entry.windows.length > 0 ||
-    entry.credits != null ||
-    entry.workspaceCredits != null ||
-    entry.creditsSpent != null ||
-    (entry.resetCredits?.availableCount ?? 0) > 0
-  );
-}
-
 export function latestObservedAt(entry: ProviderLimits): number | null {
   return entry.windows.reduce<number | null>((latest, window) => {
     const observedAt = parseInstant(window.observedAt);
@@ -99,19 +89,21 @@ export function latestObservedAt(entry: ProviderLimits): number | null {
   }, null);
 }
 
-export function presentLimitAccount(entry: ProviderLimits, fallbackMessage: string): LimitAccountPresentation {
-  const observed = hasObservations(entry);
+export function observedAtText(entry: ProviderLimits): string | null {
   const newest = latestObservedAt(entry);
-  const savedProfile = entry.savedProfile === true;
-  const savedRefreshPaused = savedProfile && observed && (entry.status === "failed" || entry.status === "unauthenticated");
-  const detail = entry.message ?? fallbackMessage;
-  return {
-    status: savedRefreshPaused ? { kind: "savedRefresh", detail }
-      : !entry.currentAccount && !savedProfile && observed ? { kind: "remembered" }
-      : entry.status !== "ok" && observed ? { kind: "paused" }
-      : null,
-    message: entry.status === "ok" || savedRefreshPaused ? null : detail,
-    lastKnown: entry.status !== "ok",
-    updatedAt: newest === null ? null : formatObservedAt(new Date(newest).toISOString()),
-  };
+  return newest === null ? null : formatObservedAt(new Date(newest).toISOString());
+}
+
+export function presentStanding(standing: ReadStanding = { kind: "live" }): StandingPresentation {
+  switch (standing.kind) {
+    case "live": return { status: null, message: null };
+    case "unavailable": return { status: null, message: standing.message };
+    case "lastObserved":
+      switch (standing.why) {
+        case "savedRefreshPaused": return { status: { kind: "savedRefresh", detail: standing.message.text }, message: null };
+        case "remembered": return { status: { kind: "remembered" }, message: standing.message ?? null };
+        case "readFailed":
+        case "signedOut": return { status: { kind: "paused" }, message: standing.message };
+      }
+  }
 }

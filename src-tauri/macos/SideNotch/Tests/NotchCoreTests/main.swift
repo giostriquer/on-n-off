@@ -291,7 +291,7 @@ final class NotchTests {
     expectThrows(
       try HostMessage.decode(Data((message + String(repeating: " ", count: 262_144)).utf8)))
     let window = #"{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}"#
-    let pending = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]}"#
+    let pending = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking limits…","tone":"muted"},"sessions":[]}"#
     for unreadable in [window, window.replacingOccurrences(of: "101", with: "null")] {
       let message = withCells(
         #"{"kind":"provider","provider":"codex","reading":{"windows":["# + unreadable
@@ -336,12 +336,12 @@ final class NotchTests {
       message.replacingOccurrences(of: "\"enabled\":false", with: "\"enabled\":true")
       .replacingOccurrences(of: "\"providers\":[\"claude\"]", with: "\"providers\":[\"gemini\",\"claude\"]")
       .replacingOccurrences(of: "\"pullRequests\":{\"enabled\":true", with: "\"pullRequests\":{\"enabled\":false")
-    let claude = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]}"#
+    let claude = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking limits…","tone":"muted"},"sessions":[]}"#
     let gemini = #"{"kind":"provider","provider":"gemini","reading":{"windows":[]},"sessions":[]}"#
     let decoded = try HostMessage.decode(
       Data(rail.replacingOccurrences(of: "\"cells\":[]", with: "\"cells\":[\(gemini),\(claude)]").utf8))
     expectEqual(decoded.cells.map(\.id), [RailCell.provider(.claude)])
-    expectEqual(providerCell(decoded)?.notice, Notice(text: "Checking usage…", tone: .muted))
+    expectEqual(providerCell(decoded)?.notice, Notice(text: "Checking limits…", tone: .muted))
     let muse = claude.replacingOccurrences(of: "\"provider\":\"claude\"", with: "\"provider\":\"muse\"")
     let reordered = try HostMessage.decode(
       Data(
@@ -449,7 +449,7 @@ final class NotchTests {
       [.provider(.claude), .provider(.codex), .provider(.muse), .pullRequests])
     for index in 0..<3 {
       expectNil(providerCell(first, index)?.reading)
-      expectEqual(providerCell(first, index)?.notice, Notice(text: "Checking usage…", tone: .muted))
+      expectEqual(providerCell(first, index)?.notice, Notice(text: "Checking limits…", tone: .muted))
     }
     expectNil(pullRequestCell(first)?.reading)
     expectEqual(pullRequestCell(first)?.label, "—")
@@ -473,7 +473,7 @@ final class NotchTests {
     expectEqual(claude?.sessions.map(\.isWorking), [true, false])
 
     let codex = providerCell(golden, 1)
-    expectEqual(codex?.notice, Notice(text: "Codex did not answer.", tone: .muted))
+    expectEqual(codex?.notice, Notice(text: "Codex did not answer.", tone: .red))
     expectEqual(
       codex?.paused, Notice(text: "Refresh paused. Last observed values below.", tone: .amber))
     expectEqual(codex?.reading?.workspaceCredits?.left, "16,999.5 of 25,000 left")
@@ -481,7 +481,7 @@ final class NotchTests {
 
     let muse = providerCell(golden, 2)
     expectNil(muse?.reading)
-    expectEqual(muse?.notice, Notice(text: "Checking usage…", tone: .muted))
+    expectEqual(muse?.notice, Notice(text: "Checking limits…", tone: .muted))
     expectEqual(muse?.sessions.count, 1)
 
     let pulls = pullRequestCell(golden)
@@ -540,7 +540,7 @@ final class NotchTests {
     expectEqual(
       ProviderCell(
         provider: .claude, reading: reading(windows: [weekly], headline: "weekly"),
-        notice: Notice(text: "Claude Code reported no usage.", tone: .muted),
+        notice: Notice(text: "Claude Code reported no usage.", tone: .red),
         paused: Notice(text: "Refresh paused. Last observed values below.", tone: .amber)
       ).spoken(name: "Claude", at: now),
       "Claude, weekly, 46% used, refresh paused, last observed")
@@ -554,9 +554,9 @@ final class NotchTests {
     expectEqual(
       ProviderCell(
         provider: .codex, reading: reading(windows: []),
-        notice: Notice(text: "Usage unavailable.", tone: .muted)
+        notice: Notice(text: "Codex limits are unavailable.", tone: .red)
       ).spoken(name: "Codex", at: now),
-      "Codex, Usage unavailable.")
+      "Codex, Codex limits are unavailable.")
     expectEqual(
       ProviderCell(
         provider: .muse,

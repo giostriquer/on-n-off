@@ -1,7 +1,17 @@
-import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsStatus, ProviderLimits, ReadStanding, StandingMessage } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 
 export const NOW = "2026-08-17T20:00:00Z";
+
+export const REMEMBERED: ReadStanding = { kind: "lastObserved", why: "remembered" };
+
+export function lastObserved(why: "readFailed" | "signedOut" | "savedRefreshPaused", text: string, tone: StandingMessage["tone"] = why === "signedOut" ? "muted" : "error"): ReadStanding {
+  return { kind: "lastObserved", why, message: { text, tone } };
+}
+
+export function unavailable(text: string, tone: StandingMessage["tone"] = "muted"): ReadStanding {
+  return { kind: "unavailable", message: { text, tone } };
+}
 
 export function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   return {
@@ -61,6 +71,7 @@ export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLim
     status: "ok",
     account: { id: "acct-personal", label: "personal@codex.example" },
     currentAccount: false,
+    standing: REMEMBERED,
     plan: "plus",
     planLabel: "Plus",
     windows: [
@@ -71,6 +82,6 @@ export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLim
   };
 }
 
-export function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
-  return { provider, status, message, currentAccount: true, windows: [] };
+export function statusOnly(provider: AgentId, status: LimitsStatus, message: string, tone: StandingMessage["tone"] = "muted"): ProviderLimits {
+  return { provider, status, message, currentAccount: true, windows: [], standing: unavailable(message, tone) };
 }

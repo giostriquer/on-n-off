@@ -1,5 +1,5 @@
 import type { AccountCategories, AccountsReading, SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { ProviderLimits, ReadStanding } from "$lib/limitsTypes";
 import { hasLimits, hasSavedAccounts, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
@@ -29,6 +29,13 @@ function reported(plan: MockPlan) {
   return { plan, ...PLANS[plan] };
 }
 const REMEMBERED_OBSERVED = at(-4 * 24 * 60 - 12 * 60);
+
+const LIVE: ReadStanding = { kind: "live" };
+const REMEMBERED: ReadStanding = { kind: "lastObserved", why: "remembered" };
+
+function savedRefreshPausedBy(text: string): ReadStanding {
+  return { kind: "lastObserved", why: "savedRefreshPaused", message: { text, tone: "error" } };
+}
 
 const CLAUDE: ProviderLimits[] = [
   {
@@ -113,6 +120,7 @@ function subscriptionBadgesCodex(): ProviderLimits[] {
     ...template,
     account: { id: `badge:${id}`, label: `${id}@example.com` },
     currentAccount: index === 0,
+    standing: index === 0 ? LIVE : REMEMBERED,
     windows: template.windows.map(window => ({ ...window, usedPercent: 25 + index * 8 })),
     subscription,
   }));
@@ -149,6 +157,7 @@ function band(source: ProviderLimits): ProviderLimits[] {
     ...source,
     account: { ...account, id: `band-${percent}`, label: `${percent}% of the week` },
     currentAccount: percent === BAND[0],
+    standing: percent === BAND[0] ? LIVE : REMEMBERED,
     credits: null,
     windows: windows.slice(0, 2).map((window) => ({ ...window, usedPercent: percent })),
   }));
@@ -160,6 +169,7 @@ function limitsOrderClaude(): ProviderLimits[] {
     ...source,
     account: { id: `order-${id}`, label },
     currentAccount,
+    standing: currentAccount ? LIVE : REMEMBERED,
     ...reported(plan),
     windows: source.windows.slice(0, 2).map((window) => window.kind === "weekly"
       ? { ...window, usedPercent: weekly, resetsAt: at(weeklyResetsIn) }
@@ -246,6 +256,7 @@ function savedRefreshPaused([live]: ProviderLimits[]): ProviderLimits[] {
   return [live, {
     ...live, currentAccount: false, savedProfile: true, status: "failed", account: { id: `${live.provider}-saved`, label: "other@example.com" },
     message: "Saved usage access has expired. The last reading is retained.",
+    standing: savedRefreshPausedBy("Saved usage access has expired. The last reading is retained."),
   }];
 }
 
@@ -261,10 +272,11 @@ function accountDuplicate(): LimitsScenario {
 }
 
 function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
-  const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
+  const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, standing: REMEMBERED, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
   return [CODEX[0], ...(reconnected ? [{ ...legacy,
     account: { id: "profile:shared", label: "shared@example.com" },
     savedProfile: true,
+    standing: LIVE,
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
   }] : []), legacy];
 }
@@ -290,7 +302,7 @@ function archivedAccounts(): LimitsScenario {
     codex: () => [
       CODEX[0],
       { ...CODEX[1], subscription: { activeUntil: at(-2 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) } },
-      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, ...reported("plus"), subscription: null },
+      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, standing: REMEMBERED, ...reported("plus"), subscription: null },
     ],
     accounts: {
       claude: () => {
@@ -338,6 +350,7 @@ function claudeSignIn(): ProviderLimits[] {
   return [CLAUDE[0], {
     ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, ...reported("max ×5"),
     status: "failed", message: "This account's saved login has ended. Sign in again.",
+    standing: savedRefreshPausedBy("This account's saved login has ended. Sign in again."),
   }];
 }
 

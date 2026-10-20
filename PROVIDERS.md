@@ -410,8 +410,8 @@ the native app-server reader, which is never started for a saved profile; a body
 `account_id` is accepted. A login that now signs in as a different account renews nothing and waits
 for a new login: "This saved login now signs in as a different account. Sign in again." A rate-limited
 saved read waits at least its `Retry-After`. Every card a saved poll produces is marked
-`savedProfile`, so the UI says "Remembered account" only for readings that are neither the signed-in
-account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
+`savedProfile`, so a card's read standing calls a reading remembered only when it is neither the
+signed-in account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
 home by the provider's own client: Codex's app-server, and for Claude the report the signed-in card
 reads (the Usage / Limits row above), `claude -p /usage --safe-mode` with the same arguments and
 environment and `CLAUDE_CONFIG_DIR` set to that home (`limits/claude_cli.rs`). A saved account's home

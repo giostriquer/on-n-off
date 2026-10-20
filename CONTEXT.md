@@ -61,6 +61,15 @@ profile Limits is polling, nor an archived account: one the user switched away f
 it, or a saved profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
 
+**Read standing**:
+What a card's reading is worth now, decided once for every surface: live, when its own read
+answered; last observed, when it still holds a quota window or a figure that no read just gave,
+because the read failed, it reached no account it could read, a saved profile's refresh is paused,
+or it is a remembered reading; unavailable, when its read did not answer and it holds nothing. The
+last two carry the message every surface shows, in the error tone for a failed read. Before any read
+a card is checking.
+_Avoid_: freshness, status (the read's own outcome), stale
+
 **Signed-in state**:
 Whether a card's account is the one the provider's CLI uses: confirmed when its saved profile, or
 without one its read, says so and the account list names it; unconfirmed while the account list has

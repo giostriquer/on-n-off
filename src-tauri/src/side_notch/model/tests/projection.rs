@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{Reading, WindowRole};
+use crate::dto::{LimitsStatus, ReadStanding, Reading, WindowRole};
 
 fn window(id: &str, label: &str, kind: LimitWindowKind) -> LimitWindowDto {
     LimitWindowDto {
@@ -183,6 +183,8 @@ fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
         card.status = status;
         card.message = Some("Paused".into());
         card.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+        card.standing = ReadStanding::of(&card);
+        let standing = card.standing.clone();
 
         let cell = project(card);
         assert_eq!(
@@ -199,7 +201,7 @@ fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
         );
         assert_eq!(cell.windows.len(), 2, "{status:?}");
         assert!(cell.workspace_credits.is_some(), "{status:?}");
-        assert_eq!(cell.message.as_deref(), Some("Paused"));
+        assert_eq!(cell.standing, standing, "{status:?}");
     }
 
     let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
@@ -218,14 +220,16 @@ fn only_the_signed_in_account_reaches_the_notch() {
         current_account: false,
         ..signed_in(AgentId::Codex, vec![weekly("primary")])
     };
-    let current = ProviderLimitsDto {
+    let mut current = ProviderLimitsDto {
         status: LimitsStatus::SignedOut,
         ..signed_in(AgentId::Codex, vec![session("primary")])
     };
+    current.standing = ReadStanding::of(&current);
+    let standing = current.standing.clone();
 
     let cell = NotchProvider::current(vec![remembered.clone(), current]).expect("the current one");
     assert_eq!(cell.windows[0].kind, LimitWindowKind::Session);
-    assert_eq!(cell.status, LimitsStatus::SignedOut);
+    assert_eq!(cell.standing, standing);
     assert_eq!(NotchProvider::current(vec![remembered]), None);
     assert_eq!(NotchProvider::current(Vec::new()), None);
 }

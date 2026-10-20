@@ -9,6 +9,7 @@ import type {
   LimitsSubscription,
   LimitsWorkspaceCredits,
   ProviderLimits,
+  StandingMessage,
 } from "$lib/limitsTypes";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { accountCards } from "./accountCards";
@@ -16,14 +17,15 @@ import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
-  presentLimitAccount,
+  observedAtText,
   presentLimitWindow,
+  presentStanding,
   unexpiredBankedResets,
   usableAgainAt,
   usageLeft,
   type CardStatus,
-  type LimitAccountPresentation,
   type LimitWindowPresentation,
+  type StandingPresentation,
 } from "./limitPresentation";
 
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
@@ -71,8 +73,7 @@ export type LimitCard = {
   empty: { reason: "usageUnavailable" | "noWindows"; copy: string } | null;
   freshness: {
     updatedAt: string | null;
-    lastKnown: boolean;
-    message: { text: string; tone: "error" | "muted" } | null;
+    message: StandingMessage | null;
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
@@ -152,7 +153,7 @@ function compare(a: number, b: number): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
-const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnown: false, updatedAt: null };
+const UNREAD: StandingPresentation = { status: null, message: null };
 
 type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 
@@ -164,14 +165,12 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
   const label = profile?.email ?? account?.label ?? null;
-  const presentation = reading ? presentLimitAccount(reading, `${name} limits are unavailable.`) : UNREAD;
+  const presentation = reading ? presentStanding(reading.standing) : UNREAD;
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
   const signIn = features.signInDeadline === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
-  const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
-    : presentation.message === null ? null
-    : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
+  const message = signIn?.message ? { text: signIn.message, tone: "error" as const } : presentation.message;
   return {
     key: `${leads ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
@@ -198,8 +197,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
       : { reason: "noWindows", copy: `${name} reported no rate-limit windows.` },
     freshness: {
-      updatedAt: presentation.updatedAt,
-      lastKnown: presentation.lastKnown,
+      updatedAt: reading ? observedAtText(reading) : null,
       message,
       readStatus,
     },

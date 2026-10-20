@@ -3,7 +3,6 @@ import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import rustProfiles from "../../../../src-tauri/src/accounts/fixtures/listed-profiles.json";
 import { accountCards } from "./accountCards";
-import { presentLimitAccount } from "./limitPresentation";
 
 const profile: SavedProfile = {
   id: "saved", observationId: "profile:user-team", legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" },
@@ -27,26 +26,19 @@ it("does not discard current legacy observations", () => {
   expect(accountCards([scoped, current], [profile]).entries).toEqual([scoped, current]);
 });
 it.each([
-  { ...scoped, windows: [] },
-  { ...scoped, windows: [], resetCredits: { availableCount: 0, nextExpiresAt: null } },
   { ...scoped, status: "failed" as const },
+  { ...scoped, status: "signedOut" as const },
   { ...scoped, account: { id: "profile:other-user", label: profile.email } },
   { ...scoped, account: { id: profile.observationId, label: "other@example.com" } },
 ])("retains history when scoped usage cannot be verified: %j", candidate => {
   expect(accountCards([candidate, legacy], [profile]).entries).toEqual([candidate, legacy]);
 });
-it("counts a scoped read that carries only banked resets as an observation", () => {
-  const resetsOnly = { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } };
-  expect(accountCards([resetsOnly, legacy], [profile]).entries).toEqual([resetsOnly]);
-});
-it("counts every window a card carries, as the card itself does", () => {
-  const onlyAWindowOnceHidden = {
-    ...scoped,
-    windows: [{ ...scoped.windows[0], id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model" as const }],
-  };
-
-  expect(accountCards([onlyAWindowOnceHidden, legacy], [profile]).entries).toEqual([onlyAWindowOnceHidden]);
-  expect(presentLimitAccount(onlyAWindowOnceHidden, "fallback").status).toEqual({ kind: "remembered" });
+it.each([
+  { ...scoped, windows: [] },
+  { ...scoped, windows: [], resetCredits: { availableCount: 1, nextExpiresAt: null } },
+  { ...scoped, windows: [{ ...scoped.windows[0], id: "extra:codex_bengalfox", label: "Weekly · GPT-5.3-Codex-Spark", kind: "model" as const }] },
+])("folds history behind a scoped read that answered, whatever it observed, as Rust's own fold does: %j", answered => {
+  expect(accountCards([answered, legacy], [profile]).entries).toEqual([answered]);
 });
 it("does not infer identity from email without a saved profile", () => {
   expect(accountCards([scoped, legacy], []).entries).toEqual([scoped, legacy]);

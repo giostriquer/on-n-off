@@ -1,7 +1,7 @@
 use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
-    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LimitsStatus, MergeKind,
-    ReviewDecision,
+    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, MergeKind, MessageTone,
+    ReadStanding, ReviewDecision, StandingMessage,
 };
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
@@ -165,21 +165,17 @@ fn provider_cell(
     reading: Option<NotchProvider>,
     sessions: Vec<LiveSession>,
 ) -> ProviderCell {
-    let (notice, paused) = match &reading {
-        Some(reading) if reading.status != LimitsStatus::Ok => (
-            Some(muted(
-                reading
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "Usage unavailable.".into()),
-            )),
-            (!reading.windows.is_empty() || reading.workspace_credits.is_some()).then(|| Notice {
+    let (notice, paused) = match reading.as_ref().map(|reading| &reading.standing) {
+        None => (Some(muted(CHECKING.into())), None),
+        Some(ReadStanding::Live) => (None, None),
+        Some(ReadStanding::LastObserved { message, .. }) => (
+            message.as_ref().map(notice_of),
+            Some(Notice {
                 text: "Refresh paused. Last observed values below.".into(),
                 tone: Tone::Amber,
             }),
         ),
-        Some(_) => (None, None),
-        None => (Some(muted("Checking usage…".into())), None),
+        Some(ReadStanding::Unavailable { message }) => (Some(notice_of(message)), None),
     };
     ProviderCell {
         provider,
@@ -187,6 +183,18 @@ fn provider_cell(
         notice,
         paused,
         sessions,
+    }
+}
+
+const CHECKING: &str = "Checking limits…";
+
+fn notice_of(message: &StandingMessage) -> Notice {
+    Notice {
+        text: message.text.clone(),
+        tone: match message.tone {
+            MessageTone::Error => Tone::Red,
+            MessageTone::Muted => Tone::Muted,
+        },
     }
 }
 

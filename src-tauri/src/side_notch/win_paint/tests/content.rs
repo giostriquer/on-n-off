@@ -383,7 +383,7 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     let (planned, _) = popover_render(projected(paused));
     let inks = inks(&planned);
     assert!(
-        inks.contains(&("Refresh failed.".to_string(), MUTED_INK)),
+        inks.contains(&("Refresh failed.".to_string(), TRIP_RED)),
         "{inks:?}"
     );
     assert!(
@@ -728,7 +728,7 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
         ["41%", "—", "—"],
         "Codex and the pull requests keep their slots until they are read"
     );
-    for (index, checking) in [(1, "Checking usage…"), (2, "Checking pull requests…")] {
+    for (index, checking) in [(1, "Checking limits…"), (2, "Checking pull requests…")] {
         let planned = plan(
             &selected,
             &displays,

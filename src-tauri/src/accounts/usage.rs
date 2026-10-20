@@ -4,7 +4,7 @@ use super::{
     Home,
 };
 use crate::{
-    dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
+    dto::{AgentId, LimitsStatus, ProviderLimitsDto, ReadStanding, Reading},
     http::{HttpError, RateLimitReset},
     limits::{SavedReadError, SavedReadUrls},
 };
@@ -528,6 +528,7 @@ fn merge(
                 current_account,
                 saved_profile: false,
                 archived: false,
+                standing: ReadStanding::Live,
                 reading: Reading::default(),
             };
             if let Some(remembered) = remembered.map(|card| card.reading.clone()) {

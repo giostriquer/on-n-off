@@ -68,18 +68,25 @@ drew only the cells that had been read into the first slots of a rail sized for 
 
 - **The cells.** One per selected provider, in rail order (`RAIL_ORDER`), then the pull request
   cell when it is on. A provider without a current-account reading, not read yet or read without
-  one, keeps its slot as a checking cell: no reading, a dash, and "Checking usage…" in its
-  popover. The pull request cell is checking until its first read ("Checking pull requests…").
+  one, keeps its slot as a checking cell: no reading, a dash, and "Checking limits…" in its
+  popover, the words the Limits screen and the tray popover use before their first read. The pull request cell is checking until its first read ("Checking pull requests…").
   The rail is as long as the frame's cells on both notches: the Windows painter and the helper
   size it from the cells they were sent, and `save` and the host's reads from
   `frame::cell_count`, which counts the same slots `frame::rail` fills. The helper decodes no
   provider list or pull request settings at all.
 - **A provider cell**: its reading (from `NotchProvider::current`, below: meter data only, the
-  windows and what the rings name), its sessions, a notice (the reading's message, else "Usage
-  unavailable.", when the read is not `ok`) and, when that reading still has windows or a
-  workspace share, the amber "Refresh paused. Last observed values below." A reading that is `ok`
-  says nothing above its windows, even without any. The read's status and message never reach the
-  drawers: the notice and the paused line are what they say.
+  windows and what the rings name), its sessions, and what its card's read standing says
+  (`ReadStanding`, decided once in Rust as the shared read finishes the card;
+  [why](README.md#limits)). A live card says nothing above its windows, even without any. A card
+  last observed shows the amber "Refresh paused. Last observed values below.", whatever it still
+  holds: windows, a workspace share, or only figures the notch does not draw, such as a credit
+  balance; above it, the standing's message as its notice. An unavailable card shows the
+  standing's message alone, the provider's own or "<Provider> limits are unavailable.", the card's
+  words. A message's tone is the card's: a failed read's message is red (`error`), any other muted.
+  The notch used to decide this itself: "Usage unavailable." where the card said "Claude limits are
+  unavailable.", always muted where the card is red, and paused only over windows or a share. The
+  read's status, message and standing never reach the drawers: the notice and the paused line are
+  what they say.
 - **The pull request cell**: whether the read is readable (`ok`, or stale), the hint as its notice
   when the read is not `ok` (amber over rows it still shows, muted when it shows none), and, only
   when readable, the lists in their own order with their titles, at most 25 rows each and only rows

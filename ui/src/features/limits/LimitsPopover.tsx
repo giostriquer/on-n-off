@@ -14,6 +14,7 @@ import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
+import { CHECKING_LIMITS } from "./limitPresentation";
 import { Meter } from "./Meter";
 import { useLimitsProviders } from "./useLimitsProviders";
 
@@ -154,7 +155,7 @@ function PopoverProviderSection({
         {errorBanner}
         {!cards ? (
           <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">
-            {query.isFetching ? "Checking limits…" : "No data yet."}
+            {query.isFetching ? CHECKING_LIMITS : "No data yet."}
           </p>
         ) : cards.length === 0 ? (
           <p className="m-0 px-3 py-3 text-[12px] text-[var(--mute)]">No saved accounts.</p>
