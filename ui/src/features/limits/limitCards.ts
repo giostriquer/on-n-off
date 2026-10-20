@@ -37,7 +37,7 @@ export type CardFigures = {
   paidOffer: LimitsResetOffer | null;
 };
 
-export type CardSubscription = { accountId: string; current: boolean; term: LimitsSubscription | null };
+export type CardSubscription = { accountId: string; poll: boolean; term: LimitsSubscription | null };
 
 export type ForgetStep = { accountId: string; expectedEmail?: string };
 
@@ -65,6 +65,7 @@ export type LimitCard = {
   plan: string | null;
   status: CardStatus | null;
   signedIn: SignedIn;
+  leads: boolean;
   headline: CardWindow | null;
   rows: CardWindow[];
   figures: CardFigures;
@@ -85,13 +86,13 @@ export type LimitCardsInput = {
   entries: ProviderLimits[] | undefined;
   profiles: SavedProfile[];
   categories?: Readonly<Record<string, string>>;
-  nativeLogin?: NativeLogin | null;
+  nativeLogin: NativeLogin | null;
   now: number;
 };
 
 type Slot = { reading: ProviderLimits; profile: SavedProfile | null } | { reading: null; profile: SavedProfile };
 
-export function limitCards({ provider, entries, profiles, categories = {}, nativeLogin = null, now }: LimitCardsInput): LimitCard[] | null {
+export function limitCards({ provider, entries, profiles, categories = {}, nativeLogin, now }: LimitCardsInput): LimitCard[] | null {
   if (!entries && profiles.length === 0) return null;
   const { entries: readings, legacyAccounts } = accountCards(entries ?? [], profiles);
   const slots: Slot[] = readings.map(reading => ({
@@ -102,6 +103,10 @@ export function limitCards({ provider, entries, profiles, categories = {}, nativ
     if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
   return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, nativeLogin, now));
+}
+
+export function isSignedIn(card: LimitCard): boolean {
+  return card.signedIn !== "no";
 }
 
 export type LimitColumn = { visible: LimitCard[]; archived: LimitCard[] };
@@ -186,6 +191,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     plan: planLabel(reading?.plan, provider) || null,
     status: presentation.status,
     signedIn,
+    leads,
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentRow(window, features.firstMessageSession === "claude", now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
@@ -207,11 +213,11 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
 function subscription(
   provider: LimitsProvider,
   accountId: string | null,
-  current: boolean,
+  poll: boolean,
   reading: ProviderLimits | null,
 ): CardSubscription | null {
   if (LIMITS_FEATURES[provider].subscriptionTerm !== "codex" || accountId === null) return null;
-  return { accountId, current, term: reading?.subscription ?? null };
+  return { accountId, poll, term: reading?.subscription ?? null };
 }
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {

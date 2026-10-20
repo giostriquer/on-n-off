@@ -5,9 +5,10 @@ import { parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
 import type { AgentId } from "$lib/types";
 import { providerLabel } from "$lib/providers";
-import { archivedRowPlan, type ArchivedRowAction as RowAction } from "./cardActionPlan";
 import { removeAccountQuestion } from "./cardActions";
 import type { CardAccount, LimitCard } from "./limitCards";
+
+type RowAction = "unarchive" | "remove";
 
 export function ArchivedAccounts({ provider, cards, blocked, onUnarchive, onRemove, focusWhenEmpty, disclosureRef }: {
   provider: AgentId;
@@ -66,8 +67,7 @@ function ArchivedRow({ card, account, blocked, onUnarchive, onRemove, unarchiveR
   const [error, setError] = useState<string | null>(null);
   const remove = useRef<HTMLButtonElement>(null);
   const label = card.identity.label;
-  const row = archivedRowPlan(card, { blocked, working });
-  const removable = row.some(entry => entry.action === "remove" && entry.enabled);
+  const disabled = blocked || working;
   async function run(action: RowAction) {
     setError(null); setWorking(true);
     try {
@@ -91,15 +91,14 @@ function ArchivedRow({ card, account, blocked, onUnarchive, onRemove, unarchiveR
           <div className="truncate text-[13px] font-semibold" title={label}>{label}</div>
           {card.identity.category && <div className="break-words text-[11px] text-[var(--mute)]">{card.identity.category}</div>}
         </div>
-        {row.map(({ action, enabled }) => action === "unarchive"
-          ? <button key={action} ref={unarchiveRef} type="button" className={button} disabled={!enabled} aria-label={`Unarchive ${label}`} onClick={() => void run("unarchive")}>Unarchive</button>
-          : <button key={action} ref={node => { remove.current = node; removeRef(node); }} type="button" className={button} disabled={!enabled} aria-label={`Remove account ${label}`} onClick={() => { setError(null); setConfirming(true); }}>Remove account</button>)}
+        <button ref={unarchiveRef} type="button" className={button} disabled={disabled} aria-label={`Unarchive ${label}`} onClick={() => void run("unarchive")}>Unarchive</button>
+        <button ref={node => { remove.current = node; removeRef(node); }} type="button" className={button} disabled={disabled} aria-label={`Remove account ${label}`} onClick={() => { setError(null); setConfirming(true); }}>Remove account</button>
       </div>
       {confirming && <div role="group" aria-label="Confirm account action" className="mt-2 flex flex-col gap-2 text-[12px]"
         onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); cancel(); } }}>
         <p className="m-0">{removeAccountQuestion(label)}</p>
         <div className="flex gap-2">
-          <button type="button" autoFocus className={button} disabled={!removable} onClick={() => void run("remove")}>Confirm removal</button>
+          <button type="button" autoFocus className={button} disabled={disabled} onClick={() => void run("remove")}>Confirm removal</button>
           <button type="button" className={button} onClick={cancel}>Cancel</button>
         </div>
       </div>}

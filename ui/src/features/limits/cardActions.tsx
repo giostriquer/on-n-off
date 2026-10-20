@@ -2,7 +2,7 @@ import { useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirmItem, type ActionMenuItem } from "@/components/ActionMenu";
 import { actionButton as button } from "@/components/actionButton";
-import { useAccountManagement } from "@/features/accounts/AccountManager";
+import { useAccountManagement, type AccountController } from "@/features/accounts/AccountManager";
 import { SwitchAlongsideConfirmation } from "@/features/accounts/SwitchAlongsideConfirmation";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
@@ -11,7 +11,7 @@ import { cachedAccountList, setCategoryLocally } from "$lib/sharedReads/accounts
 import { checkLimitsNow } from "$lib/sharedReads/limits";
 import { AutomaticSpend, usePendingResetSpend } from "./AutomaticSpend";
 import { UseBankedReset } from "./BankedResets";
-import { cardActionPlan, hasResetControls, type MainAction, type MenuAction, type PlanEntry } from "./cardActionPlan";
+import { cardActionPlan, hasResetControls, type CheckNowEntry, type MainEntry, type MenuEntry } from "./cardActionPlan";
 import type { CardAccount, LimitCard } from "./limitCards";
 import { ResetAlertForm } from "./resetAlerts";
 
@@ -24,78 +24,77 @@ export type CardHandlers = {
   onRemove: (account: CardAccount) => Promise<void>;
 };
 
-export type CardActionsInput = { provider: LimitsProvider; now: number; checking: boolean }
-  & ({ card: null } | ({ card: LimitCard } & CardHandlers));
+export type CardFrameInput = { provider: LimitsProvider; card: LimitCard; now: number; checking: boolean } & CardHandlers;
 
 export type CardActions = { menu: ActionMenuItem[]; footer: ReactNode };
 
-export function useCardActions(input: CardActionsInput): CardActions {
-  const { provider, now, checking, card } = input;
+function signingIn(manager: AccountController, accountId: string | null): "running" | "canceling" | null {
+  if (accountId === null || manager.loginTarget !== accountId) return null;
+  return manager.busy === "cancelLogin" ? "canceling" : manager.busy === "login" ? "running" : null;
+}
+
+export function useCheckNow(provider: LimitsProvider): (entry: CheckNowEntry) => ActionMenuItem {
   const client = useQueryClient();
+  return ({ enabled }) => ({ id: "checkNow", label: "Check limits now", disabled: !enabled, run: () => void checkLimitsNow(client, provider).catch(() => {}) });
+}
+
+export function useCardActions({ provider, card, now, checking, onArchive, onRemove }: CardFrameInput): CardActions {
+  const client = useQueryClient();
+  const checkNow = useCheckNow(provider);
   const manager = useAccountManagement();
   const [archiving, setArchiving] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [clients, setClients] = useState<string[] | null>(null);
   const mainButton = useRef<HTMLButtonElement>(null);
-  const account = card?.account ?? null;
-  const spend = usePendingResetSpend(account && hasResetControls(card) ? account.id : null);
-  const profile = account?.profile ?? null;
-  const signingIn = manager && account && manager.loginTarget === account.id
-    ? manager.busy === "cancelLogin" ? "canceling" as const : manager.busy === "login" ? "running" as const : null
-    : null;
+  const accountId = card.account?.id ?? null;
+  const spend = usePendingResetSpend(hasResetControls(card) ? accountId : null);
   const plan = cardActionPlan({
-    card, now, checking, archiving, removing, pendingSpend: spend !== null,
-    accounts: manager && { blocked: manager.blocked, signingIn, runningClients: clients !== null },
+    card, now, checking, archiving, removing, pendingSpend: spend,
+    accounts: manager && { controls: manager, blocked: manager.blocked, signingIn: signingIn(manager, accountId), runningClients: clients },
   });
-  const checkNow = (enabled: boolean): ActionMenuItem => ({ id: "checkNow", label: "Check limits now", disabled: !enabled, run: () => void checkLimitsNow(client, provider).catch(() => {}) });
-  if (!input.card || !account) return { menu: plan.menu.map(entry => checkNow(entry.enabled)), footer: null };
-  const { onArchive, onRemove } = input;
-  const shown = input.card;
-  const own: CardAccount = account;
-  const name = own.name;
+  if (plan.account === null) return { menu: plan.menu.map(checkNow), footer: null };
+  const { account, footer: { main, switchAlongside, resets } } = plan;
 
   function archive() {
     if (archiving) return;
     setArchiving(true);
-    void onArchive(own).finally(() => setArchiving(false));
+    void onArchive(account).finally(() => setArchiving(false));
   }
 
-  function startSwitch(profileId: string) {
-    if (!manager) return;
+  function startSwitch(controls: AccountController, profileId: string) {
     setClients(null);
-    void manager.use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
+    void controls.use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
   }
 
-  function menuItem({ action, enabled, busy }: PlanEntry<MenuAction>): ActionMenuItem {
-    const disabled = !enabled;
-    switch (action) {
-      case "checkNow": return checkNow(enabled);
+  function menuItem(entry: MenuEntry<AccountController>): ActionMenuItem {
+    switch (entry.action) {
+      case "checkNow": return checkNow(entry);
       case "category": return {
-        id: action, label: "Edit category", disabled,
-        panel: done => <CategoryPanel initial={shown.identity.category ?? ""} disabled={disabled} done={done} onSave={async category => {
-          const stored = await api.setAccountCategory(provider, own.id, category);
-          setCategoryLocally(client, provider, own.id, stored);
+        id: entry.action, label: "Edit category", disabled: !entry.enabled,
+        panel: done => <CategoryPanel initial={entry.initial} disabled={!entry.enabled} done={done} onSave={async category => {
+          const stored = await api.setAccountCategory(provider, account.id, category);
+          setCategoryLocally(client, provider, account.id, stored);
         }} />,
       };
-      case "signInAgain": return { id: action, label: "Sign in again", disabled, run: () => void manager?.add(profile?.id, own.id) };
+      case "signInAgain": return { id: entry.action, label: "Sign in again", disabled: !entry.enabled, run: () => void entry.controls.add(entry.profileId, account.id) };
       case "removeLogin": return confirmItem({
-        id: action, label: "Remove saved login", question: `Remove the saved login for ${name}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled,
-        onConfirm: async done => { if (manager && profile) await manager.action("remove", profile.id); done(); },
+        id: entry.action, label: "Remove saved login", question: `Remove the saved login for ${account.name}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled: !entry.enabled,
+        onConfirm: async done => { await entry.controls.action("remove", entry.profileId); done(); },
       });
-      case "archive": return { id: action, label: "Archive account", disabled, busy, run: archive };
-      case "resetAlert": return { id: action, label: "Banked reset alert", disabled, panel: done => <ResetAlertForm accountId={own.id} label={name} onDone={done} /> };
+      case "archive": return { id: entry.action, label: "Archive account", disabled: !entry.enabled, busy: entry.busy, run: archive };
+      case "resetAlert": return { id: entry.action, label: "Banked reset alert", panel: done => <ResetAlertForm accountId={account.id} label={account.name} onDone={done} /> };
       case "signOut": return confirmItem({
-        id: action, label: "Sign out", question: "Sign out of this account? The provider may also revoke its saved sign-ins.", confirmLabel: "Confirm sign out", disabled,
+        id: entry.action, label: "Sign out", question: "Sign out of this account? The provider may also revoke its saved sign-ins.", confirmLabel: "Confirm sign out", disabled: !entry.enabled,
         onConfirm: async done => {
-          if (manager && shown.signedIn === "confirmed" && cachedAccountList(client, manager.provider)?.nativeObservationId === own.id) await manager.action("signOut");
+          if (entry.enabled && cachedAccountList(client, entry.controls.provider)?.nativeObservationId === account.id) await entry.controls.action("signOut");
           done();
         },
       });
       case "remove": return confirmItem({
-        id: action, label: "Remove account", question: removeAccountQuestion(name), confirmLabel: "Confirm removal", disabled,
+        id: entry.action, label: "Remove account", question: removeAccountQuestion(account.name), confirmLabel: "Confirm removal", disabled: !entry.enabled,
         onConfirm: async done => {
           setRemoving(true);
-          try { await onRemove(own); }
+          try { await onRemove(account); }
           finally { setRemoving(false); }
           done();
         },
@@ -103,29 +102,28 @@ export function useCardActions(input: CardActionsInput): CardActions {
     }
   }
 
-  function mainButtonFor({ action, enabled, busy }: PlanEntry<MainAction>): ReactNode {
-    const props = { ref: mainButton, className: button, disabled: !enabled };
-    switch (action) {
-      case "cancelSignIn": return <button {...props} onClick={() => void manager?.cancel()}>{busy ? "Canceling…" : "Cancel sign-in"}</button>;
-      case "signInAgain": return <button {...props} onClick={() => void manager?.add(profile?.id, own.id)}>Sign in again</button>;
-      case "archive": return <button {...props} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={archive}>Archive account</button>;
-      case "saveAccount": return <button {...props} onClick={() => void manager?.action("save").catch(() => {})}>Save account</button>;
-      case "signIn": return <button {...props} onClick={() => void manager?.add(profile?.id, own.id)}>Sign in</button>;
-      case "useAccount": return <button {...props} onClick={() => profile && startSwitch(profile.id)}>Use account</button>;
+  function mainButtonFor(entry: MainEntry<AccountController>): ReactNode {
+    const props = { ref: mainButton, className: button, disabled: !entry.enabled };
+    switch (entry.action) {
+      case "cancelSignIn": return <button {...props} onClick={() => void entry.controls.cancel()}>{entry.busy ? "Canceling…" : "Cancel sign-in"}</button>;
+      case "signInAgain": return <button {...props} onClick={() => void entry.controls.add(entry.profileId, account.id)}>Sign in again</button>;
+      case "archive": return <button {...props} aria-disabled={entry.busy || undefined} aria-busy={entry.busy || undefined} onClick={archive}>Archive account</button>;
+      case "saveAccount": return <button {...props} onClick={() => void entry.controls.action("save").catch(() => {})}>Save account</button>;
+      case "signIn": return <button {...props} onClick={() => void entry.controls.add(entry.profileId ?? undefined, account.id)}>Sign in</button>;
+      case "useAccount": return <button {...props} onClick={() => startSwitch(entry.controls, entry.profileId)}>Use account</button>;
     }
   }
 
-  const { main, switchAlongside, resets } = plan.footer;
   return {
     menu: plan.menu.map(menuItem),
     footer: <>
       {main && mainButtonFor(main)}
-      {switchAlongside && clients && profile && <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={clients} disabled={!switchAlongside.enabled}
-        onSwitch={() => { setClients(null); void manager?.action("useAlongsideClients", profile.id).catch(() => {}); }}
+      {switchAlongside && <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchAlongside.clients} disabled={!switchAlongside.enabled}
+        onSwitch={() => { setClients(null); void switchAlongside.controls.action("useAlongsideClients", switchAlongside.profileId).catch(() => {}); }}
         onCancel={() => { setClients(null); mainButton.current?.focus(); }} />}
-      {resets && shown.reading && <>
-        <UseBankedReset entry={shown.reading} label={name} now={now} offered={resets.useBankedReset !== null} disabled={!resets.useBankedReset?.enabled} />
-        <AutomaticSpend accountId={own.id} dueAt={resets.cancelAutomaticSpend && spend ? spend.dueAt : null} now={now} />
+      {resets && <>
+        <UseBankedReset entry={resets.reading} label={account.name} now={now} offered={resets.useBankedReset !== null} disabled={!resets.useBankedReset?.enabled} />
+        <AutomaticSpend accountId={account.id} dueAt={resets.automaticSpend?.dueAt ?? null} now={now} />
       </>}
     </>,
   };

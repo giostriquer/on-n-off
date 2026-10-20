@@ -66,11 +66,14 @@ source carries no comments (see [Code comments](#code-comments)).
   alone (`cardActionPlan`, `cardActionPlan.ts`), for every provider and card state: the menu
   (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
   the destructive items, and the footer: its main button, the Switch anyway confirmation and the
-  banked reset controls. An archived row asks the same module (`archivedRowPlan`).
-  `useCardActions` (`cardActions.tsx`) only binds a label and a handler to each entry; nothing else
-  adds, removes or enables an action. Whether a card's account is the signed-in one is its one
-  signed-in state (`signedIn`), which every action decision reads ([why](architecture/README.md#limits)).
-  The card model reads each
+  banked reset controls. Each entry carries what its handler needs (the account controls, the saved
+  login, the clients still running, the reading, the waiting spend), and `useCardActions`
+  (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
+  else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
+  Check limits now (`checkNowEntry`). The plan reads two facts from the card for who is signed in:
+  its signed-in state (`signedIn`), for every decision about the signed-in login, and whether it
+  shows the provider's own read (`leads`), which Use banked reset requires and Archive account in
+  place of Use account refuses ([why](architecture/README.md#limits)). The card model reads each
   per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: the table is keyed by the
   catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and

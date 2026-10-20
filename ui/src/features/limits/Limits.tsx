@@ -12,8 +12,8 @@ import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
 import { ArchivedAccounts } from "./ArchivedAccounts";
-import { ActiveAccountDot, LimitCardFrame } from "./LimitCardFrame";
-import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
+import { ActiveAccountDot, LimitCardFrame, PendingCardFrame } from "./LimitCardFrame";
+import { isSignedIn, limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { ResetAlertsContext } from "./resetAlerts";
@@ -151,10 +151,10 @@ function ProviderColumn({
 
   if (!column) {
     return (
-      <LimitCardFrame provider={provider} card={null} now={now} checking={query.isFetching}>
+      <PendingCardFrame provider={provider} now={now} checking={query.isFetching}>
         {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
         <p className="px-3.5 py-4 text-[13px] text-[var(--mute)]">{query.isFetching ? "Checking limits…" : "No data yet."}</p>
-      </LimitCardFrame>
+      </PendingCardFrame>
     );
   }
 
@@ -218,7 +218,7 @@ function AccountCard({
         </p>
       ) : null}
 
-      {card.headline ? <HeadlineWindow active={card.signedIn !== "no"} window={card.headline} provider={provider} /> : null}
+      {card.headline ? <HeadlineWindow signedIn={isSignedIn(card)} window={card.headline} provider={provider} /> : null}
       {card.rows.map((row) => (
         <WindowRow key={row.id} row={row} provider={provider} />
       ))}
@@ -234,11 +234,11 @@ function AccountCard({
 }
 
 function HeadlineWindow({
-  active,
+  signedIn,
   window,
   provider,
 }: {
-  active: boolean;
+  signedIn: boolean;
   window: CardWindow;
   provider: AgentId;
 }) {
@@ -247,7 +247,7 @@ function HeadlineWindow({
     <div className="flex flex-col gap-2 p-3.5">
       <div className="flex items-center justify-between gap-2">
         <span className="text-[10px] font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{label}</span>
-        {active && <ActiveAccountDot />}
+        {signedIn && <ActiveAccountDot />}
       </div>
       <div className="flex items-baseline gap-2">
         <span

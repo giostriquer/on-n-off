@@ -17,6 +17,7 @@ function archived(): LimitCard[] {
     entries: [okCodex(), staleCodex({ account: { id: "team", label: "history@codex.example" }, archived: true })],
     profiles: [unread],
     categories: { "profile:unread": "Client B" },
+    nativeLogin: null,
     now: Date.parse(NOW),
   });
   if (!column) throw new Error("expected a column");

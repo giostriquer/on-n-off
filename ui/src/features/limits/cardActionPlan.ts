@@ -1,100 +1,137 @@
+import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { codexTermEnded } from "./codexSubscriptionTerm";
-import type { CardAccount, LimitCard } from "./limitCards";
+import { isSignedIn, type CardAccount, type LimitCard } from "./limitCards";
 import { LIMITS_FEATURES } from "./limitFeatures";
 
-export type AccountListState = {
+export type AccountList<C> = {
+  controls: C;
   blocked: boolean;
   signingIn: "running" | "canceling" | null;
-  runningClients: boolean;
+  runningClients: string[] | null;
 };
 
-export type CardActionInput = {
-  card: LimitCard | null;
+export type PlanInput<C> = {
+  card: LimitCard;
   now: number;
   checking: boolean;
-  accounts: AccountListState | null;
+  accounts: AccountList<C> | null;
   archiving: boolean;
   removing: boolean;
-  pendingSpend: boolean;
+  pendingSpend: { dueAt: string } | null;
 };
 
-export type MenuAction = "checkNow" | "category" | "signInAgain" | "removeLogin" | "archive" | "resetAlert" | "signOut" | "remove";
-export type MainAction = "cancelSignIn" | "signInAgain" | "archive" | "saveAccount" | "signIn" | "useAccount";
-export type ArchivedRowAction = "unarchive" | "remove";
+type SavedLogin<C> = { controls: C; profileId: string };
 
-export type PlanEntry<A extends string> = { action: A; enabled: boolean; busy: boolean };
+export type CheckNowEntry = { action: "checkNow"; enabled: boolean };
+export type ArchiveEntry = { action: "archive"; enabled: boolean; busy: boolean };
+
+export type MenuEntry<C> =
+  | CheckNowEntry
+  | { action: "category"; enabled: boolean; initial: string }
+  | ({ action: "signInAgain"; enabled: boolean } & SavedLogin<C>)
+  | ({ action: "removeLogin"; enabled: boolean } & SavedLogin<C>)
+  | ArchiveEntry
+  | { action: "resetAlert" }
+  | { action: "signOut"; enabled: boolean; controls: C }
+  | { action: "remove"; enabled: boolean };
+
+export type MainEntry<C> =
+  | { action: "cancelSignIn"; enabled: boolean; busy: boolean; controls: C }
+  | ({ action: "signInAgain"; enabled: boolean } & SavedLogin<C>)
+  | ArchiveEntry
+  | { action: "saveAccount"; enabled: boolean; controls: C }
+  | { action: "signIn"; enabled: boolean; controls: C; profileId: string | null }
+  | ({ action: "useAccount"; enabled: boolean } & SavedLogin<C>);
+
+export type SwitchAlongside<C> = { enabled: boolean; clients: string[] } & SavedLogin<C>;
 
 export type ResetControls = {
-  useBankedReset: PlanEntry<"useBankedReset"> | null;
-  cancelAutomaticSpend: PlanEntry<"cancelAutomaticSpend"> | null;
+  reading: ProviderLimits;
+  useBankedReset: { enabled: boolean } | null;
+  automaticSpend: { dueAt: string } | null;
 };
 
-export type CardActionPlan = {
-  menu: PlanEntry<MenuAction>[];
-  footer: {
-    main: PlanEntry<MainAction> | null;
-    switchAlongside: PlanEntry<"switchAnyway"> | null;
-    resets: ResetControls | null;
-  };
+export type CardFooterPlan<C> = {
+  main: MainEntry<C> | null;
+  switchAlongside: SwitchAlongside<C> | null;
+  resets: ResetControls | null;
 };
 
-function entry<A extends string>(action: A, enabled: boolean, busy = false): PlanEntry<A> {
-  return { action, enabled, busy };
+export type CardActionPlan<C> =
+  | { account: null; menu: CheckNowEntry[]; footer: null }
+  | { account: CardAccount; menu: MenuEntry<C>[]; footer: CardFooterPlan<C> };
+
+type Shown<C> = {
+  card: LimitCard;
+  profile: SavedProfile | null;
+  accounts: AccountList<C> | null;
+  can: boolean;
+  signedIn: boolean;
+  confirmed: boolean;
+  archive: ArchiveEntry;
+};
+
+export function hasResetControls(card: LimitCard): boolean {
+  return !!card.account && card.reading !== null && LIMITS_FEATURES[card.provider].bankedResets !== null;
 }
 
-type ReadAccountCard = LimitCard & { account: CardAccount; reading: ProviderLimits };
-
-export function hasResetControls(card: LimitCard | null): card is ReadAccountCard {
-  return !!card?.account && card.reading !== null && LIMITS_FEATURES[card.provider].bankedResets !== null;
+export function checkNowEntry(checking: boolean): CheckNowEntry {
+  return { action: "checkNow", enabled: !checking };
 }
 
-export function cardActionPlan({ card, now, checking, accounts, archiving, removing, pendingSpend }: CardActionInput): CardActionPlan {
-  const checkNow = entry("checkNow", !checking);
-  if (!card?.account) return { menu: [checkNow], footer: { main: null, switchAlongside: null, resets: null } };
-  const { profile } = card.account;
+export function cardActionPlan<C>({ card, now, checking, accounts, archiving, removing, pendingSpend }: PlanInput<C>): CardActionPlan<C> {
+  const checkNow = checkNowEntry(checking);
+  if (!card.account) return { account: null, menu: [checkNow], footer: null };
   const can = !(accounts?.blocked ?? false) && !removing;
-  const signedIn = card.signedIn !== "no";
-  const confirmed = card.signedIn === "confirmed";
-  const archive = entry("archive", can, archiving);
-  const saved = accounts !== null && profile !== null;
-  const menu: PlanEntry<MenuAction>[] = [
-    checkNow,
-    entry("category", can),
-    ...(saved ? [entry("signInAgain", can)] : []),
-    ...(saved && signedIn ? [entry("removeLogin", can)] : []),
-    ...(signedIn ? [] : [archive]),
-    ...(LIMITS_FEATURES[card.provider].bankedResets ? [entry("resetAlert", true)] : []),
-    ...(accounts && signedIn ? [entry("signOut", can && confirmed)] : []),
-    ...(signedIn ? [] : [entry("remove", can)]),
-  ];
-  const archiveInsteadOfUse = !signedIn && !card.reading?.currentAccount && !!profile && !profile.needsLogin
-    && codexTermEnded(card.subscription?.term, now);
-  const switchAlongside = accounts?.runningClients && profile && !profile.needsLogin ? entry("switchAnyway", can) : null;
-  return { menu, footer: { main: main(), switchAlongside, resets: resets(card) } };
-
-  function main(): PlanEntry<MainAction> | null {
-    if (!accounts) return null;
-    if (accounts.signingIn) return entry("cancelSignIn", accounts.signingIn === "running", accounts.signingIn === "canceling");
-    if (profile && card?.signIn?.state === "ended") return entry("signInAgain", can);
-    if (archiveInsteadOfUse) return archive;
-    if (!profile) return signedIn ? entry("saveAccount", can && confirmed) : entry("signIn", can);
-    if (signedIn && !profile.pendingActivation) return null;
-    return profile.needsLogin ? entry("signIn", can) : entry("useAccount", can);
-  }
-
-  function resets(shown: LimitCard): ResetControls | null {
-    if (!hasResetControls(shown)) return null;
-    const live = shown.reading.currentAccount && shown.reading.status === "ok" && shown.figures.bankedResets !== null;
-    return {
-      useBankedReset: signedIn && live && !switchAlongside ? entry("useBankedReset", can && confirmed) : null,
-      cancelAutomaticSpend: pendingSpend ? entry("cancelAutomaticSpend", true) : null,
-    };
-  }
+  const shown: Shown<C> = {
+    card, profile: card.account.profile, accounts, can,
+    signedIn: isSignedIn(card), confirmed: card.signedIn === "confirmed",
+    archive: { action: "archive", enabled: can, busy: archiving },
+  };
+  const switchAlongside = switchAlongsideOf(shown);
+  return {
+    account: card.account,
+    menu: [checkNow, ...menuOf(shown)],
+    footer: { main: mainOf(shown, now), switchAlongside, resets: resetsOf(shown, switchAlongside !== null, pendingSpend) },
+  };
 }
 
-export function archivedRowPlan(card: LimitCard, { blocked, working }: { blocked: boolean; working: boolean }): PlanEntry<ArchivedRowAction>[] {
-  if (!card.account) return [];
-  const enabled = !blocked && !working;
-  return [entry("unarchive", enabled), entry("remove", enabled)];
+function menuOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>): MenuEntry<C>[] {
+  const saved = accounts && profile ? { controls: accounts.controls, profileId: profile.id } : null;
+  return [
+    { action: "category", enabled: can, initial: card.identity.category ?? "" },
+    ...(saved ? [{ action: "signInAgain" as const, enabled: can, ...saved }] : []),
+    ...(saved && signedIn ? [{ action: "removeLogin" as const, enabled: can, ...saved }] : []),
+    ...(signedIn ? [] : [archive]),
+    ...(LIMITS_FEATURES[card.provider].bankedResets ? [{ action: "resetAlert" as const }] : []),
+    ...(accounts && signedIn ? [{ action: "signOut" as const, enabled: can && confirmed, controls: accounts.controls }] : []),
+    ...(signedIn ? [] : [{ action: "remove" as const, enabled: can }]),
+  ];
+}
+
+function mainOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>, now: number): MainEntry<C> | null {
+  if (!accounts) return null;
+  const { controls } = accounts;
+  if (accounts.signingIn) return { action: "cancelSignIn", enabled: accounts.signingIn === "running", busy: accounts.signingIn === "canceling", controls };
+  if (!profile) return signedIn ? { action: "saveAccount", enabled: can && confirmed, controls } : { action: "signIn", enabled: can, controls, profileId: null };
+  if (card.signIn?.state === "ended") return { action: "signInAgain", enabled: can, controls, profileId: profile.id };
+  if (!signedIn && !card.leads && !profile.needsLogin && codexTermEnded(card.subscription?.term, now)) return archive;
+  if (signedIn && !profile.pendingActivation) return null;
+  return { action: profile.needsLogin ? "signIn" : "useAccount", enabled: can, controls, profileId: profile.id };
+}
+
+function switchAlongsideOf<C>({ profile, accounts, can }: Shown<C>): SwitchAlongside<C> | null {
+  if (!accounts?.runningClients || !profile || profile.needsLogin) return null;
+  return { enabled: can, clients: accounts.runningClients, controls: accounts.controls, profileId: profile.id };
+}
+
+function resetsOf<C>({ card, can, signedIn, confirmed }: Shown<C>, switching: boolean, pendingSpend: { dueAt: string } | null): ResetControls | null {
+  if (!card.reading || !hasResetControls(card)) return null;
+  const live = card.leads && card.freshness.readStatus === "ok" && card.figures.bankedResets !== null;
+  return {
+    reading: card.reading,
+    useBankedReset: signedIn && live && !switching ? { enabled: can && confirmed } : null,
+    automaticSpend: pendingSpend && { dueAt: pendingSpend.dueAt },
+  };
 }

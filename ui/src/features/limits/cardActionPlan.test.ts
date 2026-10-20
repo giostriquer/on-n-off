@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
-import { archivedRowPlan, cardActionPlan, type AccountListState, type CardActionPlan, type PlanEntry } from "./cardActionPlan";
+import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
 import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
 
@@ -29,14 +29,17 @@ function profile(provider: LimitsProvider, overrides: Partial<SavedProfile> = {}
   };
 }
 
-const LIST: AccountListState = { blocked: false, signingIn: null, runningClients: false };
+const CONTROLS = "the account controls";
+const LIST: AccountList<string> = { controls: CONTROLS, blocked: false, signingIn: null, runningClients: null };
+const RUNNING = ["Acme Studio (codex)"];
+const SPEND = { dueAt: "2026-08-17T20:08:00Z" };
 
 type Setup = {
   entries: ProviderLimits[];
   profiles?: SavedProfile[];
   nativeLogin?: NativeLogin | null;
-  accounts?: AccountListState | null;
-  pendingSpend?: boolean;
+  accounts?: AccountList<string> | null;
+  pendingSpend?: { dueAt: string } | null;
 };
 
 function card(provider: LimitsProvider, { entries, profiles = [], nativeLogin = { observationId: "someone-else", settled: true } }: Setup): LimitCard {
@@ -44,24 +47,32 @@ function card(provider: LimitsProvider, { entries, profiles = [], nativeLogin = 
   return cards!.find(shown => shown.account?.id === accountId(provider))!;
 }
 
-function plan(provider: LimitsProvider, setup: Setup, overrides: { checking?: boolean; archiving?: boolean; removing?: boolean } = {}): CardActionPlan {
+function planFor(shown: LimitCard, setup: Setup, overrides: { checking?: boolean; archiving?: boolean; removing?: boolean } = {}): CardActionPlan<string> {
   return cardActionPlan({
-    card: card(provider, setup), now: AT_NOW, checking: false, archiving: false, removing: false,
-    accounts: setup.accounts === undefined ? LIST : setup.accounts, pendingSpend: setup.pendingSpend ?? false, ...overrides,
+    card: shown, now: AT_NOW, checking: false, archiving: false, removing: false,
+    accounts: setup.accounts === undefined ? LIST : setup.accounts, pendingSpend: setup.pendingSpend ?? null, ...overrides,
   });
 }
 
-function described(entry: PlanEntry<string>): string {
-  return `${entry.action}${entry.enabled ? "" : "-"}${entry.busy ? "*" : ""}`;
+function plan(provider: LimitsProvider, setup: Setup, overrides: { checking?: boolean; archiving?: boolean; removing?: boolean } = {}): CardActionPlan<string> {
+  return planFor(card(provider, setup), setup, overrides);
 }
 
-function describe_(shown: CardActionPlan): { menu: string; footer: string } {
+function described({ action, enabled = true, busy = false }: { action: string; enabled?: boolean; busy?: boolean }): string {
+  return `${action}${enabled ? "" : "-"}${busy ? "*" : ""}`;
+}
+
+function describe_(shown: CardActionPlan<string>): { menu: string; footer: string } {
+  const menu = shown.menu.map(described).join(" ");
+  if (shown.footer === null) return { menu, footer: "" };
   const { main, switchAlongside, resets } = shown.footer;
-  const footer = [main, switchAlongside, resets?.useBankedReset ?? null, resets?.cancelAutomaticSpend ?? null];
-  return {
-    menu: shown.menu.map(described).join(" "),
-    footer: footer.flatMap(entry => entry ? [described(entry)] : []).join(" "),
-  };
+  const footer = [
+    main && described(main),
+    switchAlongside && described({ action: "switchAnyway", ...switchAlongside }),
+    resets?.useBankedReset && described({ action: "useBankedReset", ...resets.useBankedReset }),
+    resets?.automaticSpend && "automaticSpend",
+  ];
+  return { menu, footer: footer.filter(Boolean).join(" ") };
 }
 
 const STATES = {
@@ -85,9 +96,9 @@ const STATES = {
   remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })] }),
   "pending automatic spend": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)],
-    accounts: { ...LIST, runningClients: true }, pendingSpend: true,
+    accounts: { ...LIST, runningClients: RUNNING }, pendingSpend: SPEND,
   }),
-  "no account manager": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: null, accounts: null, pendingSpend: true }),
+  "no account manager": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: null, accounts: null, pendingSpend: SPEND }),
 } satisfies Record<string, (provider: LimitsProvider) => Setup>;
 
 type State = keyof typeof STATES;
@@ -121,8 +132,8 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "term ended": { menu: CODEX_SAVED, footer: "archive" },
     "signing in": { menu: CODEX_SAVED, footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive resetAlert remove", footer: "signIn" },
-    "pending automatic spend": { menu: CODEX_SAVED, footer: "useAccount switchAnyway cancelAutomaticSpend" },
-    "no account manager": { menu: "checkNow category resetAlert", footer: "useBankedReset cancelAutomaticSpend" },
+    "pending automatic spend": { menu: CODEX_SAVED, footer: "useAccount switchAnyway automaticSpend" },
+    "no account manager": { menu: "checkNow category resetAlert", footer: "useBankedReset automaticSpend" },
   },
   muse: {
     "current confirmed": { menu: SIGNED_IN, footer: "" },
@@ -144,14 +155,6 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
     expect(describe_(plan(provider, STATES[state](provider)))).toEqual(TABLE[provider][state]);
   });
 
-  it("for an archived card offers Unarchive and Remove account, and neither while the account list or the row is busy", () => {
-    const archived = limitCards({ provider, entries: [reading(provider, { currentAccount: false, archived: true })], profiles: [], now: AT_NOW })![0];
-    expect(archived.archived).toBe(true);
-    expect(archivedRowPlan(archived, { blocked: false, working: false }).map(described)).toEqual(["unarchive", "remove"]);
-    expect(archivedRowPlan(archived, { blocked: true, working: false }).map(described)).toEqual(["unarchive-", "remove-"]);
-    expect(archivedRowPlan(archived, { blocked: false, working: true }).map(described)).toEqual(["unarchive-", "remove-"]);
-  });
-
   it("holds every account action while the account list cannot act or the card's removal runs, but never Check limits now", () => {
     const blocked = { menu: "checkNow category- signInAgain- archive- remove-", footer: "useAccount-" };
     const withAlert = provider === "codex" ? { ...blocked, menu: "checkNow category- signInAgain- archive- resetAlert remove-" } : blocked;
@@ -160,15 +163,14 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
   });
 
   it("disables only Check limits now while the provider is being checked", () => {
-    expect(plan(provider, STATES.saved(provider), { checking: true }).menu.map(described).filter(entry => entry.endsWith("-"))).toEqual(["checkNow-"]);
+    expect(describe_(plan(provider, STATES.saved(provider), { checking: true })).menu.split(" ").filter(entry => entry.endsWith("-"))).toEqual(["checkNow-"]);
   });
 
-  it("offers a card with no account only Check limits now, and a card not yet read the same", () => {
-    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], profiles: [], now: AT_NOW })![0];
-    for (const shown of [anonymous, null]) {
-      expect(describe_(cardActionPlan({ card: shown, now: AT_NOW, checking: false, accounts: LIST, archiving: false, removing: false, pendingSpend: true })))
-        .toEqual({ menu: "checkNow", footer: "" });
-    }
+  it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
+    expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
+    expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
   });
 });
 
@@ -192,10 +194,10 @@ describe("a card's one signed-in state", () => {
 
 describe("Use banked reset", () => {
   const live = STATES["current confirmed"]("codex");
-  const offered = (setup: Setup) => plan("codex", setup).footer.resets?.useBankedReset ?? null;
+  const offered = (setup: Setup) => plan("codex", setup).footer?.resets?.useBankedReset ?? null;
 
   it("is offered only on the signed-in account's live reading that has a reset banked", () => {
-    expect(offered(live)).toEqual({ action: "useBankedReset", enabled: true, busy: false });
+    expect(offered(live)).toEqual({ enabled: true });
     for (const entries of [
       [reading("codex", { currentAccount: false })],
       [reading("codex", { status: "failed" })],
@@ -207,13 +209,15 @@ describe("Use banked reset", () => {
   });
 
   it("gives way to a Switch anyway confirmation on its card, which a waiting automatic reset's Cancel does not", () => {
-    const pending = { ...live, profiles: [profile("codex", { active: true, pendingActivation: true })], accounts: { ...LIST, runningClients: true }, pendingSpend: true };
-    expect(describe_(plan("codex", pending)).footer).toBe("useAccount switchAnyway cancelAutomaticSpend");
+    const pending = { ...live, profiles: [profile("codex", { active: true, pendingActivation: true })], accounts: { ...LIST, runningClients: RUNNING }, pendingSpend: SPEND };
+    expect(describe_(plan("codex", pending)).footer).toBe("useAccount switchAnyway automaticSpend");
   });
 
-  it("has no reset controls on a card whose read named no account", () => {
-    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], profiles: [], now: AT_NOW })![0];
-    expect(cardActionPlan({ card: anonymous, now: AT_NOW, checking: false, accounts: null, archiving: false, removing: false, pendingSpend: true }).footer.resets).toBeNull();
+  it("has no reset controls on a card whose read named no account, nor on a saved login no read answered for", () => {
+    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    expect(planFor(anonymous, { entries: [], accounts: null, pendingSpend: SPEND }).footer).toBeNull();
+    const unread = plan("codex", { entries: [], profiles: [profile("codex")], pendingSpend: SPEND });
+    expect(unread.footer?.resets).toBeNull();
   });
 });
 
@@ -249,15 +253,14 @@ describe("the footer of a saved account whose subscription ended", () => {
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {
     const shown = limitCards({ provider: "codex", entries: [reading], profiles: saved ? [saved] : [], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;
-    const footer = cardActionPlan({ card: shown, now: AT_NOW, checking: false, accounts: LIST, archiving: false, removing: false, pendingSpend: false }).footer;
-    expect(footer.main?.action === "archive").toBe(expected);
+    expect(planFor(shown, { entries: [] }).footer?.main?.action === "archive").toBe(expected);
   });
 });
 
 describe("Sign in again in place of the footer's action", () => {
   const ended = before(1);
   const claudeProfile = (overrides: Partial<SavedProfile>) => profile("claude", { signInEndsAt: ended, ...overrides });
-  const main = (setup: Setup) => plan("claude", setup).footer.main?.action ?? null;
+  const main = (setup: Setup) => plan("claude", setup).footer?.main?.action ?? null;
 
   it("is offered once a saved Claude sign-in ended, read or not, signed out or never used", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})] })).toBe("signInAgain");
@@ -267,7 +270,27 @@ describe("Sign in again in place of the footer's action", () => {
 
   it("gives way to the Cancel of the sign-in it started", () => {
     expect(main({ entries: [], profiles: [claudeProfile({})], accounts: { ...LIST, signingIn: "canceling" } })).toBe("cancelSignIn");
-    expect(plan("claude", { entries: [], profiles: [claudeProfile({})], accounts: { ...LIST, signingIn: "canceling" } }).footer.main)
-      .toEqual({ action: "cancelSignIn", enabled: false, busy: true });
+    expect(plan("claude", { entries: [], profiles: [claudeProfile({})], accounts: { ...LIST, signingIn: "canceling" } }).footer?.main)
+      .toEqual({ action: "cancelSignIn", enabled: false, busy: true, controls: CONTROLS });
+  });
+});
+
+describe("each entry", () => {
+  it("carries what its handler needs: the account controls, the saved login, the clients still running, the reading and the waiting spend", () => {
+    const pending = plan("codex", STATES["pending automatic spend"]("codex"));
+    expect(pending.account?.id).toBe(accountId("codex"));
+    expect(pending.footer).toEqual({
+      main: { action: "useAccount", enabled: true, controls: CONTROLS, profileId: "saved-codex" },
+      switchAlongside: { enabled: true, clients: RUNNING, controls: CONTROLS, profileId: "saved-codex" },
+      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true }), useBankedReset: null, automaticSpend: SPEND },
+    });
+    expect(pending.menu.find(entry => entry.action === "signInAgain")).toEqual({ action: "signInAgain", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
+    expect(plan("codex", STATES.remembered("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: null });
+    expect(plan("codex", STATES["needs login"]("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
+  });
+
+  it("starts the category editor from the card's category", () => {
+    const shown = limitCards({ provider: "muse", entries: [reading("muse")], profiles: [], categories: { [accountId("muse")]: "Client A" }, nativeLogin: null, now: AT_NOW })![0];
+    expect(planFor(shown, { entries: [] }).menu[1]).toEqual({ action: "category", enabled: true, initial: "Client A" });
   });
 });
