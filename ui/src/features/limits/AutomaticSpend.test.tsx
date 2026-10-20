@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatClock } from "$lib/limitsFormat";
 import { SharedReads } from "$lib/sharedReads/announcements";
-import { AutomaticSpend } from "./AutomaticSpend";
+import { AutomaticSpend, usePendingResetSpend } from "./AutomaticSpend";
 
 const pendingResetSpends = vi.hoisted(() => vi.fn());
 const cancelResetSpend = vi.hoisted(() => vi.fn());
@@ -22,12 +22,17 @@ vi.mock("$lib/api", () => ({
 const NOW = Date.parse("2026-10-01T12:00:00Z");
 const DUE = "2026-10-01T12:08:00Z";
 
+function Waiting({ accountId }: { accountId: string }) {
+  const spend = usePendingResetSpend(accountId);
+  return <AutomaticSpend accountId={accountId} dueAt={spend?.dueAt ?? null} now={NOW} />;
+}
+
 function renderSpend(...accountIds: string[]) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <SharedReads />
-      {(accountIds.length ? accountIds : ["acct-work"]).map((accountId) => <AutomaticSpend key={accountId} accountId={accountId} now={NOW} />)}
+      {(accountIds.length ? accountIds : ["acct-work"]).map((accountId) => <Waiting key={accountId} accountId={accountId} />)}
     </QueryClientProvider>,
   );
 }

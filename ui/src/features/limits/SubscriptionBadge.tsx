@@ -19,12 +19,12 @@ export function SubscriptionBadge({ term, paidThrough, now }: { term?: LimitsSub
   return <TermBadge badge={shown} tooltip={tooltip} />;
 }
 
-export function CodexSubscriptionBadge({accountId, current, term, now}: {accountId: string; current: boolean; term?: LimitsSubscription | null; now: number}) {
-  const query = useQuery(codexSubscriptionQuery(accountId, current));
+export function CodexSubscriptionBadge({accountId, poll, term, now}: {accountId: string; poll: boolean; term?: LimitsSubscription | null; now: number}) {
+  const query = useQuery(codexSubscriptionQuery(accountId, poll));
   return <SubscriptionBadge term={term} paidThrough={query.data ?? null} now={now} />;
 }
 
 export function AccountSubscriptionBadge({ subscription, now }: { subscription: CardSubscription | null; now: number }) {
   if (!subscription) return null;
-  return <CodexSubscriptionBadge accountId={subscription.accountId} current={subscription.current} term={subscription.term} now={now} />;
+  return <CodexSubscriptionBadge accountId={subscription.accountId} poll={subscription.poll} term={subscription.term} now={now} />;
 }

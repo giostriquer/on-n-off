@@ -33,6 +33,7 @@ fn remembered_codex_card(profile: &mut Profile) -> ProviderLimitsDto {
         "account": {"id": profile.identity.observation_key(), "label": "a@example.com"},
         "currentAccount": false,
         "plan": "business",
+        "planLabel": "Business",
         "windows": [
             {"id": "primary", "label": "Weekly · all models", "kind": "weekly", "usedPercent": 40.0,
              "observedAt": "2026-09-19T00:00:00Z"}

@@ -37,7 +37,7 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 used_percent: 7.0,
                 reset: ResetInstant::parse("2026-08-18T04:59:59.692639+00:00"),
                 role: None,
-                starts_on_first_message: true,
+                cycle_starts_on_first_message: true,
             },
             QuotaWindow {
                 id: "weekly_all".into(),
@@ -46,7 +46,7 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 used_percent: 12.0,
                 reset: ResetInstant::parse("2026-08-24T13:59:59.692659+00:00"),
                 role: None,
-                starts_on_first_message: false,
+                cycle_starts_on_first_message: false,
             },
         ]
     );
@@ -71,7 +71,7 @@ fn weekly_group_kinds_other_than_all_are_a_models_week() {
                 used_percent: 40.0,
                 reset: None,
                 role: None,
-                starts_on_first_message: false,
+                cycle_starts_on_first_message: false,
             },
             QuotaWindow {
                 id: "weekly_sonnet_4_5".into(),
@@ -80,7 +80,7 @@ fn weekly_group_kinds_other_than_all_are_a_models_week() {
                 used_percent: 3.5,
                 reset: None,
                 role: None,
-                starts_on_first_message: false,
+                cycle_starts_on_first_message: false,
             },
         ]
     );
@@ -170,7 +170,7 @@ fn only_claudes_session_windows_start_with_the_first_message_and_say_so_while_un
     let starts: Vec<(String, bool, bool)> = parse_claude(&payload)
         .into_iter()
         .map(|window| {
-            let fact = window.starts_on_first_message;
+            let fact = window.cycle_starts_on_first_message;
             let dto = window.into_dto();
             (dto.id, fact, dto.starts_on_first_message)
         })
@@ -191,7 +191,7 @@ fn only_claudes_session_windows_start_with_the_first_message_and_say_so_while_un
         ]
     });
     for window in parse_claude(&started) {
-        assert!(window.starts_on_first_message, "{window:?}");
+        assert!(window.cycle_starts_on_first_message, "{window:?}");
         assert!(
             !window.clone().into_dto().starts_on_first_message,
             "{window:?}"
@@ -211,6 +211,13 @@ fn only_claudes_session_windows_start_with_the_first_message_and_say_so_while_un
             ("session".to_string(), true),
             ("weekly_all".to_string(), false)
         ]
+    );
+    assert!(
+        AgentId::Claude
+            .limits_facts()
+            .on_load
+            .contains(&crate::provider_catalogue::OnLoad::MarkFirstMessageSessions),
+        "a Claude reading remembered before the flag is marked as it loads"
     );
 }
 

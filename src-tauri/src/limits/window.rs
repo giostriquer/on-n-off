@@ -26,7 +26,7 @@ pub(super) struct QuotaWindow {
     pub(super) id: String,
     pub(super) scope: Scope,
     pub(super) role: Option<WindowRole>,
-    pub(super) starts_on_first_message: bool,
+    pub(super) cycle_starts_on_first_message: bool,
     pub(super) length: Option<Duration>,
     pub(super) used_percent: f64,
     pub(super) reset: Option<ResetInstant>,
@@ -38,7 +38,7 @@ impl QuotaWindow {
             id: id.into(),
             scope: Scope::AllModels,
             role: None,
-            starts_on_first_message: true,
+            cycle_starts_on_first_message: true,
             length: Some(length),
             used_percent: 0.0,
             reset: None,
@@ -55,9 +55,8 @@ impl QuotaWindow {
             window_seconds: self.length.map(|length| length.as_secs()),
             observed_at: String::new(),
             role: self.role,
-            starts_on_first_message: self.starts_on_first_message
-                && used_percent == 0.0
-                && self.reset.is_none(),
+            starts_on_first_message: self.cycle_starts_on_first_message
+                && unstarted(used_percent, self.reset.is_some()),
             id: self.id,
         }
     }
@@ -107,6 +106,20 @@ fn in_range(used_percent: f64) -> f64 {
         used_percent.clamp(0.0, 100.0)
     } else {
         0.0
+    }
+}
+
+fn unstarted(used_percent: f64, has_reset: bool) -> bool {
+    used_percent == 0.0 && !has_reset
+}
+
+pub(super) fn mark_first_message_sessions(windows: &mut [LimitWindowDto]) {
+    for window in windows {
+        if window.kind == LimitWindowKind::Session
+            && unstarted(window.used_percent, window.resets_at.is_some())
+        {
+            window.starts_on_first_message = true;
+        }
     }
 }
 

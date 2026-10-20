@@ -117,9 +117,9 @@ fn asks_for_the_30_utc_days_ending_today_by_day() {
 }
 
 #[test]
-fn only_a_workspace_card_of_a_provider_with_backend_figures_is_asked_what_it_spent() {
+fn only_a_workspace_card_of_a_provider_whose_credits_spent_are_read_is_asked_what_it_spent() {
     for provider in crate::provider_catalogue::WITH_LIMITS {
-        let figures = provider.limits_facts().backend_figures;
+        let figures = provider.limits_facts().credits_spent.is_some();
         let mut card = ProviderLimitsDto::for_test(provider, "acct-a");
         for (plan, workspace) in [
             ("self_serve_business_prolite", true),

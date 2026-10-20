@@ -64,10 +64,11 @@ source carries no comments (see [Code comments](#code-comments)).
   What a surface does with a window beyond its kind (the notch's inner ring, a row that starts
   with the first message) is a field the reader sets on the window, never a label or provider
   match in the surface.
-- A provider fact a Limits module asks (a legacy reading, a load clean-up, backend figures, extra
-  observations, banked resets, a card feature): its `LimitsFacts` row in the provider catalogue,
-  through `AgentId::limits_facts`, never a `match` on `AgentId` in shared Limits code. A plan's
-  label and capacity: `limits/plan.rs`, never the UI.
+- A provider fact a Limits module asks (a legacy reading, a load step, credits spent, session
+  rollouts, banked resets, a card feature): its `LimitsFacts` row in the provider catalogue,
+  through `AgentId::limits_facts`, never a `match` on `AgentId` in shared Limits code. A fact that
+  selects an implementation is a closed enum naming the ones that exist, and the code that runs it
+  matches on that enum. A plan's label and capacity: `limits/plan.rs`, never the UI.
 - How often Limits is read: `limits_refresh.rs`, which owns the check every consumer keeps
   (`check_interval`) and the failure backoff every failing read waits (`failure_backoff`). A read
   keeps its own failure count and passes its own interval; it never restates the formula. The UI's
@@ -75,17 +76,26 @@ source carries no comments (see [Code comments](#code-comments)).
   `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
   keeps the fixture equal to `check_interval`.
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
-  shell, header, tags, ⋯ menu and footer from the card model; a card adds only menu items, its
-  destructive items and footer content. The menu (`ActionMenu`, `ui/src/components/`) always
-  starts with Check limits now and ends with the destructive items. Edit category on every
-  card with an account, and Archive account and Remove account on a remembered card, come from
-  `useCardActions` (`cardActions.tsx`) for every provider; the saved-login items come from
-  `useAccountCardActions`, which has none without an account manager. The card model reads each
-  per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
+  shell, header, tags, ⋯ menu and footer from the card model; a card adds only its body. Which
+  actions a card offers, in what order and whether each is enabled, is the card action plan's
+  alone (`cardActionPlan`, `cardActionPlan.ts`), for every provider and card state: the menu
+  (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
+  the destructive items, and the footer: its main button, the Switch anyway confirmation and the
+  banked reset controls. Each entry carries what its handler needs (the account controls, the saved
+  login, the clients still running, the reading, the waiting spend), and `useCardActions`
+  (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
+  else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
+  Check limits now (`checkNowEntry`). The plan reads two facts from the card for who is signed in:
+  its signed-in state (`signedIn`), for every decision about the signed-in login, and whether it
+  shows the provider's own read (`leads`), which Use banked reset requires and Archive account in
+  place of Use account refuses ([why](architecture/README.md#limits)). The card model and the plan
+  read each per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: it is the catalogue fixture's
-  `limitsFeatures`, which Rust writes from each provider's `LimitsFacts`, so a new provider has a row
-  once Rust gives it one, `limitFeatures.test.ts` fails when a row names an implementation the card
-  model lacks, and reusing a feature means reusing that implementation. A new header tag kind (`cardTags.ts`)
+  `limitsFeatures`, which Rust writes from each provider's `LimitsFacts`, read through
+  `LIMITS_IMPLEMENTATIONS`, the one list of the implementations the card model has, which also
+  types each feature. A new provider has a row once Rust gives it one, `limitFeatures.test.ts`
+  fails when a row names an implementation that list lacks, and reusing a feature means reusing
+  that implementation. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
   order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.
@@ -97,8 +107,9 @@ source carries no comments (see [Code comments](#code-comments)).
   order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
   in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
   verification).
-  `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
-  `limitCards.test.ts` pins each provider's features.
+  `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider,
+  `limitCards.test.ts` pins each provider's features, and `cardActionPlan.test.ts` is the table of
+  every provider's actions in every card state.
 - What a quota window or workspace share reads at an instant (used now, renewed, reached, its
   percent text, its reset note, idle, its meter level): `limits/window_at.rs`, which the limits
   monitor and the Windows painter use, the painter with the clock its window passes in, never

@@ -507,10 +507,11 @@ absent date.
 
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude, Codex and Muse;
 each card owns its usage, subscription date, primary action and optional category. The card frame
-(`LimitCardFrame`) owns each card's ⋯ menu and always offers Check limits now; account management
-adds the saved-login items and the footer's primary action through `useAccountCardActions`, and
-Limits adds Edit category on every card with an account and Archive account and Remove account on
-every remembered card (`useCardActions`).
+(`LimitCardFrame`) draws each card's ⋯ menu and footer from the card action plan
+(`cardActionPlan.ts`), which decides every account action for every provider: Check limits now
+always, Edit category on every card with an account, the saved-login items and the footer's
+primary action wherever there is an account manager, and Archive account and Remove account on
+every card that is not signed in.
 Remove account removes a saved login first when there is one, as the archived list does; on a
 card with no saved login, Archive account and Remove account act on its usage history only.
 Saved identities

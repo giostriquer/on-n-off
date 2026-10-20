@@ -11,46 +11,47 @@ struct Tier {
     reported: &'static str,
     label: &'static str,
     capacity: u32,
-    claude_rate_limit_tier: Option<&'static str>,
 }
 
 const CLAUDE_MAX: &str = "max";
+const CLAUDE_MAX_20: &str = "max ×20";
+const CLAUDE_MAX_5: &str = "max ×5";
+
+const CLAUDE_MAX_RATE_LIMIT_TIERS: [(&str, &str); 2] = [
+    ("default_claude_max_20x", CLAUDE_MAX_20),
+    ("default_claude_max_5x", CLAUDE_MAX_5),
+];
 
 const TIERS: [Tier; 5] = [
     Tier {
         provider: AgentId::Claude,
-        reported: "max ×20",
+        reported: CLAUDE_MAX_20,
         label: "Max ×20",
         capacity: 20,
-        claude_rate_limit_tier: Some("default_claude_max_20x"),
     },
     Tier {
         provider: AgentId::Claude,
-        reported: "max ×5",
+        reported: CLAUDE_MAX_5,
         label: "Max ×5",
         capacity: 5,
-        claude_rate_limit_tier: Some("default_claude_max_5x"),
     },
     Tier {
         provider: AgentId::Claude,
         reported: CLAUDE_MAX,
         label: "Max",
         capacity: 5,
-        claude_rate_limit_tier: None,
     },
     Tier {
         provider: AgentId::Codex,
         reported: "pro",
         label: "Pro ×20",
         capacity: 20,
-        claude_rate_limit_tier: None,
     },
     Tier {
         provider: AgentId::Codex,
         reported: "prolite",
         label: "Pro ×5",
         capacity: 5,
-        claude_rate_limit_tier: None,
     },
 ];
 
@@ -102,15 +103,15 @@ pub(crate) fn claude_plan(
     organization_type: Option<&str>,
     rate_limit_tier: Option<&str>,
 ) -> Option<String> {
-    let tier = TIERS.iter().find(|tier| {
-        tier.provider == AgentId::Claude
-            && organization_type == Some(CLAUDE_MAX)
-            && tier.claude_rate_limit_tier.is_some()
-            && tier.claude_rate_limit_tier == rate_limit_tier
-    });
-    tier.map(|tier| tier.reported)
-        .or(organization_type)
-        .map(str::to_string)
+    let max_tier = (organization_type == Some(CLAUDE_MAX))
+        .then(|| {
+            CLAUDE_MAX_RATE_LIMIT_TIERS
+                .iter()
+                .find(|(tier, _)| Some(*tier) == rate_limit_tier)
+        })
+        .flatten()
+        .map(|(_, plan)| *plan);
+    max_tier.or(organization_type).map(str::to_string)
 }
 
 pub(crate) fn is_codex_workspace_plan(plan: &str) -> bool {

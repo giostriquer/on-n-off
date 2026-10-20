@@ -164,7 +164,7 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 used_percent: 22.0,
                 reset: DateTime::from_timestamp(1_760_500_000, 0).map(ResetInstant::from),
                 role: None,
-                starts_on_first_message: false,
+                cycle_starts_on_first_message: false,
             },
             QuotaWindow {
                 id: "session".into(),
@@ -173,7 +173,7 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 used_percent: 41.0,
                 reset: DateTime::from_timestamp(1_760_000_000, 0).map(ResetInstant::from),
                 role: None,
-                starts_on_first_message: true,
+                cycle_starts_on_first_message: true,
             },
         ]
     );
@@ -220,6 +220,13 @@ fn an_unused_session_without_a_reset_starts_with_the_first_message_and_the_week_
         .map(|window| window.starts_on_first_message)
         .collect();
     assert_eq!(started, [false, false]);
+    assert!(
+        crate::dto::AgentId::Muse
+            .limits_facts()
+            .on_load
+            .contains(&crate::provider_catalogue::OnLoad::MarkFirstMessageSessions),
+        "a Muse reading remembered before the flag is marked as it loads"
+    );
 }
 
 #[test]

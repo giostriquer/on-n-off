@@ -128,7 +128,7 @@ fn providers_without_a_subscription_are_unsupported() {
     let home = scratch_dir("limits-unsupported");
     let unsupported: Vec<AgentId> = AgentId::ALL
         .into_iter()
-        .filter(|id| !id.facts().limits.is_some())
+        .filter(|id| id.facts().limits.is_none())
         .collect();
     assert!(!unsupported.is_empty());
     for provider in unsupported {

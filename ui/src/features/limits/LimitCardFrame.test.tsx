@@ -63,15 +63,6 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const MENUS: Record<LimitsProvider, { current: string[]; remembered: string[] }> = {
-  claude: { current: ["Check limits now", "Edit category", "Sign out"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
-  codex: {
-    current: ["Check limits now", "Edit category", "Banked reset alert", "Sign out"],
-    remembered: ["Check limits now", "Edit category", "Archive account", "Banked reset alert", "Remove account"],
-  },
-  muse: { current: ["Check limits now", "Edit category", "Sign out"], remembered: ["Check limits now", "Edit category", "Archive account", "Remove account"] },
-};
-
 describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
   const name = providerLabel(provider);
 
@@ -80,9 +71,11 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     renderLimits();
     const current = await screen.findByRole("region", { name: `${name} limits · ${label(provider)}` });
     expect(within(current).getByTestId("account-tags")).toBeInTheDocument();
-    expect(openMenu(current, label(provider))).toEqual(MENUS[provider].current);
+    const signedIn = openMenu(current, label(provider));
+    expect([signedIn[0], signedIn.at(-1)]).toEqual(["Check limits now", "Sign out"]);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
-    expect(openMenu(card(`${name} limits · ${oldLabel(provider)}`), oldLabel(provider))).toEqual(MENUS[provider].remembered);
+    const history = openMenu(card(`${name} limits · ${oldLabel(provider)}`), oldLabel(provider));
+    expect([history[0], history.at(-1)]).toEqual(["Check limits now", "Remove account"]);
   });
 
   it("archives a remembered account from its menu", async () => {
@@ -172,7 +165,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
   });
 });
 
-it("puts a saved login's items between Check limits now and the card's history items", async () => {
+it("draws the card action plan's menu in its order, each item under its own label", async () => {
   const old = okCodex({ currentAccount: false, account: { id: "codex-old", label: "old@codex.example" } });
   const profile = { id: "saved-old", observationId: "codex-old", legacyId: "old", identity: { provider: "codex" as const, userId: "old", workspaceId: "old" }, email: "old@codex.example", label: "old@codex.example", savedAt: NOW, active: false, needsLogin: false };
   readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));

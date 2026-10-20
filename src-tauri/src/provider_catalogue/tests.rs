@@ -24,8 +24,8 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary: "claude",
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
-                        load_cleanup: Some(LoadCleanup::ResetCredits),
-                        sign_in_deadline: Some(AgentId::Claude),
+                        on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                        sign_in_deadline: Some(SignInDeadline::Claude),
                         ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Claude),
@@ -40,12 +40,12 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary: "codex",
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
-                        load_cleanup: Some(LoadCleanup::HiddenWindows),
-                        backend_figures: true,
-                        session_rollouts: true,
-                        banked_resets: Some(AgentId::Codex),
-                        subscription_term: Some(AgentId::Codex),
-                        paid_reset_offer: Some(AgentId::Codex),
+                        on_load: &[OnLoad::DropHiddenWindows],
+                        credits_spent: Some(CreditsSpent::Codex),
+                        session_rollouts: Some(SessionRollouts::Codex),
+                        banked_resets: Some(BankedResets::Codex),
+                        subscription_term: Some(SubscriptionTerm::Codex),
+                        paid_reset_offer: Some(PaidResetOffer::Codex),
                         ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Codex),
@@ -85,6 +85,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
                         inherits_legacy_reading: true,
+                        on_load: &[OnLoad::MarkFirstMessageSessions],
                         ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Muse),
@@ -236,14 +237,23 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
         LimitsFacts::NONE,
         LimitsFacts {
             inherits_legacy_reading: false,
-            load_cleanup: None,
-            backend_figures: false,
-            session_rollouts: false,
+            on_load: &[],
+            credits_spent: None,
+            session_rollouts: None,
             banked_resets: None,
             sign_in_deadline: None,
             subscription_term: None,
             paid_reset_offer: None,
         }
+    );
+}
+
+#[test]
+fn one_provider_banks_resets_and_its_alert_spend_and_reread_follow_it() {
+    assert_eq!(WITH_BANKED_RESETS, [BANKED_RESETS_PROVIDER]);
+    assert_eq!(
+        BANKED_RESETS_PROVIDER.limits_facts().banked_resets,
+        Some(BankedResets::Codex)
     );
 }
 
@@ -276,6 +286,21 @@ fn a_provider_usage_reads_is_the_one_its_transcripts_and_folded_rows_name() {
 }
 
 #[test]
+fn each_card_feature_is_written_as_the_key_of_the_implementation_it_names() {
+    assert_eq!(
+        serde_json::to_value(SignInDeadline::Claude).unwrap(),
+        serde_json::json!(AgentId::Claude.key())
+    );
+    for value in [
+        serde_json::to_value(SubscriptionTerm::Codex).unwrap(),
+        serde_json::to_value(BankedResets::Codex).unwrap(),
+        serde_json::to_value(PaidResetOffer::Codex).unwrap(),
+    ] {
+        assert_eq!(value, serde_json::json!(AgentId::Codex.key()));
+    }
+}
+
+#[test]
 fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
     let keys = |ids: &[AgentId]| ids.iter().map(|id| id.key()).collect::<Vec<_>>();
     let keyed = |ids: &[AgentId]| {
@@ -305,7 +330,6 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
         AgentId::ALL.len(),
         "two providers sharing a key would be one provider to the UI"
     );
-    let implementation = |id: Option<AgentId>| id.map(AgentId::key);
     let limits_features: serde_json::Map<String, serde_json::Value> = WITH_LIMITS
         .into_iter()
         .map(|id| {
@@ -313,10 +337,10 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
             (
                 id.key().to_string(),
                 serde_json::json!({
-                    "signInDeadline": implementation(facts.sign_in_deadline),
-                    "subscriptionTerm": implementation(facts.subscription_term),
-                    "bankedResets": implementation(facts.banked_resets),
-                    "paidResetOffer": implementation(facts.paid_reset_offer),
+                    "signInDeadline": facts.sign_in_deadline,
+                    "subscriptionTerm": facts.subscription_term,
+                    "bankedResets": facts.banked_resets,
+                    "paidResetOffer": facts.paid_reset_offer,
                 }),
             )
         })

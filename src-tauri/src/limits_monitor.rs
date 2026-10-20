@@ -301,7 +301,7 @@ async fn poll_once(
 ) -> Result<(), String> {
     let fresh = waiting
         .read(|waiting| waiting.any_due(polled_at))
-        .then_some(AgentId::Codex);
+        .then_some(crate::provider_catalogue::BANKED_RESETS_PROVIDER);
     let readings = io.read(watched, fresh).await?;
     let previous = state.clone();
     let mut notices = limit_notices(state, &readings, settings);

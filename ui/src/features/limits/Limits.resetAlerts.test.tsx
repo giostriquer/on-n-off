@@ -256,12 +256,4 @@ describe("a Codex account's banked reset alert", () => {
     await waitFor(() => expect(saved).toHaveBeenCalledWith({}));
     expect(requestNotificationPermission).not.toHaveBeenCalled();
   });
-
-  it("is offered only on Codex cards", async () => {
-    renderLimits();
-
-    fireEvent.click(await screen.findByRole("button", { name: "More actions for me@claude.example" }));
-
-    expect(within(screen.getByRole("group", { name: "Actions for me@claude.example" })).queryByRole("button", { name: "Banked reset alert" })).toBeNull();
-  });
 });

@@ -16,27 +16,64 @@ pub struct ProviderFacts {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LimitsFacts {
     pub inherits_legacy_reading: bool,
-    pub load_cleanup: Option<LoadCleanup>,
-    pub backend_figures: bool,
-    pub session_rollouts: bool,
-    pub banked_resets: Option<AgentId>,
-    pub sign_in_deadline: Option<AgentId>,
-    pub subscription_term: Option<AgentId>,
-    pub paid_reset_offer: Option<AgentId>,
+    pub on_load: &'static [OnLoad],
+    pub credits_spent: Option<CreditsSpent>,
+    pub session_rollouts: Option<SessionRollouts>,
+    pub banked_resets: Option<BankedResets>,
+    pub sign_in_deadline: Option<SignInDeadline>,
+    pub subscription_term: Option<SubscriptionTerm>,
+    pub paid_reset_offer: Option<PaidResetOffer>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LoadCleanup {
-    HiddenWindows,
-    ResetCredits,
+pub enum OnLoad {
+    DropHiddenWindows,
+    DropResetCredits,
+    MarkFirstMessageSessions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CreditsSpent {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SessionRollouts {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BankedResets {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SignInDeadline {
+    Claude,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SubscriptionTerm {
+    Codex,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PaidResetOffer {
+    Codex,
 }
 
 impl LimitsFacts {
     pub const NONE: Self = Self {
         inherits_legacy_reading: false,
-        load_cleanup: None,
-        backend_figures: false,
-        session_rollouts: false,
+        on_load: &[],
+        credits_spent: None,
+        session_rollouts: None,
         banked_resets: None,
         sign_in_deadline: None,
         subscription_term: None,
@@ -61,8 +98,8 @@ impl AgentId {
                 binary: "claude",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    load_cleanup: Some(LoadCleanup::ResetCredits),
-                    sign_in_deadline: Some(Self::Claude),
+                    on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                    sign_in_deadline: Some(SignInDeadline::Claude),
                     ..LimitsFacts::NONE
                 }),
                 usage: Some(UsageProvider::Claude),
@@ -74,12 +111,12 @@ impl AgentId {
                 binary: "codex",
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
-                    load_cleanup: Some(LoadCleanup::HiddenWindows),
-                    backend_figures: true,
-                    session_rollouts: true,
-                    banked_resets: Some(Self::Codex),
-                    subscription_term: Some(Self::Codex),
-                    paid_reset_offer: Some(Self::Codex),
+                    on_load: &[OnLoad::DropHiddenWindows],
+                    credits_spent: Some(CreditsSpent::Codex),
+                    session_rollouts: Some(SessionRollouts::Codex),
+                    banked_resets: Some(BankedResets::Codex),
+                    subscription_term: Some(SubscriptionTerm::Codex),
+                    paid_reset_offer: Some(PaidResetOffer::Codex),
                     ..LimitsFacts::NONE
                 }),
                 usage: Some(UsageProvider::Codex),
@@ -110,6 +147,7 @@ impl AgentId {
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
                     inherits_legacy_reading: true,
+                    on_load: &[OnLoad::MarkFirstMessageSessions],
                     ..LimitsFacts::NONE
                 }),
                 usage: Some(UsageProvider::Muse),
@@ -206,6 +244,13 @@ pub const WITH_SAVED_ACCOUNTS: [AgentId; Fact::SavedAccounts.count()] =
 
 pub const WITH_BANKED_RESETS: [AgentId; Fact::BankedResets.count()] =
     Fact::BankedResets.providers();
+
+const _: () = assert!(
+    Fact::BankedResets.count() == 1,
+    "one provider banks resets: the reset alert, its spend and its re-read follow that one provider"
+);
+
+pub const BANKED_RESETS_PROVIDER: AgentId = WITH_BANKED_RESETS[0];
 
 const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;

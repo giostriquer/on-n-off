@@ -109,8 +109,10 @@ adapter assumes today (change the adapter and this file together).
   whose cycle starts that way (Claude's and Muse's sessions, and `QuotaWindow::idle`), and the
   module sets the flag only while such a window is unused and has no reset. Every surface words
   such a window from that flag alone, the card "Starts with your first message" and both notches
-  "Starts with first message" (`limits/window_at.rs`). Both fields are left out when unset,
-  so a reading remembered before they existed loads with neither until its account is read again.
+  "Starts with first message" (`limits/window_at.rs`). Both fields are left out when unset.
+  A reading remembered before they existed gets the flag as its file loads, on every unused session
+  without a reset, where its provider's sessions start that way (Limits facts, below); it has no
+  role until its account is read again.
   Every window that leaves `limits/` is in range:
   built ones by `QuotaWindow::into_dto`, the Codex sessions merge's included, remembered ones as
   their file loads (`StoredSnapshot::into_dto`), and every read again in `pipeline::finish`; the
@@ -133,14 +135,22 @@ adapter assumes today (change the adapter and this file together).
 
 - Per-provider Limits facts: one row each in the provider catalogue (`LimitsFacts`,
   `AgentId::limits_facts`), which shared Limits code asks instead of naming a provider. It says
-  whether a saved profile's first reading inherits the reading its legacy id remembered (Muse);
-  what a remembered file loses as it loads (Codex its hidden windows, Claude its banked resets);
-  whether the backend figures, credits spent and the subscription term, are asked (Codex); whether
-  session rollouts add observations (Codex); whose banked resets the limits monitor watches and the
-  banked reset alert judges (Codex, `WITH_BANKED_RESETS`); and the card features the UI turns on: a
-  saved sign-in's deadline (Claude), the subscription term (Codex), banked resets and the paid
-  reset offer (Codex). Those four are written into the catalogue fixture as `limitsFeatures`, each
-  naming the implementation it turns on, and the UI's `LIMITS_FEATURES` is that map.
+  whether a saved profile's first reading inherits the reading its legacy id remembered (Muse,
+  a plain yes or no, since the mechanism is the same for any provider); what a remembered file
+  changes as it loads (`on_load`: Codex drops its hidden windows, Claude its banked resets, and
+  Claude and Muse mark an unused session without a reset as starting with the first message); and
+  which implementation, if any, gives the provider each of these: credits spent (Codex), session
+  rollouts as extra observations (Codex), banked resets (Codex), a saved sign-in's deadline
+  (Claude), the subscription term (Codex: asked by the read and shown by the card, one fact) and
+  the paid reset offer (Codex). Each of those is a closed enum naming the implementations it has
+  (`BankedResets::Codex`, `SignInDeadline::Claude`, …), so a row can only name one that exists,
+  and the code that runs it matches on it. Exactly one provider banks resets: a compile-time check
+  holds `WITH_BANKED_RESETS` to one entry, `BANKED_RESETS_PROVIDER`, whose card the banked reset
+  alert judges and whose read the limits monitor watches and repeats before a spend, because the
+  alert, its spend and its re-read are Codex's. The four card features are written into the
+  catalogue fixture as `limitsFeatures`, each the key of the implementation it names, and the
+  UI's `LIMITS_FEATURES` is that map, read through `LIMITS_IMPLEMENTATIONS`, the one list of the
+  implementations the card model has.
 
 - GitHub pull requests (`github/`, `github_monitor.rs`): the Pull requests screen is not a
   provider and stays outside `AgentAdapter`. It borrows the GitHub CLI's login by running
