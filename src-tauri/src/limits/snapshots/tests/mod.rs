@@ -23,7 +23,7 @@ pub(super) fn snapshot(
         .labelled(label)
         .with_reading(Reading {
             plan: Some("pro".to_string()),
-            windows: vec![super::super::json::window(
+            windows: vec![super::super::window::fixture(
                 "primary",
                 "Weekly · all models",
                 LimitWindowKind::Weekly,

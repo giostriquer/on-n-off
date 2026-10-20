@@ -185,7 +185,7 @@ fn the_numbers_the_ui_restates_are_the_ones_the_rule_keeps() {
             account_id: "acct".into(),
             account_label: None,
             left_percent: 5.0,
-            renews_at: at(RENEWS),
+            cycle: at(RENEWS).into(),
             automatic: true,
         }],
         now(),

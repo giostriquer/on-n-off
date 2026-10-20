@@ -164,3 +164,70 @@ fn every_cell_travels_in_rail_order_and_a_cell_not_read_yet_carries_only_its_not
     );
     assert_eq!(message["actionError"], serde_json::Value::Null);
 }
+
+#[test]
+fn a_remembered_reading_out_of_range_still_reaches_the_helper_in_range() {
+    use crate::dto::{
+        LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto, Reading,
+    };
+    let home = crate::paths::scratch_dir("notch-remembered-out-of-range");
+    let read = ProviderLimitsDto::for_test(AgentId::Codex, "acct-1").with_reading(Reading {
+        windows: vec![LimitWindowDto {
+            id: "primary".into(),
+            label: "Weekly · all models".into(),
+            kind: LimitWindowKind::Weekly,
+            used_percent: 50.0,
+            resets_at: Some("2026-10-05T12:00:00.000Z".into()),
+            window_seconds: Some(604_800),
+            observed_at: "2026-10-01T10:00:00.000Z".into(),
+        }],
+        workspace_credits: Some(LimitsWorkspaceCreditsDto {
+            limit: "100".into(),
+            used: "40".into(),
+            used_percent: 40.0,
+            resets_at: None,
+            reached: false,
+        }),
+        ..Reading::default()
+    });
+    assert!(crate::limits::remember(&home, read).saved.is_ok());
+    let file = std::fs::read_dir(home.join(".on-n-off").join("limits"))
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "json")
+        })
+        .unwrap();
+    let mut stored: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    stored["windows"][0]["usedPercent"] = serde_json::json!(140.0);
+    stored["workspaceCredits"]["usedPercent"] = serde_json::json!(250.0);
+    std::fs::write(&file, stored.to_string()).unwrap();
+    let failed = ProviderLimitsDto {
+        status: LimitsStatus::Failed,
+        message: Some("Refresh failed.".into()),
+        ..ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
+    };
+
+    let paused = crate::limits::remember(&home, failed).card;
+    let reading = NotchProvider::current(vec![paused]).unwrap();
+    let only = NotchSettings {
+        providers: vec![AgentId::Codex],
+        ..NotchSettings::default()
+    };
+    let sent = encoded(only, vec![(AgentId::Codex, Some(reading), Vec::new())])["cells"][0]
+        ["reading"]
+        .clone();
+
+    let used: Vec<f64> = sent["windows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|window| window["usedPercent"].as_f64().unwrap())
+        .collect();
+    assert_eq!(used, [100.0]);
+    assert_eq!(sent["workspaceCredits"]["usedPercent"], 100.0);
+    let _ = std::fs::remove_dir_all(&home);
+}

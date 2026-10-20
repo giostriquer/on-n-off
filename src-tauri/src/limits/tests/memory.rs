@@ -1,6 +1,6 @@
 use super::account;
 use crate::dto::LimitWindowKind;
-use crate::limits::json::window;
+use crate::limits::window::fixture;
 use crate::limits::*;
 use crate::paths::scratch_dir;
 
@@ -13,7 +13,7 @@ fn ok_snapshot(provider: AgentId, id: &str, label: &str, used: f64) -> ProviderL
             account: Some(account(id, label)),
             reading: Reading {
                 plan: Some("pro".to_string()),
-                windows: vec![window(
+                windows: vec![fixture(
                     "primary",
                     "Weekly · all models",
                     LimitWindowKind::Weekly,
@@ -100,7 +100,7 @@ fn successful_read_without_an_account_is_not_remembered() {
             account: None,
             reading: Reading {
                 plan: Some("max".to_string()),
-                windows: vec![window(
+                windows: vec![fixture(
                     "w",
                     "Weekly · all models",
                     LimitWindowKind::Weekly,

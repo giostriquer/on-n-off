@@ -1,6 +1,6 @@
 use super::account;
 use crate::dto::LimitWindowKind;
-use crate::limits::json::window;
+use crate::limits::window::fixture;
 use crate::limits::*;
 use crate::paths::scratch_dir;
 
@@ -12,7 +12,7 @@ fn read(id: &str, label: &str, hour: u32) -> ProviderLimitsDto {
         Parsed {
             account: Some(account(id, label)),
             reading: Reading {
-                windows: vec![window(
+                windows: vec![fixture(
                     "primary",
                     "Weekly · all models",
                     LimitWindowKind::Weekly,

@@ -9,14 +9,14 @@ fn legacy(provider: AgentId, label: &str) -> ProviderLimitsDto {
         .with_reading(Reading {
             plan: Some("Muse Code Power Usage".to_string()),
             windows: vec![
-                crate::limits::json::window(
+                crate::limits::window::fixture(
                     "weekly",
                     "Weekly · all models",
                     LimitWindowKind::Weekly,
                     30.0,
                     Some("2026-10-19T00:00:00.000Z".to_string()),
                 ),
-                crate::limits::json::window(
+                crate::limits::window::fixture(
                     "session",
                     "5 hour · all models",
                     LimitWindowKind::Session,
@@ -38,7 +38,7 @@ fn idle(provider: AgentId) -> ProviderLimitsDto {
         .with_legacy_id("email:you@example.com")
         .with_reading(Reading {
             plan: Some("Muse Code Power Usage".to_string()),
-            windows: vec![crate::limits::json::window(
+            windows: vec![crate::limits::window::fixture(
                 "session",
                 "5 hour · all models",
                 LimitWindowKind::Session,
