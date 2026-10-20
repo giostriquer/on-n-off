@@ -361,6 +361,13 @@ fn non_empty(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
+pub(crate) fn login_email(config: &Path) -> Option<Option<String>> {
+    let (text, _) = read_auth(config).ok()??;
+    let meta = meta_of(&document(&text).ok()?)?;
+    meta.storage?;
+    Some(meta.email())
+}
+
 pub(super) static SIGNED_IN: LoginCache = LoginCache::new();
 
 pub(crate) fn signed_in(config: &Path) -> Option<MuseLogin> {

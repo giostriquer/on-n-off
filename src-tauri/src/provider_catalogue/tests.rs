@@ -23,7 +23,10 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Claude",
                     binary: "claude",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        client: "Claude Code",
+                        vendor: "Anthropic",
+                    }),
                     usage: Some(UsageProvider::Claude),
                     saved_accounts: true,
                 },
@@ -35,7 +38,10 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Codex",
                     binary: "codex",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        client: "Codex CLI",
+                        vendor: "OpenAI",
+                    }),
                     usage: Some(UsageProvider::Codex),
                     saved_accounts: true,
                 },
@@ -47,7 +53,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Antigravity",
                     binary: "agy",
                     binary_aliases: &[],
-                    limits_reader: false,
+                    limits: None,
                     usage: None,
                     saved_accounts: false,
                 },
@@ -59,7 +65,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Cursor",
                     binary: "agent",
                     binary_aliases: &["cursor-agent"],
-                    limits_reader: false,
+                    limits: None,
                     usage: None,
                     saved_accounts: false,
                 },
@@ -71,7 +77,10 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Muse",
                     binary: "muse",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        client: "Muse Code",
+                        vendor: "Meta",
+                    }),
                     usage: Some(UsageProvider::Muse),
                     saved_accounts: true,
                 },
@@ -196,7 +205,7 @@ fn each_fact_list_holds_exactly_the_providers_with_that_fact_in_tab_order() {
             .filter(|id| fact(&id.facts()))
             .collect()
     };
-    assert_eq!(WITH_LIMITS.to_vec(), with(|facts| facts.limits_reader));
+    assert_eq!(WITH_LIMITS.to_vec(), with(|facts| facts.limits.is_some()));
     assert_eq!(
         WITH_SAVED_ACCOUNTS.to_vec(),
         with(|facts| facts.saved_accounts)
@@ -249,7 +258,7 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
                     "displayName": facts.display_name,
                     "binary": facts.binary,
                     "binaryAliases": facts.binary_aliases,
-                    "limitsReader": facts.limits_reader,
+                    "limitsReader": facts.limits.is_some(),
                     "usage": facts.usage,
                     "savedAccounts": facts.saved_accounts,
                 }),

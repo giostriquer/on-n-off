@@ -1,13 +1,5 @@
 use super::*;
 
-fn identity() -> Identity {
-    Identity {
-        provider: AgentId::Codex,
-        user_id: "user".into(),
-        workspace_id: "team".into(),
-    }
-}
-
 #[test]
 fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_windows() {
     let home = tempfile::tempdir().unwrap();
@@ -53,44 +45,4 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
             .count(),
         3
     );
-}
-
-#[test]
-fn a_first_reading_is_kept_only_when_it_answered_for_the_identity_with_something_observed() {
-    let who = identity();
-    let answered = ProviderLimitsDto::for_test(AgentId::Codex, &who.observation_key())
-        .with_reading(Reading {
-            windows: vec![super::super::window::fixture(
-                "primary",
-                "Weekly · all models",
-                crate::dto::LimitWindowKind::Weekly,
-                42.0,
-                None,
-            )],
-            ..Reading::default()
-        });
-
-    let kept = accepted(&who, answered.clone()).expect("an answer about the identity");
-    assert!(!kept.current_account);
-    assert_eq!(kept.reading, answered.reading);
-
-    let failed = ProviderLimitsDto {
-        status: LimitsStatus::Failed,
-        ..answered.clone()
-    };
-    let mut another = answered.clone();
-    another.account.as_mut().unwrap().id = "profile:someone-else".into();
-    let unnamed = ProviderLimitsDto {
-        account: None,
-        ..answered.clone()
-    };
-    let empty = answered.with_reading(Reading::default());
-    for (case, card) in [
-        ("failed", failed),
-        ("another account", another),
-        ("no account", unnamed),
-        ("nothing observed", empty),
-    ] {
-        assert_eq!(accepted(&who, card), None, "{case}");
-    }
 }

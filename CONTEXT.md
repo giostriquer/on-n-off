@@ -48,6 +48,14 @@ The plan a read reports. It describes the account; a reading that holds nothing 
 nothing.
 _Avoid_: metadata
 
+**Read outcome**:
+What one Limits read came to: a reading, or one failure of a closed set (not installed, signed out,
+unsupported, a refused login, another account, an account changed during the read, a rate limit,
+a failed request, or unavailable). It decides the card's status and message, whether the card keeps the account the
+login names (every failure but not installed and signed out does, so its remembered reading stands
+in), and how long the next read waits.
+_Avoid_: error, result, read failure (one of its kinds)
+
 **Remembered reading**:
 The last reading kept for an account, shown when the account is neither the signed-in one, a saved
 profile Limits is polling, nor an archived account: one the user switched away from without saving
@@ -86,9 +94,10 @@ _Avoid_: auto-reset
 
 **Failure backoff**:
 How long a Limits read waits after failing before it is made again: its poll interval doubled for
-each failure in a row, at most sixteen intervals and never more than an hour. The signed-in
-account's read, each saved profile and each Codex backend figure count their own failures; a
-success starts the count over. A backend figure starts one doubling behind the others: one
+each failure in a row, at most sixteen intervals and never more than an hour, or a rate limit's
+Retry-After when that is longer. The signed-in account's read, each saved profile and each Codex
+backend figure count their own failures; a success starts the count over, and a read that found
+nobody signed in, nothing installed or no subscription to read counts none. A backend figure starts one doubling behind the others: one
 interval after its first failure, where they wait two.
 _Avoid_: retry delay, cooldown
 

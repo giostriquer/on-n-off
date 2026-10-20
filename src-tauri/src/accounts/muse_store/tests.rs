@@ -154,6 +154,29 @@ fn login_metadata_without_a_credential_is_no_login_and_never_asks_the_keychain()
 }
 
 #[test]
+fn the_login_email_names_the_login_from_auth_json_alone() {
+    for body in [
+        r#"{"providers":{"meta":{"mechanism":"oauth","access_token":"device-token","user_email":" You@Example.com "}}}"#,
+        KEYCHAIN_AUTH,
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","expires_at":1000}}}"#,
+        r#"{"providers":{"meta":{"api_key":"LLM|key"}}}"#,
+        r#"{"providers":{"meta":{"mechanism":"apiKey","user_email":"you@example.com"}}}"#,
+        r#"{"providers":{}}"#,
+        "not json",
+    ] {
+        let config = config_with_auth(body);
+        let login = LoginCache::new().login(&config, NOW, &keychain_token);
+        assert_eq!(
+            login_email(&config),
+            login.map(|login| login.email),
+            "{body}"
+        );
+    }
+    let nothing = crate::paths::scratch_dir("muse-store-no-auth");
+    assert_eq!(login_email(&nothing), None);
+}
+
+#[test]
 fn an_expired_login_does_not_ask_the_keychain() {
     let config = config_with_auth(
         r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","expires_at":1000}}}"#,

@@ -5,25 +5,26 @@ use serde_json::Value;
 
 use super::claude_cli;
 use super::json::{humanize, optional_string};
-use super::pipeline::finish;
+use super::outcome::{Read, ReadFailure};
 use super::window::{QuotaWindow, ResetInstant, Scope, FIVE_HOURS, ONE_WEEK};
-use super::Parsed;
 use crate::accounts::claude::SignedIn;
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::LimitsAccountDto;
 
-pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
+pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
+    let claude = SignedIn::resolve(home).ok()?;
+    Some(claude_cli::known_account(claude.config_file()))
+}
+
+pub(super) fn claude_current(home: &Path) -> Read {
     match SignedIn::resolve(home) {
         Ok(claude) => claude_cli::read_signed_in(
             &|dir| claude.command_in(dir),
             claude.config_file(),
             &usage_config_dir(home),
         ),
-        Err(why) => finish(
-            AgentId::Claude,
-            LimitsStatus::Failed,
-            Some(format!("Could not find Claude Code's config: {why}")),
-            Parsed::default(),
-        ),
+        Err(why) => Read::anonymous(ReadFailure::Unavailable(format!(
+            "Could not find Claude Code's config: {why}"
+        ))),
     }
 }
 

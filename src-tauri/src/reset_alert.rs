@@ -7,7 +7,8 @@ use crate::dto::{
     AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto,
     ProviderLimitsDto, Reading, ResetCreditOutcome,
 };
-use crate::limits::ResetInstant;
+use crate::limits::{ReadFailure, ResetInstant};
+use crate::limits_refresh::Served;
 
 const SPEND_CAP_PERCENT: u8 = 5;
 const LOWEST_SHARE_PERCENT: u8 = 1;
@@ -168,16 +169,18 @@ enum Kept {
     Late,
 }
 
-pub fn plan(
+pub(crate) fn plan(
     memory: &mut AlertMemory,
     waiting: &mut Waiting,
-    readings: &[ProviderLimitsDto],
+    reads: &[Served],
     alerts: &HashMap<String, ResetAlert>,
     now: DateTime<Utc>,
 ) -> Plan {
-    let due = waiting.fall_due(readings, alerts, now);
+    let codex = reads.iter().find(|read| read.provider == AgentId::Codex);
+    let due = waiting.fall_due(codex, alerts, now);
+    let cards = codex.map_or(&[][..], |read| read.entries.as_slice());
     let (automatic, told): (Vec<_>, Vec<_>) = memory
-        .offers(readings, alerts, now)
+        .offers(cards, alerts, now)
         .into_iter()
         .partition(|offer| offer.automatic);
     Plan {
@@ -313,13 +316,19 @@ enum CodexNow<'a> {
     Unknown,
 }
 
-fn codex_now(readings: &[ProviderLimitsDto]) -> CodexNow<'_> {
-    let current = readings
+fn codex_now(codex: Option<&Served>) -> CodexNow<'_> {
+    let Some(read) = codex else {
+        return CodexNow::Unknown;
+    };
+    let current = read
+        .entries
         .iter()
         .find(|card| card.provider == AgentId::Codex && card.current_account);
-    match current {
-        Some(card) if signed_in_codex(card).is_some() => CodexNow::Live(card),
-        Some(card) if card.status != LimitsStatus::Failed => CodexNow::NobodySignedIn,
+    match (current, &read.failure) {
+        (Some(card), _) if signed_in_codex(card).is_some() => CodexNow::Live(card),
+        (Some(_), Some(ReadFailure::SignedOut | ReadFailure::Unsupported(_))) => {
+            CodexNow::NobodySignedIn
+        }
         _ => CodexNow::Unknown,
     }
 }
@@ -327,7 +336,7 @@ fn codex_now(readings: &[ProviderLimitsDto]) -> CodexNow<'_> {
 impl Waiting {
     fn fall_due(
         &mut self,
-        readings: &[ProviderLimitsDto],
+        codex: Option<&Served>,
         alerts: &HashMap<String, ResetAlert>,
         now: DateTime<Utc>,
     ) -> Vec<Due> {
@@ -336,7 +345,7 @@ impl Waiting {
         let late = |spend: &WaitingSpend| {
             spend.due_at + chrono::Duration::minutes(LATE_AFTER_MINUTES) < now
         };
-        let codex = codex_now(readings);
+        let codex = codex_now(codex);
         let decided = !matches!(codex, CodexNow::Unknown);
         self.0
             .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))

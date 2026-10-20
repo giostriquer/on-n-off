@@ -8,6 +8,7 @@ use crate::accounts::{
     model,
     store::{ChangeKind, Database},
 };
+use crate::http::RateLimitReset;
 use serde_json::json;
 fn profile() -> Profile {
     let mut db = super::super::store::Database::default();
@@ -58,6 +59,9 @@ fn account_change(home: &Path, edit: impl FnOnce(&mut Database)) {
 fn ticket(home: &Path) -> Ticket {
     open(home).load().unwrap().ticket(Guard::SignIn).unwrap()
 }
+fn answered(profile: &Profile) -> Accepted {
+    Accepted::for_test(reading(profile))
+}
 fn reading(profile: &Profile) -> ProviderLimitsDto {
     let mut entries = vec![];
     merge(&mut entries, profile, Some(Err("fixture".into())));
@@ -88,7 +92,7 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
         &|| Ok(open(home.path())),
         &|p| FetchResult {
             login: p.login.clone(),
-            result: Ok(reading(p)),
+            result: Ok(answered(p)),
         },
     )
     .unwrap()
@@ -123,7 +127,7 @@ fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read
             });
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -144,7 +148,7 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
             account_change(home.path(), |_| {});
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -172,7 +176,7 @@ fn a_pending_recovery_during_http_discards_the_late_read() {
             });
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );
@@ -196,7 +200,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
                 calls.set(calls.get() + 1);
                 FetchResult {
                     login: p.login.clone(),
-                    result: Err(HttpError::RateLimited(RateLimitReset::RetryAfter(7200)).into()),
+                    result: Err(ReadFailure::RateLimited(RateLimitReset::RetryAfter(7200))),
                 }
             },
         );
@@ -219,78 +223,42 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
         &|| Ok(open(home.path())),
         &|p| FetchResult {
             login: p.login.clone(),
-            result: Ok(reading(p))
+            result: Ok(answered(p))
         }
     )
     .unwrap()
     .is_ok());
 }
 #[test]
-fn each_fetch_result_says_why_and_how_long_it_holds_the_next_poll_back() {
-    const SIGN_IN: &str =
-        "Usage refresh needs sign-in again or renewal by the client that owns this login.";
-    const OTHER: &str = "This saved login now signs in as a different account. Sign in again.";
-    const RATE: &str = "Usage refresh is rate limited. The last reading is retained.";
-    const UNAVAILABLE: &str = "Usage refresh is unavailable. The last reading is retained.";
-    let rate = |reset| Err(HttpError::RateLimited(reset).into());
-    for (result, expected) in [
-        (
-            Ok(reading(&profile())),
-            AttemptOutcome {
-                error: None,
-                rejected: false,
-                retry: Duration::ZERO,
-            },
-        ),
-        (
-            Err(HttpError::Unauthorized.into()),
-            AttemptOutcome::failed(SIGN_IN, true, Duration::ZERO),
-        ),
-        (
-            Err(SavedReadError::OtherAccount),
-            AttemptOutcome::failed(OTHER, true, Duration::ZERO),
-        ),
-        (
-            Err(SavedReadError::Unavailable("Update Claude Code.")),
-            AttemptOutcome::failed("Update Claude Code.", false, Duration::ZERO),
-        ),
-        (
-            rate(RateLimitReset::RetryAfter(30)),
-            AttemptOutcome::failed(RATE, false, Duration::from_secs(30)),
-        ),
-        (
-            rate(RateLimitReset::RetryAfter(10_000_000)),
-            AttemptOutcome::failed(RATE, false, Duration::from_secs(86400)),
-        ),
-        (
-            rate(RateLimitReset::At(0)),
-            AttemptOutcome::failed(RATE, false, Duration::ZERO),
-        ),
-        (
-            rate(RateLimitReset::Unknown),
-            AttemptOutcome::failed(RATE, false, Duration::ZERO),
-        ),
-        (
-            Err(HttpError::Status(503).into()),
-            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
-        ),
-        (
-            Err(HttpError::Network("offline".into()).into()),
-            AttemptOutcome::failed(UNAVAILABLE, false, Duration::ZERO),
-        ),
+fn a_poll_holds_back_as_the_verdict_of_its_read_context_says() {
+    let p = profile();
+    for failure in [
+        ReadFailure::LoginRefused,
+        ReadFailure::OtherAccount,
+        ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
+        ReadFailure::Unavailable("The source said why.".into()),
     ] {
-        assert_eq!(attempt_outcome(&result), expected, "{:?}", result.err());
+        for saved in [Saved::Login, Saved::Home] {
+            assert_eq!(
+                verdict_of(saved, &p, &Err(failure.clone())),
+                Some(outcome::saved(p.identity.provider, saved, &failure, 0)),
+                "{failure:?} in {saved:?}"
+            );
+        }
     }
+    assert_eq!(verdict_of(Saved::Login, &p, &Ok(answered(&p))), None);
 }
 
 #[test]
 fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry_after() {
-    let failed = |retry| AttemptOutcome::failed("failed", false, Duration::from_secs(retry));
-    let answered = AttemptOutcome {
-        error: None,
-        rejected: false,
-        retry: Duration::ZERO,
+    let failed = |retry| {
+        Some(SavedVerdict {
+            message: "failed".into(),
+            parks_login: false,
+            retry: Duration::from_secs(retry),
+        })
     };
+    let succeeded = None;
     for interval in [Duration::from_secs(60), Duration::from_secs(300)] {
         let backoff = |failures| crate::limits_refresh::failure_backoff(interval, failures);
         for (before, outcome, failures, wait) in [
@@ -298,7 +266,7 @@ fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry
             (1, failed(0), 2, backoff(2)),
             (2, failed(0), 3, backoff(3)),
             (4, failed(0), 5, backoff(5)),
-            (3, answered.clone(), 0, backoff(0)),
+            (3, succeeded.clone(), 0, backoff(0)),
             (0, failed(30), 1, backoff(1)),
             (0, failed(7200), 1, Duration::from_secs(7200)),
         ] {
@@ -341,37 +309,17 @@ fn attempt(home: &Path, p: &Profile) -> Attempt {
 }
 
 #[test]
-fn a_poll_that_read_nothing_says_why() {
+fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
     use std::cell::Cell;
-    for (error, message, sticky) in [
-        (
-            HttpError::Unauthorized.into(),
-            "Usage refresh needs sign-in again or renewal by the client that owns this login.",
-            true,
-        ),
-        (
-            SavedReadError::OtherAccount,
-            "This saved login now signs in as a different account. Sign in again.",
-            true,
-        ),
-        (
-            HttpError::RateLimited(RateLimitReset::RetryAfter(30)).into(),
-            "Usage refresh is rate limited. The last reading is retained.",
-            false,
-        ),
-        (
-            HttpError::Status(503).into(),
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-        ),
-        (
-            HttpError::Network("offline".into()).into(),
-            "Usage refresh is unavailable. The last reading is retained.",
-            false,
-        ),
+    for error in [
+        ReadFailure::LoginRefused,
+        ReadFailure::OtherAccount,
+        ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
+        ReadFailure::Unavailable("The source said why.".into()),
     ] {
         let home = tempfile::tempdir().unwrap();
         let p = stored(home.path());
+        let verdict = outcome::saved(p.identity.provider, Saved::Login, &error, 0);
         let fetches = Cell::new(0);
         let poll = || {
             poll_with(
@@ -389,9 +337,13 @@ fn a_poll_that_read_nothing_says_why() {
                 },
             )
         };
-        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
-        assert_eq!(attempt(home.path(), &p).rejected, sticky, "{error:?}");
-        assert_eq!(poll(), Some(Err(message.to_string())), "{error:?}");
+        assert_eq!(poll(), Some(Err(verdict.message.clone())), "{error:?}");
+        assert_eq!(
+            attempt(home.path(), &p).rejected,
+            verdict.parks_login,
+            "{error:?}"
+        );
+        assert_eq!(poll(), Some(Err(verdict.message)), "{error:?}");
         assert_eq!(fetches.get(), 1, "{error:?}");
     }
 }
@@ -410,7 +362,7 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
             &|| Ok(open(home.path())),
             &|p| FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             },
         )
     };
@@ -446,7 +398,7 @@ fn a_new_credential_retries_a_previously_rejected_account() {
         &|p| {
             FetchResult {
                 login: p.login.clone(),
-                result: Err(HttpError::Unauthorized.into()),
+                result: Err(ReadFailure::LoginRefused),
             }
         }
     )
@@ -463,7 +415,7 @@ fn a_new_credential_retries_a_previously_rejected_account() {
         &|p| {
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         }
     )
@@ -489,11 +441,10 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
                 FetchResult {
                     login: Some(login),
                     result: Err(if rejected {
-                        HttpError::Unauthorized
+                        ReadFailure::LoginRefused
                     } else {
-                        HttpError::RateLimited(RateLimitReset::RetryAfter(1800))
-                    }
-                    .into()),
+                        ReadFailure::RateLimited(RateLimitReset::RetryAfter(1800))
+                    }),
                 }
             },
         );
@@ -531,7 +482,7 @@ fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
             calls.fetch_add(1, Ordering::SeqCst);
             FetchResult {
                 login: p.login.clone(),
-                result: Ok(reading(p)),
+                result: Ok(answered(p)),
             }
         },
     );

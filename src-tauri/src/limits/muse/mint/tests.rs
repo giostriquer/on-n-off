@@ -34,7 +34,9 @@ fn usage() -> Value {
 fn a_saved_login_reads_its_own_card_under_its_scoped_id() {
     let (url, served) = serve_once("200 OK", &answer("You@Example.com", usage()));
 
-    let card = read_saved(&identity(), &token(), &urls(&url)).unwrap();
+    let card = read_saved(&identity(), &token(), &urls(&url))
+        .unwrap()
+        .into_card();
     served.join().unwrap();
 
     assert_eq!(card.status, LimitsStatus::Ok);
@@ -60,20 +62,17 @@ fn an_answer_for_another_email_is_another_account() {
     let read = read_saved(&identity(), &token(), &urls(&url));
     served.join().unwrap();
 
-    assert!(matches!(read, Err(SavedReadError::OtherAccount)));
+    assert_eq!(read.err(), Some(ReadFailure::OtherAccount));
 }
 
 #[test]
-fn a_rejected_token_reads_as_unauthorized() {
+fn a_rejected_token_is_a_refused_login() {
     let (url, served) = serve_once("401 Unauthorized", r#"{"title":"Authentication Error"}"#);
 
     let read = read_saved(&identity(), &token(), &urls(&url));
     served.join().unwrap();
 
-    assert!(matches!(
-        read,
-        Err(SavedReadError::Http(HttpError::Unauthorized))
-    ));
+    assert_eq!(read.err(), Some(ReadFailure::LoginRefused));
 }
 
 #[test]
@@ -83,7 +82,9 @@ fn an_idle_window_reads_its_plan_and_an_unused_session() {
         &answer("you@example.com", serde_json::Value::Null),
     );
 
-    let card = read_saved(&identity(), &token(), &urls(&url)).unwrap();
+    let card = read_saved(&identity(), &token(), &urls(&url))
+        .unwrap()
+        .into_card();
     served.join().unwrap();
 
     assert_eq!(card.status, LimitsStatus::Ok);
@@ -103,38 +104,38 @@ fn an_idle_window_reads_its_plan_and_an_unused_session() {
 }
 
 #[test]
-fn an_inactive_subscription_and_an_unreadable_usage_block_are_unavailable_rather_than_failed() {
+fn an_inactive_subscription_is_unsupported_and_an_unreadable_usage_block_no_usage() {
     let inactive = json!({"is_subs_active": false, "user_email": "you@example.com"}).to_string();
     let unreadable = answer("you@example.com", json!({"window": null, "weekly": null}));
-    for body in [inactive, unreadable] {
+    for (body, expected) in [
+        (inactive, ReadFailure::Unsupported(Unsupported::Inactive)),
+        (unreadable, ReadFailure::NoUsage),
+    ] {
         let (url, served) = serve_once("200 OK", &body);
         let read = read_saved(&identity(), &token(), &urls(&url));
         served.join().unwrap();
-        assert!(
-            matches!(read, Err(SavedReadError::Unavailable(_))),
-            "{body}"
-        );
+        assert_eq!(read.err(), Some(expected), "{body}");
     }
 }
 
 #[test]
-fn an_unreachable_endpoint_is_a_network_failure() {
+fn an_unreachable_endpoint_is_unavailable() {
     assert!(matches!(
         read_saved(&identity(), &token(), &urls(&refused_url())),
-        Err(SavedReadError::Http(HttpError::Network(_)))
+        Err(ReadFailure::RequestFailed(_))
     ));
 }
 
-fn normalized(body: Value) -> Option<Result<Parsed, ReadFailure>> {
-    normalize(Some("You@Example.com".to_string()), &mint_response(body))
+fn normalized(body: Value) -> Result<Parsed, ReadFailure> {
+    super::answer(Some("You@Example.com".to_string()), &mint_response(body))
 }
 
 fn mint_reading(body: Value) -> Parsed {
-    normalized(body).expect("mint reading").expect("parsed")
+    normalized(body).expect("mint reading")
 }
 
 fn facts(body: Value) -> Vec<QuotaWindow> {
-    quota_windows(&mint_response(body)).expect("quota windows")
+    quota_windows(&mint_response(body))
 }
 
 fn session(facts: &[QuotaWindow]) -> &QuotaWindow {
@@ -247,23 +248,24 @@ fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
 }
 
 #[test]
-fn a_mint_answer_with_no_usable_window_is_no_reading() {
+fn a_mint_answer_with_no_usable_window_answers_no_window() {
+    let no_window = |body: Value| mint_reading(body).reading.windows.is_empty();
     for unconfirmed in [
         json!({"subs_tier_name": "Wonder", "subs_usage": null}),
         json!({"is_subs_active": null, "subs_tier_name": "Wonder"}),
     ] {
-        assert!(normalized(unconfirmed.clone()).is_none(), "{unconfirmed}");
+        assert!(no_window(unconfirmed.clone()), "{unconfirmed}");
     }
 
     let mut empty = mint_body();
     empty["subs_usage"]["window"] = json!(null);
     empty["subs_usage"]["weekly"] = json!(null);
-    assert!(normalized(empty).is_none());
+    assert!(no_window(empty));
 
     let mut unusable = mint_body();
     unusable["subs_usage"]["window"] = json!({"window_duration_mins": 300});
     unusable["subs_usage"]["weekly"] = json!({"used_percent": null, "resets_at": 1_760_500_000i64});
-    assert!(normalized(unusable).is_none());
+    assert!(no_window(unusable));
 
     let mut weekly_only = mint_body();
     weekly_only["subs_usage"]["window"] = json!(null);
@@ -274,15 +276,13 @@ fn a_mint_answer_with_no_usable_window_is_no_reading() {
 
 #[test]
 fn an_inactive_or_unpaid_subscription_reads_unsupported() {
-    let inactive = normalized(json!({"is_subs_active": false, "subs_tier_name": "Wonder"}));
-    assert!(
-        matches!(&inactive, Some(Err(ReadFailure::Unsupported(message))) if message.contains("inactive")),
-        "{inactive:?}"
+    assert_eq!(
+        normalized(json!({"is_subs_active": false, "subs_tier_name": "Wonder"})).err(),
+        Some(ReadFailure::Unsupported(Unsupported::Inactive))
     );
-    let billing = normalized(json!({"is_subs_active": true, "require_payment": true}));
-    assert!(
-        matches!(&billing, Some(Err(ReadFailure::Unsupported(message))) if message.contains("billing")),
-        "{billing:?}"
+    assert_eq!(
+        normalized(json!({"is_subs_active": true, "require_payment": true})).err(),
+        Some(ReadFailure::Unsupported(Unsupported::BillingIncomplete))
     );
 }
 
@@ -318,7 +318,7 @@ fn the_mint_call_sends_the_device_token_and_reads_the_quota_block() {
         captured.head
     );
     assert_eq!(captured.body, "{}");
-    assert!(normalize(None, &response).is_some());
+    assert!(super::answer(None, &response).is_ok());
 }
 
 #[test]

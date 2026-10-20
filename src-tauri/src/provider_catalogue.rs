@@ -3,12 +3,18 @@ use std::path::Path;
 use crate::dto::AgentId;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitsFacts {
+    pub client: &'static str,
+    pub vendor: &'static str,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderFacts {
     pub key: &'static str,
     pub display_name: &'static str,
     pub binary: &'static str,
     pub binary_aliases: &'static [&'static str],
-    pub limits_reader: bool,
+    pub limits: Option<LimitsFacts>,
     pub usage: Option<UsageProvider>,
     pub saved_accounts: bool,
 }
@@ -29,7 +35,10 @@ impl AgentId {
                 display_name: "Claude",
                 binary: "claude",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    client: "Claude Code",
+                    vendor: "Anthropic",
+                }),
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
             },
@@ -38,7 +47,10 @@ impl AgentId {
                 display_name: "Codex",
                 binary: "codex",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    client: "Codex CLI",
+                    vendor: "OpenAI",
+                }),
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
             },
@@ -47,7 +59,7 @@ impl AgentId {
                 display_name: "Antigravity",
                 binary: "agy",
                 binary_aliases: &[],
-                limits_reader: false,
+                limits: None,
                 usage: None,
                 saved_accounts: false,
             },
@@ -56,7 +68,7 @@ impl AgentId {
                 display_name: "Cursor",
                 binary: "agent",
                 binary_aliases: &["cursor-agent"],
-                limits_reader: false,
+                limits: None,
                 usage: None,
                 saved_accounts: false,
             },
@@ -65,7 +77,10 @@ impl AgentId {
                 display_name: "Muse",
                 binary: "muse",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    client: "Muse Code",
+                    vendor: "Meta",
+                }),
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: true,
             },
@@ -178,7 +193,7 @@ impl Fact {
     const fn holds_for(self, id: AgentId) -> bool {
         let facts = id.facts();
         match self {
-            Self::LimitsReader => facts.limits_reader,
+            Self::LimitsReader => facts.limits.is_some(),
             Self::SavedAccounts => facts.saved_accounts,
         }
     }

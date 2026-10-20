@@ -65,17 +65,18 @@ fn current_read_is_remembered_once_ahead_of_other_accounts() {
 }
 
 #[test]
-fn failed_anonymous_read_hides_no_remembered_account_and_saves_nothing() {
+fn a_signed_out_read_names_nobody_and_leaves_the_remembered_account_its_own_card() {
     let home = scratch_dir("limits-memory");
     let store = SnapshotStore::for_home(&home);
     store
         .save(&ok_snapshot(AgentId::Claude, "uuid-a", "a@x", 5.0))
         .unwrap();
-    let signed_out = finish(
+    let (signed_out, _) = outcome::signed_in(
         AgentId::Claude,
-        LimitsStatus::SignedOut,
-        Some("Sign in".to_string()),
-        Parsed::default(),
+        outcome::Read {
+            account: Some(account("uuid-a", "a@x")),
+            answer: Err(ReadFailure::SignedOut),
+        },
     );
 
     let listed = aggregate_accounts(&store, signed_out);
@@ -83,9 +84,57 @@ fn failed_anonymous_read_hides_no_remembered_account_and_saves_nothing() {
     assert_eq!(listed.len(), 2);
     assert_eq!(listed[0].status, LimitsStatus::SignedOut);
     assert!(listed[0].current_account);
+    assert!(listed[0].account.is_none());
     assert_eq!(listed[1].account.as_ref().unwrap().id, "uuid-a");
     assert!(!listed[1].current_account);
     assert_eq!(store.load(AgentId::Claude).len(), 1);
+}
+
+#[test]
+fn a_failed_read_of_a_known_account_shows_its_remembered_reading_on_the_one_current_card() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let home = scratch_dir("limits-memory-failed-known");
+        let store = SnapshotStore::for_home(&home);
+        store
+            .save(&ok_snapshot(provider, "acct-a", "a@x", 5.0))
+            .unwrap();
+        let (failed, _) = outcome::signed_in(
+            provider,
+            outcome::Read {
+                account: Some(LimitsAccountDto {
+                    legacy_id: None,
+                    id: "acct-a".into(),
+                    label: None,
+                }),
+                answer: Err(ReadFailure::Unavailable("The source said why.".into())),
+            },
+        );
+
+        let listed = aggregate_accounts(&store, failed);
+
+        assert_eq!(listed.len(), 1, "{provider:?}");
+        assert!(listed[0].current_account, "{provider:?}");
+        assert_eq!(listed[0].status, LimitsStatus::Failed, "{provider:?}");
+        assert_eq!(
+            listed[0].reading.windows[0].used_percent, 5.0,
+            "{provider:?}"
+        );
+        assert_eq!(
+            listed[0].account.as_ref().unwrap().label.as_deref(),
+            Some("a@x"),
+            "{provider:?}: the card lost the remembered name"
+        );
+        assert_eq!(
+            store.load(provider)[0]
+                .account
+                .as_ref()
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("a@x"),
+            "{provider:?}: the file lost the remembered name"
+        );
+    }
 }
 
 #[test]
@@ -252,4 +301,33 @@ fn saved_scoped_history_never_hides_a_current_unscoped_error() {
         Some("Current account could not be verified")
     );
     assert!(listed[0].reading.windows.is_empty());
+}
+
+#[test]
+fn a_read_that_names_its_account_keeps_that_name_over_the_remembered_one() {
+    for remembered_name in [Some("old@x"), None] {
+        let home = scratch_dir("limits-memory-new-name");
+        let store = SnapshotStore::for_home(&home);
+        let mut stored = ok_snapshot(AgentId::Codex, "acct-a", "old@x", 5.0);
+        stored.account.as_mut().unwrap().label = remembered_name.map(str::to_string);
+        store.save(&stored).unwrap();
+
+        let remembered = store.remember(ok_snapshot(AgentId::Codex, "acct-a", "new@x", 9.0));
+
+        assert_eq!(
+            remembered.card.account.unwrap().label.as_deref(),
+            Some("new@x"),
+            "{remembered_name:?}"
+        );
+        assert_eq!(
+            store.load(AgentId::Codex)[0]
+                .account
+                .as_ref()
+                .unwrap()
+                .label
+                .as_deref(),
+            Some("new@x"),
+            "{remembered_name:?}"
+        );
+    }
 }

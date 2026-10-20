@@ -45,12 +45,12 @@ fn a_polled_profile_is_a_saved_profile_whether_it_answered_failed_or_was_held_ba
     let p = stored(home.path());
     let key = p.identity.observation_key();
 
-    let mut answered = vec![];
-    polled(home.path(), &mut answered, Ok(None), &|p| FetchResult {
+    let mut polled_cards = vec![];
+    polled(home.path(), &mut polled_cards, Ok(None), &|p| FetchResult {
         login: p.login.clone(),
-        result: Ok(reading(p)),
+        result: Ok(answered(p)),
     });
-    assert!(flag(&answered, &key), "answered");
+    assert!(flag(&polled_cards, &key), "answered");
 
     let mut held_back = crate::limits::remembered(home.path(), AgentId::Claude);
     assert!(!flag(&held_back, &key));
@@ -64,7 +64,7 @@ fn a_polled_profile_is_a_saved_profile_whether_it_answered_failed_or_was_held_ba
     let mut failed = vec![];
     polled(other.path(), &mut failed, Ok(None), &|p| FetchResult {
         login: p.login.clone(),
-        result: Err(HttpError::Network("offline".into()).into()),
+        result: Err(ReadFailure::Unavailable("offline".into())),
     });
     assert_eq!(failed[0].status, LimitsStatus::Failed);
     assert!(flag(&failed, &p.identity.observation_key()), "failed");

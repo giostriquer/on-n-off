@@ -4,8 +4,9 @@ use std::process::Command;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use super::outcome::{Read, ReadFailure, Unsupported};
 use super::Parsed;
-use crate::accounts::codex_store::CodexAccess;
+use crate::accounts::codex_store::{CodexAccess, Metadata};
 use crate::cli::AgentCli;
 use crate::cli_locate::resolve_provider_cli;
 use crate::dto::{AgentId, ResetCreditOutcome};
@@ -44,13 +45,6 @@ struct CodexAccount {
     email: Option<String>,
     #[serde(default)]
     plan_type: Option<String>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub(super) enum AppServerFailure {
-    SignedOut,
-    Unsupported(String),
-    Failed(String),
 }
 
 #[derive(Debug, Deserialize)]
@@ -112,9 +106,7 @@ fn spend_in_session(
 ) -> Result<ResetCreditOutcome, Failure> {
     require_chatgpt(account).map_err(|failure| {
         Failure::new(match failure {
-            AppServerFailure::SignedOut => {
-                "Codex is not signed in, so there is no banked reset to use."
-            }
+            ReadFailure::SignedOut => "Codex is not signed in, so there is no banked reset to use.",
             _ => "Banked resets belong to a ChatGPT sign-in, and Codex is not using one.",
         })
     })?;
@@ -149,28 +141,63 @@ pub(super) fn read(
     home: &Path,
     force: bool,
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
-) -> Result<Parsed, AppServerFailure> {
-    read_with(home, force, start, after_identity)
+) -> Read {
+    read_with(
+        home,
+        force,
+        |codex_home| Ok(launch(codex_home)?),
+        after_identity,
+    )
 }
 
 fn read_with(
     home: &Path,
     force: bool,
-    start: impl FnOnce(&Path) -> Result<Session, String>,
+    start: impl FnOnce(&Path) -> Result<Session, ReadFailure>,
     after_identity: impl FnOnce(&mut Parsed, Option<&CodexAccess>),
-) -> Result<Parsed, AppServerFailure> {
+) -> Read {
     let expected_codex_home = home.join(".codex");
-    let before = crate::accounts::codex_store::metadata(&expected_codex_home)
-        .map_err(AppServerFailure::Failed)?;
-    let answers = start(&expected_codex_home)
-        .and_then(|session| query_app_server(session, &expected_codex_home, force))
-        .map_err(AppServerFailure::Failed)?;
-    let (mut parsed, access) = normalize_app_server(answers, before)?;
-    after_identity(&mut parsed, access.as_ref());
-    Ok(parsed)
+    let before = match crate::accounts::codex_store::metadata(&expected_codex_home) {
+        Ok(before) => before,
+        Err(why) => return Read::anonymous(ReadFailure::Unavailable(why)),
+    };
+    let account = card_account(before.as_ref(), None);
+    let answer = start(&expected_codex_home)
+        .and_then(|session| {
+            query_app_server(session, &expected_codex_home, force).map_err(ReadFailure::Unavailable)
+        })
+        .and_then(|answers| normalize_app_server(answers, before))
+        .map(|(mut parsed, access)| {
+            after_identity(&mut parsed, access.as_ref());
+            parsed
+        });
+    Read { account, answer }
 }
 
 fn start(codex_home: &Path) -> Result<Session, String> {
+    launch(codex_home).map_err(|failure| match failure {
+        NotStarted::Missing => {
+            "Codex CLI not found. Install or configure `codex`, then refresh Limits.".to_string()
+        }
+        NotStarted::Failed(message) => message,
+    })
+}
+
+impl From<NotStarted> for ReadFailure {
+    fn from(failure: NotStarted) -> Self {
+        match failure {
+            NotStarted::Missing => Self::NotInstalled,
+            NotStarted::Failed(message) => Self::Unavailable(message),
+        }
+    }
+}
+
+pub(super) fn known_account(home: &Path) -> Option<crate::dto::LimitsAccountDto> {
+    let before = crate::accounts::codex_store::metadata(&home.join(".codex")).ok()??;
+    card_account(Some(&before), None)
+}
+
+fn launch(codex_home: &Path) -> Result<Session, NotStarted> {
     let binary = resolve_provider_cli(AgentId::Codex, "codex")
         .map(|path| path.to_string_lossy().into_owned())
         .unwrap_or_else(|| "codex".to_string());
@@ -178,16 +205,7 @@ fn start(codex_home: &Path) -> Result<Session, String> {
     command
         .args(["app-server", "--stdio"])
         .env("CODEX_HOME", codex_home);
-    begin(APP_SERVER, command)
-}
-
-fn begin(peer: Peer, command: Command) -> Result<Session, String> {
-    Session::start(peer, command).map_err(|failure| match failure {
-        NotStarted::Missing => {
-            "Codex CLI not found. Install or configure `codex`, then refresh Limits.".to_string()
-        }
-        NotStarted::Failed(message) => message,
-    })
+    Session::start(APP_SERVER, command)
 }
 
 fn query_app_server(
@@ -245,8 +263,8 @@ fn open_account<T>(
 
 fn normalize_app_server(
     answers: AppServerAnswers,
-    before: Option<(String, Value)>,
-) -> Result<(Parsed, Option<CodexAccess>), AppServerFailure> {
+    before: Option<Metadata>,
+) -> Result<(Parsed, Option<CodexAccess>), ReadFailure> {
     let account = require_chatgpt(&answers.account)?;
     let email = account
         .email
@@ -263,33 +281,24 @@ fn normalize_app_server(
         .map(str::to_string)
         .or(reading.plan);
     let (after, access) = crate::accounts::codex_store::metadata_and_access(&answers.codex_home)
-        .map_err(AppServerFailure::Failed)?
+        .map_err(ReadFailure::Unavailable)?
         .map_or((None, None), |(metadata, access)| (Some(metadata), access));
     if before.as_ref().map(|(id, _)| id) != after.as_ref().map(|(id, _)| id) {
-        return Err(AppServerFailure::Failed(
-            "The signed-in account changed while reading usage. Retry after sign-in finishes."
-                .into(),
-        ));
+        return Err(ReadFailure::AccountChanged);
     }
-    let metadata = before;
-    let identity = metadata
-        .as_ref()
-        .and_then(|(_, claims)| crate::accounts::codex_store::claims_identity(claims));
-    let account = match identity {
-        Some(identity) => super::scoped_account(&identity, email),
-        None => crate::dto::LimitsAccountDto {
+    let account = card_account(before.as_ref(), email.clone())
+        .or_else(|| {
+            email.as_deref().map(|email| crate::dto::LimitsAccountDto {
+                legacy_id: None,
+                id: format!("email:{}", email.to_lowercase()),
+                label: Some(email.to_string()),
+            })
+        })
+        .unwrap_or_else(|| crate::dto::LimitsAccountDto {
             legacy_id: None,
-            id: metadata
-                .map(|(id, _)| id)
-                .or_else(|| {
-                    email
-                        .as_deref()
-                        .map(|email| format!("email:{}", email.to_lowercase()))
-                })
-                .unwrap_or_else(|| super::DEFAULT_ACCOUNT.to_string()),
-            label: email,
-        },
-    };
+            id: super::DEFAULT_ACCOUNT.to_string(),
+            label: None,
+        });
     let parsed = Parsed {
         account: Some(account),
         reading,
@@ -297,17 +306,32 @@ fn normalize_app_server(
     Ok((parsed, access))
 }
 
-fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, AppServerFailure> {
+fn card_account(
+    metadata: Option<&Metadata>,
+    email: Option<String>,
+) -> Option<crate::dto::LimitsAccountDto> {
+    let (id, claims) = metadata?;
+    Some(
+        match crate::accounts::codex_store::claims_identity(claims) {
+            Some(identity) => super::scoped_account(&identity, email),
+            None => crate::dto::LimitsAccountDto {
+                legacy_id: None,
+                id: id.clone(),
+                label: email,
+            },
+        },
+    )
+}
+
+fn require_chatgpt(read: &AccountReadResponse) -> Result<&CodexAccount, ReadFailure> {
     let Some(account) = read.account.as_ref() else {
-        return Err(AppServerFailure::SignedOut);
+        return Err(ReadFailure::SignedOut);
     };
     match account.kind.as_str() {
         "chatgpt" => Ok(account),
-        "apiKey" => Err(AppServerFailure::Unsupported(
-            "Codex is signed in with an API key, which has no subscription limits.".to_string(),
-        )),
-        other => Err(AppServerFailure::Unsupported(format!(
-            "Codex account type `{other}` has no subscription limits to show."
+        "apiKey" => Err(ReadFailure::Unsupported(Unsupported::ApiKey)),
+        other => Err(ReadFailure::Unsupported(Unsupported::AccountType(
+            other.to_string(),
         ))),
     }
 }

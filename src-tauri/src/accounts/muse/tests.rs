@@ -337,14 +337,14 @@ fn a_home_and_a_new_sign_in_read_usage_with_their_own_token() {
     };
     home.put(&login("you@example.com", "t1"), &()).unwrap();
 
-    let card = home.read_usage(&you()).unwrap();
+    let card = home.read_usage(&you()).unwrap().into_card();
     let request = home_served.join().unwrap();
     let (first_url, first_served) = serve_once("200 OK", &mint("you@example.com"));
     let isolated = MuseNative {
         urls: urls(first_url),
         ..MuseNative::private(&dir)
     };
-    let first = isolated.first_usage(&dir, &you()).unwrap();
+    let first = isolated.first_usage(&dir, &you()).unwrap().into_card();
     first_served.join().unwrap();
 
     assert!(
@@ -372,14 +372,17 @@ fn verification_accepts_its_own_account_and_refuses_another_or_a_rejected_token(
         verdict
     };
 
+    let verified = |failure| crate::limits::outcome::verified(AgentId::Muse, Some(&failure));
     assert_eq!(verdict("200 OK", mint("You@Example.com")), Ok(()));
     assert_eq!(
         verdict("200 OK", mint("someone@example.com")),
-        Err("Muse answered for a different account. Sign in again.".into())
+        verified(ReadFailure::OtherAccount)
     );
-    assert!(verdict("401 Unauthorized", "{}".into())
-        .unwrap_err()
-        .contains("could not be verified"));
+    assert_eq!(
+        verdict("401 Unauthorized", "{}".into()),
+        verified(ReadFailure::LoginRefused)
+    );
+    assert!(verified(ReadFailure::LoginRefused).is_err());
 }
 
 #[cfg(target_os = "macos")]

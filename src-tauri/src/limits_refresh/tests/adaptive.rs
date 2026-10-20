@@ -20,8 +20,14 @@ fn quota(used: f64, current: bool) -> ProviderLimitsDto {
 }
 
 fn age_native(cache: &Cache, seconds: u64) {
-    cache.read.lock().unwrap().as_mut().unwrap().refreshed_at =
-        Instant::now() - Duration::from_secs(seconds);
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .native
+        .refreshed_at = Instant::now() - Duration::from_secs(seconds);
 }
 
 #[test]
@@ -36,14 +42,14 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
         (95.0, true, LimitsStatus::Failed, 1),
         (f64::NAN, true, LimitsStatus::Ok, 1),
     ] {
-        let cache = Cache::new(Source::LimitsClaude);
+        let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
         let native_reads = Cell::new(0);
         let saved_reads = Cell::new(0);
         let native = |_| {
             native_reads.set(native_reads.get() + 1);
             let mut card = quota(used, current);
             card.status = status;
-            vec![card]
+            native_read(vec![card])
         };
         let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
         let read = || {
@@ -51,7 +57,10 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
                 &cache,
                 Duration::from_secs(1800),
                 false,
-                &native,
+                &Native {
+                    read: &native,
+                    login: &no_login,
+                },
                 &|_| false,
                 &saved,
                 &|_| {},
@@ -74,7 +83,7 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
 
 #[test]
 fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
-    let cache = Cache::new(Source::LimitsCodex);
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     let used = Cell::new(95.0);
     let reads = Cell::new(0);
     let saved_reads = Cell::new(0);
@@ -84,7 +93,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
         if reads.get() > 1 {
             entries.push(quota(40.0, false));
         }
-        entries
+        native_read(entries)
     };
     let saved_card = {
         let mut card = quota(98.0, false);
@@ -102,7 +111,10 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
             &cache,
             Duration::from_secs(1800),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -111,7 +123,8 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     read();
     age_native(&cache, 300);
     used.set(100.0);
-    let (entries, revision) = read();
+    let (served, revision) = read();
+    let entries = served.entries;
     assert_eq!(reads.get(), 2);
     assert_eq!(saved_reads.get(), 1);
     assert_eq!(entries, [quota(100.0, true), saved_card.clone()]);
@@ -130,13 +143,13 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
 
 #[test]
 fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadline() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let used = Cell::new(94.0);
     let native_reads = Cell::new(0);
     let saved_reads = Cell::new(0);
     let native = |_| {
         native_reads.set(native_reads.get() + 1);
-        vec![quota(used.get(), true)]
+        native_read(vec![quota(used.get(), true)])
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
     let read = |force| {
@@ -144,7 +157,10 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
             &cache,
             Duration::from_secs(1800),
             force,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -182,12 +198,32 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
         .as_mut()
         .unwrap()
         .saved_refreshed_at = Instant::now() - Duration::from_secs(1800);
-    let native_at = cache.read.lock().unwrap().as_ref().unwrap().refreshed_at;
+    let native_at = cache
+        .read
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .native
+        .refreshed_at;
     read(false);
     assert_eq!((native_reads.get(), saved_reads.get()), (4, 2));
     assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().refreshed_at,
+        cache
+            .read
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .native
+            .refreshed_at,
         native_at
+    );
+    read(false);
+    assert_eq!(
+        (native_reads.get(), saved_reads.get()),
+        (4, 2),
+        "the saved accounts just read wait their interval again"
     );
 
     read(true);
@@ -200,7 +236,7 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
 
 #[test]
 fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let native_reads = Cell::new(0);
     let saved_reads = Cell::new(0);
     let native = |_| {
@@ -209,7 +245,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
         if native_reads.get() > 1 {
             card.status = LimitsStatus::Failed;
         }
-        vec![card]
+        native_read(vec![card])
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
     let read = || {
@@ -217,7 +253,10 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
             &cache,
             Duration::from_secs(900),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -244,6 +283,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
             .unwrap()
             .as_ref()
             .unwrap()
+            .native
             .consecutive_failures,
         1
     );
@@ -254,7 +294,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
 
 #[test]
 fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let weekly = Cell::new(40.0);
     let session = Cell::new(95.0);
     let calls = Cell::new(0);
@@ -266,14 +306,17 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
         window.kind = crate::dto::LimitWindowKind::Session;
         window.used_percent = session.get();
         card.reading.windows.push(window);
-        vec![card]
+        native_read(vec![card])
     };
     let read = |force| {
         read_provider(
             &cache,
             Duration::from_secs(1800),
             force,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &|_, _| {},
             &|_| {},
@@ -305,15 +348,15 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
 
 #[test]
 fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card() {
-    let cache = Cache::new(Source::LimitsClaude);
+    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
     let switched = Cell::new(false);
     let native = |_| {
         if switched.get() {
             let mut card = quota(20.0, false);
             card.current_account = true;
-            vec![card]
+            native_read(vec![card])
         } else {
-            vec![quota(95.0, true)]
+            native_read(vec![quota(95.0, true)])
         }
     };
     let saved = |_, entries: &mut Vec<ProviderLimitsDto>| entries.push(quota(98.0, false));
@@ -322,7 +365,10 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
             &cache,
             Duration::from_secs(1800),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -331,7 +377,8 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
     read();
     switched.set(true);
     age_native(&cache, 300);
-    let (entries, revision) = read();
+    let (served, revision) = read();
+    let entries = served.entries;
     assert_eq!(entries.len(), 1);
     assert!(entries[0].current_account);
     assert_eq!(entries[0].reading.windows[0].used_percent, 20.0);
@@ -357,11 +404,14 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
     });
     age_native(&cache, 300);
 
-    let (entries, _) = read_provider(
+    let (Served { entries, .. }, _) = read_provider(
         &cache,
         Duration::from_secs(1800),
         false,
-        &|_| vec![scoped.clone()],
+        &Native {
+            read: &|_| native_read(vec![scoped.clone()]),
+            login: &no_login,
+        },
         &|_| false,
         &|_, _| panic!("saved accounts are not due"),
         &|_| {},

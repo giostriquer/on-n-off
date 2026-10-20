@@ -94,7 +94,7 @@ fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
         &|| Ok(open(home.path())),
         &|p| FetchResult {
             login: p.login.clone(),
-            result: Ok(answered.clone()),
+            result: Ok(Accepted::for_test(answered.clone())),
         },
     );
     merge(&mut entries, &p, result);

@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::ProviderLimitsDto;
 use crate::http::{never_asked, serve_once, serve_once_capturing, was_asked};
 use serde_json::Value;
 
@@ -14,7 +15,7 @@ fn read_at(
     identity: &Identity,
     auth: &Value,
     codex: CodexEndpoints<'_>,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<ProviderLimitsDto, ReadFailure> {
     let token = crate::accounts::model::string(auth, "/tokens/access_token")
         .map(AccessToken::new)
         .expect("the fixture's access token");
@@ -22,7 +23,7 @@ fn read_at(
         codex,
         ..SavedReadUrls::LIVE
     };
-    read_saved_codex(identity, token, &urls)
+    read_saved_codex(identity, token, &urls).map(Accepted::into_card)
 }
 
 #[test]
@@ -180,7 +181,7 @@ fn codex_endpoints(
     )
 }
 
-fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, SavedReadError> {
+fn read_codex(usage: &str, resets: &str) -> Result<ProviderLimitsDto, ReadFailure> {
     read_at(
         &identity(AgentId::Codex),
         &json!({"tokens":{"access_token":"fixture-access"}}),
@@ -329,7 +330,7 @@ fn codex_quota_for_another_account_is_rejected() {
         },
     );
     request.join().unwrap();
-    assert_eq!(result.err(), Some(SavedReadError::OtherAccount));
+    assert_eq!(result.err(), Some(ReadFailure::OtherAccount));
 }
 
 const CODEX_BUSINESS_USAGE: &str = r#"{"plan_type":"self_serve_business_prolite","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":false,"balance":"0"}}"#;
@@ -406,7 +407,7 @@ fn read_codex_spending(
     who: &Identity,
     usage: &str,
     spending: &str,
-) -> Result<ProviderLimitsDto, SavedReadError> {
+) -> Result<ProviderLimitsDto, ReadFailure> {
     read_at(
         who,
         &json!({"tokens":{"access_token":"fixture-access"}}),
@@ -523,16 +524,16 @@ fn a_spending_read_that_fails_leaves_the_usage_read_standing() {
 #[test]
 fn a_saved_codex_read_the_service_refuses_or_throttles_says_which() {
     for (status, expected) in [
-        ("401 Unauthorized", HttpError::Unauthorized),
+        ("401 Unauthorized", ReadFailure::LoginRefused),
         (
             "429 Too Many Requests",
-            HttpError::RateLimited(crate::http::RateLimitReset::RetryAfter(30)),
+            ReadFailure::RateLimited(crate::http::RateLimitReset::RetryAfter(30)),
         ),
     ] {
         let (usage, u) = serve_once_capturing(status, &["Retry-After: 30"], "{}");
         let codex = read_codex(&usage, "unused");
         u.join().unwrap();
-        assert_eq!(codex.err(), Some(expected.into()), "{status}");
+        assert_eq!(codex.err(), Some(expected), "{status}");
     }
 }
 
@@ -541,10 +542,7 @@ fn a_saved_codex_read_that_observed_nothing_is_an_error() {
     let (usage, u) = serve_once("200 OK", r#"{"plan_type":"pro"}"#);
     let codex = read_codex(&usage, "unused");
     u.join().unwrap();
-    assert_eq!(
-        codex.err(),
-        Some(HttpError::Parse("Usage response contained no quota observations.".into()).into())
-    );
+    assert_eq!(codex.err(), Some(ReadFailure::NoUsage));
 }
 
 fn usage_on(plan: Option<&str>) -> String {

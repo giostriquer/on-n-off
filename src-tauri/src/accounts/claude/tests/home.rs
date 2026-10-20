@@ -234,7 +234,8 @@ fn a_homes_usage_is_claude_codes_report_asked_in_that_home() {
         .write(&bin);
 
     let card = crate::accounts::native::with_test_cli(&stub, || home.read_usage(&identity()))
-        .unwrap_or_else(|error| panic!("{error:?}"));
+        .unwrap_or_else(|error| panic!("{error:?}"))
+        .into_card();
 
     assert_eq!(card.account.unwrap().id, identity().observation_key());
     let config_dir = fs::read_to_string(bin.join("config-dir.txt")).unwrap();
