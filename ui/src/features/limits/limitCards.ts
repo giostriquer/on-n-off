@@ -13,7 +13,6 @@ import type {
 import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { accountCards } from "./accountCards";
 import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
-import { codexTermEnded } from "./codexSubscriptionTerm";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
@@ -37,7 +36,7 @@ export type CardFigures = {
   paidOffer: LimitsResetOffer | null;
 };
 
-export type CardSubscription = { accountId: string; current: boolean; term: LimitsSubscription | null };
+export type CardSubscription = { accountId: string; poll: boolean; term: LimitsSubscription | null };
 
 export type ForgetStep = { accountId: string; expectedEmail?: string };
 
@@ -46,9 +45,11 @@ export type CardAccount = {
   name: string;
   profile: SavedProfile | null;
   forget: ForgetStep[];
-  resetActions: ProviderLimits | null;
-  resetAlert: boolean;
 };
+
+export type SignedIn = "confirmed" | "unconfirmed" | "no";
+
+export type NativeLogin = { observationId: string | null; settled: boolean };
 
 export type LimitCard = {
   key: string;
@@ -59,9 +60,11 @@ export type LimitCard = {
     category: string | null;
   };
   account: CardAccount | null;
+  reading: ProviderLimits | null;
   plan: string | null;
   status: CardStatus | null;
-  active: boolean;
+  signedIn: SignedIn;
+  leads: boolean;
   headline: CardWindow | null;
   rows: CardWindow[];
   figures: CardFigures;
@@ -74,9 +77,7 @@ export type LimitCard = {
   };
   subscription: CardSubscription | null;
   signIn: SignInPresentation | null;
-  signInAgain: boolean;
   archived: boolean;
-  archiveInsteadOfUse: boolean;
 };
 
 export type LimitCardsInput = {
@@ -84,12 +85,13 @@ export type LimitCardsInput = {
   entries: ProviderLimits[] | undefined;
   profiles: SavedProfile[];
   categories?: Readonly<Record<string, string>>;
+  nativeLogin: NativeLogin | null;
   now: number;
 };
 
 type Slot = { reading: ProviderLimits; profile: SavedProfile | null } | { reading: null; profile: SavedProfile };
 
-export function limitCards({ provider, entries, profiles, categories = {}, now }: LimitCardsInput): LimitCard[] | null {
+export function limitCards({ provider, entries, profiles, categories = {}, nativeLogin, now }: LimitCardsInput): LimitCard[] | null {
   if (!entries && profiles.length === 0) return null;
   const { entries: readings, legacyAccounts } = accountCards(entries ?? [], profiles);
   const slots: Slot[] = readings.map(reading => ({
@@ -99,7 +101,11 @@ export function limitCards({ provider, entries, profiles, categories = {}, now }
   for (const profile of profiles) {
     if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
-  return orderSlots(slots, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, now));
+  return orderSlots(slots, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, nativeLogin, now));
+}
+
+export function isSignedIn(card: LimitCard): boolean {
+  return card.signedIn !== "no";
 }
 
 export type LimitColumn = { visible: LimitCard[]; archived: LimitCard[] };
@@ -113,8 +119,16 @@ function accountOf(slot: Slot) {
   return slot.reading ? slot.reading.account ?? null : { id: slot.profile.observationId, label: slot.profile.email };
 }
 
-function isCurrent(slot: Slot): boolean {
+function leadsColumn(slot: Slot): boolean {
   return slot.reading ? slot.reading.currentAccount : slot.profile.active;
+}
+
+function signedInState(slot: Slot, accountId: string | undefined, nativeLogin: NativeLogin | null): SignedIn {
+  if (accountId === undefined) return "no";
+  const claimed = slot.profile ? slot.profile.active : !!slot.reading?.currentAccount;
+  if (!claimed) return "no";
+  if (!nativeLogin) return "confirmed";
+  return nativeLogin.settled && nativeLogin.observationId === accountId ? "confirmed" : "unconfirmed";
 }
 
 function orderSlots(slots: Slot[], now: number): Slot[] {
@@ -126,7 +140,7 @@ function orderSlots(slots: Slot[], now: number): Slot[] {
 type CardRank = [group: number, within: number];
 
 function cardRank(slot: Slot, now: number): CardRank {
-  if (isCurrent(slot)) return [0, 0];
+  if (leadsColumn(slot)) return [0, 0];
   const entry = slot.reading;
   const left = entry ? usageLeft(entry, now) : null;
   if (!entry || left === null) return [3, 0];
@@ -142,25 +156,24 @@ const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnow
 
 type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 
-function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, now: number): LimitCard {
+function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, nativeLogin: NativeLogin | null, now: number): LimitCard {
   const { reading, profile } = slot;
   const name = providerLabel(provider);
   const features = LIMITS_FEATURES[provider];
   const account = accountOf(slot);
-  const current = isCurrent(slot);
+  const leads = leadsColumn(slot);
+  const signedIn = signedInState(slot, account?.id, nativeLogin);
   const label = profile?.email ?? account?.label ?? null;
   const presentation = reading ? presentLimitAccount(reading, `${name} limits are unavailable.`) : UNREAD;
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
-  const cardSubscription = subscription(provider, account?.id ?? null, current, reading);
-  const active = !!account && (profile?.active ?? current);
   const signIn = features.signInDeadline === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null
     : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
   return {
-    key: `${current ? "current" : "remembered"}-${account?.id ?? index}`,
+    key: `${leads ? "current" : "remembered"}-${account?.id ?? index}`,
     provider,
     identity: {
       label: label ?? name,
@@ -172,12 +185,12 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       name: label ?? account.id,
       profile,
       forget: [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }) => ({ accountId: id, expectedEmail: email })), { accountId: account.id }],
-      resetActions: features.bankedResets === "codex" ? reading : null,
-      resetAlert: features.bankedResets === "codex",
     },
+    reading,
     plan: reading?.planLabel || null,
     status: presentation.status,
-    active,
+    signedIn,
+    leads,
     headline: headline ? presentWindow(headline, now) : null,
     rows: rest.map(window => presentRow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
@@ -190,26 +203,20 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       message,
       readStatus,
     },
-    subscription: cardSubscription,
+    subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
     signIn,
-    signInAgain: signIn?.state === "ended" && !!profile,
-    archived: !current && !!(reading ? reading.archived : profile?.archived),
-    archiveInsteadOfUse: !current && !active && !!profile && !profile.needsLogin && subscriptionEnded(cardSubscription, now),
+    archived: !leads && !!(reading ? reading.archived : profile?.archived),
   };
-}
-
-function subscriptionEnded(subscription: CardSubscription | null, now: number): boolean {
-  return subscription !== null && codexTermEnded(subscription.term, now);
 }
 
 function subscription(
   provider: LimitsProvider,
   accountId: string | null,
-  current: boolean,
+  poll: boolean,
   reading: ProviderLimits | null,
 ): CardSubscription | null {
   if (LIMITS_FEATURES[provider].subscriptionTerm !== "codex" || accountId === null) return null;
-  return { accountId, current, term: reading?.subscription ?? null };
+  return { accountId, poll, term: reading?.subscription ?? null };
 }
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {

@@ -32,10 +32,10 @@ function codex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   };
 }
 
-type ButtonProps = { entry: ProviderLimits; current?: boolean; disabled?: boolean; label?: string };
+type ButtonProps = { entry: ProviderLimits; offered?: boolean; disabled?: boolean; label?: string };
 
-function button({ entry, current = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
-  return <UseBankedReset entry={entry} label={label} current={current} now={NOW} disabled={disabled} />;
+function button({ entry, offered = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
+  return <UseBankedReset entry={entry} label={label} offered={offered} now={NOW} disabled={disabled} />;
 }
 
 function useReset() {
@@ -133,28 +133,10 @@ describe("UseBankedReset", () => {
     fireEvent.click(within(screen.getByRole("alertdialog", { name: "Use this reset?" })).getByRole("button", { name: "Use reset" }));
   }
 
-  it("is not offered once the banked reset has expired", () => {
-    const { container } = render(button({ entry: codex({ resetCredits: { availableCount: 1, nextExpiresAt: "2026-08-17T19:59:00Z" } }) }));
+  it("shows nothing while the reset is not offered and no attempt has been made", () => {
+    const { container } = render(button({ entry: codex(), offered: false }));
 
     expect(container.innerHTML).toBe("");
-  });
-
-  it("is offered only on the live, signed-in account card that has a reset banked", () => {
-    for (const props of [
-      { entry: codex(), current: false },
-      { entry: codex({ currentAccount: false }) },
-      { entry: codex({ status: "failed" }) },
-      { entry: codex({ account: null }) },
-      { entry: codex({ resetCredits: { availableCount: 0, nextExpiresAt: null } }) },
-      { entry: codex({ resetCredits: null }) },
-    ]) {
-      const { unmount } = render(button(props));
-      expect(screen.queryByRole("button", { name: "Use banked reset" })).toBeNull();
-      unmount();
-    }
-
-    render(button({ entry: codex() }));
-    expect(useReset()).toBeTruthy();
   });
 
   it("stays unusable while the account controls are busy", () => {
@@ -285,7 +267,7 @@ describe("UseBankedReset", () => {
 
     spendNow();
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Banked reset used."));
-    rerender(button({ entry: codex({ windows: [weekly(0)], resetCredits: { availableCount: 0, nextExpiresAt: null } }) }));
+    rerender(button({ entry: codex({ windows: [weekly(0)], resetCredits: { availableCount: 0, nextExpiresAt: null } }), offered: false }));
 
     expect(screen.getByRole("status").textContent).toBe("Banked reset used.");
     expect(screen.queryByRole("button", { name: "Use banked reset" })).toBeNull();
@@ -300,7 +282,7 @@ describe("UseBankedReset", () => {
       const { rerender } = render(button({ entry: codex({ windows: [weekly(99)] }) }));
       spendNow();
       const refreshed = { ...weekly(0), observedAt: "2026-08-17T20:00:31Z" };
-      rerender(button({ entry: codex({ windows: [refreshed], resetCredits: { availableCount: 0, nextExpiresAt: null } }) }));
+      rerender(button({ entry: codex({ windows: [refreshed], resetCredits: { availableCount: 0, nextExpiresAt: null } }), offered: false }));
 
       vi.setSystemTime(Date.parse("2026-08-17T20:00:32Z"));
       pending.resolve("reset");

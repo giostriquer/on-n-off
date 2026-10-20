@@ -7,14 +7,18 @@ import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { accountListQuery } from "$lib/sharedReads/accounts";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
 import { ActionMenu } from "@/components/ActionMenu";
-import { useAccountCardActions } from "./AccountCardActions";
+import { useCardActions } from "@/features/limits/cardActions";
+import { limitCards } from "@/features/limits/limitCards";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
+const NOW = Date.parse("2026-09-12T12:00:00Z");
 function AccountCard({ profile }: { profile: SavedProfile }) {
-  const actions = useAccountCardActions({ accountId: profile.observationId, label: profile.email!, current: profile.active, profile, archive: { run: () => {}, busy: false } });
-  return <><header><ActionMenu label={profile.email!} items={[...actions.items, ...actions.danger]} /></header><footer>{actions.footer}</footer></>;
+  const manager = useAccountManagement();
+  const [card] = limitCards({ provider: "codex", entries: undefined, profiles: [profile], nativeLogin: manager?.nativeLogin ?? null, now: NOW })!;
+  const actions = useCardActions({ provider: "codex", card, now: NOW, checking: false, onArchive: async () => {}, onRemove: async () => {} });
+  return <><header><ActionMenu label={profile.email!} items={actions.menu} /></header><footer>{actions.footer}</footer></>;
 }
 function Cards() {
   const manager = useAccountManagement();
@@ -23,9 +27,10 @@ function Cards() {
     <AccountCard profile={profile} />
   </section>)}</>;
 }
-function setup({ preferences = false, onCommit, signedIn = false }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean } = {}) {
+const OTHER: SavedProfile = { id: "profile-b", observationId: "profile:billing-b", legacyId: "other", identity: { ...identity, userId: "user-b" }, label: "other@example.com", email: "other@example.com", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" };
+function setup({ preferences = false, onCommit, signedIn = false, others = [] }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean; others?: SavedProfile[] } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
-  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", legacyId: "team", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
+  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", legacyId: "team", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }, ...others], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -99,15 +104,6 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a"));
   await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
-});
-it.each([
-  [false, ["Sign in again"]],
-  [true, ["Sign in again", "Remove saved login", "Sign out"]],
-])("offers a saved login (signed in: %s) exactly its own items, with Remove saved login and Sign out only when signed in", async (signedIn, items) => {
-  setup({ signedIn });
-  const card = await screen.findByRole("region", { name: "person@example.com" });
-  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
-  expect(within(within(card).getByRole("group", { name: "Actions for person@example.com" })).getAllByRole("button").map(item => item.textContent)).toEqual(items);
 });
 it("keeps email as the account name", async () => {
   setup(); await screen.findByText("person@example.com");
@@ -194,16 +190,20 @@ it("keeps cancellation on the initiating card and permits retry after cleanup", 
   let finish!: () => void;
   vi.mocked(api.addAccount).mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
   vi.mocked(api.cancelAccountLogin).mockResolvedValue();
-  setup();
+  setup({ others: [OTHER] });
   const card = await screen.findByRole("region", {name: "person@example.com"});
+  const other = screen.getByRole("region", {name: "other@example.com"});
+  const othersFooter = () => within(other).getAllByRole("button").filter(button => button.closest("footer")).map(button => [button.textContent, button.hasAttribute("disabled")]);
   fireEvent.click(within(card).getByLabelText("More actions for person@example.com"));
   fireEvent.click(within(card).getByRole("button", {name: "Sign in again"}));
   const cancel = within(card).getByRole("button", {name: "Cancel sign-in"});
   expect(cancel).toBeEnabled();
+  expect(othersFooter(), "another card keeps its own action, held while the sign-in runs").toEqual([["Use account", true]]);
   const operation = vi.mocked(api.addAccount).mock.calls.at(-1)![1];
   fireEvent.click(cancel);
   await waitFor(() => expect(api.cancelAccountLogin).toHaveBeenCalledWith(operation));
   expect(within(card).getByRole("button", {name: "Canceling…"})).toBeDisabled();
+  expect(othersFooter()).toEqual([["Use account", true]]);
   await act(async () => finish());
   await waitFor(() => expect(within(card).getByRole("button", {name: "Use account"})).toBeEnabled());
   expect(within(card).queryByRole("button", {name: "Cancel sign-in"})).toBeNull();
