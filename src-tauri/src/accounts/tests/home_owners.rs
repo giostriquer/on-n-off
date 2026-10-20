@@ -16,12 +16,12 @@ fn read(harness: &Harness, provider: AgentId) {
         });
 }
 
-fn home_dir(harness: &Harness, id: &str) -> PathBuf {
+fn account_home(harness: &Harness, id: &str) -> PathBuf {
     homes::dir(harness.path(), id).unwrap()
 }
 
 fn unnamed_home(harness: &Harness, layout: &[&str], login: Login) -> PathBuf {
-    let dir = home_dir(harness, &uuid::Uuid::new_v4().to_string());
+    let dir = account_home(harness, &uuid::Uuid::new_v4().to_string());
     std::fs::create_dir_all(&dir).unwrap();
     for part in layout {
         std::fs::create_dir_all(dir.join(part)).unwrap();
@@ -64,7 +64,7 @@ fn claude_accounts(harness: &Harness) -> String {
 fn named_home(harness: &Harness, profile: usize) -> PathBuf {
     let id = uuid::Uuid::new_v4().to_string();
     harness.seed(|db| db.profiles[profile].home = Some(id.clone()));
-    home_dir(harness, &id)
+    account_home(harness, &id)
 }
 
 #[test]
