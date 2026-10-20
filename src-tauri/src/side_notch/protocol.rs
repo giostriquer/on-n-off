@@ -122,7 +122,6 @@ impl From<&NotchProvider> for NativeReading {
 fn helper_window(window: &LimitWindowDto) -> LimitWindowDto {
     LimitWindowDto {
         role: None,
-        starts_on_first_message: false,
         ..window.clone()
     }
 }

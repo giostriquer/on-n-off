@@ -1,0 +1,667 @@
+{
+  "now": "2026-10-19T12:00:00Z",
+  "timeZone": "Europe/Berlin",
+  "windows": [
+    {
+      "name": "a live window keeps its percent and counts down to its reset",
+      "window": {
+        "usedPercent": 41.5,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 41.5,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "42%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "under a day the countdown is hours and minutes",
+      "window": {
+        "usedPercent": 12,
+        "resetsAt": "2026-10-19T16:05:30Z"
+      },
+      "usedNow": 12,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "12%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Mon 18:05",
+        "relative": "4h 5m",
+        "card": "resets in 4h 5m · Mon 18:05",
+        "notch": "Resets Mon 18:05"
+      }
+    },
+    {
+      "name": "the last minute counts down as under a minute",
+      "window": {
+        "usedPercent": 3,
+        "resetsAt": "2026-10-19T12:00:30Z"
+      },
+      "usedNow": 3,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "3%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Mon 14:00",
+        "relative": "<1m",
+        "card": "resets in <1m · Mon 14:00",
+        "notch": "Resets Mon 14:00"
+      }
+    },
+    {
+      "name": "a reset after the clocks change reads in the new offset",
+      "window": {
+        "usedPercent": 66,
+        "resetsAt": "2026-10-26T09:00:00Z"
+      },
+      "usedNow": 66,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "66%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Mon 10:00",
+        "relative": "6d 21h",
+        "card": "resets in 6d 21h · Mon 10:00",
+        "notch": "Resets Mon 10:00"
+      }
+    },
+    {
+      "name": "an unused window counts down like any other",
+      "window": {
+        "usedPercent": 0,
+        "resetsAt": "2026-10-20T00:00:00Z"
+      },
+      "usedNow": 0,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Tue 02:00",
+        "relative": "12h 0m",
+        "card": "resets in 12h 0m · Tue 02:00",
+        "notch": "Resets Tue 02:00"
+      }
+    },
+    {
+      "name": "a window past its reset has renewed and is used 0%, not what it held",
+      "window": {
+        "usedPercent": 93,
+        "resetsAt": "2026-10-19T10:35:00Z"
+      },
+      "usedNow": 0,
+      "renewed": true,
+      "reached": false,
+      "idle": false,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "elapsed",
+        "at": "Mon 12:35",
+        "relative": "1h ago",
+        "card": "reset 1h ago · Mon 12:35",
+        "notch": "Reset Mon 12:35"
+      }
+    },
+    {
+      "name": "the reset instant itself has already passed",
+      "window": {
+        "usedPercent": 50,
+        "resetsAt": "2026-10-19T12:00:00Z"
+      },
+      "usedNow": 0,
+      "renewed": true,
+      "reached": false,
+      "idle": false,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "elapsed",
+        "at": "Mon 14:00",
+        "relative": "just now",
+        "card": "reset just now · Mon 14:00",
+        "notch": "Reset Mon 14:00"
+      }
+    },
+    {
+      "name": "an unused window its reader says starts with the first message is idle",
+      "window": {
+        "usedPercent": 0,
+        "startsOnFirstMessage": true
+      },
+      "usedNow": 0,
+      "renewed": false,
+      "reached": false,
+      "idle": true,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "idle",
+        "card": "Starts with your first message",
+        "notch": "Starts with first message"
+      }
+    },
+    {
+      "name": "a reset wins over the first-message flag",
+      "window": {
+        "usedPercent": 0,
+        "resetsAt": "2026-10-20T00:00:00Z",
+        "startsOnFirstMessage": true
+      },
+      "usedNow": 0,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Tue 02:00",
+        "relative": "12h 0m",
+        "card": "resets in 12h 0m · Tue 02:00",
+        "notch": "Resets Tue 02:00"
+      }
+    },
+    {
+      "name": "a used window is never idle, whatever its reader said",
+      "window": {
+        "usedPercent": 12,
+        "startsOnFirstMessage": true
+      },
+      "usedNow": 12,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "12%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "Reset time unavailable",
+        "notch": "Reset time unavailable"
+      }
+    },
+    {
+      "name": "a window without a reset says its reset is unknown",
+      "window": {
+        "usedPercent": 17
+      },
+      "usedNow": 17,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "17%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "Reset time unavailable",
+        "notch": "Reset time unavailable"
+      }
+    },
+    {
+      "name": "a reset that does not read as a time is no reset",
+      "window": {
+        "usedPercent": 93,
+        "resetsAt": "soon"
+      },
+      "usedNow": 93,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "93%",
+      "meter": {
+        "level": "trip"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "Reset time unavailable",
+        "notch": "Reset time unavailable"
+      }
+    },
+    {
+      "name": "a sliver of use is under one percent, never zero",
+      "window": {
+        "usedPercent": 0.4,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 0.4,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "<1%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "a half rounds up",
+      "window": {
+        "usedPercent": 2.5,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 2.5,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "3%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "70% still draws the accent",
+      "window": {
+        "usedPercent": 70,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 70,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "70%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "the blend eases: a quarter through the band is halfway to the trip red",
+      "window": {
+        "usedPercent": 75,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 75,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "75%",
+      "meter": {
+        "level": "blend",
+        "fraction": 0.5
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "halfway through the band is most of the way to the trip red",
+      "window": {
+        "usedPercent": 80,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 80,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "80%",
+      "meter": {
+        "level": "blend",
+        "fraction": 0.7071067811865476
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "just under 90% is nearly the trip red",
+      "window": {
+        "usedPercent": 89.9,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 89.9,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "90%",
+      "meter": {
+        "level": "blend",
+        "fraction": 0.9974968671630003
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "90% trips the meter",
+      "window": {
+        "usedPercent": 90,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 90,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "90%",
+      "meter": {
+        "level": "trip"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "99.5% is not reached, so it reads 99%",
+      "window": {
+        "usedPercent": 99.5,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 99.5,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "99%",
+      "meter": {
+        "level": "trip"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "100% is reached",
+      "window": {
+        "usedPercent": 100,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 100,
+      "renewed": false,
+      "reached": true,
+      "idle": false,
+      "usedText": "100%",
+      "meter": {
+        "level": "trip"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "above 100% is unreadable, though its reset still reads",
+      "window": {
+        "usedPercent": 101,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": null,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "—",
+      "meter": {
+        "level": "unreadable"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "below 0% is unreadable",
+      "window": {
+        "usedPercent": -3
+      },
+      "usedNow": null,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "—",
+      "meter": {
+        "level": "unreadable"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "Reset time unavailable",
+        "notch": "Reset time unavailable"
+      }
+    },
+    {
+      "name": "a value that is not a number is unreadable",
+      "window": {
+        "usedPercent": null,
+        "startsOnFirstMessage": true
+      },
+      "usedNow": null,
+      "renewed": false,
+      "reached": false,
+      "idle": false,
+      "usedText": "—",
+      "meter": {
+        "level": "unreadable"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "Reset time unavailable",
+        "notch": "Reset time unavailable"
+      }
+    },
+    {
+      "name": "an unreadable window stays unreadable after its reset",
+      "window": {
+        "usedPercent": 101,
+        "resetsAt": "2026-10-19T10:35:00Z"
+      },
+      "usedNow": null,
+      "renewed": true,
+      "reached": false,
+      "idle": false,
+      "usedText": "—",
+      "meter": {
+        "level": "unreadable"
+      },
+      "note": {
+        "kind": "elapsed",
+        "at": "Mon 12:35",
+        "relative": "1h ago",
+        "card": "reset 1h ago · Mon 12:35",
+        "notch": "Reset Mon 12:35"
+      }
+    }
+  ],
+  "shares": [
+    {
+      "name": "a share counts down to the date it renews",
+      "share": {
+        "usedPercent": 32,
+        "resetsAt": "2026-12-01T12:00:00Z"
+      },
+      "usedNow": 32,
+      "renewed": false,
+      "reached": false,
+      "usedText": "32%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Dec 1",
+        "card": "resets Dec 1",
+        "notch": "Resets Dec 1"
+      }
+    },
+    {
+      "name": "the date is the local one",
+      "share": {
+        "usedPercent": 40,
+        "resetsAt": "2026-11-30T23:30:00Z"
+      },
+      "usedNow": 40,
+      "renewed": false,
+      "reached": false,
+      "usedText": "40%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Dec 1",
+        "card": "resets Dec 1",
+        "notch": "Resets Dec 1"
+      }
+    },
+    {
+      "name": "a spent share is reached",
+      "share": {
+        "usedPercent": 100,
+        "resetsAt": "2026-12-01T12:00:00Z"
+      },
+      "usedNow": 100,
+      "renewed": false,
+      "reached": true,
+      "usedText": "100%",
+      "meter": {
+        "level": "trip"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Dec 1",
+        "card": "resets Dec 1",
+        "notch": "Resets Dec 1"
+      }
+    },
+    {
+      "name": "a share past its reset has renewed",
+      "share": {
+        "usedPercent": 100,
+        "resetsAt": "2026-10-18T12:00:00Z"
+      },
+      "usedNow": 0,
+      "renewed": true,
+      "reached": false,
+      "usedText": "0%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "elapsed",
+        "at": "Oct 18",
+        "relative": "1d ago",
+        "card": "reset 1d ago · Oct 18",
+        "notch": "Reset Oct 18"
+      }
+    },
+    {
+      "name": "a share without a reset has no note",
+      "share": {
+        "usedPercent": 40
+      },
+      "usedNow": 40,
+      "renewed": false,
+      "reached": false,
+      "usedText": "40%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "unknown",
+        "card": "",
+        "notch": ""
+      }
+    },
+    {
+      "name": "a share outside 0-100% is unreadable",
+      "share": {
+        "usedPercent": 120,
+        "resetsAt": "2026-12-01T12:00:00Z"
+      },
+      "usedNow": null,
+      "renewed": false,
+      "reached": false,
+      "usedText": "—",
+      "meter": {
+        "level": "unreadable"
+      },
+      "note": {
+        "kind": "pending",
+        "at": "Dec 1",
+        "card": "resets Dec 1",
+        "notch": "Resets Dec 1"
+      }
+    }
+  ]
+}

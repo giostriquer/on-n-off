@@ -1,7 +1,7 @@
 use super::*;
 
 fn ring_label(card: ProviderLimitsDto) -> String {
-    match cell_content(&CellData::Provider(projected(card))) {
+    match cell_content(&CellData::Provider(projected(card)), now()) {
         CellContent::Provider { label, .. } => label,
         _ => panic!("wrong content kind"),
     }
@@ -33,81 +33,6 @@ fn the_ring_label_is_the_weekly_figure_or_a_dash_never_the_session() {
 }
 
 #[test]
-fn reset_notes_never_double_space_the_hour() {
-    for hour in 0..24 {
-        let mut pending = window("w", "Weekly", LimitWindowKind::Weekly, 10.0);
-        pending.resets_at = Some(format!("2099-01-01T{hour:02}:07:00Z"));
-        let note = reset_note(&pending);
-        assert!(
-            !note.contains("  "),
-            "the hour is not space-padded at {hour}: {note:?}"
-        );
-    }
-}
-#[test]
-fn percent_labels_follow_the_mac_rounding_rules() {
-    let content = cell_content(&CellData::Provider(claude_with(vec![window(
-        "w",
-        "Weekly - all models",
-        LimitWindowKind::Weekly,
-        0.4,
-    )])));
-    match content {
-        CellContent::Provider { label, .. } => assert_eq!(label, "<1%", "a sliver is not zero"),
-        _ => panic!("wrong content kind"),
-    }
-}
-#[test]
-fn a_reset_window_reads_as_zero_and_never_recites_its_spent_figure() {
-    let mut expired = window("w", "Weekly - all models", LimitWindowKind::Weekly, 97.0);
-    expired.resets_at = Some("2020-01-01T00:00:00Z".into());
-    let content = cell_content(&CellData::Provider(claude_with(vec![expired.clone()])));
-    match content {
-        CellContent::Provider {
-            label, headline, ..
-        } => {
-            assert_eq!(label, "0%", "the quota renewed at the reset");
-            assert_eq!(
-                headline.and_then(|quota| quota.percent),
-                Some(0.0),
-                "and the ring draws an empty arc rather than none at all"
-            );
-        }
-        _ => panic!("wrong content kind"),
-    }
-
-    assert_eq!(
-        reset_note(&expired),
-        format!(
-            "Reset {}",
-            chrono::DateTime::parse_from_rfc3339("2020-01-01T00:00:00Z")
-                .unwrap()
-                .with_timezone(&chrono::Local)
-                .format("%a %-I:%M %p")
-        ),
-        "the note says when it renewed, not what it held before"
-    );
-
-    let (planned, _) = popover_render(claude_with(vec![expired]));
-    let popover = planned.popover.as_ref().expect("the popover is open");
-    let texts: Vec<&str> = popover
-        .entries
-        .iter()
-        .filter_map(|(item, _)| match item {
-            PopItem::Text { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
-        .collect();
-    assert!(
-        texts.contains(&"0% Used"),
-        "the popover says so too: {texts:?}"
-    );
-    assert!(
-        !texts.iter().any(|text| text.contains("97")),
-        "the spent cycle's figure appears nowhere: {texts:?}"
-    );
-}
-#[test]
 fn unreadable_pull_requests_keep_their_rows_hidden() {
     let pulls = pulls_read(
         "ghNotLoggedIn",
@@ -124,6 +49,7 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
@@ -189,6 +115,7 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
@@ -257,6 +184,7 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
                 active: Some(index),
                 ..Hover::default()
             },
+            now(),
         )
         .expect("fits");
         let popover = planned.popover.as_ref().expect("the popover is open");
@@ -314,8 +242,8 @@ fn popover_texts(provider: ProviderCell) -> Vec<String> {
         .collect()
 }
 
-fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, QuotaView, (Color, Color))> {
-    match cell_content(&CellData::Provider(provider)) {
+fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, WindowAt, (Color, Color))> {
+    match cell_content(&CellData::Provider(provider), now()) {
         CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
             let colors = inner_ring_colors(&ring);
             (ring, quota, colors)
@@ -327,23 +255,20 @@ fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, QuotaView, (Color, C
 #[test]
 fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     let member = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
-    match cell_content(&CellData::Provider(member.clone())) {
+    match cell_content(&CellData::Provider(member.clone()), now()) {
         CellContent::Provider {
             label, headline, ..
         } => {
             assert_eq!(label, "31%", "the weekly stays the headline");
-            assert_eq!(headline.and_then(|quota| quota.percent), Some(31.0));
+            assert_eq!(headline.and_then(|at| at.used_now()), Some(31.0));
         }
         _ => panic!("wrong content kind"),
     }
     assert_eq!(
-        inner_ring(member),
+        inner_ring(member).map(|(ring, at, colors)| (ring, at.used_now(), colors)),
         Some((
             InnerRing::WorkspaceShare,
-            QuotaView {
-                percent: Some(32.0),
-                reached: false
-            },
+            Some(32.0),
             (CREDITS_INK, CREDITS_TRACK),
         ))
     );
@@ -354,11 +279,8 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
             true,
             "2020-01-01T12:00:00Z"
         )))
-        .map(|(_, quota, _)| quota),
-        Some(QuotaView {
-            percent: Some(0.0),
-            reached: false
-        }),
+        .map(|(_, at, _)| at.used_now()),
+        Some(Some(0.0)),
         "a share past its reset has renewed, as a window has"
     );
 }
@@ -377,14 +299,14 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
             ..window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0)
         },
     ]);
-    let (ring, quota, colors) = inner_ring(claude).expect("an inner ring");
+    let (ring, at, colors) = inner_ring(claude).expect("an inner ring");
     assert_eq!(
         ring,
         InnerRing::Fable {
             window_id: "fable".into()
         }
     );
-    assert_eq!(quota.percent, Some(13.0));
+    assert_eq!(at.used_now(), Some(13.0));
     assert_eq!(colors, (FABLE_ORANGE, FABLE_TRACK));
 }
 
@@ -505,6 +427,7 @@ fn each_badge_wears_the_ink_of_its_tone() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let inks = inks(&planned);
@@ -626,6 +549,7 @@ fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
@@ -784,7 +708,7 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
         None,
     );
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let rail = plan(&selected, &displays, &data, Hover::default()).expect("fits");
+    let rail = plan(&selected, &displays, &data, Hover::default(), now()).expect("fits");
     let labels: Vec<String> = rail
         .cells
         .iter()
@@ -813,6 +737,7 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
                 active: Some(index),
                 ..Hover::default()
             },
+            now(),
         )
         .expect("fits");
         let texts: Vec<String> = planned
@@ -859,6 +784,7 @@ fn a_read_pull_request_cell_draws_the_figure_and_segments_the_model_decided() {
         &displays,
         &data(vec![cell.clone()]),
         Hover::default(),
+        now(),
     )
     .expect("fits");
     assert_eq!(

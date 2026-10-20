@@ -1,16 +1,19 @@
 import { useId } from "react";
 import { usageFillStyle } from "$lib/limitsFormat";
 import type { AgentId } from "$lib/types";
+import type { MeterLevel } from "$lib/windowAt";
 
 export function Meter({
   label,
   percent,
+  meter,
   provider,
   className,
   describedBy,
 }: {
   label: string;
   percent: number;
+  meter: MeterLevel;
   provider: AgentId;
   className: string;
   describedBy?: string;
@@ -27,7 +30,7 @@ export function Meter({
     >
       <div
         className="h-full rounded-sm transition-[width]"
-        style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
+        style={{ width: `${percent}%`, ...usageFillStyle(provider, meter) }}
       />
     </div>
   );
@@ -37,6 +40,7 @@ export function MeterRow({
   label,
   note,
   percent,
+  meter,
   text,
   color,
   provider,
@@ -44,6 +48,7 @@ export function MeterRow({
   label: string;
   note: string;
   percent: number;
+  meter: MeterLevel;
   text: string;
   color: string | undefined;
   provider: AgentId;
@@ -55,7 +60,7 @@ export function MeterRow({
         <span className="text-[10px] leading-4 font-semibold tracking-[0.03em] text-[var(--mute)] uppercase">{label}</span>
         <span id={noteId} className="font-mono text-[11px] leading-snug text-[var(--mute)]">{note}</span>
       </div>
-      <Meter label={label} percent={percent} provider={provider} className="h-1 w-24 shrink-0" describedBy={noteId} />
+      <Meter label={label} percent={percent} meter={meter} provider={provider} className="h-1 w-24 shrink-0" describedBy={noteId} />
       <span className="w-11 shrink-0 text-right font-mono text-[12px]" style={{ color }}>
         {text}
       </span>

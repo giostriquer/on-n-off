@@ -268,7 +268,7 @@ function HeadlineWindow({
   window: CardWindow;
   provider: AgentId;
 }) {
-  const { label, percent, note, text, color } = window;
+  const { label, percent, meter, note, text, color } = window;
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <div className="flex items-center justify-between gap-2">
@@ -286,11 +286,11 @@ function HeadlineWindow({
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter label={label} percent={percent} provider={provider} className="h-1.5" />
+      <Meter label={label} percent={percent} meter={meter} provider={provider} className="h-1.5" />
     </div>
   );
 }
 
 function WindowRow({ row, provider }: { row: CardWindow; provider: AgentId }) {
-  return <MeterRow label={row.label} note={row.note} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
+  return <MeterRow label={row.label} note={row.note} percent={row.percent} meter={row.meter} text={row.text} color={row.color} provider={provider} />;
 }

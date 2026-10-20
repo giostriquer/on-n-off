@@ -26,6 +26,6 @@ function CreditsSpentRow({ spent }: { spent: LimitsCreditsSpent }) {
 }
 
 function WorkspaceShareRow({ share, provider, now }: { share: LimitsWorkspaceCredits; provider: AgentId; now: number }) {
-  const { percent, text, color, note } = presentWorkspaceShare(share, now);
-  return <MeterRow label="Workspace credits" note={note} percent={percent} text={text} color={color} provider={provider} />;
+  const { percent, meter, text, color, note } = presentWorkspaceShare(share, now);
+  return <MeterRow label="Workspace credits" note={note} percent={percent} meter={meter} text={text} color={color} provider={provider} />;
 }

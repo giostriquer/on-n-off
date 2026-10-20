@@ -162,7 +162,13 @@ impl Machine {
         if !data.settings.enabled {
             return None;
         }
-        win_paint::plan(&data.settings, &self.displays, data, self.hover)
+        win_paint::plan(
+            &data.settings,
+            &self.displays,
+            data,
+            self.hover,
+            chrono::Utc::now(),
+        )
     }
 
     pub fn take_dirty(&mut self) -> bool {

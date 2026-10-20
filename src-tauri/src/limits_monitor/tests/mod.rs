@@ -151,6 +151,22 @@ fn an_exhausted_limit_notification_is_not_described_as_a_reset() {
 }
 
 #[test]
+fn a_notification_words_its_percents_as_the_cards_and_the_notch_do() {
+    let reset = LimitEvent {
+        kind: LimitEventKind::Reset,
+        provider: AgentId::Codex,
+        account_label: None,
+        window_label: "Weekly · all models".into(),
+        previous_used_percent: 99.6,
+        used_percent: 0.4,
+    };
+
+    let (_, body) = notification_copy(&reset);
+
+    assert_eq!(body, "Weekly · all models reset from 99% to <1% used");
+}
+
+#[test]
 fn an_exhausted_first_observation_is_only_a_baseline() {
     let mut state = MonitorState::default();
 

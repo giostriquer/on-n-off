@@ -15,10 +15,11 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   public let usedPercent: Double
   public let resetsAt: String?
   public let observedAt: String
+  public let startsOnFirstMessage: Bool
 
   public init(
     id: String, label: String, kind: String, usedPercent: Double, resetsAt: String?,
-    observedAt: String
+    observedAt: String, startsOnFirstMessage: Bool = false
   ) {
     self.id = id
     self.label = label
@@ -26,17 +27,40 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     self.usedPercent = usedPercent
     self.resetsAt = resetsAt
     self.observedAt = observedAt
+    self.startsOnFirstMessage = startsOnFirstMessage
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, label, kind, usedPercent, resetsAt, observedAt, startsOnFirstMessage
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(String.self, forKey: .id)
+    label = try values.decode(String.self, forKey: .label)
+    kind = try values.decode(String.self, forKey: .kind)
+    usedPercent = try values.decodeIfPresent(Double.self, forKey: .usedPercent) ?? .nan
+    resetsAt = try values.decodeIfPresent(String.self, forKey: .resetsAt)
+    observedAt = try values.decode(String.self, forKey: .observedAt)
+    startsOnFirstMessage =
+      try values.decodeIfPresent(Bool.self, forKey: .startsOnFirstMessage) ?? false
+  }
+
+  public func isRenewed(at now: Date) -> Bool {
+    parseInstant(resetsAt).map { $0 <= now } ?? false
   }
 
   public func percent(at now: Date) -> Double? {
-    guard usedPercent.isFinite, (0...100).contains(usedPercent) else { return nil }
-    if let reset = parseInstant(resetsAt), reset <= now { return 0 }
-    return usedPercent
+    guard usedPercent.isFinite, (0...reachedPercent).contains(usedPercent) else { return nil }
+    return isRenewed(at: now) ? 0 : usedPercent
   }
 
   public func isReached(at now: Date) -> Bool {
-    guard let percent = percent(at: now) else { return false }
-    return roundedPercent(percent) == 100
+    percent(at: now).map { $0 >= reachedPercent } ?? false
+  }
+
+  public func isIdle(at now: Date) -> Bool {
+    startsOnFirstMessage && parseInstant(resetsAt) == nil && percent(at: now) == 0
   }
 
   public func text(at now: Date) -> String {
@@ -44,12 +68,11 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 
   public func note(at now: Date) -> String {
-    guard let reset = parseInstant(resetsAt) else { return "" }
-    let formatter = DateFormatter()
-    formatter.dateFormat = "EEE h:mm a"
-    let clock = formatter.string(from: reset)
-    if reset <= now { return "Reset \(clock)" }
-    return "Resets \(clock)"
+    guard let reset = parseInstant(resetsAt) else {
+      return isIdle(at: now) ? "Starts with first message" : "Reset time unavailable"
+    }
+    let clock = localClock(reset, format: "EEE HH:mm")
+    return reset <= now ? "Reset \(clock)" : "Resets \(clock)"
   }
 }
 
@@ -73,15 +96,12 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
   }
 
   public func amounts(at now: Date) -> String {
-    (parseInstant(resetsAt).map { $0 <= now } ?? false) ? renewed : left
+    quota.isRenewed(at: now) ? renewed : left
   }
 
   public func note(at now: Date) -> String {
     guard let reset = parseInstant(resetsAt) else { return "" }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US")
-    formatter.dateFormat = "MMM d"
-    let date = formatter.string(from: reset)
+    let date = localClock(reset, format: "MMM d")
     return reset <= now ? "Reset \(date)" : "Resets \(date)"
   }
 }
@@ -581,12 +601,6 @@ extension Cell {
         && cell.sessions.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }
         && (cell.reading.map { reading in
           reading.windows.count <= 100 && reading.referencesAreSent
-            && reading.windows.allSatisfy {
-              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-            }
-            && (reading.workspaceCredits.map {
-              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-            } ?? true)
         } ?? true)
     case .pullRequests(let cell):
       return cell.reading.map { pulls in
@@ -745,12 +759,20 @@ public func parseInstant(_ text: String?) -> Date? {
   return formatter.date(from: text)
 }
 
+let reachedPercent = 100.0
+private let lastUnreachedPercent = 99
+
 public func formatPercent(_ percent: Double) -> String {
-  percent > 0 && percent < 1 ? "<1%" : "\(roundedPercent(percent))%"
+  if percent >= reachedPercent { return "100%" }
+  if percent > 0 && percent < 1 { return "<1%" }
+  return "\(min(Int(percent.rounded()), lastUnreachedPercent))%"
 }
 
-private func roundedPercent(_ percent: Double) -> Int {
-  Int(percent.rounded())
+func localClock(_ instant: Date, format: String) -> String {
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "en_US_POSIX")
+  formatter.dateFormat = format
+  return formatter.string(from: instant)
 }
 
 public func reviewRequestHtml(title: String, url: URL) -> String {

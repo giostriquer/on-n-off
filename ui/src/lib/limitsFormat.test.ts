@@ -7,8 +7,7 @@ import {
   formatResetAt,
   formatResetIn,
   hasElapsed,
-  formatUsedPercent,
-  usageFillColor,
+  usageFillStyle,
   usageMeterColor,
   usageTextColor,
 } from "./limitsFormat";
@@ -82,63 +81,15 @@ describe("formatClock", () => {
   });
 });
 
-describe("usageMeterColor", () => {
-  it("holds the base colour while there is room", () => {
-    expect(usageMeterColor("red", 0)).toBe("red");
-    expect(usageMeterColor("red", 69.9)).toBe("red");
-    expect(usageMeterColor("red", 70)).toBe("red");
-  });
-
-  it("is fully tripped from 90", () => {
-    expect(usageMeterColor("red", 90)).toBe("var(--trip)");
-    expect(usageMeterColor("red", 100)).toBe("var(--trip)");
-  });
-
-  it("never passes through the warning amber", () => {
-    for (let percent = 0; percent <= 100; percent += 0.5) {
-      expect(usageMeterColor("red", percent)).not.toContain("--warn");
-    }
-  });
-
-  it("eases, so a quarter through the band is half the way to red", () => {
-    expect(usageMeterColor("red", 75)).toBe("color-mix(in srgb, red, var(--trip) 50.0%)");
-    expect(usageMeterColor("red", 75)).not.toContain("25.0%");
-  });
-
-  it("moves monotonically toward red across the band", () => {
-    const share = (percent: number) =>
-      Number(/var\(--trip\) ([\d.]+)%/.exec(usageMeterColor("red", percent))?.[1] ?? 0);
-    let previous = -1;
-    for (let percent = 70.5; percent < 90; percent += 0.5) {
-      const now = share(percent);
-      expect(now).toBeGreaterThan(previous);
-      previous = now;
-    }
-  });
-});
-
-describe("usageFillColor and usageTextColor", () => {
-  it("fills with the provider accent until the band", () => {
-    expect(usageFillColor("claude", 50)).toBe("#d97757");
-    expect(usageFillColor("claude", 95)).toBe("var(--trip)");
-  });
-
-  it("leaves the figure its ordinary colour until the window is spent", () => {
-    expect(usageTextColor(50)).toBeUndefined();
-    expect(usageTextColor(70)).toBeUndefined();
-    expect(usageTextColor(80)).toBeUndefined();
-    expect(usageTextColor(90)).toBe("var(--trip)");
-    expect(usageTextColor(95)).toBe("var(--trip)");
-  });
-});
-
-describe("formatUsedPercent", () => {
-  it("rounds to whole percent and keeps tiny non-zero use visible", () => {
-    expect(formatUsedPercent(12)).toBe("12%");
-    expect(formatUsedPercent(7.4)).toBe("7%");
-    expect(formatUsedPercent(0.4)).toBe("<1%");
-    expect(formatUsedPercent(0)).toBe("0%");
-    expect(formatUsedPercent(100)).toBe("100%");
+describe("usageMeterColor and usageTextColor", () => {
+  it("draw each meter level in one ink, never the warning amber", () => {
+    expect(usageMeterColor("red", { level: "base" })).toBe("red");
+    expect(usageMeterColor("red", { level: "unreadable" })).toBe("red");
+    expect(usageMeterColor("red", { level: "blend", fraction: 0.5 })).toBe("color-mix(in srgb, red, var(--trip) 50.0%)");
+    expect(usageMeterColor("red", { level: "trip" })).toBe("var(--trip)");
+    expect(usageFillStyle("claude", { level: "base" })).toEqual({ background: "#d97757", backgroundColor: "#d97757" });
+    expect(usageTextColor({ level: "blend", fraction: 0.99 })).toBeUndefined();
+    expect(usageTextColor({ level: "trip" })).toBe("var(--trip)");
   });
 });
 

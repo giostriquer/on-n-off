@@ -99,11 +99,17 @@ source carries no comments (see [Code comments](#code-comments)).
   verification).
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
   `limitCards.test.ts` pins each provider's features.
-- A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
-  side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
-  endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
+- What a quota window or workspace share reads at an instant (used now, renewed, reached, its
+  percent text, its reset note, idle, its meter level): `limits/window_at.rs`, which the limits
+  monitor and the Windows painter use, the painter with the clock its window passes in, never
+  `Utc::now()` of its own. The card restates it in `ui/src/lib/windowAt.ts` and the macOS helper in
+  `NotchCore/Models.swift` and `Meter.swift`; all three read
+  `src-tauri/src/limits/window_at/fixtures/window-cases.json`, whose rows name each surface's
+  wording (`card`, `notch`), so a change to one side fails until the others follow
+  ([why](architecture/README.md#limits)). A meter's ink comes from its level alone:
+  `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), `meter_color` (`side_notch/model.rs`) and
+  `meterInk` (`Meter.swift`). `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
-  Change the shape and change all three, each of which has a test pinning it.
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together

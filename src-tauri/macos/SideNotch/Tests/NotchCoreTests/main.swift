@@ -26,29 +26,61 @@ final class NotchTests {
       workHeight: 1084, scale: scale, mirrored: mirrored)
   }
 
-  func testTheMeterRampOnlyEverMovesTowardTheTripRed() {
-    func distanceToTrip(_ ink: Ink) -> Double {
-      let dr = ink.r - tripInk.r, dg = ink.g - tripInk.g, db = ink.b - tripInk.b
-      return (dr * dr + dg * dg + db * db).squareRoot()
-    }
+  func testEachMeterLevelDrawsInOneInk() {
     for base in ProviderId.allCases.map(providerInk) + [fableInk, creditsInk] {
-      var previous = Double.infinity
-      for step in 0...100 {
-        let ink = meterInk(quota("weekly", Double(step)), base: base, at: now)
-        let distance = distanceToTrip(ink)
-        let strict = (71...89).contains(step) && base != tripInk
-        if distance > previous + 0.000_001 || (strict && distance >= previous) {
-          failures += 1
-          print("FAIL meter ramp stalls or backtracks at \(step) %: \(distance) vs \(previous)")
-        }
-        previous = distance
-      }
-      expectEqual(meterInk(quota("weekly", 70), base: base, at: now), base)
-      expectEqual(meterInk(quota("weekly", 90), base: base, at: now), tripInk)
-      expectEqual(
-        meterInk(quota("weekly", 75), base: base, at: now), base.mixed(toward: tripInk, 0.5))
+      expectEqual(meterInk(.unreadable, base: base), unreadableInk)
+      expectEqual(meterInk(.base, base: base), base)
+      expectEqual(meterInk(.blend(0.5), base: base), base.mixed(toward: tripInk, 0.5))
+      expectEqual(meterInk(.trip, base: base), tripInk)
     }
     expectEqual(meterInk(nil, base: claudeInk, at: now), unreadableInk)
+  }
+
+  func testTheSharedWindowCasesReadTheSameAtThePinnedInstant() throws {
+    let cases = try WindowCases.load()
+    NSTimeZone.default = TimeZone(identifier: cases.timeZone)!
+    defer { NSTimeZone.resetSystemTimeZone(); NSTimeZone.default = .current }
+    let at = parseInstant(cases.now)!
+    func level(_ meter: WindowCases.Meter) -> MeterLevel? {
+      switch (meter.level, meter.fraction) {
+      case ("unreadable", nil): return .unreadable
+      case ("base", nil): return .base
+      case ("blend", let fraction?): return .blend(fraction)
+      case ("trip", nil): return .trip
+      default: return nil
+      }
+    }
+    func sameLevel(_ shown: MeterLevel, _ expected: MeterLevel?) -> Bool {
+      if case .blend(let a) = shown, case .blend(let b)? = expected { return abs(a - b) < 1e-9 }
+      return shown == expected
+    }
+    func check(_ entry: WindowCases.Case, _ quota: Quota, note: String) {
+      let shown = (
+        quota.percent(at: at), quota.isRenewed(at: at), quota.isReached(at: at),
+        quota.isIdle(at: at), quota.text(at: at), note)
+      let expected = (
+        entry.usedNow, entry.renewed, entry.reached, entry.idle ?? false, entry.usedText,
+        entry.note.notch)
+      if shown != expected || !sameLevel(meterLevel(quota, at: at), level(entry.meter)) {
+        failures += 1
+        print("FAIL window case \(entry.name): \(shown) != \(expected)")
+      }
+    }
+    expectEqual(cases.windows.isEmpty || cases.shares.isEmpty, false)
+    for entry in cases.windows {
+      let input = entry.window!
+      let quota = Quota(
+        id: "w", label: "Weekly · all models", kind: "weekly",
+        usedPercent: input.usedPercent ?? .nan, resetsAt: input.resetsAt, observedAt: "",
+        startsOnFirstMessage: input.startsOnFirstMessage ?? false)
+      check(entry, quota, note: quota.note(at: at))
+    }
+    for entry in cases.shares {
+      let input = entry.share!
+      let credits = WorkspaceCredits(
+        usedPercent: input.usedPercent ?? .nan, resetsAt: input.resetsAt, left: "", renewed: "")
+      check(entry, credits.quota, note: credits.note(at: at))
+    }
   }
 
   func testTheRingsShowTheWindowsTheHostNamed() {
@@ -74,13 +106,6 @@ final class NotchTests {
   ) -> WorkspaceCredits {
     WorkspaceCredits(usedPercent: percent, resetsAt: reset, left: left, renewed: renewed)
   }
-  func localDate(_ instant: String) -> String {
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US")
-    formatter.dateFormat = "MMM d"
-    return formatter.string(from: parseInstant(instant)!)
-  }
-
   func testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside() {
     let entry = Reading(
       windows: [quota("weekly", 31, label: "Weekly · all models", id: "primary")],
@@ -92,42 +117,13 @@ final class NotchTests {
     expectEqual(entry.windows.map(\.label), ["Weekly · all models"])
   }
 
-  func testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset() {
-    let pending = credits(32)
-    expectEqual(pending.amounts(at: now), "17,000 of 25,000 left")
-    expectEqual(pending.quota.percent(at: now), 32)
-    expectEqual(pending.note(at: now), "Resets \(localDate("2027-02-01T12:00:00Z"))")
+  func testACreditSharePicksItsWordingByTheClock() {
+    expectEqual(credits(32).amounts(at: now), "17,000 of 25,000 left")
     expectEqual(credits(100, left: "limit reached").amounts(at: now), "limit reached")
-    expectEqual(credits(32, reset: nil).note(at: now), "")
     expectEqual(credits(32, reset: nil).amounts(at: now), "17,000 of 25,000 left")
-    let renewed = credits(100, reset: "2026-06-15T12:00:00Z", left: "limit reached")
-    expectEqual(renewed.quota.percent(at: now), 0)
-    expectEqual(renewed.quota.isReached(at: now), false)
-    expectEqual(renewed.amounts(at: now), "25,000 of 25,000 left")
-    expectEqual(renewed.note(at: now), "Reset \(localDate("2026-06-15T12:00:00Z"))")
-  }
-
-  func testWindowsRenewIndependentlyAndUnknownResetRemainsUsable() {
-    let entry = reading(windows: [
-      quota("weekly", 41),
-      quota("model", 58, label: "Weekly · Fable", reset: "2026-01-01T00:00:00Z"),
-    ])
-    expectEqual(entry.windows[0].percent(at: now), 41)
-    expectEqual(entry.windows[1].percent(at: now), 0)
-    expectEqual(entry.windows[1].text(at: now), "0%")
-    expectEqual(quota("weekly", 0.4, reset: "invalid").percent(at: now), 0.4)
-    expectEqual(quota("weekly", 9, reset: "2027-01-15T08:00:00.000Z").percent(at: now), 0)
-    expectNil(quota("weekly", .nan).percent(at: now))
-    expectNil(quota("weekly", 101, reset: "2026-01-01T00:00:00Z").percent(at: now))
-    expectEqual(quota("weekly", .nan).text(at: now), "—")
-    expectEqual(quota("weekly", 100).isReached(at: now), true)
-    expectEqual(quota("weekly", 99.49).isReached(at: now), false)
-    expectEqual(quota("weekly", 41, reset: "2027-02-01T00:00:00Z").note(at: now).hasPrefix("Resets "), true)
-    let renewed = quota("weekly", 97, reset: "2026-01-01T00:00:00Z").note(at: now)
-    expectEqual(renewed.hasPrefix("Reset "), true)
-    expectEqual(renewed.contains("last seen"), false)
-    expectEqual(renewed.contains("97"), false)
-    expectEqual(quota("weekly", 41).note(at: now), "")
+    expectEqual(
+      credits(100, reset: "2026-06-15T12:00:00Z", left: "limit reached").amounts(at: now),
+      "25,000 of 25,000 left")
   }
 
   func testSessionAgesReadLikeTheReferenceApp() {
@@ -278,7 +274,7 @@ final class NotchTests {
     return nil
   }
 
-  func testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions() throws {
+  func testProtocolRejectsUnsupportedVersionOversizeAndBadSessionsButNotAnUnreadableMeter() throws {
     expectEqual(try HostMessage.decode(Data(message.utf8)).sequence, 1)
     for older in ["1", "2", "3", "4", "5", "6"] {
       expectThrows(
@@ -287,10 +283,17 @@ final class NotchTests {
     }
     expectThrows(
       try HostMessage.decode(Data((message + String(repeating: " ", count: 262_144)).utf8)))
-    let invalid = withCells(
-      #"{"kind":"provider","provider":"claude","reading":{"windows":[{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}]},"sessions":[]}"#
-    )
-    expectThrows(try HostMessage.decode(Data(invalid.utf8)))
+    let window = #"{"id":"w","label":"Weekly","kind":"weekly","usedPercent":101,"observedAt":""}"#
+    let pending = #"{"kind":"provider","provider":"claude","notice":{"text":"Checking usage…","tone":"muted"},"sessions":[]}"#
+    for unreadable in [window, window.replacingOccurrences(of: "101", with: "null")] {
+      let message = withCells(
+        #"{"kind":"provider","provider":"codex","reading":{"windows":["# + unreadable
+          + #"],"headlineWindowId":"w"},"sessions":[]},"# + pending)
+      let decoded = try HostMessage.decode(Data(message.utf8))
+      expectEqual(decoded.cells.map(\.id), [.provider(.codex), .provider(.claude)])
+      expectNil(providerCell(decoded)?.reading?.headline?.percent(at: now))
+      expectEqual(providerCell(decoded)?.reading?.headline?.text(at: now), "—")
+    }
     let withSessions = withCells(
       #"{"kind":"provider","provider":"cursor","reading":{"windows":[]},"sessions":[{"id":"1","name":"repo-1a","place":"Terminal","project":"repo","status":"working","lastActiveAt":"2026-09-01T10:00:00Z"}]}"#
     )
@@ -303,9 +306,11 @@ final class NotchTests {
     expectEqual(
       providerCell(try HostMessage.decode(Data(withCredits.utf8)))?.reading?.inner?.quota.percent(
         at: now), 32)
-    expectThrows(
-      try HostMessage.decode(
-        Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8)))
+    expectNil(
+      providerCell(
+        try HostMessage.decode(
+          Data(withCredits.replacingOccurrences(of: "\"usedPercent\":32", with: "\"usedPercent\":101").utf8))
+      )?.reading?.inner?.quota.percent(at: now))
     let emptyName = withSessions.replacingOccurrences(of: "\"name\":\"repo-1a\"", with: "\"name\":\"\"")
     expectThrows(try HostMessage.decode(Data(emptyName.utf8)))
     let oneSession =
@@ -451,6 +456,9 @@ final class NotchTests {
 
     let claude = providerCell(golden, 0)
     expectEqual(claude?.reading?.headline?.usedPercent, 41.5)
+    let idle = claude?.reading?.windows.first { $0.id == "session" }
+    expectEqual(idle?.isIdle(at: now), true)
+    expectEqual(idle?.note(at: now), "Starts with first message")
     expectEqual(claude?.reading?.inner, InnerQuota.fable(claude!.reading!.windows[2]))
     expectNil(claude?.notice)
     expectEqual(claude?.sessions.map(\.isWorking), [true, false])
@@ -586,6 +594,44 @@ final class NotchTests {
   }
 }
 
+struct WindowCases: Decodable {
+  struct Input: Decodable {
+    let usedPercent: Double?
+    let resetsAt: String?
+    let startsOnFirstMessage: Bool?
+  }
+  struct Meter: Decodable {
+    let level: String
+    let fraction: Double?
+  }
+  struct Note: Decodable {
+    let notch: String
+  }
+  struct Case: Decodable {
+    let name: String
+    let window: Input?
+    let share: Input?
+    let usedNow: Double?
+    let renewed: Bool
+    let reached: Bool
+    let idle: Bool?
+    let usedText: String
+    let meter: Meter
+    let note: Note
+  }
+  let now: String
+  let timeZone: String
+  let windows: [Case]
+  let shares: [Case]
+
+  static func load() throws -> WindowCases {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+      .appendingPathComponent("../../../../src/limits/window_at/fixtures/window-cases.json")
+      .standardized
+    return try JSONDecoder().decode(WindowCases.self, from: Data(contentsOf: url))
+  }
+}
+
 var failures = 0
 
 struct RailFixture: Decodable {
@@ -672,17 +718,17 @@ func expectThrows<T>(_ value: @autoclosure () throws -> T, line: Int = #line) {
   } catch {}
 }
 let checks = NotchTests()
-checks.testTheMeterRampOnlyEverMovesTowardTheTripRed()
+checks.testEachMeterLevelDrawsInOneInk()
+try checks.testTheSharedWindowCasesReadTheSameAtThePinnedInstant()
 checks.testTheRingsShowTheWindowsTheHostNamed()
 checks.testCodexCreditsFillTheInnerRingWhileTheWeeklyStaysOutside()
-checks.testACreditSharePicksItsWordingByTheClockAndRenewsAtItsReset()
-checks.testWindowsRenewIndependentlyAndUnknownResetRemainsUsable()
+checks.testACreditSharePicksItsWordingByTheClock()
 checks.testSessionAgesReadLikeTheReferenceApp()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
 try checks.testRailMetricsMatchTheSharedCases()
 try checks.testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads()
 checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
-try checks.testProtocolRejectsUnsupportedVersionOversizeInvalidPercentAndBadSessions()
+try checks.testProtocolRejectsUnsupportedVersionOversizeAndBadSessionsButNotAnUnreadableMeter()
 try checks.testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
 try checks.testPullRequestsValidateLinksListsSegmentsAndCaps()

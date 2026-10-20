@@ -4,6 +4,8 @@ use crate::dto::{
     GithubPrDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
     ProviderLimitsDto, WindowRole,
 };
+#[cfg(any(target_os = "windows", test))]
+use crate::limits::window_at::{Meter, WindowAt};
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -462,19 +464,20 @@ impl NotchProvider {
         self.windows.iter().find(|window| window.id == id)
     }
 
-    pub fn inner_window(&self) -> Option<(&InnerRing, LimitWindowDto)> {
+    pub fn inner_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<(&InnerRing, WindowAt)> {
         let ring = self.inner_ring.as_ref()?;
-        let window = match ring {
+        let at = match ring {
             InnerRing::Fable { window_id } => self
                 .windows
                 .iter()
                 .find(|window| &window.id == window_id)
-                .cloned(),
-            InnerRing::WorkspaceShare => {
-                self.workspace_credits.as_ref().map(workspace_share_window)
-            }
+                .map(|window| WindowAt::of(window, now)),
+            InnerRing::WorkspaceShare => self
+                .workspace_credits
+                .as_ref()
+                .map(|share| WindowAt::of_share(share, now)),
         }?;
-        Some((ring, window))
+        Some((ring, at))
     }
 }
 
@@ -501,12 +504,12 @@ pub const TRIP_RED: Color = [226, 89, 76, 255];
 pub const UNREADABLE_INK: Color = [77, 77, 77, 255];
 
 #[cfg(any(target_os = "windows", test))]
-pub fn meter_color(percent: Option<f64>, base: Color) -> Color {
-    match percent {
-        None => UNREADABLE_INK,
-        Some(percent) if percent >= 90.0 => TRIP_RED,
-        Some(percent) if percent > 70.0 => mix(base, TRIP_RED, ((percent - 70.0) / 20.0).sqrt()),
-        Some(_) => base,
+pub fn meter_color(meter: Meter, base: Color) -> Color {
+    match meter {
+        Meter::Unreadable => UNREADABLE_INK,
+        Meter::Base => base,
+        Meter::Blend(fraction) => mix(base, TRIP_RED, fraction),
+        Meter::Trip => TRIP_RED,
     }
 }
 
@@ -570,51 +573,6 @@ fn format_amount(value: f64) -> String {
         0 => grouped,
         fraction if fraction.is_multiple_of(10) => format!("{grouped}.{}", fraction / 10),
         fraction => format!("{grouped}.{fraction:02}"),
-    }
-}
-
-#[cfg(any(target_os = "windows", test))]
-pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowDto {
-    LimitWindowDto {
-        id: "workspace-credits".into(),
-        label: "Workspace credits".into(),
-        kind: LimitWindowKind::Model,
-        used_percent: share.used_percent,
-        resets_at: share.resets_at.clone(),
-        window_seconds: None,
-        observed_at: String::new(),
-        role: None,
-        starts_on_first_message: false,
-    }
-}
-
-#[cfg(any(target_os = "windows", test))]
-pub fn workspace_share_renewed(
-    share: &LimitsWorkspaceCreditsDto,
-    now: chrono::DateTime<chrono::Utc>,
-) -> bool {
-    share_reset(share).is_some_and(|reset| reset <= now)
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn share_reset(share: &LimitsWorkspaceCreditsDto) -> Option<chrono::DateTime<chrono::Utc>> {
-    let reset = chrono::DateTime::parse_from_rfc3339(share.resets_at.as_deref()?).ok()?;
-    Some(reset.with_timezone(&chrono::Utc))
-}
-
-#[cfg(any(target_os = "windows", test))]
-pub fn workspace_share_note(
-    share: &LimitsWorkspaceCreditsDto,
-    now: chrono::DateTime<chrono::Utc>,
-) -> String {
-    let Some(reset) = share_reset(share) else {
-        return String::new();
-    };
-    let date = reset.with_timezone(&chrono::Local).format("%b %-d");
-    if reset <= now {
-        format!("Reset {date}")
-    } else {
-        format!("Resets {date}")
     }
 }
 

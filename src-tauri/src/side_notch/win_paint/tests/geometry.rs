@@ -21,7 +21,7 @@ fn the_painted_rail_ends_one_ear_past_its_last_cell() {
                 };
                 let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, scale)];
                 let planned =
-                    plan(&current, &displays, &rail_data, Hover::default()).expect("fits");
+                    plan(&current, &displays, &rail_data, Hover::default(), now()).expect("fits");
                 let rail = planned.rail;
                 let first = planned.cells[0].rect;
                 let last = planned.cells[planned.cells.len() - 1].rect;

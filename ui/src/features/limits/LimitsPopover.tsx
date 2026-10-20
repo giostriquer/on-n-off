@@ -217,7 +217,7 @@ function PopoverTag({ tag }: { tag: CardTag }) {
 }
 
 function PopoverWindow({ window, provider }: { window: CardWindow; provider: AgentId }) {
-  const { label, percent, note, text, color } = window;
+  const { label, percent, meter, note, text, color } = window;
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
@@ -240,7 +240,7 @@ function PopoverWindow({ window, provider }: { window: CardWindow; provider: Age
       >
         <div
           className="h-full rounded-full transition-[width]"
-          style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
+          style={{ width: `${percent}%`, ...usageFillStyle(provider, meter) }}
         />
       </div>
     </div>

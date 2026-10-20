@@ -179,7 +179,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     status: presentation.status,
     active,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, now)),
+    rows: rest.map(window => presentWindow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
@@ -214,11 +214,6 @@ function subscription(
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {
   return { id: window.id, label: window.label, ...presentLimitWindow(window, now) };
-}
-
-function presentRow(window: LimitWindow, now: number): CardWindow {
-  const presented = presentWindow(window, now);
-  return { ...presented, note: presented.note || (window.startsOnFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
 }
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };
