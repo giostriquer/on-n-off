@@ -1,7 +1,7 @@
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { codexTermEnded } from "./codexSubscriptionTerm";
-import { isSignedIn, type CardAccount, type LimitCard } from "./limitCards";
+import { isSignedIn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import { asksToSignInAgain } from "./loginState";
 
@@ -51,6 +51,7 @@ export type SwitchAlongside<C> = { enabled: boolean; clients: string[] } & Saved
 
 export type ResetControls = {
   reading: ProviderLimits;
+  headline: CardWindow | null;
   useBankedReset: { enabled: boolean } | null;
   automaticSpend: { dueAt: string } | null;
 };
@@ -149,6 +150,7 @@ function resetsOf<C>({ card, can, signedIn, confirmed }: Shown<C>, switching: bo
   const live = card.leads && card.freshness.readStatus === "ok" && card.figures.bankedResets !== null;
   return {
     reading: card.reading,
+    headline: card.headline,
     useBankedReset: signedIn && live && !switching ? { enabled: can && confirmed } : null,
     automaticSpend: pendingSpend && { dueAt: pendingSpend.dueAt },
   };

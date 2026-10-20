@@ -286,13 +286,16 @@ describe("Sign in again in place of the footer's action", () => {
 });
 
 describe("each entry", () => {
-  it("carries what its handler needs: the account controls, the saved login, the clients still running, the reading and the waiting spend", () => {
-    const pending = plan("codex", STATES["pending automatic spend"]("codex"));
+  it("carries what its handler needs: the account controls, the saved login, the clients still running, the reading, its headline window and the waiting spend", () => {
+    const setup = STATES["pending automatic spend"]("codex");
+    const shown = card("codex", setup);
+    const pending = planFor(shown, setup);
     expect(pending.account?.id).toBe(accountId("codex"));
+    expect(shown.headline).not.toBeNull();
     expect(pending.footer).toEqual({
       main: { action: "useAccount", enabled: true, controls: CONTROLS, profileId: "saved-codex" },
       switchAlongside: { enabled: true, clients: RUNNING, controls: CONTROLS, profileId: "saved-codex" },
-      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), useBankedReset: null, automaticSpend: SPEND },
+      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), headline: shown.headline, useBankedReset: null, automaticSpend: SPEND },
     });
     expect(pending.menu.find(entry => entry.action === "signInAgain")).toEqual({ action: "signInAgain", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
     expect(plan("codex", STATES.remembered("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: null });

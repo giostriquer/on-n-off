@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
+import { limitCards, type CardWindow } from "./limitCards";
 import { ResetAlertsContext } from "./resetAlerts";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
@@ -32,10 +33,14 @@ function codex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   };
 }
 
-type ButtonProps = { entry: ProviderLimits; offered?: boolean; disabled?: boolean; label?: string };
+type ButtonProps = { entry: ProviderLimits; headline?: CardWindow | null; offered?: boolean; disabled?: boolean; label?: string };
 
-function button({ entry, offered = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
-  return <UseBankedReset entry={entry} label={label} offered={offered} now={NOW} disabled={disabled} />;
+function cardHeadline(entry: ProviderLimits): CardWindow | null {
+  return limitCards({ provider: "codex", entries: [entry], nativeLogin: null, now: NOW })![0].headline;
+}
+
+function button({ entry, headline = cardHeadline(entry), offered = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
+  return <UseBankedReset entry={entry} headline={headline} label={label} offered={offered} now={NOW} disabled={disabled} />;
 }
 
 function useReset() {
@@ -219,6 +224,24 @@ describe("UseBankedReset", () => {
     spendNow();
     await waitFor(() => expect(consumeCodexResetCredit).toHaveBeenCalledWith("acct-work", expect.stringMatching(UUID)));
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("says when the limit renews by itself from the headline window its card chose, never from a window of its own", () => {
+    const entry = codex({ windows: [weekly(96)] });
+    const chosen = cardHeadline(entry)!;
+    const { rerender } = render(button({ entry, headline: { ...chosen, resetsIn: "1h 5m" } }));
+
+    fireEvent.click(useReset());
+    expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(
+      `work@codex.example has 4% of its Codex limit left and renews by itself in 1h 5m. ${EFFECT}`,
+    );
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
+
+    rerender(button({ entry, headline: null }));
+    fireEvent.click(useReset());
+    expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(
+      `work@codex.example has 4% of its Codex limit left. ${EFFECT}`,
+    );
   });
 
   it("spends the reset on the card's account and says so", async () => {

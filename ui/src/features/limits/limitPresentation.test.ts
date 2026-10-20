@@ -23,6 +23,7 @@ describe("presentLimitWindow", () => {
       meter: { level: "trip" },
       text: "93%",
       note: windowAt(live, NOW).note.text,
+      resetsIn: "3h 0m",
     });
   });
 
@@ -33,6 +34,7 @@ describe("presentLimitWindow", () => {
       meter: { level: "unreadable" },
       text: "—",
       note: "Reset time unavailable",
+      resetsIn: null,
     });
   });
 });

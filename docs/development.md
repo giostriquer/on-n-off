@@ -89,7 +89,7 @@ source carries no comments (see [Code comments](#code-comments)).
   (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
   the destructive items, and the footer: its main button, the Switch anyway confirmation and the
   banked reset controls. Each entry carries what its handler needs (the account controls, the saved
-  login, the clients still running, the reading, the waiting spend), and `useCardActions`
+  login, the clients still running, the reading and its headline window, the waiting spend), and `useCardActions`
   (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
   else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
   Check limits now (`checkNowEntry`). The plan reads two facts from the card for who is signed in:

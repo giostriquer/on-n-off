@@ -123,7 +123,7 @@ export function useCardActions({ provider, card, now, checking, onArchive, onRem
         onSwitch={() => { setClients(null); void switchAlongside.controls.action("useAlongsideClients", switchAlongside.profileId).catch(() => {}); }}
         onCancel={() => { setClients(null); mainButton.current?.focus(); }} />}
       {resets && <>
-        <UseBankedReset entry={resets.reading} label={account.name} now={now} offered={resets.useBankedReset !== null} disabled={!resets.useBankedReset?.enabled} />
+        <UseBankedReset entry={resets.reading} headline={resets.headline} label={account.name} now={now} offered={resets.useBankedReset !== null} disabled={!resets.useBankedReset?.enabled} />
         <AutomaticSpend accountId={account.id} dueAt={resets.automaticSpend?.dueAt ?? null} now={now} />
       </>}
     </>,
