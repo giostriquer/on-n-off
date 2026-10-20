@@ -58,15 +58,15 @@ tokio = { version = "1", features = ["time"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
-# `winreg` and `windows` are held at the versions the tauri/tao tree already resolves, for the
-# same reason `tao` is: a second copy of `windows` is the largest codegen unit in the Windows
-# tree, and every duplicated generation counts against the 10 GB Actions cache cap that
-# cache-prune.yml exists to defend. 0.62 and 0.56 change none of the Win32 functions, DirectWrite
-# methods or registry APIs this crate calls, so the bump would be cost without gain.
+# `tao` and `windows` follow the versions the Tauri runtime resolves (tauri-runtime-wry's `tao`,
+# tauri-runtime's `windows`), and `winreg` stays where it is: a second copy of `windows` is the
+# largest codegen unit in the Windows tree, and every duplicated generation counts against the
+# 10 GB Actions cache cap that cache-prune.yml exists to defend. scripts/cargo-pins.test.mjs fails
+# when a Tauri bump moves them, so bump these with it; Dependabot leaves their minors alone.
 winreg = "0.55"
-tao = "0.35"
+tao = "0.37"
 tiny-skia = "0.12"
-windows = { version = "0.61", features = [
+windows = { version = "0.62", features = [
   "Win32_Devices_Display",
   "Win32_Foundation",
   "Win32_Graphics_DirectWrite",

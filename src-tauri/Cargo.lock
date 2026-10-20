@@ -2640,7 +2640,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.1",
- "tao 0.35.3",
+ "tao",
  "tar",
  "tauri",
  "tauri-build",
@@ -2658,7 +2658,7 @@ dependencies = [
  "unicode-normalization",
  "ureq",
  "uuid",
- "windows 0.61.3",
+ "windows 0.62.2",
  "winreg",
 ]
 
@@ -3954,46 +3954,6 @@ dependencies = [
 
 [[package]]
 name = "tao"
-version = "0.35.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d1c93047acf68669466a34690ac58cca7010bd1b201e1ec86f1fd0a75d3dd4a9"
-dependencies = [
- "bitflags 2.13.2",
- "block2",
- "core-foundation 0.10.1",
- "core-graphics",
- "crossbeam-channel",
- "dbus",
- "dispatch2",
- "dlopen2",
- "dpi",
- "gdkwayland-sys",
- "gdkx11-sys",
- "gtk",
- "jni 0.21.1",
- "libc",
- "log",
- "ndk",
- "ndk-sys",
- "objc2",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-ui-kit",
- "once_cell",
- "parking_lot",
- "percent-encoding",
- "raw-window-handle",
- "tao-macros",
- "unicode-segmentation",
- "url",
- "windows 0.61.3",
- "windows-core 0.61.2",
- "windows-version",
- "x11-dl",
-]
-
-[[package]]
-name = "tao"
 version = "0.37.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f37f381f4e048e6cdf038b5705f8cf14ad108279d46eb968140a7b291aba9400"
@@ -4375,7 +4335,7 @@ dependencies = [
  "percent-encoding",
  "raw-window-handle",
  "softbuffer",
- "tao 0.37.1",
+ "tao",
  "tauri-runtime",
  "tauri-utils",
  "url",
