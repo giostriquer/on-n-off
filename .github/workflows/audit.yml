@@ -1,9 +1,5 @@
 name: Audit
 
-# Checks both lockfiles against the published advisories. It is not a required check: an advisory
-# can land on any day without a change here, and it should not block unrelated pull requests. The
-# weekly run reports one that lands while nothing is merged. Dependabot opens the security updates
-# for cargo; it has none for bun, so bun audit is the JavaScript signal.
 on:
   pull_request:
     branches:
@@ -50,8 +46,6 @@ jobs:
 
       # cargo-deny only reads `cargo metadata`, which any recent cargo answers. The image's stable
       # toolchain saves installing the one rust-toolchain.toml pins for builds.
-      # src-tauri/deny.toml limits the graph to the two shipped targets and records each ignored
-      # advisory with its reason.
       - name: Check Rust dependencies against the RustSec advisories
         env:
           RUSTUP_TOOLCHAIN: stable

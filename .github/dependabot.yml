@@ -1,7 +1,5 @@
 version: 2
 
-# One grouped pull request per ecosystem each month keeps version updates reviewable. Security
-# updates (cargo, GitHub Actions) are opened as soon as an advisory lands, outside this schedule.
 updates:
   - package-ecosystem: cargo
     directory: /src-tauri
