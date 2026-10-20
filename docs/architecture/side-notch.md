@@ -107,8 +107,9 @@ the current account's card:
   Claude's Fable week), by id, or else a Codex business member's workspace-credit share, chosen the
   same way. The model asks the role, never the provider or the label. The helper is told the ring
   by id, and each window its message carries is a `NativeWindow` (`protocol.rs`) borrowing only the
-  seven fields protocol 7 has always sent, so no later window field reaches the helper by
-  accident. The share's meter is the
+  fields the helper reads: the seven protocol 7 has always sent, and the first-message flag when it
+  is set, from which both notches word an idle window as the card does. No later window field, the
+  role among them, reaches the helper by accident. The share's meter is the
   limits reader's `used_percent`; its amounts are worded once in `model.rs`
   (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
   reset.
@@ -127,11 +128,15 @@ the owner.
 What stays with each drawer is what depends on the clock, since they redraw between reads (a
 window's percent now, its reset note, a session's age, the percent under a provider's ring), and
 what is only style: provider names and marks, the inks of each tone, list titles and tags set in
-capitals, the CI dot's colour, "Nothing open." and "N of M". The review request copied from a row is
+capitals, the CI dot's colour, "Nothing open." and "N of M". The rules for what a window reads at
+an instant are still one, `limits/window_at.rs`, which the Windows painter asks with the clock its
+window passes in and NotchCore restates; both, and the card, read the cases in
+`limits/window_at/fixtures/window-cases.json` ([why](README.md#limits)). The review request copied from a row is
 still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
 (`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided
-fields alone: a cell not read yet is "updating", one without a headline says its notice, and the
-paused line adds "refresh paused, last observed".
+fields alone: a cell not read yet is "updating", one without a headline says its notice, a ring
+whose meter is unreadable says "usage unavailable", as its popover row does, and the paused line adds
+"refresh paused, last observed".
 
 A drawer never decides what a cell says. A new badge, notice or rule goes in `model/frame.rs` and
 reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the
@@ -171,9 +176,9 @@ flowchart LR
 The helper receives the frame as one line: `version` 7, `sequence`, `snapshot` (the
 settings and displays), `cells` in rail order and `actionError`. Each cell has a `kind`:
 
-- `provider`: `provider`, `reading` (absent while checking: `windows`, `headlineWindowId`,
-  `innerRing`, `workspaceCredits`), `notice`, `paused` (each a `text` and a `tone`, absent when
-  there is none) and `sessions`.
+- `provider`: `provider`, `reading` (absent while checking: `windows`, each with
+  `startsOnFirstMessage` only when it is set, `headlineWindowId`, `innerRing`, `workspaceCredits`),
+  `notice`, `paused` (each a `text` and a `tone`, absent when there is none) and `sessions`.
 - `pullRequests`: `label`, `reading` (absent while checking: `readable`, `count`, `segments` of `ci`
   and `passingWithConflicts`, `attention`, `lists` of `id`, `title`, `total` and `items`, each row
   with its `repo` as the drawers show it, its `badges` and optional `tag`, each a `label` and a
@@ -183,7 +188,10 @@ The snapshot's settings still carry the provider list and the pull request setti
 the helper reads only `enabled`, `displayId`, `edge`, `size`, `show` and `popoverStyle`.
 
 The helper refuses another version, a message naming a window it did not send, two cells with the
-same id, more than 24 segments or 25 rows a list, and a row off github.com. It skips a cell whose
+same id, more than 24 segments or 25 rows a list, and a row off github.com. A window or workspace
+share whose used percent is outside 0–100 or not a number (`null` on the wire) is not refused: it
+draws as unreadable, a dash and an empty meter, and the rest of the notch as usual. It used to
+refuse the whole message, and one bad meter blanked the notch. It skips a cell whose
 provider it does not know rather than refusing the whole message, and its rail is one cell shorter
 for it: the helper ships inside the bundle, so this only matters between builds, but one unknown
 provider used to blank the notch. An unknown tone draws muted; an unknown CI state draws as no

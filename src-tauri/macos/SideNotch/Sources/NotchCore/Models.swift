@@ -15,10 +15,11 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   public let usedPercent: Double
   public let resetsAt: String?
   public let observedAt: String
+  public let startsOnFirstMessage: Bool
 
   public init(
     id: String, label: String, kind: String, usedPercent: Double, resetsAt: String?,
-    observedAt: String
+    observedAt: String, startsOnFirstMessage: Bool = false
   ) {
     self.id = id
     self.label = label
@@ -26,17 +27,38 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
     self.usedPercent = usedPercent
     self.resetsAt = resetsAt
     self.observedAt = observedAt
+    self.startsOnFirstMessage = startsOnFirstMessage
+  }
+
+  private enum CodingKeys: String, CodingKey {
+    case id, label, kind, usedPercent, resetsAt, observedAt, startsOnFirstMessage
+  }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    id = try values.decode(String.self, forKey: .id)
+    label = try values.decode(String.self, forKey: .label)
+    kind = try values.decode(String.self, forKey: .kind)
+    usedPercent = try values.decodeIfPresent(Double.self, forKey: .usedPercent) ?? .nan
+    resetsAt = try values.decodeIfPresent(String.self, forKey: .resetsAt)
+    observedAt = try values.decode(String.self, forKey: .observedAt)
+    startsOnFirstMessage =
+      try values.decodeIfPresent(Bool.self, forKey: .startsOnFirstMessage) ?? false
+  }
+
+  public func cycle(at now: Date) -> ResetCycle {
+    guard let reset = parseInstant(resetsAt) else { return startsOnFirstMessage ? .idle : .unknown }
+    return reset <= now ? .renewed(reset) : .pending(reset)
   }
 
   public func percent(at now: Date) -> Double? {
-    guard usedPercent.isFinite, (0...100).contains(usedPercent) else { return nil }
-    if let reset = parseInstant(resetsAt), reset <= now { return 0 }
+    guard usedPercent.isFinite, (0...reachedPercent).contains(usedPercent) else { return nil }
+    if case .renewed = cycle(at: now) { return 0 }
     return usedPercent
   }
 
   public func isReached(at now: Date) -> Bool {
-    guard let percent = percent(at: now) else { return false }
-    return roundedPercent(percent) == 100
+    percent(at: now).map { $0 >= reachedPercent } ?? false
   }
 
   public func text(at now: Date) -> String {
@@ -44,12 +66,20 @@ public struct Quota: Codable, Equatable, Identifiable, Sendable {
   }
 
   public func note(at now: Date) -> String {
-    guard let reset = parseInstant(resetsAt) else { return "" }
-    let formatter = DateFormatter()
-    formatter.dateFormat = "EEE h:mm a"
-    let clock = formatter.string(from: reset)
-    if reset <= now { return "Reset \(clock)" }
-    return "Resets \(clock)"
+    resetNote(cycle(at: now), format: "EEE HH:mm", unknown: "Reset time unavailable")
+  }
+}
+
+public enum ResetCycle: Equatable, Sendable {
+  case pending(Date), renewed(Date), idle, unknown
+}
+
+private func resetNote(_ cycle: ResetCycle, format: String, unknown: String) -> String {
+  switch cycle {
+  case .pending(let reset): return "Resets \(localClock(reset, format: format))"
+  case .renewed(let reset): return "Reset \(localClock(reset, format: format))"
+  case .idle: return "Starts with first message"
+  case .unknown: return unknown
   }
 }
 
@@ -66,6 +96,16 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
     self.renewed = renewed
   }
 
+  private enum CodingKeys: String, CodingKey { case usedPercent, resetsAt, left, renewed }
+
+  public init(from decoder: Decoder) throws {
+    let values = try decoder.container(keyedBy: CodingKeys.self)
+    usedPercent = try values.decodeIfPresent(Double.self, forKey: .usedPercent) ?? .nan
+    resetsAt = try values.decodeIfPresent(String.self, forKey: .resetsAt)
+    left = try values.decode(String.self, forKey: .left)
+    renewed = try values.decode(String.self, forKey: .renewed)
+  }
+
   public var quota: Quota {
     Quota(
       id: "workspace-credits", label: "Workspace credits", kind: "credits",
@@ -73,16 +113,12 @@ public struct WorkspaceCredits: Codable, Equatable, Sendable {
   }
 
   public func amounts(at now: Date) -> String {
-    (parseInstant(resetsAt).map { $0 <= now } ?? false) ? renewed : left
+    if case .renewed = quota.cycle(at: now) { return renewed }
+    return left
   }
 
   public func note(at now: Date) -> String {
-    guard let reset = parseInstant(resetsAt) else { return "" }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US")
-    formatter.dateFormat = "MMM d"
-    let date = formatter.string(from: reset)
-    return reset <= now ? "Reset \(date)" : "Resets \(date)"
+    resetNote(quota.cycle(at: now), format: "MMM d", unknown: "")
   }
 }
 
@@ -249,13 +285,13 @@ public struct ProviderCell: Codable, Equatable, Sendable {
       headline.map { _ in "weekly" }
       ?? (reading == nil ? "updating" : (notice?.text ?? "unavailable"))
     guard let headline = headline else { return "\(name), \(period)" }
-    let reached = headline.isReached(at: now) ? ", limit reached" : ""
-    let inner = reading?.inner.map {
-      ", \($0.spokenName), \($0.quota.text(at: now)) used"
-        + ($0.quota.isReached(at: now) ? ", limit reached" : "")
-    } ?? ""
+    func use(_ quota: Quota) -> String {
+      guard quota.percent(at: now) != nil else { return "usage unavailable" }
+      return "\(quota.text(at: now)) used" + (quota.isReached(at: now) ? ", limit reached" : "")
+    }
+    let inner = reading?.inner.map { ", \($0.spokenName), \(use($0.quota))" } ?? ""
     let paused = self.paused == nil ? "" : ", refresh paused, last observed"
-    return "\(name), \(period), \(headline.text(at: now)) used\(reached)" + inner + paused
+    return "\(name), \(period), \(use(headline))" + inner + paused
   }
 }
 
@@ -581,12 +617,6 @@ extension Cell {
         && cell.sessions.allSatisfy { !$0.id.isEmpty && !$0.name.isEmpty }
         && (cell.reading.map { reading in
           reading.windows.count <= 100 && reading.referencesAreSent
-            && reading.windows.allSatisfy {
-              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-            }
-            && (reading.workspaceCredits.map {
-              (0...100).contains($0.usedPercent) && $0.usedPercent.isFinite
-            } ?? true)
         } ?? true)
     case .pullRequests(let cell):
       return cell.reading.map { pulls in
@@ -745,12 +775,20 @@ public func parseInstant(_ text: String?) -> Date? {
   return formatter.date(from: text)
 }
 
+let reachedPercent = 100.0
+private let lastUnreachedPercent = 99
+
 public func formatPercent(_ percent: Double) -> String {
-  percent > 0 && percent < 1 ? "<1%" : "\(roundedPercent(percent))%"
+  if percent >= reachedPercent { return "100%" }
+  if percent > 0 && percent < 1 { return "<1%" }
+  return "\(min(Int(percent.rounded()), lastUnreachedPercent))%"
 }
 
-private func roundedPercent(_ percent: Double) -> Int {
-  Int(percent.rounded())
+func localClock(_ instant: Date, format: String) -> String {
+  let formatter = DateFormatter()
+  formatter.locale = Locale(identifier: "en_US_POSIX")
+  formatter.dateFormat = format
+  return formatter.string(from: instant)
 }
 
 public func reviewRequestHtml(title: String, url: URL) -> String {

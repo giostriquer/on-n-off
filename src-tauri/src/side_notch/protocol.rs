@@ -112,6 +112,8 @@ struct NativeWindow<'a> {
     #[serde(skip_serializing_if = "Option::is_none")]
     window_seconds: Option<u64>,
     observed_at: &'a str,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    starts_on_first_message: bool,
 }
 
 impl<'a> From<&'a LimitWindowDto> for NativeWindow<'a> {
@@ -124,6 +126,7 @@ impl<'a> From<&'a LimitWindowDto> for NativeWindow<'a> {
             resets_at: window.resets_at.as_deref(),
             window_seconds: window.window_seconds,
             observed_at: &window.observed_at,
+            starts_on_first_message: window.starts_on_first_message,
         }
     }
 }

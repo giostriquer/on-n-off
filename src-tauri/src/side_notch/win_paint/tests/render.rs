@@ -12,6 +12,7 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let first = render(&planned);
@@ -63,7 +64,14 @@ fn the_collapsed_pill_renders_only_the_strip() {
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let mut hover_settings = settings();
     hover_settings.show = ShowMode::OnHover;
-    let planned = plan(&hover_settings, &displays, &data(cells), Hover::default()).expect("fits");
+    let planned = plan(
+        &hover_settings,
+        &displays,
+        &data(cells),
+        Hover::default(),
+        now(),
+    )
+    .expect("fits");
     let pill = planned.pill.expect("collapsed shows the strip");
     let pixmap = render(&planned);
     assert_eq!(
@@ -117,7 +125,14 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
     let mut hover_settings = settings();
     hover_settings.show = ShowMode::OnHover;
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
-    let planned = plan(&hover_settings, &displays, &data(cells), Hover::default()).expect("fits");
+    let planned = plan(
+        &hover_settings,
+        &displays,
+        &data(cells),
+        Hover::default(),
+        now(),
+    )
+    .expect("fits");
     let pill = planned.pill.expect("collapsed shows the strip");
     let pixmap = render(&planned);
     let left = pill.x.round() as u32;
@@ -142,6 +157,7 @@ fn hovering_the_cap_lightens_the_ear() {
         &displays,
         &data(cells.clone()),
         Hover::default(),
+        now(),
     )
     .expect("fits");
     let lit = plan(
@@ -152,6 +168,7 @@ fn hovering_the_cap_lightens_the_ear() {
             cap_hovered: true,
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let (x, y) = (10, 30);
@@ -170,7 +187,7 @@ fn the_cap_pin_says_which_show_mode_is_on() {
         cap_hovered: true,
         ..Hover::default()
     };
-    let pinned = plan(&settings(), &displays, &data(cells.clone()), hover).expect("fits");
+    let pinned = plan(&settings(), &displays, &data(cells.clone()), hover, now()).expect("fits");
     let mut on_hover = settings();
     on_hover.show = ShowMode::OnHover;
     let loose = plan(
@@ -181,6 +198,7 @@ fn the_cap_pin_says_which_show_mode_is_on() {
             rail_open: true,
             ..hover
         },
+        now(),
     )
     .expect("fits");
     assert!(
@@ -225,6 +243,7 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
                 active: Some(0),
                 ..Hover::default()
             },
+            now(),
         )
         .expect("fits");
         let popover = planned.popover.as_ref().expect("the popover is open");
@@ -311,6 +330,7 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
             42.0,
         ))]),
         Hover::default(),
+        now(),
     )
     .expect("fits");
     planned.cells[0].content = CellContent::PullRequests {

@@ -1,7 +1,7 @@
 use super::*;
 use crate::dto::{
-    GithubPrsDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto, ProviderLimitsDto,
-    Reading,
+    GithubPrsDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
+    ProviderLimitsDto, Reading,
 };
 use crate::side_notch::model::frame::{self, ProviderCell};
 use crate::side_notch::model::{Display, NotchProvider, NotchPullRequests, NotchSettings};
@@ -11,6 +11,10 @@ mod content;
 mod geometry;
 mod layout;
 mod render;
+
+fn now() -> DateTime<Utc> {
+    "2026-09-03T10:30:00Z".parse().unwrap()
+}
 
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
     Display {
@@ -168,6 +172,7 @@ fn popover_render(provider: ProviderCell) -> (Plan, tiny_skia::Pixmap) {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let pixmap = render(&planned);

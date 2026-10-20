@@ -290,24 +290,31 @@ fn the_named_windows_resolve_for_the_painter() {
             weekly("weekly_all"),
             session("session"),
             model("weekly_opus", "Weekly · Opus"),
-            ring("weekly_fable", "Weekly · Fable"),
+            LimitWindowDto {
+                used_percent: 63.0,
+                ..ring("weekly_fable", "Weekly · Fable")
+            },
         ],
     ));
     assert_eq!(
         claude.headline().map(|window| window.id.as_str()),
         Some("weekly_all")
     );
-    let (ring, window) = claude.inner_window().expect("the Fable ring");
-    assert!(matches!(ring, InnerRing::Fable { .. }));
-    assert_eq!(window.id, "weekly_fable");
+    let now = "2026-09-01T10:00:00Z".parse().unwrap();
+    let (inner, at) = claude.inner_at(now).expect("the Fable ring");
+    assert!(matches!(inner, InnerRing::Fable { .. }));
+    assert_eq!(
+        at.used_now(),
+        Some(63.0),
+        "the ring is the Fable window's own reading"
+    );
 
     let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);
-    member.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+    let credits = share("25000", "8000", 32.0, false);
+    member.reading.workspace_credits = Some(credits.clone());
     let member = project(member);
-    let (ring, window) = member.inner_window().expect("the share ring");
-    assert_eq!(ring, &InnerRing::WorkspaceShare);
-    assert_eq!(
-        (window.label.as_str(), window.used_percent),
-        ("Workspace credits", 32.0)
-    );
+    let (inner, at) = member.inner_at(now).expect("the share ring");
+    assert_eq!(inner, &InnerRing::WorkspaceShare);
+    assert_eq!(at, WindowAt::of_share(&credits, now));
+    assert_eq!(at.used_now(), Some(32.0));
 }

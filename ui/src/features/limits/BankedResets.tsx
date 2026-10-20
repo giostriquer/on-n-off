@@ -3,10 +3,11 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import { windowAt } from "$lib/windowAt";
 import { actionButton } from "@/components/actionButton";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
-import { latestObservedAt, usageLeft } from "./limitPresentation";
+import { headlineWindow, latestObservedAt, usageLeftFigure } from "./limitPresentation";
 import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
 
@@ -62,8 +63,7 @@ export function UseBankedReset({ entry, label, offered, now, disabled = false }:
   const observed = latestObservedAt(entry);
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
-  const read = usageLeft(entry, now);
-  const left = read === null ? null : Math.round(read);
+  const left = usageLeftFigure(entry, now);
 
   async function spend(account: string) {
     setConfirming(false);
@@ -81,8 +81,9 @@ export function UseBankedReset({ entry, label, offered, now, disabled = false }:
     }
   }
 
-  const weekly = entry.windows.find(window => window.kind === "weekly");
-  const renewsIn = formatResetIn(weekly?.resetsAt, now);
+  const { headline } = headlineWindow(entry);
+  const note = headline ? windowAt(headline, now).note : null;
+  const renewsIn = note?.kind === "pending" ? note.relative : undefined;
   const effect = "A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.";
   const body = left === null
     ? `on-n-off can't read how much of ${label}'s Codex limit is left.${renewsIn ? ` It renews by itself in ${renewsIn}.` : ""} ${effect}`

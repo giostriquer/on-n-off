@@ -215,8 +215,9 @@ provider's own client:
   form's bounds, the ten-minute delay and an alert's share. `ui/src/lib/resetAlertRule.test.ts`
   checks them against `src-tauri/src/reset_alert/fixtures/rule.json`, which a Rust test keeps
   equal to what the rule does. The card's own "how much is left" (`usageLeft`,
-  `limitPresentation.ts`) counts a window past its reset as 0% used, because a reading ages on
-  screen; the rule judges live readings and does not.
+  `limitPresentation.ts`) counts a window past its reset as 0% used, as every surface reads a
+  window at an instant (below), because a reading ages on screen; the rule judges live readings
+  and does not.
 
 Every quota window is built in one place, `limits/window.rs`. A reader maps its provider's answer
 to `QuotaWindow` facts (id, scope, length, used percent, reset instant) and nothing else;
@@ -238,9 +239,10 @@ spent or the subscription term (`limits/reading.rs`), whether session rollouts a
 capacity hold by construction: `keep_remembered` drops whatever either reading carried and works
 them out again from the plan it kept.
 
-Every window that leaves `limits/` is within 0–100, which the notch helper
-needs, since it refuses a whole message that holds one meter outside it. Three clamps share that
-job, and each governs its own path:
+Every window that leaves `limits/` is within 0–100, since no surface can draw a meter outside it:
+each draws such a window as unreadable, a dash, and the macOS helper used to refuse the whole
+message for one, which blanked the notch. Three clamps share that job, and each governs its own
+path:
 
 - `QuotaWindow::into_dto` clamps every window a reader builds, the one the Codex sessions merge
   advances included, so a fresh window is in range before anything else sees it.
@@ -249,6 +251,37 @@ job, and each governs its own path:
   loads, while the file keeps what was written. Removing it would let one old file blank the notch.
 - `window::keep_in_range` in `pipeline::finish` is the outer guard on every read, signed-in or
   saved, and clamps the workspace-credit share a read computes.
+
+What a window reads at an instant is decided once, in `limits/window_at.rs`: `WindowAt` (`of` a
+window, `of_share` a workspace-credit share, in its `instant` child, which only the Windows painter
+and tests compile) given the window and the time. Its reset cycle is decided once: pending until its
+reset instant, renewed from it, and without a reset idle when its reader says the window starts with
+the first message, else unknown. The flag is set only through `window::unstarted`, so the surfaces
+trust it and never check the usage again. Its used now is 0 once renewed, and none when its used
+percent is not a number or lies outside 0–100, which every surface draws as a dash and an empty
+meter in the unreadable ink, and a screen reader hears as "Usage unavailable". It is reached only at
+100% used. The figure behind the percent text is 100 only then, so 99.5% reads "99%"; a sliver under
+1% reads "<1%" and counts as 1; otherwise the percent is rounded, a half up. That figure is what the
+card's meters tell a screen reader and what the banked reset's confirmation says is left. The meter's level
+is the base ink up to 70%, a blend toward the trip red eased by the square root of how far it is
+through 70–90%, and the trip red from 90%. The reset note names the reset instant in the local zone,
+a window's as a weekday and a 24-hour clock (`Mon 14:00`), a share's as a date (`Dec 1`); a window
+without one says "Reset time unavailable" and an idle one says it starts with the first message,
+where a share without one says nothing. The card writes the note in full ("resets in 2d 3h · Mon
+14:00", "reset 1h ago · Mon 14:00", "Starts with your first message"); both notches drop the
+countdown, which their popover's row has no room for, and shorten the idle note ("Resets Mon
+14:00", "Reset Mon 14:00", "Starts with first message"). The limits monitor asks the same
+module whether a window is reached and how a notification words a percent, so "reset from 99% to
+<1% used" reads as the card does.
+
+The module does no I/O and reads no clock: the Windows painter is given the time by its window, and
+the drawers that redraw between reads ask it again. The card restates the rules in
+`ui/src/lib/windowAt.ts`, with the meter inks beside the levels, and the macOS helper in `NotchCore`
+(`Quota.cycle`, `WorkspaceCredits`, `meterLevel`), since each redraws on its own clock. All three read the cases in
+`limits/window_at/fixtures/window-cases.json`, pinned to one instant and one time zone: the Rust
+tests assert every field but the card's wording, `windowAt.test.ts` every field but the notch's,
+and `NotchCoreChecks` what the helper draws. A row names each surface's wording (`card`, `notch`), so
+a rule or a word changed on one side fails until the others follow.
 
 Reset times are compared only as `ResetInstant`s, parsed from a window's `resetsAt` once. The type
 itself compares and orders by the exact instant, so equality a struct derives and any sort stay
@@ -649,6 +682,7 @@ the code today; a change that moves one updates its row.
 | --- | --- |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
+| Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows painter (`side_notch/win_paint.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |

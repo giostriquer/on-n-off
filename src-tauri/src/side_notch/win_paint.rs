@@ -5,10 +5,11 @@ mod text;
 
 use super::model::{
     layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display,
-    workspace_share_note, workspace_share_renewed, workspace_share_window, workspace_share_wording,
-    Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode,
+    workspace_share_wording, Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode,
 };
-use crate::dto::{AgentId, CiState, LimitWindowDto};
+use crate::dto::{AgentId, CiState};
+use crate::limits::window_at::{WindowAt, UNREADABLE};
+use chrono::{DateTime, Utc};
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
 
 use super::model::frame::{CellData, PrSegment, RailData, Tone};
@@ -102,20 +103,14 @@ pub struct Hover {
 pub enum CellContent {
     Provider {
         provider: AgentId,
-        headline: Option<QuotaView>,
-        inner: Option<(InnerRing, QuotaView)>,
+        headline: Option<WindowAt>,
+        inner: Option<(InnerRing, WindowAt)>,
         label: String,
     },
     PullRequests {
         label: String,
         segments: Vec<PrSegment>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QuotaView {
-    pub percent: Option<f64>,
-    pub reached: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -224,14 +219,6 @@ pub fn rail_hit(plan: &Plan, x: f64, y: f64) -> Option<usize> {
     plan.cells.iter().position(|cell| cell.rect.contains(x, y))
 }
 
-fn quota_view(window: &LimitWindowDto) -> QuotaView {
-    let percent = quota_percent(window);
-    QuotaView {
-        percent,
-        reached: percent.is_some_and(|percent| percent.round() as u64 == 100),
-    }
-}
-
 fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
     match ring {
         InnerRing::Fable { .. } => (FABLE_ORANGE, FABLE_TRACK),
@@ -239,23 +226,20 @@ fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
     }
 }
 
-fn cell_content(data: &CellData) -> CellContent {
+fn cell_content(data: &CellData, now: DateTime<Utc>) -> CellContent {
     match data {
         CellData::Provider(provider) => {
             let reading = provider.reading.as_ref();
             let headline = reading
                 .and_then(|reading| reading.headline())
-                .map(quota_view);
+                .map(|window| WindowAt::of(window, now));
             CellContent::Provider {
                 provider: provider.provider,
                 headline,
                 inner: reading
-                    .and_then(|reading| reading.inner_window())
-                    .map(|(ring, window)| (ring.clone(), quota_view(&window))),
-                label: headline
-                    .and_then(|quota| quota.percent)
-                    .map(format_percent)
-                    .unwrap_or_else(|| "—".into()),
+                    .and_then(|reading| reading.inner_at(now))
+                    .map(|(ring, at)| (ring.clone(), at)),
+                label: headline.map_or_else(|| UNREADABLE.into(), |at| at.used_text()),
             }
         }
         CellData::PullRequests(cell) => CellContent::PullRequests {
@@ -274,6 +258,7 @@ pub fn plan(
     displays: &[super::model::Display],
     data: &RailData,
     hover: Hover,
+    now: DateTime<Utc>,
 ) -> Option<Plan> {
     let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
@@ -289,7 +274,7 @@ pub fn plan(
         .enumerate()
         .map(|(index, frame)| CellPlan {
             rect: R::from(frame).translated(rail.x, rail.y),
-            content: cell_content(&data.cells[index]),
+            content: cell_content(&data.cells[index], now),
             active: hover.active == Some(index),
         })
         .collect();
@@ -314,7 +299,8 @@ pub fn plan(
         } else {
             0.0
         };
-        let (entries, zones) = popover_entries(data, index, inner_w, size_scale, display_scale);
+        let (entries, zones) =
+            popover_entries(data, index, inner_w, size_scale, display_scale, now);
         let card_h = measure(&entries, size_scale, display_scale, padding);
         let height = card_h
             + if edge.is_vertical() {
@@ -416,6 +402,7 @@ fn popover_entries(
     inner_w: f64,
     size_scale: f64,
     display_scale: f64,
+    now: DateTime<Utc>,
 ) -> (Vec<(PopItem, R)>, Vec<(Zone, R)>) {
     let v = |points: f64| value(points, size_scale, display_scale);
     let line_h = |size: f64, weight: TextWeight| {
@@ -529,30 +516,26 @@ fn popover_entries(
 
             struct Block {
                 label: String,
-                note: String,
-                percent: Option<f64>,
+                at: WindowAt,
                 detail: Option<String>,
             }
-            let now = chrono::Utc::now();
             let mut blocks: Vec<Block> = reading
                 .map(|reading| reading.windows.as_slice())
                 .unwrap_or_default()
                 .iter()
                 .map(|window| Block {
                     label: window.label.clone(),
-                    note: reset_note(window),
-                    percent: quota_percent(window),
+                    at: WindowAt::of(window, now),
                     detail: None,
                 })
                 .collect();
             if let Some(share) = reading.and_then(|reading| reading.workspace_credits.as_ref()) {
-                let window = workspace_share_window(share);
+                let at = WindowAt::of_share(share, now);
                 let wording = workspace_share_wording(share);
                 blocks.push(Block {
-                    label: window.label.clone(),
-                    note: workspace_share_note(share, now),
-                    percent: quota_percent(&window),
-                    detail: Some(if workspace_share_renewed(share, now) {
+                    label: WORKSPACE_CREDITS.into(),
+                    at,
+                    detail: Some(if at.renewed() {
                         wording.renewed
                     } else {
                         wording.left
@@ -562,7 +545,7 @@ fn popover_entries(
             for block in blocks {
                 let note_max = inner_w * 0.6;
                 let note = ellipsize(
-                    &block.note,
+                    &block.at.notch_note(&chrono::Local),
                     note_max,
                     v(10.0),
                     TextWeight::Regular,
@@ -604,18 +587,17 @@ fn popover_entries(
                 y += line_h(11.0, TextWeight::Semibold) + v(5.0);
                 entries.push((
                     PopItem::Bar {
-                        percent: block.percent,
-                        color: meter_color(block.percent, provider_color(provider.provider)),
+                        percent: block.at.used_now(),
+                        color: meter_color(block.at.meter(), provider_color(provider.provider)),
                     },
                     R::new(x, y, inner_w, v(4.0)),
                 ));
                 y += v(4.0) + v(5.0);
-                let figure = match (block.percent, &block.detail) {
-                    (None, _) => "—".into(),
-                    (Some(percent), None) => format!("{} Used", format_percent(percent)),
-                    (Some(percent), Some(detail)) => {
-                        format!("{} Used · {detail}", format_percent(percent))
-                    }
+                let used = block.at.used_text();
+                let figure = match (block.at.used_now(), &block.detail) {
+                    (None, _) => used,
+                    (Some(_), None) => format!("{used} Used"),
+                    (Some(_), Some(detail)) => format!("{used} Used · {detail}"),
                 };
                 text_entry(
                     &mut entries,
@@ -699,7 +681,7 @@ fn popover_entries(
                         y,
                         inner_w,
                         line_h(10.0, TextWeight::Regular),
-                        age_text(&session.last_active_at),
+                        age_text(&session.last_active_at, now),
                         v(10.0),
                         TextWeight::Regular,
                         MUTED_INK,
@@ -1031,43 +1013,11 @@ fn ellipsize(text: &str, max_px: f64, size: f64, weight: TextWeight, scale: f64)
     format!("{cut}…")
 }
 
-fn quota_percent(window: &LimitWindowDto) -> Option<f64> {
-    if !window.used_percent.is_finite() || !(0.0..=100.0).contains(&window.used_percent) {
-        return None;
-    }
-    let expired = window
-        .resets_at
-        .as_deref()
-        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-        .is_some_and(|reset| reset <= chrono::Utc::now());
-    Some(if expired { 0.0 } else { window.used_percent })
-}
-
-fn reset_note(window: &LimitWindowDto) -> String {
-    let Some(reset) = window
-        .resets_at
-        .as_deref()
-        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-    else {
+fn age_text(last_active_at: &str, now: DateTime<Utc>) -> String {
+    let Some(instant) = last_active_at.parse::<DateTime<Utc>>().ok() else {
         return String::new();
     };
-    let now = chrono::Utc::now();
-    let clock = reset
-        .with_timezone(&chrono::Local)
-        .format("%a %-I:%M %p")
-        .to_string();
-    if reset <= now {
-        format!("Reset {clock}")
-    } else {
-        format!("Resets {clock}")
-    }
-}
-
-fn age_text(last_active_at: &str) -> String {
-    let Some(instant) = last_active_at.parse::<chrono::DateTime<chrono::Utc>>().ok() else {
-        return String::new();
-    };
-    let minutes = (chrono::Utc::now() - instant).num_minutes();
+    let minutes = (now - instant).num_minutes();
     if minutes < 1 {
         "just now".into()
     } else if minutes < 60 {
@@ -1088,6 +1038,7 @@ fn measure(entries: &[(PopItem, R)], size_scale: f64, display_scale: f64, paddin
     bottom + padding
 }
 
+const WORKSPACE_CREDITS: &str = "Workspace credits";
 const RAIL_INK: Color = [8, 8, 8, 255];
 const POPOVER_INK: Color = [14, 14, 17, 255];
 const MUTED_INK: Color = [153, 153, 153, 255];
@@ -1125,14 +1076,6 @@ fn provider_color(provider: AgentId) -> Color {
         AgentId::Cursor => CURSOR_BLUE,
         AgentId::Antigravity => ANTIGRAVITY_MUTE,
         AgentId::Muse => MUSE_BLUE,
-    }
-}
-
-fn format_percent(percent: f64) -> String {
-    if percent > 0.0 && percent < 1.0 {
-        "<1%".into()
-    } else {
-        format!("{}%", percent.round())
     }
 }
 
@@ -1489,7 +1432,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
             label,
         } => {
             if let Some(headline) = headline {
-                let percent = headline.percent.unwrap_or(0.0);
+                let percent = headline.used_now().unwrap_or(0.0);
                 stroke_ring(
                     pixmap,
                     center.0,
@@ -1498,14 +1441,14 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     ring_stroke,
                     -90.0,
                     -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(headline.percent, provider_color(*provider)),
+                    meter_color(headline.meter(), provider_color(*provider)),
                     true,
                     false,
                 );
             }
-            if let Some((ring, quota)) = inner {
+            if let Some((ring, at)) = inner {
                 let (ink, track) = inner_ring_colors(ring);
-                let inner_percent = quota.percent.unwrap_or(0.0);
+                let inner_percent = at.used_now().unwrap_or(0.0);
                 let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
                 stroke_ring(
                     pixmap,
@@ -1527,7 +1470,7 @@ fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
                     metrics.inner_ring_stroke as f32 * scale,
                     -90.0,
                     -90.0 + inner_percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(quota.percent, ink),
+                    meter_color(at.meter(), ink),
                     true,
                     false,
                 );

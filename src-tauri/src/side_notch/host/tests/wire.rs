@@ -46,8 +46,8 @@ fn pinned_limits(agent: AgentId) -> Vec<ProviderLimitsDto> {
              "account":{"id":"acct-claude","label":"you@example.com"},"plan":"max","windows":[
                 {"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":41.5,
                  "resetsAt":"2026-09-05T08:00:00Z","windowSeconds":604800,"observedAt":"2026-09-01T10:00:00Z"},
-                {"id":"session","label":"5 hour · all models","kind":"session","usedPercent":12.0,
-                 "resetsAt":"2026-09-01T13:00:00Z","observedAt":"2026-09-01T10:00:00Z"},
+                {"id":"session","label":"5 hour · all models","kind":"session","usedPercent":0.0,
+                 "observedAt":"2026-09-01T10:00:00Z","startsOnFirstMessage":true},
                 {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":63.0,
                  "observedAt":"2026-09-01T10:00:00Z","role":"innerRing"}
             ]}

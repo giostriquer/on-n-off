@@ -106,7 +106,7 @@ fn sends_only_the_current_account_and_omits_account_identifiers() {
 }
 
 #[test]
-fn the_headline_and_the_inner_ring_travel_as_window_ids() {
+fn the_headline_and_the_inner_ring_travel_as_window_ids_and_an_idle_window_says_so() {
     let reading = sent_reading(AgentId::Claude, serde_json::json!([
         {"provider":"claude","status":"ok","currentAccount":true,"windows":[
             {"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7.0,"observedAt":"2026-09-01T10:00:00Z"},
@@ -120,10 +120,20 @@ fn the_headline_and_the_inner_ring_travel_as_window_ids() {
         reading["innerRing"],
         serde_json::json!({"kind":"fable","windowId":"weekly_scoped:Fable"})
     );
-    for window in reading["windows"].as_array().expect("the windows") {
+    let windows = reading["windows"].as_array().expect("the windows");
+    for window in windows {
         assert!(window.get("role").is_none(), "{window}");
-        assert!(window.get("startsOnFirstMessage").is_none(), "{window}");
     }
+    let idle: Vec<&str> = windows
+        .iter()
+        .filter(|window| window.get("startsOnFirstMessage") == Some(&true.into()))
+        .map(|window| window["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        idle,
+        ["session"],
+        "the helper words a window that starts with the first message as the card does"
+    );
 }
 
 #[test]
