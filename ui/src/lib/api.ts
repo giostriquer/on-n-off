@@ -21,6 +21,7 @@ import type {
 import type { GithubPrs } from "./githubTypes";
 import type { LimitsColumnEntry, ResetCreditOutcome } from "./limitsTypes";
 import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
+import type { LimitsProvider } from "./providers";
 import type { UsageHistoryStatus, UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -145,7 +146,7 @@ export function clearUsageHistory(): Promise<UsageHistoryStatus> {
   return invoke("clear_usage_history");
 }
 
-export function readLimits(agentId: AgentId, force = false): Promise<LimitsColumnEntry[]> {
+export function readLimits(agentId: LimitsProvider, force = false): Promise<LimitsColumnEntry[]> {
   return invoke("read_limits", { agentId, force });
 }
 
@@ -161,11 +162,11 @@ export function cancelResetSpend(accountId: string): Promise<boolean> {
   return invoke("cancel_reset_spend", { accountId });
 }
 
-export function forgetLimitsSnapshot(agentId: AgentId, accountId: string, expectedEmail?: string): Promise<void> {
+export function forgetLimitsSnapshot(agentId: LimitsProvider, accountId: string, expectedEmail?: string): Promise<void> {
   return invoke("forget_limits_snapshot", { agentId, accountId, ...(expectedEmail !== undefined ? { expectedEmail } : {}) });
 }
 
-export function setLimitsArchived(agentId: AgentId, accountIds: string[], archived: boolean): Promise<void> {
+export function setLimitsArchived(agentId: LimitsProvider, accountIds: string[], archived: boolean): Promise<void> {
   return invoke("set_limits_archived", { agentId, accountIds, archived });
 }
 
@@ -254,7 +255,7 @@ export function addAccount(agent: import("./providers").AccountProvider, operati
 export function readAccountCategories(): Promise<import("./accountTypes").AccountCategories> {
   return invoke("read_account_categories");
 }
-export function setAccountCategory(agentId: import("./providers").LimitsProvider, accountId: string, category: string): Promise<string | null> {
+export function setAccountCategory(agentId: LimitsProvider, accountId: string, category: string): Promise<string | null> {
   return invoke("set_account_category", { agentId, accountId, category });
 }
 export function cancelAccountLogin(operationId: string): Promise<void> {
