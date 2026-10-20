@@ -172,10 +172,11 @@ pub fn plan(
     memory: &mut AlertMemory,
     waiting: &mut Waiting,
     readings: &[ProviderLimitsDto],
+    nobody_signed_in: &[AgentId],
     alerts: &HashMap<String, ResetAlert>,
     now: DateTime<Utc>,
 ) -> Plan {
-    let due = waiting.fall_due(readings, alerts, now);
+    let due = waiting.fall_due(readings, nobody_signed_in, alerts, now);
     let (automatic, told): (Vec<_>, Vec<_>) = memory
         .offers(readings, alerts, now)
         .into_iter()
@@ -313,13 +314,13 @@ enum CodexNow<'a> {
     Unknown,
 }
 
-fn codex_now(readings: &[ProviderLimitsDto]) -> CodexNow<'_> {
+fn codex_now<'a>(readings: &'a [ProviderLimitsDto], nobody_signed_in: &[AgentId]) -> CodexNow<'a> {
     let current = readings
         .iter()
         .find(|card| card.provider == AgentId::Codex && card.current_account);
     match current {
         Some(card) if signed_in_codex(card).is_some() => CodexNow::Live(card),
-        Some(card) if card.status != LimitsStatus::Failed => CodexNow::NobodySignedIn,
+        Some(_) if nobody_signed_in.contains(&AgentId::Codex) => CodexNow::NobodySignedIn,
         _ => CodexNow::Unknown,
     }
 }
@@ -328,6 +329,7 @@ impl Waiting {
     fn fall_due(
         &mut self,
         readings: &[ProviderLimitsDto],
+        nobody_signed_in: &[AgentId],
         alerts: &HashMap<String, ResetAlert>,
         now: DateTime<Utc>,
     ) -> Vec<Due> {
@@ -336,7 +338,7 @@ impl Waiting {
         let late = |spend: &WaitingSpend| {
             spend.due_at + chrono::Duration::minutes(LATE_AFTER_MINUTES) < now
         };
-        let codex = codex_now(readings);
+        let codex = codex_now(readings, nobody_signed_in);
         let decided = !matches!(codex, CodexNow::Unknown);
         self.0
             .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))

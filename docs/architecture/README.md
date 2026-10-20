@@ -190,7 +190,11 @@ provider's own client:
   (`limits::same_reset_instant`), and the saved cycle stays the string Codex sent; one that does
   not read as a time is another cycle. An automatic alert's offer is a notification that the reset will be used in ten minutes. When that
   time comes the reset is used only if a fresh read still finds the signed-in account low in the
-  same cycle; a read that fails leaves it waiting, and one found more than fifteen minutes late,
+  same cycle; a read that fails, or could not ask Codex at all (no `codex` found), leaves it
+  waiting, while one that finds nobody signed in, or an API-key login, keeps the reset as no longer
+  needed. That finding is the read outcome's (`outcome::nobody_signed_in`), which the shared cache
+  serves with the cards it read (`limits_refresh::read_served`) and the monitor hands the rule,
+  since the card alone reads signed out either way; and one found more than fifteen minutes late,
   as after sleep, is kept. A spend that fails is not tried again.
 
   `limits_monitor` is the loop that does the I/O around the rule (`poll_once`, over a small `Io`
@@ -232,7 +236,9 @@ reader only detects: it hands back the account it knew before reading (`Read::ac
 the login on disk names) and either its answer or one failure of a closed set (`ReadFailure`): not
 installed, signed out, unsupported (an API-key login, an account type, unfinished billing, an
 inactive subscription, a provider with no limits), a refused login, another account, an account
-changed during the read, a rate limit with its reset, or unavailable with the source's own reason.
+changed during the read, a rate limit with its reset, a request that failed with its cause
+("The <provider> usage read failed (<cause>). on-n-off will read it again later."), or unavailable
+with the source's own reason.
 One function per read context turns that into everything its caller needs: the signed-in card
 (`signed_in`), a saved login's or an account home's card and hold (`verdict` with
 `Context::SavedLogin` or `Context::AccountHome`, which `accounts/usage.rs` records), a sign-in's

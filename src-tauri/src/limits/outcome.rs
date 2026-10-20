@@ -18,6 +18,7 @@ pub(crate) enum ReadFailure {
     OtherAccount,
     AccountChanged,
     RateLimited(RateLimitReset),
+    RequestFailed(String),
     Unavailable(String),
 }
 
@@ -35,9 +36,7 @@ impl From<HttpError> for ReadFailure {
         match error {
             HttpError::Unauthorized => Self::LoginRefused,
             HttpError::RateLimited(reset) => Self::RateLimited(reset),
-            other => Self::Unavailable(format!(
-                "The usage read failed ({other}). on-n-off will read it again later."
-            )),
+            other => Self::RequestFailed(other.to_string()),
         }
     }
 }
@@ -105,6 +104,13 @@ pub(crate) fn verdict(
             ),
         status,
     }
+}
+
+pub(super) fn nobody_signed_in(failure: &ReadFailure) -> bool {
+    matches!(
+        failure,
+        ReadFailure::SignedOut | ReadFailure::Unsupported(_)
+    )
 }
 
 pub(super) fn signed_in(provider: AgentId, read: Read) -> (ProviderLimitsDto, Backoff) {
@@ -314,6 +320,9 @@ impl Words {
                     "This {display} subscription is inactive, so it has no subscription limits to show."
                 ),
             },
+            ReadFailure::RequestFailed(cause) => format!(
+                "The {display} usage read failed ({cause}). on-n-off will read it again later."
+            ),
             ReadFailure::Unavailable(why) => why.clone(),
         }
     }

@@ -97,13 +97,31 @@ struct Sources<'a> {
 pub(crate) struct NativeRead {
     pub(crate) cards: Vec<ProviderLimitsDto>,
     pub(crate) backoff: Backoff,
+    pub(crate) nobody_signed_in: bool,
+}
+
+fn native_read(agent: AgentId, read: Read) -> (ProviderLimitsDto, NativeRead) {
+    let nobody_signed_in = read
+        .answer
+        .as_ref()
+        .err()
+        .is_some_and(outcome::nobody_signed_in);
+    let (card, backoff) = outcome::signed_in(agent, read);
+    (
+        card,
+        NativeRead {
+            cards: Vec::new(),
+            backoff,
+            nobody_signed_in,
+        },
+    )
 }
 
 pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
     let home = match paths::user_home() {
         Ok(home) => home,
         Err(error) => {
-            let (card, backoff) = outcome::signed_in(
+            let (card, read) = native_read(
                 agent,
                 Read::anonymous(ReadFailure::Unavailable(format!(
                     "Could not read the stored login: {}",
@@ -112,7 +130,7 @@ pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
             );
             return NativeRead {
                 cards: vec![card],
-                backoff,
+                ..read
             };
         }
     };
@@ -167,20 +185,20 @@ fn limits_reader(agent: AgentId) -> Option<Reader> {
 
 fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRead {
     let Some(read) = limits_reader(agent) else {
-        let (card, backoff) = outcome::signed_in(
+        let (card, read) = native_read(
             agent,
             Read::anonymous(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
         );
         return NativeRead {
             cards: vec![card],
-            backoff,
+            ..read
         };
     };
     let _provider_guard = provider_read_guard(agent);
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let (current, backoff) = outcome::signed_in(agent, read(home, force));
+    let (current, native) = native_read(agent, read(home, force));
     let store = SnapshotStore::for_home(home);
     let mut cards = aggregate_accounts(&store, current);
     if agent == AgentId::Codex {
@@ -189,7 +207,7 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRe
             store.save_changed(&before, &cards);
         }
     }
-    NativeRead { cards, backoff }
+    NativeRead { cards, ..native }
 }
 
 fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {

@@ -13,6 +13,7 @@ enum Effect {
 
 struct Fake {
     readings: RefCell<Vec<ProviderLimitsDto>>,
+    nobody_signed_in: RefCell<Vec<AgentId>>,
     read_fails: Cell<bool>,
     save_fails: Cell<bool>,
     outcome: RefCell<Result<ResetCreditOutcome, String>>,
@@ -26,6 +27,7 @@ impl Fake {
     fn new() -> Self {
         Self {
             readings: RefCell::new(Vec::new()),
+            nobody_signed_in: RefCell::new(Vec::new()),
             read_fails: Cell::new(false),
             save_fails: Cell::new(false),
             outcome: RefCell::new(Ok(ResetCreditOutcome::Reset)),
@@ -50,14 +52,17 @@ impl Io for Fake {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Vec<ProviderLimitsDto>, String> {
+    ) -> Result<Readings, String> {
         self.log
             .borrow_mut()
             .push(Effect::Read(providers.to_vec(), fresh));
         if self.read_fails.get() {
             return Err("provider worker failed: cancelled".to_string());
         }
-        Ok(self.readings.borrow().clone())
+        Ok(Readings {
+            cards: self.readings.borrow().clone(),
+            nobody_signed_in: self.nobody_signed_in.borrow().clone(),
+        })
     }
 
     async fn save(&self, state: &MonitorState) -> Result<(), String> {
@@ -414,6 +419,58 @@ fn a_read_that_fails_decides_nothing_and_the_spend_keeps_waiting() {
         [Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex))]
     );
     assert_eq!(listed(&monitor).len(), 1);
+}
+
+fn nobody_named() -> ProviderLimitsDto {
+    ProviderLimitsDto {
+        status: LimitsStatus::SignedOut,
+        account: None,
+        reading: Reading::default(),
+        ..codex_with_a_reset(96.0, "2026-08-19T13:11:00Z")
+    }
+}
+
+#[test]
+fn a_spend_falling_due_while_codex_cannot_be_asked_keeps_waiting() {
+    let mut monitor = Monitor::new(automatic_only());
+    monitor.schedule_a_spend();
+
+    monitor
+        .poll("2026-08-19T13:11:00Z", vec![nobody_named()])
+        .unwrap();
+
+    assert_eq!(
+        monitor.io.effects(),
+        [
+            Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex)),
+            Effect::Saved,
+        ]
+    );
+    assert_eq!(listed(&monitor).len(), 1);
+}
+
+#[test]
+fn a_spend_falling_due_once_codex_is_signed_out_is_kept_and_told() {
+    let mut monitor = Monitor::new(automatic_only());
+    monitor.schedule_a_spend();
+    *monitor.io.nobody_signed_in.borrow_mut() = vec![AgentId::Codex];
+
+    monitor
+        .poll("2026-08-19T13:11:00Z", vec![nobody_named()])
+        .unwrap();
+
+    assert_eq!(
+        monitor.io.effects(),
+        [
+            Effect::Read(vec![AgentId::Codex], Some(AgentId::Codex)),
+            Effect::Saved,
+            told(
+                "Codex: banked reset not used",
+                "you@example.com no longer needs it, or is no longer signed in, so it was kept."
+            ),
+        ]
+    );
+    assert!(listed(&monitor).is_empty());
 }
 
 #[test]

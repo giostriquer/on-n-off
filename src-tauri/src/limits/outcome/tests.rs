@@ -45,6 +45,7 @@ fn failures() -> Vec<ReadFailure> {
         ReadFailure::OtherAccount,
         ReadFailure::AccountChanged,
         ReadFailure::RateLimited(RateLimitReset::RetryAfter(30)),
+        ReadFailure::RequestFailed("HTTP 503".to_string()),
         ReadFailure::Unavailable("The source said why.".to_string()),
     ]
 }
@@ -88,6 +89,9 @@ fn every_failure_in_every_read_context_has_one_card_and_one_schedule() {
     use ReadFailure as F;
     let limited = || F::RateLimited(RateLimitReset::RetryAfter(30));
     let why = || F::Unavailable("The source said why.".to_string());
+    let request = || F::RequestFailed("HTTP 503".to_string());
+    const REQUEST: &str =
+        "The Muse usage read failed (HTTP 503). on-n-off will read it again later.";
     let inactive = || F::Unsupported(Unsupported::Inactive);
     const LIMITED: &str =
         "Meta is limiting how often Muse usage can be read. on-n-off will read it again later.";
@@ -105,6 +109,7 @@ fn every_failure_in_every_read_context_has_one_card_and_one_schedule() {
         row(F::OtherAccount, SignedIn, FAILED, "Muse answered for a different account. Sign in with `muse` again to see subscription limits.", true, true, 0, false),
         row(F::AccountChanged, SignedIn, FAILED, "The signed-in Muse account changed while its usage was read.", true, true, 0, false),
         row(limited(), SignedIn, FAILED, LIMITED, true, true, 30, false),
+        row(request(), SignedIn, FAILED, REQUEST, true, true, 0, false),
         row(why(), SignedIn, FAILED, "The source said why.", true, true, 0, false),
         row(F::NotInstalled, SavedLogin, FAILED, "Muse Code is not installed.", true, true, 0, false),
         row(F::SignedOut, SavedLogin, FAILED, VAULT_ENDED, true, true, 0, true),
@@ -113,6 +118,7 @@ fn every_failure_in_every_read_context_has_one_card_and_one_schedule() {
         row(F::OtherAccount, SavedLogin, FAILED, OTHER, true, true, 0, true),
         row(F::AccountChanged, SavedLogin, FAILED, "This account changed while its usage was read.", true, true, 0, false),
         row(limited(), SavedLogin, FAILED, LIMITED, true, true, 30, false),
+        row(request(), SavedLogin, FAILED, REQUEST, true, true, 0, false),
         row(why(), SavedLogin, FAILED, "The source said why.", true, true, 0, false),
         row(F::NotInstalled, AccountHome, FAILED, "Muse Code is not installed.", true, true, 0, false),
         row(F::SignedOut, AccountHome, FAILED, HOME_ENDED, true, true, 0, false),
@@ -121,6 +127,7 @@ fn every_failure_in_every_read_context_has_one_card_and_one_schedule() {
         row(F::OtherAccount, AccountHome, FAILED, OTHER, true, true, 0, false),
         row(F::AccountChanged, AccountHome, FAILED, "This account changed while its usage was read.", true, true, 0, false),
         row(limited(), AccountHome, FAILED, LIMITED, true, true, 30, false),
+        row(request(), AccountHome, FAILED, REQUEST, true, true, 0, false),
         row(why(), AccountHome, FAILED, "The source said why.", true, true, 0, false),
     ];
     assert_eq!(
@@ -316,9 +323,28 @@ fn an_http_failure_is_a_refused_login_a_rate_limit_or_unavailable_with_its_cause
     ] {
         assert_eq!(
             ReadFailure::from(error),
-            ReadFailure::Unavailable(format!(
-                "The usage read failed ({cause}). on-n-off will read it again later."
-            ))
+            ReadFailure::RequestFailed(cause.to_string())
+        );
+    }
+    for (provider, expected) in [
+        (
+            AgentId::Claude,
+            "The Claude usage read failed (HTTP 503). on-n-off will read it again later.",
+        ),
+        (
+            AgentId::Codex,
+            "The Codex usage read failed (HTTP 503). on-n-off will read it again later.",
+        ),
+    ] {
+        assert_eq!(
+            verdict(
+                provider,
+                SavedLogin,
+                &ReadFailure::RequestFailed("HTTP 503".into()),
+                NOW
+            )
+            .message,
+            expected
         );
     }
 }
@@ -436,4 +462,17 @@ fn a_signed_in_card_keeps_the_account_known_before_a_failure_unless_nobody_is_si
         assert!(card.current_account, "{failure:?}");
         assert!(!card.reading.has_observations(), "{failure:?}");
     }
+}
+
+#[test]
+fn only_a_provider_that_answered_with_no_subscription_login_has_nobody_signed_in() {
+    for (failure, nobody) in failures()
+        .into_iter()
+        .zip([false, true, true, false, false, false, false, false])
+    {
+        assert_eq!(nobody_signed_in(&failure), nobody, "{failure:?}");
+    }
+    assert!(nobody_signed_in(&ReadFailure::Unsupported(
+        Unsupported::ApiKey
+    )));
 }

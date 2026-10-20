@@ -120,7 +120,7 @@ fn an_inactive_subscription_is_unsupported_and_an_unreadable_usage_block_no_usag
 fn an_unreachable_endpoint_is_unavailable() {
     assert!(matches!(
         read_saved(&identity(), &token(), &urls(&refused_url())),
-        Err(ReadFailure::Unavailable(_))
+        Err(ReadFailure::RequestFailed(_))
     ));
 }
 

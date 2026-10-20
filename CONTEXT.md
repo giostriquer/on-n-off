@@ -46,7 +46,7 @@ _Avoid_: metadata
 **Read outcome**:
 What one Limits read came to: a reading, or one failure of a closed set (not installed, signed out,
 unsupported, a refused login, another account, an account changed during the read, a rate limit,
-or unavailable). It decides the card's status and message, whether the card keeps the account the
+a failed request, or unavailable). It decides the card's status and message, whether the card keeps the account the
 login names (every failure but not installed and signed out does, so its remembered reading stands
 in), and how long the next read waits.
 _Avoid_: error, result, read failure (one of its kinds)

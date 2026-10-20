@@ -9,7 +9,7 @@ fn poll(
     cards: &[ProviderLimitsDto],
     alerts: &HashMap<String, ResetAlert>,
 ) -> Plan {
-    plan(memory, &mut Waiting::default(), cards, alerts, now())
+    plan(memory, &mut Waiting::default(), cards, &[], alerts, now())
 }
 
 fn offered(

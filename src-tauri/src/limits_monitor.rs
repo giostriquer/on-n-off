@@ -130,12 +130,15 @@ pub fn spend_reset_by_hand(
     })
 }
 
+#[derive(Debug, Clone, Default, PartialEq)]
+struct Readings {
+    cards: Vec<ProviderLimitsDto>,
+    nobody_signed_in: Vec<AgentId>,
+}
+
 trait Io {
-    async fn read(
-        &self,
-        providers: &[AgentId],
-        fresh: Option<AgentId>,
-    ) -> Result<Vec<ProviderLimitsDto>, String>;
+    async fn read(&self, providers: &[AgentId], fresh: Option<AgentId>)
+        -> Result<Readings, String>;
     async fn save(&self, state: &MonitorState) -> Result<(), String>;
     async fn spend(
         &self,
@@ -156,24 +159,30 @@ impl Io for App {
         &self,
         providers: &[AgentId],
         fresh: Option<AgentId>,
-    ) -> Result<Vec<ProviderLimitsDto>, String> {
+    ) -> Result<Readings, String> {
         let tasks: Vec<_> = providers
             .iter()
             .map(|&provider| {
                 let force = fresh == Some(provider);
                 async_runtime::spawn_blocking(move || {
-                    crate::limits_refresh::read_limits(provider, force)
+                    (
+                        provider,
+                        crate::limits_refresh::read_served(provider, force).0,
+                    )
                 })
             })
             .collect();
-        let mut snapshots = Vec::new();
+        let mut readings = Readings::default();
         for task in tasks {
-            snapshots.extend(
-                task.await
-                    .map_err(|error| format!("provider worker failed: {error}"))?,
-            );
+            let (provider, served) = task
+                .await
+                .map_err(|error| format!("provider worker failed: {error}"))?;
+            readings.cards.extend(served.entries);
+            if served.nobody_signed_in {
+                readings.nobody_signed_in.push(provider);
+            }
         }
-        Ok(snapshots)
+        Ok(readings)
     }
 
     async fn save(&self, state: &MonitorState) -> Result<(), String> {
@@ -302,12 +311,13 @@ async fn poll_once(
         .then_some(AgentId::Codex);
     let readings = io.read(watched, fresh).await?;
     let previous = state.clone();
-    let mut notices = limit_notices(state, &readings, settings);
+    let mut notices = limit_notices(state, &readings.cards, settings);
     let Plan { offered, due } = waiting.change(|waiting| {
         reset_alert::plan(
             &mut state.reset_alerts,
             waiting,
-            &readings,
+            &readings.cards,
+            &readings.nobody_signed_in,
             &settings.reset_alerts,
             polled_at,
         )

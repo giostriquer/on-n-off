@@ -44,7 +44,25 @@ fn falls_due(
     alerts: &HashMap<String, ResetAlert>,
     at: DateTime<Utc>,
 ) -> Vec<Due> {
-    plan(&mut AlertMemory::default(), waiting, readings, alerts, at).due
+    falls_due_finding(waiting, readings, &[], alerts, at)
+}
+
+fn falls_due_finding(
+    waiting: &mut Waiting,
+    readings: &[ProviderLimitsDto],
+    nobody_signed_in: &[AgentId],
+    alerts: &HashMap<String, ResetAlert>,
+    at: DateTime<Utc>,
+) -> Vec<Due> {
+    plan(
+        &mut AlertMemory::default(),
+        waiting,
+        readings,
+        nobody_signed_in,
+        alerts,
+        at,
+    )
+    .due
 }
 
 #[test]
@@ -149,23 +167,46 @@ fn the_signed_in_codex_card_decides_among_the_others() {
     assert!(matches!(due.as_slice(), [Due::Spend(..)]), "{due:?}");
 }
 
+fn nobody_named(status: LimitsStatus) -> ProviderLimitsDto {
+    let mut card = live(96.0, RENEWS);
+    card.status = status;
+    card.account = None;
+    card.reading = crate::dto::Reading::default();
+    card
+}
+
 #[test]
 fn nobody_signed_in_keeps_the_reset() {
     for status in [LimitsStatus::SignedOut, LimitsStatus::Unsupported] {
-        let mut signed_out = live(96.0, RENEWS);
-        signed_out.status = status;
-        signed_out.account = None;
         let mut waiting = scheduled();
 
-        let due = falls_due(
+        let due = falls_due_finding(
             &mut waiting,
-            &[signed_out],
+            &[nobody_named(status)],
+            &[AgentId::Codex],
             &automatic(),
             minutes_after_now(10),
         );
 
         assert_eq!(due, [kept(NOT_NEEDED)], "{status:?}");
     }
+}
+
+#[test]
+fn a_spend_due_while_codex_could_not_be_asked_keeps_waiting() {
+    let mut waiting = scheduled();
+    let not_installed = nobody_named(LimitsStatus::SignedOut);
+
+    let due = falls_due_finding(
+        &mut waiting,
+        &[not_installed],
+        &[AgentId::Claude],
+        &automatic(),
+        minutes_after_now(12),
+    );
+
+    assert!(due.is_empty(), "{due:?}");
+    assert_eq!(waiting.0.len(), 1);
 }
 
 #[test]

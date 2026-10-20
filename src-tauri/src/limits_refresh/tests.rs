@@ -18,6 +18,7 @@ fn native_read(cards: Vec<ProviderLimitsDto>) -> NativeRead {
             counted,
             floor: Duration::ZERO,
         },
+        nobody_signed_in: false,
     }
 }
 
@@ -182,6 +183,7 @@ fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
                     counted: true,
                     floor: Duration::from_secs(7200),
                 },
+                nobody_signed_in: false,
             }
         })
     };
@@ -205,6 +207,40 @@ fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
         reads.get(),
         2,
         "the read waits no longer than its Retry-After"
+    );
+}
+
+#[test]
+fn whether_nobody_is_signed_in_is_served_with_the_native_read_that_found_it() {
+    let cache = Cache::new(Source::LimitsCodex);
+    let interval = Duration::from_secs(300);
+    let found = |nobody_signed_in| NativeRead {
+        cards: vec![snapshot("current", true, LimitsStatus::SignedOut)],
+        backoff: Backoff::default(),
+        nobody_signed_in,
+    };
+
+    let (first, _) = read_through_cache(&cache, interval, false, |_, _| found(true));
+    let (cached, _) = read_through_cache(&cache, interval, false, |_, _| {
+        unreachable!("the cached read is still fresh")
+    });
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .saved_refreshed_at = Instant::now() - interval;
+    let (saved_only, _) = read_through_cache(&cache, interval, false, |_, refresh| {
+        assert!(!refresh.native);
+        found(false)
+    });
+
+    assert!(first.nobody_signed_in);
+    assert!(cached.nobody_signed_in);
+    assert!(
+        saved_only.nobody_signed_in,
+        "a saved-accounts refresh says nothing about who is signed in"
     );
 }
 
@@ -311,7 +347,7 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
         unreachable!("a consumer answering the announcement must not reach the provider")
     });
     assert_eq!(reading, Reading::Unchanged(failed.revision()));
-    assert_eq!(served[0].status, LimitsStatus::Failed);
+    assert_eq!(served.entries[0].status, LimitsStatus::Failed);
 }
 
 #[test]
@@ -326,6 +362,7 @@ fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_succes
         ],
         consecutive_failures: 0,
         retry_floor: Duration::ZERO,
+        nobody_signed_in: false,
     });
 
     let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
@@ -362,6 +399,7 @@ fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
         entries,
         consecutive_failures: 0,
         retry_floor: Duration::ZERO,
+        nobody_signed_in: false,
     });
     cache
 }
@@ -511,7 +549,11 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         }
     };
     let interval = Duration::from_secs(300);
-    let read = |force| read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag).0;
+    let read = |force| {
+        read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag)
+            .0
+            .entries
+    };
 
     let entries = read(false);
     assert_eq!(*log.borrow(), ["native", "unarchive", "saved", "flag"]);

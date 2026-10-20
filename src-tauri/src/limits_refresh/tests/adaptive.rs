@@ -111,7 +111,8 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     read();
     age_native(&cache, 300);
     used.set(100.0);
-    let (entries, revision) = read();
+    let (served, revision) = read();
+    let entries = served.entries;
     assert_eq!(reads.get(), 2);
     assert_eq!(saved_reads.get(), 1);
     assert_eq!(entries, [quota(100.0, true), saved_card.clone()]);
@@ -331,7 +332,8 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
     read();
     switched.set(true);
     age_native(&cache, 300);
-    let (entries, revision) = read();
+    let (served, revision) = read();
+    let entries = served.entries;
     assert_eq!(entries.len(), 1);
     assert!(entries[0].current_account);
     assert_eq!(entries[0].reading.windows[0].used_percent, 20.0);
@@ -357,7 +359,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
     });
     age_native(&cache, 300);
 
-    let (entries, _) = read_provider(
+    let (Served { entries, .. }, _) = read_provider(
         &cache,
         Duration::from_secs(1800),
         false,

@@ -19,6 +19,13 @@ struct CachedRead {
     entries: Vec<ProviderLimitsDto>,
     consecutive_failures: u32,
     retry_floor: Duration,
+    nobody_signed_in: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Served {
+    pub entries: Vec<ProviderLimitsDto>,
+    pub nobody_signed_in: bool,
 }
 
 struct Refresh<'a> {
@@ -88,12 +95,22 @@ fn active_interval(entries: &[ProviderLimitsDto], default: Duration) -> Duration
 }
 
 pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
-    read_limits_revisioned(agent, force).0
+    read_served(agent, force).0.entries
 }
 
 pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimitsDto>, u64) {
+    let (served, revision) = read_served(agent, force);
+    (served.entries, revision)
+}
+
+pub fn read_served(agent: AgentId, force: bool) -> (Served, u64) {
     let Some(cache) = cache_for(agent) else {
-        return (crate::limits::read_limits(agent, force).cards, 0);
+        let read = crate::limits::read_limits(agent, force);
+        let served = Served {
+            entries: read.cards,
+            nobody_signed_in: read.nobody_signed_in,
+        };
+        return (served, 0);
     };
     let Some(_account_read) = crate::accounts::activity::read(agent) else {
         let read = cache
@@ -101,7 +118,7 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         return (
-            read.as_ref().map(|r| r.entries.clone()).unwrap_or_default(),
+            read.as_ref().map(CachedRead::served).unwrap_or_default(),
             cache.revision.current(),
         );
     };
@@ -117,6 +134,15 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
     )
 }
 
+impl CachedRead {
+    fn served(&self) -> Served {
+        Served {
+            entries: self.entries.clone(),
+            nobody_signed_in: self.nobody_signed_in,
+        }
+    }
+}
+
 fn read_provider(
     cache: &Cache,
     interval: Duration,
@@ -125,33 +151,34 @@ fn read_provider(
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
     saved: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>),
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
-) -> (Vec<ProviderLimitsDto>, u64) {
+) -> (Served, u64) {
     let mut unarchived = false;
-    let (entries, reading) = read_through_cache(cache, interval, force, |force, refresh| {
-        let (mut entries, backoff) = if refresh.native {
-            let NativeRead { mut cards, backoff } = native(force);
-            unarchived = unarchive(&cards);
+    let (served, reading) = read_through_cache(cache, interval, force, |force, refresh| {
+        let mut read = if refresh.native {
+            let mut read = native(force);
+            unarchived = unarchive(&read.cards);
             if !refresh.saved {
-                cards = keep_saved_cards(cards, refresh.previous);
+                read.cards = keep_saved_cards(read.cards, refresh.previous);
             }
-            (cards, backoff)
+            read
         } else {
-            (refresh.previous.to_vec(), Backoff::default())
+            NativeRead {
+                cards: refresh.previous.to_vec(),
+                backoff: Backoff::default(),
+                nobody_signed_in: false,
+            }
         };
         if refresh.saved {
-            saved(force, &mut entries);
+            saved(force, &mut read.cards);
         }
-        flag(&mut entries);
-        NativeRead {
-            cards: entries,
-            backoff,
-        }
+        flag(&mut read.cards);
+        read
     });
     announce(cache, reading);
     if unarchived {
         read_revision::announce(Source::Accounts);
     }
-    (entries, reading.revision())
+    (served, reading.revision())
 }
 
 fn keep_saved_cards(
@@ -329,7 +356,7 @@ fn read_through_cache<F>(
     interval: Duration,
     force: bool,
     read: F,
-) -> (Vec<ProviderLimitsDto>, Reading)
+) -> (Served, Reading)
 where
     F: FnOnce(bool, Refresh<'_>) -> NativeRead,
 {
@@ -353,7 +380,7 @@ where
         .is_none_or(|entry| !cache_is_fresh(entry.saved_refreshed_at, now, interval, 0, force));
     if !native && !saved {
         return (
-            cached.as_ref().unwrap().entries.clone(),
+            cached.as_ref().unwrap().served(),
             Reading::Unchanged(cache.revision.current()),
         );
     }
@@ -363,6 +390,7 @@ where
     let NativeRead {
         cards: entries,
         backoff,
+        nobody_signed_in,
     } = read(
         force,
         Refresh {
@@ -371,18 +399,13 @@ where
             previous: cached.as_ref().map_or(&[], |entry| &entry.entries),
         },
     );
-    let (consecutive_failures, retry_floor) = if native {
-        (
+    let (consecutive_failures, retry_floor, nobody_signed_in) = match cached.as_ref() {
+        Some(entry) if !native => (previous_failures, entry.retry_floor, entry.nobody_signed_in),
+        _ => (
             next_failure_count(previous_failures, backoff),
             backoff.floor,
-        )
-    } else {
-        (
-            previous_failures,
-            cached
-                .as_ref()
-                .map_or(Duration::ZERO, |entry| entry.retry_floor),
-        )
+            nobody_signed_in,
+        ),
     };
     let finished_at = Instant::now();
     *cached = Some(CachedRead {
@@ -396,11 +419,15 @@ where
         } else {
             cached.as_ref().unwrap().saved_refreshed_at
         },
-        entries: entries.clone(),
+        entries,
         consecutive_failures,
         retry_floor,
+        nobody_signed_in,
     });
-    (entries, Reading::Replaced(cache.revision.bump()))
+    (
+        cached.as_ref().unwrap().served(),
+        Reading::Replaced(cache.revision.bump()),
+    )
 }
 
 fn forget_through_cache<F>(cache: &Cache, account_id: &str, forget: F) -> Result<Reading, String>
