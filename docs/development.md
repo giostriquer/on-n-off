@@ -229,7 +229,8 @@ cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
 cargo deny --manifest-path src-tauri/Cargo.toml check advisories   # needs cargo-deny
 bun audit
 
-bun run tauri build                        # Windows: NSIS
+bun scripts/third-party-licenses.mjs       # needs cargo-about (or CARGO_ABOUT); writes src-tauri/gen/THIRD_PARTY_LICENSES.md
+bun run tauri build                        # Windows: NSIS; add --config src-tauri/tauri.licenses.conf.json to bundle the notice
 bun run tauri build --bundles app,dmg      # macOS: .app + .dmg
 ```
 

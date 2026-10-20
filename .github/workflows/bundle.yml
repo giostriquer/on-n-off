@@ -116,6 +116,9 @@ jobs:
 
           "version=$version" >> $env:GITHUB_OUTPUT
 
+      - name: Install cargo-about
+        run: ./scripts/install-cargo-about.ps1
+
       - name: Build and verify installer bundle
         env:
           RELEASE_VERSION: ${{ steps.version.outputs.version }}

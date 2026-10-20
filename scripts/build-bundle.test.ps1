@@ -69,16 +69,25 @@ try {
     "disk image" | Set-Content -LiteralPath (Join-Path $dmgDirectory "on-n-off_0.2.0_aarch64.dmg") -Encoding UTF8
     "updater bundle" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz") -Encoding UTF8
     "signature" | Set-Content -LiteralPath (Join-Path $macosDirectory "on-n-off.app.tar.gz.sig") -Encoding UTF8
+    $generatedLicenses = Join-Path $fixtureRoot "src-tauri" "gen" "THIRD_PARTY_LICENSES.md"
+    $dmgLicenses = Join-Path $macosDirectory "on-n-off.app" "Contents" "Resources" "THIRD_PARTY_LICENSES.md"
+    $nsisLicenses = Join-Path $fixtureRoot "src-tauri" "target" "release" "THIRD_PARTY_LICENSES.md"
+    foreach ($copy in @($generatedLicenses, $dmgLicenses, $nsisLicenses)) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $copy) -Force | Out-Null
+        "licenses" | Set-Content -LiteralPath $copy -Encoding UTF8
+    }
 
     $validNsis = Invoke-Validator -Kind "nsis" -Signed
     Assert-Equal $validNsis.ExitCode 0 "valid signed NSIS"
     Assert-Match $validNsis.Output "on-n-off_0.2.0_x64-setup.exe" "valid NSIS"
+    Assert-Match $validNsis.Output "licenses=.*release.THIRD_PARTY_LICENSES.md" "valid NSIS license notice"
 
     $validDmg = Invoke-Validator -Kind "dmg" -Signed
     Assert-Equal $validDmg.ExitCode 0 "valid signed DMG"
     Assert-Match $validDmg.Output "installer=.*on-n-off_0.2.0_aarch64.dmg" "valid DMG installer"
     Assert-Match $validDmg.Output "updater=.*on-n-off.app.tar.gz" "valid DMG updater"
     Assert-Match $validDmg.Output "signature=.*on-n-off.app.tar.gz.sig" "valid DMG signature"
+    Assert-Match $validDmg.Output "licenses=.*on-n-off.app.*THIRD_PARTY_LICENSES.md" "valid DMG license notice"
 
     $stageDirectory = Join-Path $fixtureRoot "stage"
     $stagedNsis = Invoke-Validator -Kind "nsis" -Signed -StageDirectory $stageDirectory
@@ -109,6 +118,25 @@ try {
 
     $unsignedDmg = Invoke-Validator -Kind "dmg"
     Assert-Equal $unsignedDmg.ExitCode 0 "unsigned DMG ignores updater artifacts"
+
+    foreach ($case in @(@{ Kind = "dmg"; Copy = $dmgLicenses }, @{ Kind = "nsis"; Copy = $nsisLicenses })) {
+        Remove-Item -LiteralPath $case.Copy
+        $missing = Invoke-Validator -Kind $case.Kind
+        Assert-Equal $missing.ExitCode 1 "a $($case.Kind) build without its license notice"
+        Assert-Match $missing.Output "THIRD_PARTY_LICENSES.md" "a $($case.Kind) build without its license notice"
+
+        "an older notice" | Set-Content -LiteralPath $case.Copy -Encoding UTF8
+        $stale = Invoke-Validator -Kind $case.Kind
+        Assert-Equal $stale.ExitCode 1 "a $($case.Kind) build carrying a stale license notice"
+        Assert-Match $stale.Output "differs" "a $($case.Kind) build carrying a stale license notice"
+        "licenses" | Set-Content -LiteralPath $case.Copy -Encoding UTF8
+    }
+
+    Remove-Item -LiteralPath $generatedLicenses
+    $notGenerated = Invoke-Validator -Kind "nsis"
+    Assert-Equal $notGenerated.ExitCode 1 "a build whose license notice was never generated"
+    Assert-Match $notGenerated.Output "THIRD_PARTY_LICENSES.md" "a build whose license notice was never generated"
+    "licenses" | Set-Content -LiteralPath $generatedLicenses -Encoding UTF8
 
     "other" | Set-Content -LiteralPath (Join-Path $nsisDirectory "other.exe") -Encoding UTF8
     $extraInstaller = Invoke-Validator -Kind "nsis"

@@ -94,7 +94,9 @@ Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md
 
 [MIT](LICENSE). Usage analytics include work derived from
 [T3 Code](https://github.com/pingdotgg/t3code). See
-[third-party notices](THIRD_PARTY_NOTICES.md) for credits and license details.
+[third-party notices](THIRD_PARTY_NOTICES.md) for credits and license details. Installers also
+include `THIRD_PARTY_LICENSES.md`, with the license of every Rust crate and JavaScript package they
+bundle.
 
 on-n-off is an independent project, not affiliated with, endorsed by or sponsored by Anthropic,
 OpenAI, Google, Anysphere or Meta. Claude Code, Codex, Antigravity, Cursor and Muse are trademarks

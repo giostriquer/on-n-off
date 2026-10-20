@@ -70,6 +70,24 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   installer kind is its own `tauri build` pass); unsigned → SmartScreen warning; verify SHA-256 / attestation.
 - macOS: `.app` + `.dmg` (Apple Silicon), ad-hoc signed, not notarised → right-click → Open on first
   launch. The dmg step needs Automation permission for the terminal locally.
+- Installers carry `THIRD_PARTY_LICENSES.md`, the license text of every Rust crate and JavaScript
+  package they bundle. `scripts/third-party-licenses.mjs` writes it: `cargo about generate` over
+  the two shipped targets (`src-tauri/about.toml`, the same targets as `deny.toml`; build and dev
+  dependencies and the unpublished app crate left out), every production npm package reached from
+  `package.json`'s `dependencies`, optional ones included (`@types/*` left out), and the build tools
+  whose own code Vite emits into `ui/dist` (`BUILD_OUTPUT`: tailwindcss's preflight, Vite's preload
+  helper, Rolldown's runtime). A license that `about.toml`'s `accepted` list does not name, an npm
+  package without a `license` field or license text (unless `TEXT_FROM` maps it to one that has
+  it), or a dependency that is not installed fails the run. `ci.yml`'s `frontend` job runs it on
+  every pull request, so a dependency bump that trips one of those fails before it reaches main.
+  `scripts/build-bundle.ps1` runs it before `tauri build`, adds the file through
+  `src-tauri/tauri.licenses.conf.json`, and checks that the build carries a byte-identical copy:
+  inside the `.app` for the dmg, and for NSIS next to the release binary, where tauri-build copies
+  each resource of the merged config. The NSIS installer embeds the generated file itself, from the
+  same merged config, so that copy proves the config reached the build. The bundle, release and frontend
+  jobs install a pinned cargo-about (`scripts/install-cargo-about.ps1`, SHA-256 checked;
+  `CARGO_ABOUT` overrides the binary the script runs). A plain local `bun run tauri build` leaves
+  the file out.
 - `tauri-plugin-updater` is built without its default `zip` feature. A Windows update is the signed
   NSIS installer and a macOS one the `.app.tar.gz`, both of which the plugin installs without it,
   so the `zip` crate and its advisories stay out of the build. Turn it back on only for a zipped
