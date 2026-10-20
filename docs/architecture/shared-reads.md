@@ -187,7 +187,9 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   lists and the preference, not the subscription dates (`rereadAccountListsAndPreference`).
   An account list that holds an `ending` date later than its last read (`dataUpdatedAt`) reads
   itself again, unforced, so the card shows `ended` as Rust decides it rather than deciding it
-  itself: a second after the nearest such date while it is ahead (`untilSignInEnds`, at most the
+  itself (the listing hands its ends to the Limits column, `Notify::listed`, and the Limits read is
+  announced when the column changed; the column also decides `ended` whenever it is served, so its
+  own poll shows it within five minutes even with no account list mounted): a second after the nearest such date while it is ahead (`untilSignInEnds`, at most the
   longest timer), then every minute once it has passed, until a read made after it lands. A closed
   window is only hidden, and an interval tick is skipped while the document is hidden;
   `refetchIntervalInBackground` stays off, since it would run the listing's Keychain reads in the
@@ -196,8 +198,8 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   nothing otherwise). A read that lands after the date schedules nothing more, even if Rust still
   says `ending`, and a list in an error state schedules nothing, so a list that keeps failing is
   not read again every minute with the signed-in store reads its listing makes. A saved
-  poll that changes a login's parked verdict announces the account list as well (Login state in
-  [accounts.md](accounts.md#login-state)).
+  poll that changes a login's parked verdict reaches the Limits column with that Limits read's own
+  announcement and announces no account list (Login state in [accounts.md](accounts.md#login-state)).
 - **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not
   the screen, decides which accounts are due, including an active account close to its limit.
 

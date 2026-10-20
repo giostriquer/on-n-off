@@ -173,8 +173,8 @@ The epoch and the recovery journal are private to the store.
 ## Login state
 
 Every listed profile carries one login state (`loginState` on `ProfileDto`, `LoginState` in
-`accounts/login_state.rs`), and it is all a Limits card reads to ask for a new sign-in, for every
-provider:
+`accounts/login_state.rs`), and so does the profile on each Limits column entry; it is all a Limits
+card reads to ask for a new sign-in, for every provider:
 
 - `usable`: nothing says otherwise;
 - `ending`, with the date its sign-in ends: the adapter knows the date (Claude's
@@ -191,9 +191,20 @@ account's state is its date alone, `usable`, `ending` or `ended`, never `missing
 `otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
 failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
 in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
-account list is read; the UI reads the account list again just after the nearest `ending` date
-it has not been read since, and when the window shows again after such a date passed while it was
-hidden ([shared-reads.md](shared-reads.md)).
+account list is read and whenever the Limits column is served; the UI reads the account list again
+just after the nearest `ending` date it has not been read since, and when the window shows again
+after such a date passed while it was hidden ([shared-reads.md](shared-reads.md)).
+
+The Limits column states each profile as the account list would (`Listed::in_column`,
+`accounts/roster.rs`, from the same `LoginState::of`), from facts it already holds and with no
+login, Keychain item or stamp read: signed in for the account of the read the column is served
+with (its current card), not the native store's; the date from the ends the account list last
+handed over (`Notify::listed`), else the end recorded on the profile (`sign_in_end`, recorded when a
+login is saved and when a home's is first read), never by opening the login; and the verdict the
+saved poll parked, from memory (`usage::recorded_parked`), while the vault login still has the
+fingerprint it was parked for (the vault is already unlocked for the roster) or the profile keeps the
+home it was parked in. A new login in the same home shows once the saved poll reads it, which the
+Limits read that follows the account change runs.
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's
@@ -223,12 +234,10 @@ the same refusal in the vault waited for a new login.
 The poll's attempts live in memory, as its holds always have, and are not kept across a restart:
 the first saved poll after a restart finds nothing held, reads every saved login and parks a
 refused one again, so the state comes back within one Limits read; until then the listing says
-usable, or ending or ended from the date. A poll that changes a profile's parked verdict, or the
-generation a verdict is parked for, says so (`hold_back` compares the attempt it records with the
-one it replaces), and the Limits read that ran it announces the account list once its cache lock
-is released
-(`limits_refresh::read_provider`), as it does for an account it unarchived. The account list
-answers unforced, which reads the verdicts and polls nothing, so the exchange ends there.
+usable, or ending or ended from the date. A poll that parks or clears a verdict changes the roster
+its saved refresh lists for the Limits column, so the Limits read that ran it carries the new state
+with its own announcement; the account list is not announced for it, since nothing outside Limits
+shows a login state, and reads the verdicts when it is next read.
 
 ## Provider adapters
 

@@ -77,11 +77,11 @@ and the menu-bar popover show the same column.
 _Avoid_: card list, roster (the saved profiles it reads)
 
 **Signed-in state**:
-Whether a card's account is the one the provider's CLI uses: confirmed when its saved profile, or
-without one its read, says so and the account list names it; unconfirmed while the account list has
-yet to name it, as just after a switch; no otherwise. Every action that acts on the signed-in login
-waits for confirmed. A card's place in its column follows the read instead, so a signed-out read
-still leads.
+Whether a card's account is the one the provider's CLI uses: confirmed when the provider's own read,
+which leads the column, names it and the account list names it too; unconfirmed while the account
+list has yet to name it, as just after a switch; no otherwise. Every action that acts on the
+signed-in login waits for confirmed. A read that names no account still leads its column, with no
+card signed in.
 _Avoid_: active, current
 
 **Card action plan**:
