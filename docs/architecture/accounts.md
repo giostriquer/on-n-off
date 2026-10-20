@@ -70,12 +70,18 @@ remembering, a sign-in's publication, a switch's capture of the outgoing login),
 home at check-in, the move out of it at check-out, and a forgotten home taken back. A profile an
 older version wrote has no record; its home is read once (`Home::sign_in_deadline`, through the
 store's own read) and what that read found, a date or none, is recorded with a metadata change
-(`ChangeKind::Metadata`), so a home is read at most once, never once per listing. The limit: a
+(`ChangeKind::Metadata`), so a home is read at most once, never once per listing. A read that
+fails, a Keychain prompt denied or unanswered or a file that cannot be read, records none too, on
+purpose, so it never asks again; that home shows no date until on-n-off next holds its login. The limit: a
 login replaced in its home outside on-n-off, by running `claude /login` with that config dir, keeps
 the date recorded for the login it replaced until on-n-off next holds the login. A sign-in awaiting use is newer than
 whatever the default store still holds for its account, so it reads only its own login; otherwise
 the default store's date comes first. The card warns through the last seven days ([PROVIDERS.md](../../PROVIDERS.md)). The date survives
-Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when.
+Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when
+for a saved account, in the vault or its home. It does not for a signed-in account with no saved
+login: once Claude Code empties its ended login, the default store holds no login, so the account
+is no longer the signed-in one and lists as `missing`, its card offering Sign in without the
+Sign-in ended tag.
 
 Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
 signed-in account, or the account's home. The issuer replaces a refresh token each time it renews
@@ -185,8 +191,8 @@ account's state is its date alone, `usable`, `ending` or `ended`, never `missing
 `otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
 failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
 in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
-account list is read; the UI reads the account list again once the nearest `ending` date has
-passed ([shared-reads.md](shared-reads.md)).
+account list is read; the UI reads the account list again once, just after the nearest `ending`
+date still ahead ([shared-reads.md](shared-reads.md)).
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's

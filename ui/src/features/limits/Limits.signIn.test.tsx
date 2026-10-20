@@ -148,6 +148,24 @@ describe("a Claude sign-in's end", () => {
     expect(within(card).getByText("Claude ended this sign-in on Aug 17. Sign in again to use this account.")).toBeTruthy();
     expect(readAccounts.mock.calls.length).toBeGreaterThan(reads);
   });
+
+  it("asks the account list once after its date, and not again while the list keeps failing", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(NOW));
+    answer([okClaude()], [profile(ending(new Date(Date.parse(NOW) + 30_000).toISOString()))]);
+    renderLimits();
+    const card = await signedInCard();
+    expect(await within(card).findByRole("button", { name: "Claude sign-in ends Aug 17" })).toBeTruthy();
+    readAccounts.mockImplementation(() => Promise.reject(new Error("The account vault is locked.")));
+    const reads = readAccounts.mock.calls.length;
+
+    await act(async () => { vi.advanceTimersByTime(60_000); });
+    const afterTheDate = readAccounts.mock.calls.length;
+    await act(async () => { vi.advanceTimersByTime(10 * 60_000); });
+
+    expect(afterTheDate).toBe(reads + 1);
+    expect(readAccounts.mock.calls.length, "read again while it keeps failing").toBe(afterTheDate);
+  });
 });
 
 describe("a saved login its provider refused", () => {

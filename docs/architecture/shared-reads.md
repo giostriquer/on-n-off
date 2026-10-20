@@ -170,9 +170,12 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   (`["subscription", "codex", …]`). An account change in the window (`accountChanged`) re-reads
   both and that provider's limits; the shell's Refresh and the remembering toggle re-read the
   lists and the preference, not the subscription dates (`rereadAccountListsAndPreference`).
-  An account list that holds an `ending` login state reads itself again, unforced, once the
-  nearest of those dates has passed (`untilSignInEnds`: at least a minute, at most the longest
-  timer), so the card shows `ended` as Rust decides it rather than deciding it itself. A saved
+  An account list that holds an `ending` login state reads itself again, unforced, once, a second
+  after the nearest of those dates still ahead (`untilSignInEnds`, at most the longest timer), so
+  the card shows `ended` as Rust decides it rather than deciding it itself. A date already passed
+  schedules nothing, and neither does a list that failed, so a list that keeps failing, or keeps
+  saying `ending` after the date, is not read again every minute with the signed-in store reads
+  its listing makes. A saved
   poll that changes a login's parked verdict announces the account list as well (Login state in
   [accounts.md](accounts.md#login-state)).
 - **Limits poll the cache at least every five minutes** (`limitsRefreshMs`): the shared cache, not

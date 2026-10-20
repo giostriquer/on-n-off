@@ -10,7 +10,7 @@ const ACCOUNTS = ["accounts"] as const;
 const CODEX_SUBSCRIPTIONS = ["subscription", "codex"] as const;
 const ANNOUNCED = [ACCOUNTS, CODEX_SUBSCRIPTIONS] as const;
 const DAY_MS = 24 * 60 * 60_000;
-const MINUTE_MS = 60_000;
+const JUST_AFTER_MS = 1_000;
 const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 function accountListKey(provider: AccountProvider) {
@@ -26,17 +26,17 @@ export function accountListQuery(provider: AccountProvider) {
     queryKey: accountListKey(provider),
     queryFn: () => api.readAccounts(provider),
     retry: false,
-    refetchInterval: (query) => untilSignInEnds(query.state.data, Date.now()),
+    refetchInterval: (query) => query.state.status === "error" ? false : untilSignInEnds(query.state.data, Date.now()),
   });
 }
 
 export function untilSignInEnds(reading: AccountsReading | undefined, now: number): number | false {
-  const ends = (reading?.profiles ?? []).flatMap(({ loginState }) => {
+  const ahead = (reading?.profiles ?? []).flatMap(({ loginState }) => {
     const until = loginState.state === "ending" ? parseInstant(loginState.endsAt) : null;
-    return until === null ? [] : [until - now];
+    return until !== null && until > now ? [until - now] : [];
   });
-  if (ends.length === 0) return false;
-  return Math.min(Math.max(Math.min(...ends), MINUTE_MS), LONGEST_TIMER_MS);
+  if (ahead.length === 0) return false;
+  return Math.min(Math.min(...ahead) + JUST_AFTER_MS, LONGEST_TIMER_MS);
 }
 
 export function accountCategoriesQuery() {
