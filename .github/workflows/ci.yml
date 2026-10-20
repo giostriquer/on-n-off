@@ -68,6 +68,20 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
+      # The installers' license notice, generated on every pull request so that a dependency
+      # bump bringing a new license or a package without license text fails here, not on main.
+      # cargo-about reads only `cargo metadata` and the fetched crates, so the image's stable cargo
+      # does.
+      - name: Install cargo-about
+        if: ${{ !cancelled() }}
+        run: ./scripts/install-cargo-about.ps1
+
+      - name: Check the bundled license notice
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          RUSTUP_TOOLCHAIN: stable
+        run: bun scripts/third-party-licenses.mjs (Join-Path $env:RUNNER_TEMP "THIRD_PARTY_LICENSES.md")
+
   # The card and popover header layout rules, measured in headless Chromium; a required check
   # (docs/development.md, Visual verification).
   layout:

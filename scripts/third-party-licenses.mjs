@@ -1,10 +1,10 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const LICENSE_FILE = /^(licen[cs]e|copying|notice)/i;
+const BUILD_OUTPUT = ["rolldown", "tailwindcss", "vite"];
 const TEXT_FROM = {
   "@tauri-apps/plugin-dialog": "@tauri-apps/api",
   "@tauri-apps/plugin-process": "@tauri-apps/api",
@@ -25,20 +25,31 @@ function resolvePackage(root, name, from) {
 }
 
 function licenseTexts(dir) {
-  return readdirSync(dir)
-    .filter((file) => LICENSE_FILE.test(file) && !/\.spdx$/i.test(file))
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && LICENSE_FILE.test(entry.name) && !/\.spdx$/i.test(entry.name))
+    .map((entry) => entry.name)
     .sort(byText)
     .map((file) => readFileSync(join(dir, file), "utf8").trim());
 }
 
-export function npmPackages(root) {
+function describe(dir) {
+  const manifest = readJson(join(dir, "package.json"));
+  if (!manifest.license) throw new Error(`${label(manifest)} declares no license`);
+  return { manifest, entry: { name: manifest.name, version: manifest.version, license: manifest.license, texts: licenseTexts(dir) } };
+}
+
+export function npmPackages(root, buildOutput = BUILD_OUTPUT) {
   const found = new Map();
+  const add = (dir) => {
+    const { manifest, entry } = describe(dir);
+    const key = `${entry.name}@${entry.version}`;
+    if (found.has(key)) return null;
+    found.set(key, entry);
+    return manifest;
+  };
   const visit = (dir) => {
-    const manifest = readJson(join(dir, "package.json"));
-    const key = `${manifest.name}@${manifest.version}`;
-    if (found.has(key)) return;
-    found.set(key, { name: manifest.name, version: manifest.version, license: manifest.license, texts: licenseTexts(dir) });
-    walk(manifest, dir, label(manifest));
+    const manifest = add(dir);
+    if (manifest) walk(manifest, dir, label(manifest));
   };
   const walk = (manifest, dir, owner) => {
     const optional = new Set(Object.keys(manifest.optionalDependencies ?? {}));
@@ -50,6 +61,11 @@ export function npmPackages(root) {
     }
   };
   walk(readJson(join(root, "package.json")), root, "the app");
+  for (const name of buildOutput) {
+    const resolved = resolvePackage(root, name, root);
+    if (!resolved) throw new Error(`${name}, which the build emits into the app, is not installed`);
+    add(resolved);
+  }
   const packages = [...found.values()];
   for (const entry of packages.filter((candidate) => candidate.texts.length === 0)) {
     const source = packages.find((candidate) => candidate.name === TEXT_FROM[entry.name] && candidate.texts.length > 0);
@@ -78,11 +94,9 @@ function grouped(entries) {
   return groups.values();
 }
 
-export function renderLicenses(about, npm, appCrate) {
+export function renderLicenses(about, npm) {
   const crates = about.licenses.flatMap((license) =>
-    license.used_by
-      .filter(({ crate }) => crate.name !== appCrate)
-      .map(({ crate }) => ({ heading: `${license.name} (${license.id})`, text: license.text.trim(), user: label(crate) })),
+    license.used_by.map(({ crate }) => ({ heading: `${license.name} (${license.id})`, text: license.text.trim(), user: label(crate) })),
   );
   const packages = npm.map((entry) => ({ heading: entry.license, text: entry.texts.join("\n\n"), user: label(entry) }));
   return [
@@ -99,15 +113,14 @@ if (import.meta.main) {
   const root = join(dirname(fileURLToPath(import.meta.url)), "..");
   const manifest = join(root, "src-tauri", "Cargo.toml");
   const output = process.argv[2] ?? join(root, "src-tauri", "gen", "THIRD_PARTY_LICENSES.md");
-  const scratch = mkdtempSync(join(tmpdir(), "on-n-off-licenses-"));
-  try {
-    execFileSync("cargo", ["fetch", "--locked", "--manifest-path", manifest], { stdio: "inherit" });
-    const json = join(scratch, "about.json");
-    execFileSync(process.env.CARGO_ABOUT ?? "cargo-about", ["generate", "--format", "json", "--locked", "--offline", "--fail", "--manifest-path", manifest, "--output-file", json], { stdio: "inherit" });
-    mkdirSync(dirname(output), { recursive: true });
-    writeFileSync(output, renderLicenses(readJson(json), npmPackages(root), "on-n-off"));
-    console.log(`wrote ${output}`);
-  } finally {
-    rmSync(scratch, { recursive: true, force: true });
-  }
+  execFileSync("cargo", ["fetch", "--locked", "--manifest-path", manifest], { stdio: "inherit" });
+  const about = execFileSync(process.env.CARGO_ABOUT ?? "cargo-about", ["generate", "--format", "json", "--locked", "--offline", "--fail", "--manifest-path", manifest], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "inherit"],
+    maxBuffer: 1 << 30,
+  });
+  const notice = renderLicenses(JSON.parse(about), npmPackages(root));
+  mkdirSync(dirname(output), { recursive: true });
+  writeFileSync(output, notice);
+  console.log(`wrote ${output}`);
 }

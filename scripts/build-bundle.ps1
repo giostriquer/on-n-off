@@ -27,6 +27,7 @@ $formats = @{
         UpdaterDirectory = "nsis"
         UpdaterName = "on-n-off_${ReleaseVersion}_x64-setup.exe"
         UpdaterStagedName = "on-n-off_${ReleaseVersion}_x64-setup.exe"
+        Licenses = @("THIRD_PARTY_LICENSES.md")
     }
     dmg = @{
         Bundles = "app,dmg"
@@ -36,10 +37,12 @@ $formats = @{
         UpdaterDirectory = "macos"
         UpdaterName = "on-n-off.app.tar.gz"
         UpdaterStagedName = "on-n-off_${ReleaseVersion}_aarch64.app.tar.gz"
+        Licenses = @("bundle", "macos", "on-n-off.app", "Contents", "Resources", "THIRD_PARTY_LICENSES.md")
     }
 }
 $format = $formats[$InstallerKind]
-$bundleRoot = Join-Path $RepositoryRoot "src-tauri" "target" "release" "bundle"
+$releaseRoot = Join-Path $RepositoryRoot "src-tauri" "target" "release"
+$bundleRoot = Join-Path $releaseRoot "bundle"
 $generatedLicenses = Join-Path $RepositoryRoot "src-tauri" "gen" "THIRD_PARTY_LICENSES.md"
 $installerDirectory = Join-Path $bundleRoot $format.InstallerDirectory
 
@@ -48,7 +51,7 @@ if (-not $ValidateOnly) {
     Push-Location $RepositoryRoot
     try {
         $env:ON_N_OFF_INSTALLER_KIND = $InstallerKind
-        & bun "scripts/third-party-licenses.mjs" $generatedLicenses
+        & bun "scripts/third-party-licenses.mjs"
         if ($LASTEXITCODE -ne 0) {
             throw "Generating THIRD_PARTY_LICENSES.md failed with exit code $LASTEXITCODE."
         }
@@ -85,13 +88,14 @@ Write-Output "installer=$installerPath"
 if (-not (Test-Path -LiteralPath $generatedLicenses -PathType Leaf)) {
     throw "The license notice was not generated: $generatedLicenses"
 }
-if ($InstallerKind -eq "dmg") {
-    $bundledLicenses = Join-Path $bundleRoot "macos" "on-n-off.app" "Contents" "Resources" "THIRD_PARTY_LICENSES.md"
-    if (-not (Test-Path -LiteralPath $bundledLicenses -PathType Leaf)) {
-        throw "The app bundle is missing its license notice: $bundledLicenses"
-    }
-    Write-Output "licenses=$bundledLicenses"
+$carriedLicenses = Join-Path $releaseRoot @($format.Licenses)
+if (-not (Test-Path -LiteralPath $carriedLicenses -PathType Leaf)) {
+    throw "The $InstallerKind build does not carry its license notice: $carriedLicenses"
 }
+if ((Get-FileHash -LiteralPath $carriedLicenses).Hash -ne (Get-FileHash -LiteralPath $generatedLicenses).Hash) {
+    throw "The license notice the $InstallerKind build carries differs from the generated one: $carriedLicenses"
+}
+Write-Output "licenses=$carriedLicenses"
 
 $updaterPath = $null
 $signaturePath = $null

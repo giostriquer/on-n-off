@@ -7,6 +7,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/giostriquer/on-n-off"
 homepage = "https://github.com/giostriquer/on-n-off"
+publish = false
 
 [lints.rust]
 # Unsafe stays opt-in per module: the Windows side notch needs raw Win32 calls, and each

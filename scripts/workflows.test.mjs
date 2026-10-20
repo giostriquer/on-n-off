@@ -86,7 +86,7 @@ test("only pull request runs cancel an in-progress run", { skip }, () => {
 
 test("a failing frontend check does not hide the result of the next one", { skip }, () => {
   const frontend = load("ci").jobs.frontend;
-  for (const name of ["Type-check frontend", "Test release scripts and workflow contracts"]) {
+  for (const name of ["Type-check frontend", "Test release scripts and workflow contracts", "Check the bundled license notice"]) {
     assert.match(String(step(frontend, name).if), /!cancelled\(\)/, name);
   }
 });
@@ -483,8 +483,30 @@ test("every installer build installs the pinned cargo-about first, for the bundl
   for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
     const install = step(job, "Install cargo-about");
     assert.equal(install.run, "./scripts/install-cargo-about.ps1", name);
+    assert.equal(install.if, undefined, `${name} installs cargo-about for every installer kind`);
     const build = job.steps.findIndex((candidate) => /scripts\/build-bundle\.ps1/.test(candidate.run ?? ""));
     assert.notEqual(build, -1, `${name} builds no bundle`);
     assert.ok(install.index < build, `${name} installs cargo-about before it builds the bundle`);
   }
+});
+
+test("every pull request generates the license notice, so a new license fails before it reaches main", { skip }, () => {
+  const frontend = load("ci").jobs.frontend;
+  const install = step(frontend, "Install cargo-about");
+  const check = step(frontend, "Check the bundled license notice");
+  assert.equal(install.run, "./scripts/install-cargo-about.ps1");
+  assert.ok(install.index < check.index);
+  assert.match(check.run, /^bun scripts\/third-party-licenses\.mjs /);
+  assert.equal(check.env.RUSTUP_TOOLCHAIN, "stable");
+  assert.equal(check["continue-on-error"], undefined);
+});
+
+test("cargo-about reads the same shipped targets cargo-deny audits, and leaves out what never ships", { skip: globalThis.Bun?.TOML ? false : "needs Bun's TOML parser" }, () => {
+  const toml = (path) => globalThis.Bun.TOML.parse(readFileSync(join(root, "src-tauri", path), "utf8"));
+  const about = toml("about.toml");
+  assert.deepEqual([...about.targets].sort(), [...toml("deny.toml").graph.targets].sort());
+  assert.equal(about["ignore-build-dependencies"], true);
+  assert.equal(about["ignore-dev-dependencies"], true);
+  assert.deepEqual(about.private, { ignore: true });
+  assert.match(readFileSync(join(root, "src-tauri", "Cargo.toml"), "utf8"), /^publish = false$/m, "private.ignore leaves out only crates that are not published");
 });
