@@ -1,5 +1,5 @@
 use chacha20poly1305::{
-    aead::{Aead, AeadCore, KeyInit, OsRng},
+    aead::{Aead, Generate, KeyInit},
     XChaCha20Poly1305, XNonce,
 };
 use std::{
@@ -12,19 +12,20 @@ use std::{
 const MAGIC: &[u8] = b"ONOFF-ACCOUNTS-1\0";
 pub fn seal(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
     let cipher = XChaCha20Poly1305::new(key.into());
-    let nonce = XChaCha20Poly1305::generate_nonce(&mut OsRng);
+    let nonce = XNonce::try_generate().map_err(|_| "Could not encrypt saved profiles.")?;
     let encrypted = cipher
         .encrypt(&nonce, data)
         .map_err(|_| "Could not encrypt saved profiles.")?;
     Ok([MAGIC, nonce.as_slice(), &encrypted].concat())
 }
 pub fn unseal(key: &[u8; 32], data: &[u8]) -> Result<Vec<u8>, String> {
-    let data = data
+    let (nonce, ciphertext) = data
         .strip_prefix(MAGIC)
-        .filter(|v| v.len() >= 40)
+        .and_then(<[u8]>::split_first_chunk::<24>)
+        .filter(|(_, ciphertext)| ciphertext.len() >= 16)
         .ok_or("Invalid or unsupported account vault.")?;
     XChaCha20Poly1305::new(key.into())
-        .decrypt(XNonce::from_slice(&data[..24]), &data[24..])
+        .decrypt(&XNonce::from(*nonce), ciphertext)
         .map_err(|_| {
             "The account vault could not be unlocked or is damaged. It has not been replaced."
                 .into()
@@ -104,7 +105,8 @@ fn read_key(scope: &str, create: bool) -> KeyResult {
             .try_into()
             .map_err(|_| "Invalid account vault key.".into()),
         Err(keyring::Error::NoEntry) if create => {
-            let key = XChaCha20Poly1305::generate_key(&mut OsRng);
+            let key = chacha20poly1305::Key::try_generate()
+                .map_err(|_| "Could not create the account vault key.")?;
             entry.set_secret(&key).map_err(|_| {
                 "Could not protect the account vault key. Allow access to the OS credential store."
             })?;

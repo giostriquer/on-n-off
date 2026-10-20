@@ -174,7 +174,10 @@ cannot be read, so it was left alone."). Keychain entries an earlier version lef
 are not found: on-n-off never lists the Keychain, and the path each one hashes is gone.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
-staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:
+staging files. A fresh random nonce protects each write. Its layout, `ONOFF-ACCOUNTS-1\0`, then the
+24-byte nonce, then the ciphertext and its 16-byte tag, is a compatibility contract:
+`accounts/vault/tests.rs` opens a vault sealed by chacha20poly1305 0.10.1, so an upgrade of the
+AEAD crate cannot strand saved logins. A 32-byte key is stored with the OS:
 macOS Keychain or Windows Credential Manager. Large OAuth payloads never have to fit into one
 Windows credential entry. A damaged vault or unavailable key fails closed. The 32-byte encryption key stays in memory after
 one unlock per storage root and app session; it is read from the OS store again after restart.

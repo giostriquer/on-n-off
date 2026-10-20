@@ -1,4 +1,9 @@
 use super::*;
+const SEALED_BY_CHACHA20POLY1305_0_10: &str = concat!(
+    "4f4e4f46462d4143434f554e54532d3100090909090909090909090909090909090909090909090909c55092f813cc10",
+    "0e91612a06332e2bc94c9acfee3513f8c39caf6b39b24a363fa24839fbb1e3d43764148ee778b1c6fe66b819281f279b",
+    "7acbc48473ad1f19f32dd27b234ee34cd8e69f1b0a6e",
+);
 #[test]
 fn authenticates_large_credentials_without_plaintext_on_disk() {
     let data = "refresh-secret".repeat(1000);
@@ -13,6 +18,20 @@ fn authenticates_large_credentials_without_plaintext_on_disk() {
     *damaged.last_mut().unwrap() ^= 1;
     assert!(unseal(&key, &damaged).is_err());
     assert_ne!(seal(&key, data.as_bytes()).unwrap(), encrypted);
+}
+#[test]
+fn a_vault_sealed_before_the_aead_upgrade_still_opens_and_new_seals_keep_its_layout() {
+    let sealed = crate::sha::hex_bytes(SEALED_BY_CHACHA20POLY1305_0_10);
+    let plain = br#"{"profiles":[],"fixture":"sealed by chacha20poly1305 0.10.1"}"#;
+    assert_eq!(unseal(&[7; 32], &sealed).unwrap(), plain);
+    let resealed = seal(&[7; 32], plain).unwrap();
+    assert_eq!(resealed.len(), sealed.len());
+    assert_eq!(&resealed[..MAGIC.len()], MAGIC);
+    assert_ne!(
+        &resealed[MAGIC.len()..MAGIC.len() + 24],
+        &sealed[MAGIC.len()..MAGIC.len() + 24]
+    );
+    assert_eq!(unseal(&[7; 32], &resealed).unwrap(), plain);
 }
 #[test]
 fn private_atomic_replacement_preserves_complete_document() {
