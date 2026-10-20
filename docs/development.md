@@ -84,7 +84,9 @@ source carries no comments (see [Code comments](#code-comments)).
   per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: the table is keyed by the
   catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and
-  reusing a feature means reusing that implementation. A new header tag kind (`cardTags.ts`)
+  reusing a feature means reusing that implementation. Whether a saved login must sign in again is
+  no feature: the card reads the profile's login state (`loginState.ts`, from
+  `accounts/login_state.rs`), the same for every provider. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
   order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.

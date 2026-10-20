@@ -255,7 +255,9 @@ app-server for a saved profile would write its credential to disk. Neither renew
 Claude Code renews a home's login, a Codex login on-n-off owns renews before its read, and one it
 does not own is never renewed. A saved read tells a refused login, one that now signs in as another
 account and a rate limit apart (its read outcome, below), and the poll backs off accordingly: a
-vault login refused, or now signing in as another account, waits for a new login; any other failure
+login refused, or now signing in as another account, waits for a new login, in the vault or in its
+home alike, and the account list says so as the profile's login state
+([accounts.md](accounts.md#login-state)); any other failure
 waits the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
 or a rate limit's Retry-After when that is longer. Every card a
 saved poll produces says so (`saved_profile`), which is how the UI knows a remembered reading from a
@@ -283,9 +285,9 @@ Around it, one function per read context gives its caller the rest:
   backoff (a failed card does) and how long a Retry-After holds the next read, and serves the
   failure with the cards.
 - `saved` gives a saved poll its `SavedVerdict`: the message, how long a Retry-After holds the
-  next poll, and whether a vault login is parked until a new one (an ended login, or one that now
-  signs in as another account); an account home is never parked. A saved card that failed always
-  reads failed.
+  next poll, and whether the login is parked until a new one, and as what (`Parked`): refused, for
+  a login the provider refused or found signed out, or another account. A login in its home parks
+  as one in the vault does. A saved card that failed always reads failed.
 - `saved_card` and `first_usage` decide acceptance, a reading with something observed for the
   expected account. They are the only makers of `Accepted`, the type the accounts adapters'
   `read_usage`, an account home's `read_usage` and a sign-in's `first_usage` hand back, so the saved
@@ -308,6 +310,12 @@ state (or none, for a provider without an account manager), the card's own archi
 flight and whether an automatic banked reset is waiting for its account. It returns the ⋯ menu in
 order and the footer: the main button (Cancel sign-in, Sign in again, Archive account, Save
 account, Sign in or Use account), the Switch anyway confirmation, and the banked reset controls.
+Whether a saved login must sign in again is the profile's login state alone, for every provider
+(`LimitCard.login`, `ui/src/features/limits/loginState.ts`): ended, refused or another account put
+Sign in again in the main button's place, and for a refused login or another account the menu
+keeps Use account, since the client that owns the login may still renew it once it is used; a
+missing login offers Sign in. The same state gives the card its sign-in tag and, when it asks for
+a new sign-in, its message in place of the read's.
 Each entry carries what its handler needs, `useCardActions` binds a handler to each and
 `LimitCardFrame` draws them. The banked reset controls depend only on the provider's feature and
 the card's reading, never on an account manager, and a waiting automatic reset keeps its countdown and Cancel while Switch anyway is
@@ -639,7 +647,8 @@ the code today; a change that moves one updates its row.
 | Read outcome | `limits/outcome.rs`: `ReadFailure` and `Read`, which every reader returns; the wording table `message` (with `Context` and `Saved`); the per-context mappings `signed_in` (with `NativeOutcome`), `saved` (`SavedVerdict`), `saved_card` and `first_usage` (the only makers of `Accepted`) and `verified`; the wording facts are `LimitsFacts` in the provider catalogue |
 | Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`, with the Retry-After floor its `NativeOutcome` gives, held only while the native login is the one it was read for), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects); `accounts/muse_store.rs` reads Muse Code's device login for its Limits read only |
-| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
+| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`); its usage is polled in `accounts/usage.rs` by one path (`poll`, which attempts, holds and parks a login by its `Generation`) for a login in the vault (`poll_vault`, through the provider's Limits reader, `Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`, `read_saved_muse`) and one in its home (`poll_home`, `Home::read_usage`: Claude Code's own report, `read_usage` in `limits/claude_cli.rs`, or Muse's key-mint read), and its card carries `saved_profile` |
+| Login state | `LoginState` (`accounts/login_state.rs`), on each listed profile as `loginState` (`ProfileDto`, `accounts::list`), from the profile's logins, its `Deadline` (the adapters' `sign_in_deadline`) and what the saved poll parked (`usage::parked`, kept in memory with the poll's holds, `accounts/usage.rs`); read by the card model as `LimitCard.login` through `loginStateOf` and presented by `signInPresentation` (`ui/src/features/limits/loginState.ts`) |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |

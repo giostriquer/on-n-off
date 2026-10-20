@@ -84,7 +84,7 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
     let before = std::fs::read(home.path().join(".on-n-off/accounts/vault.enc")).unwrap();
-    let result = poll_with(
+    let result = poll_vault(
         home.path(),
         &p,
         &ticket(home.path()),
@@ -114,7 +114,7 @@ fn a_successful_saved_read_persists_numbers_without_changing_the_vault_login() {
 fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    let result = poll_with(
+    let result = poll_vault(
         home.path(),
         &p,
         &ticket(home.path()),
@@ -138,7 +138,7 @@ fn a_login_replaced_without_an_account_change_during_http_discards_the_late_read
 fn an_unrelated_account_change_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    let result = poll_with(
+    let result = poll_vault(
         home.path(),
         &p,
         &ticket(home.path()),
@@ -160,7 +160,7 @@ fn an_unrelated_account_change_during_http_discards_the_late_read() {
 fn a_pending_recovery_during_http_discards_the_late_read() {
     let home = tempfile::tempdir().unwrap();
     let p = stored(home.path());
-    let result = poll_with(
+    let result = poll_vault(
         home.path(),
         &p,
         &ticket(home.path()),
@@ -190,7 +190,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     let p = stored(home.path());
     let calls = Cell::new(0);
     for force in [false, true, true] {
-        let result = poll_with(
+        let result = poll_vault(
             home.path(),
             &p,
             &ticket(home.path()),
@@ -215,7 +215,7 @@ fn forced_refresh_respects_rate_limit_backoff_per_account() {
     other.id = "other-profile".into();
     other.identity.user_id = "other".into();
     rewrite(home.path(), |db| db.profiles.push(other.clone()));
-    assert!(poll_with(
+    assert!(poll_vault(
         home.path(),
         &other,
         &ticket(home.path()),
@@ -254,7 +254,7 @@ fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry
     let failed = |retry| {
         Some(SavedVerdict {
             message: "failed".into(),
-            parks_login: false,
+            parks: None,
             retry: Duration::from_secs(retry),
         })
     };
@@ -272,17 +272,17 @@ fn a_saved_poll_that_keeps_failing_waits_the_limits_failure_backoff_or_its_retry
         ] {
             let attempts = Mutex::default();
             let previous = Attempt {
-                fingerprint: "login".into(),
+                generation: Generation::Vault("login".into()),
                 next: Instant::now(),
                 failures: before,
                 error: Some("failed".into()),
-                rejected: false,
+                parked: None,
             };
             let start = Instant::now();
             hold_back(
                 &attempts,
                 "key".into(),
-                "login".into(),
+                Generation::Vault("login".into()),
                 (before > 0).then_some(&previous),
                 outcome,
                 interval,
@@ -322,7 +322,7 @@ fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
         let verdict = outcome::saved(p.identity.provider, Saved::Login, &error, 0);
         let fetches = Cell::new(0);
         let poll = || {
-            poll_with(
+            poll_vault(
                 home.path(),
                 &p,
                 &ticket(home.path()),
@@ -338,11 +338,7 @@ fn a_poll_that_read_nothing_says_why_and_replays_it_while_held_back() {
             )
         };
         assert_eq!(poll(), Some(Err(verdict.message.clone())), "{error:?}");
-        assert_eq!(
-            attempt(home.path(), &p).rejected,
-            verdict.parks_login,
-            "{error:?}"
-        );
+        assert_eq!(attempt(home.path(), &p).parked, verdict.parks, "{error:?}");
         assert_eq!(poll(), Some(Err(verdict.message)), "{error:?}");
         assert_eq!(fetches.get(), 1, "{error:?}");
     }
@@ -354,7 +350,7 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     let p = stored(home.path());
     std::fs::write(home.path().join(".on-n-off/limits"), "").unwrap();
     let poll = || {
-        poll_with(
+        poll_vault(
             home.path(),
             &p,
             &ticket(home.path()),
@@ -373,8 +369,8 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
     assert_eq!(card.reading.windows, reading(&p).reading.windows);
     let recorded = attempt(home.path(), &p);
     assert_eq!(recorded.error.as_deref(), Some(message));
-    assert!(
-        !recorded.rejected,
+    assert_eq!(
+        recorded.parked, None,
         "a new login is not needed to read again"
     );
     assert_eq!(recorded.failures, 1);
@@ -386,49 +382,11 @@ fn a_reading_that_could_not_be_saved_is_shown_and_retried() {
 }
 
 #[test]
-fn a_new_credential_retries_a_previously_rejected_account() {
-    let home = tempfile::tempdir().unwrap();
-    let mut p = stored(home.path());
-    assert!(poll_with(
-        home.path(),
-        &p,
-        &ticket(home.path()),
-        false,
-        &|| Ok(open(home.path())),
-        &|p| {
-            FetchResult {
-                login: p.login.clone(),
-                result: Err(ReadFailure::LoginRefused),
-            }
-        }
-    )
-    .unwrap()
-    .is_err());
-    p.login.as_mut().unwrap().auth["claudeAiOauth"]["accessToken"] = json!("new-access");
-    rewrite(home.path(), |db| db.profiles[0] = p.clone());
-    assert!(poll_with(
-        home.path(),
-        &p,
-        &ticket(home.path()),
-        false,
-        &|| Ok(open(home.path())),
-        &|p| {
-            FetchResult {
-                login: p.login.clone(),
-                result: Ok(answered(p)),
-            }
-        }
-    )
-    .unwrap()
-    .is_ok());
-}
-
-#[test]
 fn post_rotation_failures_keep_the_new_generation_backoff() {
     for rejected in [false, true] {
         let home = tempfile::tempdir().unwrap();
         let p = stored(home.path());
-        let result = poll_with(
+        let result = poll_vault(
             home.path(),
             &p,
             &ticket(home.path()),
@@ -450,7 +408,7 @@ fn post_rotation_failures_keep_the_new_generation_backoff() {
         );
         assert!(result.expect("rotation error must remain visible").is_err());
         let p = open(home.path()).load().unwrap().profiles.remove(0);
-        let result = poll_with(
+        let result = poll_vault(
             home.path(),
             &p,
             &ticket(home.path()),
@@ -471,21 +429,48 @@ fn a_cli_without_a_subscription_login_excludes_no_saved_account_from_polling() {
     rewrite(home.path(), |db| db.profiles[0] = p.clone());
     let calls = AtomicUsize::new(0);
     let mut entries = vec![];
-    refresh_with(
+    refresh_profiles(
         home.path(),
         AgentId::Codex,
         false,
         &mut entries,
         Ok(None),
-        &|| Ok(open(home.path())),
-        &|p| {
-            calls.fetch_add(1, Ordering::SeqCst);
-            FetchResult {
-                login: p.login.clone(),
-                result: Ok(answered(p)),
-            }
+        &Reads {
+            open: &|| Ok(open(home.path())),
+            homes: None,
+            fetch: &|p| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                FetchResult {
+                    login: p.login.clone(),
+                    result: Ok(answered(p)),
+                }
+            },
         },
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(entries[0].reading.windows[0].used_percent, 42.0);
+}
+
+pub(in crate::accounts) fn elapse(home: &Path) {
+    let prefix = format!("{}:", home.display());
+    if let Some(attempts) = ATTEMPTS.get() {
+        for (key, attempt) in attempts.lock().unwrap().iter_mut() {
+            if key.starts_with(&prefix) {
+                attempt.next = Instant::now();
+            }
+        }
+    }
+}
+
+pub(in crate::accounts) fn holds(home: &Path) -> Vec<(Instant, u32)> {
+    let prefix = format!("{}:", home.display());
+    ATTEMPTS.get().map_or_else(Vec::new, |attempts| {
+        attempts
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(key, _)| key.starts_with(&prefix))
+            .map(|(_, attempt)| (attempt.next, attempt.failures))
+            .collect()
+    })
 }

@@ -10,6 +10,7 @@ mod usage_renew;
 mod transaction;
 
 mod homes;
+mod login_state;
 
 pub(crate) mod claude;
 pub(crate) mod claude_store;
@@ -50,6 +51,7 @@ pub struct ProfileDto {
     archived: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     sign_in_ends_at: Option<String>,
+    login_state: login_state::LoginState,
 }
 #[derive(Default, Serialize)]
 #[serde(transparent)]
@@ -248,35 +250,6 @@ impl Accounts {
     }
 }
 
-fn sign_in_ends_at(
-    profile: &store::Profile,
-    native: Option<&model::SignInDeadline>,
-    homes: Option<&impl Fn(&str) -> Result<Box<dyn Home>, String>>,
-) -> Option<String> {
-    let own = |deadline: &model::SignInDeadline| {
-        (deadline.identity == profile.identity).then_some(deadline.ends_at_ms)
-    };
-    let native = || native.and_then(own);
-    let saved = || {
-        let vault = profile.login.as_ref().and_then(|login| {
-            view(profile.identity.provider, login)
-                .ok()?
-                .sign_in_deadline()
-        });
-        vault
-            .or_else(|| homes?(profile.home.as_deref()?).ok()?.sign_in_deadline())
-            .as_ref()
-            .and_then(own)
-    };
-    let ends_at_ms = if profile.pending_activation {
-        saved()
-    } else {
-        native().or_else(saved)
-    }?;
-    chrono::DateTime::from_timestamp_millis(ends_at_ms)
-        .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-}
-
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Accounts::live()?.list(provider)
 }
@@ -363,25 +336,37 @@ impl Accounts {
             .unwrap_or_default();
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
+        let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
+        let now_ms = chrono::Utc::now().timestamp_millis();
         Ok(AccountsDto {
             profiles: db
                 .profiles
                 .into_iter()
                 .filter(|p| p.identity.provider == provider)
-                .map(|p| ProfileDto {
-                    sign_in_ends_at: sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref()),
-                    needs_login: p.needs_login(),
-                    archived: archived.contains(&p.identity.observation_key()),
-                    category: categories.get(&p.identity.observation_key()).cloned(),
-                    observation_id: p.identity.observation_key(),
-                    legacy_id: p.identity.legacy_key(),
-                    active: current.as_ref() == Some(&p.identity),
-                    id: p.id,
-                    identity: p.identity,
-                    label: p.label,
-                    email: p.email,
-                    saved_at: p.saved_at,
-                    pending_activation: p.pending_activation,
+                .map(|p| {
+                    let active = current.as_ref() == Some(&p.identity);
+                    let deadline = login_state::Deadline::of(&p, native_deadline.as_ref(), homes);
+                    let parked = if active {
+                        None
+                    } else {
+                        usage::parked(home, &p, homes)
+                    };
+                    ProfileDto {
+                        sign_in_ends_at: deadline.spelled(),
+                        login_state: login_state::LoginState::of(&p, &deadline, parked, now_ms),
+                        needs_login: p.needs_login(),
+                        archived: archived.contains(&p.identity.observation_key()),
+                        category: categories.get(&p.identity.observation_key()).cloned(),
+                        observation_id: p.identity.observation_key(),
+                        legacy_id: p.identity.legacy_key(),
+                        active,
+                        id: p.id,
+                        identity: p.identity,
+                        label: p.label,
+                        email: p.email,
+                        saved_at: p.saved_at,
+                        pending_activation: p.pending_activation,
+                    }
                 })
                 .collect(),
             remember_accounts: discovery::enabled(home).unwrap_or(false),

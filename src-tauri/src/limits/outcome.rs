@@ -152,10 +152,16 @@ fn signed_in_status(failure: &ReadFailure) -> LimitsStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Parked {
+    Refused,
+    OtherAccount,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SavedVerdict {
     pub(crate) message: String,
-    pub(crate) parks_login: bool,
+    pub(crate) parks: Option<Parked>,
     pub(crate) retry: Duration,
 }
 
@@ -167,11 +173,11 @@ pub(crate) fn saved(
 ) -> SavedVerdict {
     SavedVerdict {
         message: message(provider, Context::Saved(saved), failure),
-        parks_login: saved == Saved::Login
-            && matches!(
-                failure,
-                ReadFailure::SignedOut | ReadFailure::LoginRefused | ReadFailure::OtherAccount
-            ),
+        parks: match failure {
+            ReadFailure::SignedOut | ReadFailure::LoginRefused => Some(Parked::Refused),
+            ReadFailure::OtherAccount => Some(Parked::OtherAccount),
+            _ => None,
+        },
         retry: failure.retry_floor(now_secs),
     }
 }

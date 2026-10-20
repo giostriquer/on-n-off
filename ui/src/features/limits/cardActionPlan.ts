@@ -3,6 +3,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { codexTermEnded } from "./codexSubscriptionTerm";
 import { isSignedIn, type CardAccount, type LimitCard } from "./limitCards";
 import { LIMITS_FEATURES } from "./limitFeatures";
+import { asksToSignInAgain } from "./loginState";
 
 export type AccountList<C> = {
   controls: C;
@@ -30,6 +31,7 @@ export type MenuEntry<C> =
   | CheckNowEntry
   | { action: "category"; enabled: boolean; initial: string }
   | ({ action: "signInAgain"; enabled: boolean } & SavedLogin<C>)
+  | ({ action: "useAccount"; enabled: boolean } & SavedLogin<C>)
   | ({ action: "removeLogin"; enabled: boolean } & SavedLogin<C>)
   | ArchiveEntry
   | { action: "resetAlert" }
@@ -99,9 +101,11 @@ export function cardActionPlan<C>({ card, now, checking, accounts, archiving, re
 
 function menuOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>): MenuEntry<C>[] {
   const saved = accounts && profile ? { controls: accounts.controls, profileId: profile.id } : null;
+  const usable = profile && usableDespiteLogin(card, profile, signedIn) ? saved : null;
   return [
     { action: "category", enabled: can, initial: card.identity.category ?? "" },
     ...(saved ? [{ action: "signInAgain" as const, enabled: can, ...saved }] : []),
+    ...(usable ? [{ action: "useAccount" as const, enabled: can, ...usable }] : []),
     ...(saved && signedIn ? [{ action: "removeLogin" as const, enabled: can, ...saved }] : []),
     ...(signedIn ? [] : [archive]),
     ...(LIMITS_FEATURES[card.provider].bankedResets ? [{ action: "resetAlert" as const }] : []),
@@ -115,14 +119,19 @@ function mainOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive 
   const { controls } = accounts;
   if (accounts.signingIn) return { action: "cancelSignIn", enabled: accounts.signingIn === "running", busy: accounts.signingIn === "canceling", controls };
   if (!profile) return signedIn ? { action: "saveAccount", enabled: can && confirmed, controls } : { action: "signIn", enabled: can, controls, profileId: null };
-  if (card.signIn?.state === "ended") return { action: "signInAgain", enabled: can, controls, profileId: profile.id };
-  if (!signedIn && !card.leads && !profile.needsLogin && codexTermEnded(card.subscription?.term, now)) return archive;
+  if (asksToSignInAgain(card.login)) return { action: "signInAgain", enabled: can, controls, profileId: profile.id };
+  const missing = card.login?.state === "missing";
+  if (!signedIn && !card.leads && !missing && codexTermEnded(card.subscription?.term, now)) return archive;
   if (signedIn && !profile.pendingActivation) return null;
-  return { action: profile.needsLogin ? "signIn" : "useAccount", enabled: can, controls, profileId: profile.id };
+  return { action: missing ? "signIn" : "useAccount", enabled: can, controls, profileId: profile.id };
 }
 
-function switchAlongsideOf<C>({ profile, accounts, can }: Shown<C>): SwitchAlongside<C> | null {
-  if (!accounts?.runningClients || !profile || profile.needsLogin) return null;
+function usableDespiteLogin(card: LimitCard, profile: SavedProfile, signedIn: boolean): boolean {
+  return (card.login?.state === "refused" || card.login?.state === "otherAccount") && (!signedIn || !!profile.pendingActivation);
+}
+
+function switchAlongsideOf<C>({ card, profile, accounts, can }: Shown<C>): SwitchAlongside<C> | null {
+  if (!accounts?.runningClients || !profile || card.login?.state === "missing") return null;
   return { enabled: can, clients: accounts.runningClients, controls: accounts.controls, profileId: profile.id };
 }
 

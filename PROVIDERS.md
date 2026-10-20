@@ -268,9 +268,12 @@ the last seven days the card's header carries **Sign-in ends <date>** in the sub
 amber style, filling as the date nears; once it has passed, a red **Sign-in ended**, the message
 "Claude ended this sign-in on <date>. Sign in again to use this account." in place of any other,
 and **Sign in again** as the card's button instead of Use account. Hover or focus shows the exact
-device-local time. The date reaches the card through the account listing (`accounts::list`), which
-reads it from the default store and from each saved account's own login (in the vault or its home),
-credited to the account that login's `oauthAccount` names. A sign-in still awaiting Use account is
+device-local time. The date reaches the card as the profile's login state (`ending` or `ended` with
+its date, `loginState`; see Login state in `docs/architecture/accounts.md`) through the account
+listing (`accounts::list`), which reads it from the default store and from each saved account's own
+login (in the vault or its home), credited to the account that login's `oauthAccount` names. The
+card reads only that state, never a per-provider switch, so a provider whose adapter reported a
+sign-in deadline would get the same tag, with its own name in the copy. A sign-in still awaiting Use account is
 newer than whatever the default store holds for that account, so it reads only its own login;
 otherwise the default store's date comes first. The listing reads the credential document
 only for that date: it uses no token and sends nothing. **code** (Claude
@@ -369,7 +372,17 @@ renewal by the client that owns this login." and waits for a new login; an accou
 of its login or refused reads "This account's saved login has ended. Sign in again."; a rate limit,
 a network or status failure and an answer with nothing observed read as on the signed-in card,
 naming the cause, where they once read "Usage refresh is rate limited." or "Usage refresh is
-unavailable." without it. Every card a saved poll produces is marked
+unavailable." without it. A refused login, in the vault or in its home, and one that now signs in
+as another account wait for a new login: the poll keeps the generation it read (the vault login's
+fingerprint, or the home's id and the fingerprint of the login it holds) and reads it again only
+once that changes. The profile's login state says so (`refused` or `otherAccount`), and every
+provider's card then reads "<Provider> no longer accepts this saved login. Sign in again to use
+this account." or "This saved login now signs in as a different <Provider> account. Sign in again to
+use this account.", tags itself **Sign-in refused** or **Other account**, and offers **Sign in
+again** as its button, with Use account kept in its ⋯ menu. Until 2026-10-20 only a Claude sign-in
+past its date changed the card: a refused Codex or Muse login, or a Claude home refused before its
+date, still offered Use account with the reason in the usage clock's tooltip, and a login refused
+in its home was read again on the backoff. Every card a saved poll produces is marked
 `savedProfile`, so the UI says "Remembered account" only for readings that are neither the signed-in
 account's nor a polled saved profile's. The first usage after a sign-in is read in the isolated
 home by the provider's own client: Codex's app-server, and for Claude the report the signed-in card

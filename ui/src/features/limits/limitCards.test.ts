@@ -40,6 +40,7 @@ describe("which cards a provider shows", () => {
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
       subscription: null,
+      login: { state: "usable" },
       signIn: null,
       archived: false,
     });
@@ -470,12 +471,12 @@ describe("archived accounts", () => {
   });
 });
 
-describe("a saved Claude sign-in's end", () => {
+describe("a saved sign-in's end", () => {
   const ended = new Date(AT_NOW - 86_400_000).toISOString();
   const endedMessage = { text: "Claude ended this sign-in on Aug 16. Sign in again to use this account.", tone: "error" };
 
   it("once passed, is the card's message in red, read or not", () => {
-    const unread = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended });
+    const unread = saved("claude", "me", "uuid-1", "me@claude.example", { loginState: { state: "ended", endsAt: ended } });
     const [card] = cards(undefined, [unread], AT_NOW, "claude");
     expect(card).toMatchObject({ signIn: { state: "ended" }, empty: null, freshness: { message: endedMessage } });
 
@@ -483,20 +484,14 @@ describe("a saved Claude sign-in's end", () => {
     expect(signedOut).toMatchObject({ signIn: { state: "ended" }, freshness: { message: endedMessage } });
   });
 
-  it("never applies to a Codex card", () => {
-    const codex = saved("codex", "me", "acct-me", "me@codex.example", { signInEndsAt: ended });
-    expect(cards(undefined, [codex], AT_NOW, "codex")[0]).toMatchObject({
-      signIn: null, empty: { reason: "usageUnavailable" }, freshness: { message: null },
-    });
-  });
 });
 
 describe("each provider's card features", () => {
-  type Features = { signIn: boolean; term: boolean; paidOffer: boolean; sessionNote: string };
+  type Features = { term: boolean; paidOffer: boolean; sessionNote: string };
   const EXPECTED: Record<LimitsProvider, Features> = {
-    claude: { signIn: true, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
-    codex: { signIn: false, term: true, paidOffer: true, sessionNote: "Reset time unavailable" },
-    muse: { signIn: false, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
+    claude: { term: false, paidOffer: false, sessionNote: "Starts with your first message" },
+    codex: { term: true, paidOffer: true, sessionNote: "Reset time unavailable" },
+    muse: { term: false, paidOffer: false, sessionNote: "Starts with your first message" },
   };
 
   it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {
@@ -512,10 +507,9 @@ describe("each provider's card features", () => {
       subscription: { activeUntil: "2026-10-10T12:00:00Z", willRenew: true, checkedAt: NOW },
       resetOffer: { price: { currency: "USD", amountMinorUnits: 800 } },
     };
-    const profile = saved(provider, "every", "acct-every", "every@example.com", { active: true, signInEndsAt: new Date(AT_NOW + 2 * 24 * 3_600_000).toISOString() });
+    const profile = saved(provider, "every", "acct-every", "every@example.com", { active: true });
     const [card] = cards([reading], [profile], AT_NOW, provider);
     expect({
-      signIn: card.signIn !== null,
       term: card.subscription !== null,
       paidOffer: card.figures.paidOffer !== null,
       sessionNote: card.rows.find(row => row.id === "session")?.note,
@@ -534,7 +528,7 @@ describe("a card's header tags", () => {
   });
 
   it("lead with the usage clock, then the sign-in tag, then the plan", () => {
-    const profile = saved("claude", "uuid-1", "uuid-1", "me@claude.example", { signInEndsAt: new Date(AT_NOW + 2 * 24 * 3_600_000).toISOString() });
+    const profile = saved("claude", "uuid-1", "uuid-1", "me@claude.example", { loginState: { state: "ending", endsAt: new Date(AT_NOW + 2 * 24 * 3_600_000).toISOString() } });
     const [claude] = cards([okClaude(savedRefreshPaused)], [profile], AT_NOW, "claude");
     expect(kinds(claude)).toEqual(["usageStatus", "signIn", "plan"]);
   });

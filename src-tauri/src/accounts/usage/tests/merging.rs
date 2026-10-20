@@ -86,7 +86,7 @@ fn an_answered_poll_keeps_the_same_figures_on_its_card_and_on_disk() {
     }))
     .unwrap();
 
-    let result = poll_with(
+    let result = poll_vault(
         home.path(),
         &p,
         &ticket(home.path()),

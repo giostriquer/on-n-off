@@ -16,9 +16,10 @@ read could not move into its home, is never sent: its read fails until a later r
 polls saved Codex accounts with access-only HTTP requests without changing the active native login,
 through Codex's Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads
 per provider run at once, with the Limits failure backoff per account
-(`limits_refresh::failure_backoff`) and provider retry-after handling. Rejected shared
-credentials, and logins that now sign in as a different account, wait for a changed generation and
-renew nothing.
+(`limits_refresh::failure_backoff`) and provider retry-after handling, whether the login is in the
+vault or in its home. A login its provider refused, and one that now signs in as a different
+account, waits for a changed generation and renews nothing, in its home as in the vault (Login
+state, below).
 The previous numeric reading and its observation time remain visible, and every card a poll
 produces is marked as a saved profile's (`saved_profile`), so it never reads as a remembered one.
 
@@ -151,6 +152,46 @@ the ticket guards is rechecked under the lease afterwards, in one of three ways:
   the epoch and the login generation the reading was made with.
 
 The epoch and the recovery journal are private to the store.
+
+## Login state
+
+Every listed profile carries one login state (`loginState` on `ProfileDto`, `LoginState` in
+`accounts/login_state.rs`), and it is all a Limits card reads to ask for a new sign-in, for every
+provider:
+
+- `usable`: nothing says otherwise;
+- `ending`, with the date its sign-in ends: the adapter knows the date (Claude's
+  `refreshTokenExpiresAt`, Homes above; Codex and Muse report none) and it has not passed;
+- `ended`, with that date, once it has passed;
+- `refused`: the saved poll parked the login because its provider refused it or found it signed
+  out;
+- `otherAccount`: the saved poll parked it because it now answers for a different account;
+- `missing`: the profile keeps neither a vault login nor a home.
+
+When more than one applies, the first of missing, ended, another account, refused and ending wins,
+so a sign-in that ended still says when after the refusal its end brought. The signed-in
+account's state is its date alone: the saved poll never reads it, and its own read names what
+failed.
+
+The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
+each attempt is keyed by the profile and kept with the generation it read, the vault login's
+fingerprint or the home's id with the fingerprint of the login the home holds. A rate limit holds
+the next attempt until its Retry-After, any other failure the Limits failure backoff, and a refusal
+or another account parks the login: no attempt, forced or not, reads it again until its
+generation changes, by a new sign-in, a switch that captured a renewed login, or the provider's
+client renewing it in its home. Reading a home's generation reads the login it holds, on macOS
+Claude's through `/usr/bin/security` like any account read. The listing takes the poll's verdict
+only while the profile's generation is still the one parked (`usage::parked`), so a changed login is
+usable at once. A Muse login refused (401) in its home used to be read again on the backoff, while
+the same refusal in the vault waited for a new login.
+
+The poll's attempts live in memory, as its holds always have, and are not kept across a restart:
+the first saved poll after a restart finds nothing held, reads every saved login and parks a
+refused one again, so the state comes back within one Limits read; until then the listing says
+usable, or ending or ended from the date. A poll that changes any profile's parked verdict says
+so, and the Limits read that ran it announces the account list once its cache lock is released
+(`limits_refresh::read_provider`), as it does for an account it unarchived. The account list
+answers unforced, which reads the verdicts and polls nothing, so the exchange ends there.
 
 ## Provider adapters
 
@@ -506,7 +547,11 @@ A vault that cannot be read right now is a retryable IPC error for the subscript
 absent date.
 
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude, Codex and Muse;
-each card owns its usage, subscription date, primary action and optional category. The card frame
+each card owns its usage, subscription date, primary action and optional category. A saved
+profile's login state decides, for every provider, whether its card asks for a new sign-in: ended,
+refused or another account make Sign in again the primary action, with the state's sign-in tag and
+its message in place of the read's, and a refused login or another account keeps Use account in
+the ⋯ menu; ending shows its date through the last seven days; missing offers Sign in. The card frame
 (`LimitCardFrame`) draws each card's ⋯ menu and footer from the card action plan
 (`cardActionPlan.ts`), which decides every account action for every provider: Check limits now
 always, Edit category on every card with an account, the saved-login items and the footer's

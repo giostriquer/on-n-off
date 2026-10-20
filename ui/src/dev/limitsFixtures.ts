@@ -314,7 +314,10 @@ function claudeSignInAccounts(): AccountsReading {
   const reading = savedAccounts("claude");
   const endsIn = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
   const [personal, work] = reading.profiles;
-  return { ...reading, profiles: [{ ...personal, signInEndsAt: endsIn(3) }, { ...work, pendingActivation: true, signInEndsAt: endsIn(-1) }] };
+  return { ...reading, profiles: [
+    { ...personal, signInEndsAt: endsIn(3), loginState: { state: "ending", endsAt: endsIn(3) } },
+    { ...work, pendingActivation: true, signInEndsAt: endsIn(-1), loginState: { state: "ended", endsAt: endsIn(-1) } },
+  ] };
 }
 
 function claudeSignIn(): ProviderLimits[] {
@@ -322,6 +325,32 @@ function claudeSignIn(): ProviderLimits[] {
     ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, plan: "max ×5",
     status: "failed", message: "This account's saved login has ended. Sign in again.",
   }];
+}
+
+const REFUSED_LOGIN = "Usage refresh needs sign-in again or renewal by the client that owns this login.";
+const ENDED_HOME_LOGIN = "This account's saved login has ended. Sign in again.";
+
+function refusedSaved(entry: ProviderLimits, id: string, label: string, message: string): ProviderLimits {
+  return { ...entry, account: { id, label }, currentAccount: false, savedProfile: true, status: "failed", message, windows: entry.windows.map(window => ({ ...window, observedAt: REMEMBERED_OBSERVED })) };
+}
+
+function savedLoginsAccounts(agent: LimitsProvider): AccountsReading {
+  const reading = savedAccounts(agent);
+  const [signedIn] = reading.profiles;
+  const saved = (id: string, email: string, loginState: SavedProfile["loginState"]): SavedProfile => ({
+    ...signedIn, id, observationId: `${agent}-${id}`, legacyId: id, identity: { provider: agent, userId: id, workspaceId: `${id} workspace` },
+    label: email, email, category: null, active: false, loginState,
+  });
+  const others = agent === "codex"
+    ? [saved("refused", "refused@example.com", { state: "refused" }), saved("moved", "moved@example.com", { state: "otherAccount" })]
+    : [saved("refused", "refused@example.com", { state: "refused" })];
+  return { ...reading, profiles: [signedIn, ...others] };
+}
+
+function savedLogins(agent: LimitsProvider, live: ProviderLimits): ProviderLimits[] {
+  const refused = refusedSaved(live, `${agent}-refused`, "refused@example.com", agent === "codex" ? REFUSED_LOGIN : ENDED_HOME_LOGIN);
+  if (agent !== "codex") return [live, refused];
+  return [live, { ...refused, subscription: null }, { ...refusedSaved(live, "codex-moved", "moved@example.com", "This saved login now signs in as a different account. Sign in again."), subscription: null }];
 }
 
 function paidThrough(accountId: string): SubscriptionDate {
@@ -345,6 +374,10 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
   museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
+  savedLogins: () => ({
+    claude: () => savedLogins("claude", CLAUDE[0]), codex: () => savedLogins("codex", CODEX[0]), muse: () => savedLogins("muse", MUSE[0]),
+    accounts: { claude: () => savedLoginsAccounts("claude"), codex: () => savedLoginsAccounts("codex"), muse: () => savedLoginsAccounts("muse") },
+  }),
   savedRefreshPaused: () => ({ claude: () => savedRefreshPaused(CLAUDE), codex: () => savedRefreshPaused(CODEX) }),
   limitsBand: () => ({ claude: limitsBandClaude, codex: limitsBandCodex }),
   limitsOrder: () => ({

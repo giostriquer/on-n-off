@@ -1,4 +1,4 @@
-import type { SignInPresentation } from "./claudeSignIn";
+import type { SignInPresentation } from "./loginState";
 import { TermBadge } from "./TermBadge";
 
 export function SignInBadge({ signIn }: { signIn: SignInPresentation | null }) {

@@ -107,7 +107,7 @@ describe("a card's footer button", () => {
   });
 
   it("signs in to an account it has no saved login for, and to a saved login's own profile when that needs it", async () => {
-    answer([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })], [{ ...personal(), observationId: "acct-spare", email: "spare@codex.example", label: "spare@codex.example", needsLogin: true }]);
+    answer([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })], [{ ...personal(), observationId: "acct-spare", email: "spare@codex.example", label: "spare@codex.example", needsLogin: true, loginState: { state: "missing" } }]);
     renderLimits();
     const history = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
     fireEvent.click(await within(history).findByRole("button", { name: "Sign in" }));
