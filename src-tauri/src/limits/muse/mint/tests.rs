@@ -193,6 +193,18 @@ fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
 }
 
 #[test]
+fn a_reset_at_or_before_the_epoch_is_no_reset() {
+    for stamp in [json!(0), json!(0.0), json!(-1)] {
+        let mut body = mint_body();
+        body["subs_usage"]["weekly"]["resets_at"] = stamp.clone();
+        body["subs_usage"]["window"]["resets_at"] = stamp.clone();
+        let resets: Vec<Option<ResetInstant>> =
+            facts(body).iter().map(|window| window.reset).collect();
+        assert_eq!(resets, [None, None], "{stamp}");
+    }
+}
+
+#[test]
 fn a_session_window_without_a_duration_is_the_five_hour_window() {
     for duration in [json!(null), json!(0), json!(-5)] {
         let mut body = mint_body();

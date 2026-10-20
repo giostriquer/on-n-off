@@ -143,6 +143,25 @@ fn a_session_observation_three_seconds_off_the_remembered_reset_is_another_windo
 }
 
 #[test]
+fn a_session_observation_from_the_remembered_instant_is_not_newer() {
+    let home = scratch_dir("limits-codex-session-same-instant");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T02:39:06.754Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+    )
+    .unwrap();
+    let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(merge_recent(&home, now, &mut accounts), 0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
+}
+
+#[test]
 fn session_reconciliation_never_reads_an_unbounded_file_prefix() {
     let home = scratch_dir("limits-codex-session-bounded-tail");
     let sessions = home.join(".codex/sessions/2026/08/20");

@@ -169,6 +169,37 @@ fn a_bucket_without_a_name_or_a_length_is_an_extra_limit_of_unknown_length() {
 }
 
 #[test]
+fn a_blank_main_limit_id_is_codexs_and_any_other_names_the_main_bucket() {
+    let bucket = |used: u8| json!({"primary": {"usedPercent": used, "windowDurationMins": 10080}});
+    let main_used = |limit_id: &str| {
+        let payload: RateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {"limitId": limit_id, "primary": {"usedPercent": 1, "windowDurationMins": 10080}},
+            "rateLimitsByLimitId": {"codex": bucket(14), "codex_pro": bucket(30)}
+        }))
+        .unwrap();
+        windows_of(&payload)
+            .into_iter()
+            .map(|window| (window.id, window.used_percent))
+            .collect::<Vec<_>>()
+    };
+
+    assert_eq!(
+        main_used("  "),
+        [
+            ("primary".to_string(), 14.0),
+            ("extra:codex_pro".to_string(), 30.0)
+        ]
+    );
+    assert_eq!(
+        main_used("codex_pro"),
+        [
+            ("primary".to_string(), 30.0),
+            ("extra:codex".to_string(), 14.0)
+        ]
+    );
+}
+
+#[test]
 fn uses_the_single_bucket_fallback_and_maps_credits() {
     let payload: RateLimitsResponse = serde_json::from_value(json!({
         "rateLimits": {

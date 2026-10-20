@@ -32,13 +32,27 @@ fn model(name: &str) -> Scope {
 #[test]
 fn every_fact_becomes_one_window_kind_label_meter_and_length() {
     let all = || Scope::AllModels;
-    let rows: [(QuotaWindow, LimitWindowKind, &str, f64, Option<u64>); 16] = [
+    let rows: [(QuotaWindow, LimitWindowKind, &str, f64, Option<u64>); 18] = [
         (
             fact(all(), Some(FIVE_HOURS), 41.0),
             LimitWindowKind::Session,
             "5 hour · all models",
             41.0,
             Some(18_000),
+        ),
+        (
+            fact(all(), Some(minutes(60)), 7.0),
+            LimitWindowKind::Session,
+            "1 hour · all models",
+            7.0,
+            Some(3_600),
+        ),
+        (
+            fact(all(), Some(minutes(0)), 7.0),
+            LimitWindowKind::Session,
+            "0 minute · all models",
+            7.0,
+            Some(0),
         ),
         (
             fact(all(), Some(minutes(120)), 7.0),
