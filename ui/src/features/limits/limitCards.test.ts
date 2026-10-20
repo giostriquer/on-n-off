@@ -86,7 +86,7 @@ describe("card order", () => {
     const window = (kind: "session" | "weekly" | "model", [usedPercent, resetsAt]: [number, string | null]) =>
       ({ id: kind, label: kind, kind, usedPercent, resetsAt, observedAt: "2026-09-21T11:00:00Z" });
     return {
-      provider: "claude", status: "ok", account: { id: `id-${sequence++}`, label }, currentAccount: false, plan: "max ×5",
+      provider: "claude", status: "ok", account: { id: `id-${sequence++}`, label }, currentAccount: false, plan: "max ×5", planLabel: "Max ×5", planCapacity: 5,
       windows: [
         ...(windows.session ? [window("session", windows.session)] : []),
         ...(windows.weekly ? [window("weekly", windows.weekly)] : []),
@@ -109,18 +109,30 @@ describe("card order", () => {
     expect(order([resetsInMinutes, nearlyOut])).toEqual(["nearly out", "resets in minutes"]);
   });
 
-  it("weighs usage left by the plan's multiplier, so a bigger plan with less left can still win", () => {
-    const max20 = account("max ×20 at 30% left", { session: [70, at(3)], weekly: [70, at(100)] }, { plan: "max ×20" });
-    const max5 = account("max ×5 untouched", { session: [0, at(3)], weekly: [0, at(100)] }, { plan: "max ×5" });
-    expect(order([max5, max20])).toEqual(["max ×20 at 30% left", "max ×5 untouched"]);
-    const max20Low = account("max ×20 at 20% left", { session: [80, at(3)], weekly: [80, at(100)] }, { plan: "max ×20" });
-    expect(order([max20Low, max5])).toEqual(["max ×5 untouched", "max ×20 at 20% left"]);
-    const pro = account("pro", { weekly: [60, at(100)] }, { provider: "codex", plan: "pro" });
-    const plus = account("plus", { weekly: [0, at(100)] }, { provider: "codex", plan: "plus" });
-    expect(order([plus, pro], "codex")).toEqual(["pro", "plus"]);
-    const bareMax = account("bare max at 30% left", { weekly: [70, at(100)] }, { plan: "max" });
-    const proUntouched = account("pro untouched", { weekly: [0, at(100)] }, { plan: "pro" });
-    expect(order([proUntouched, bareMax])).toEqual(["bare max at 30% left", "pro untouched"]);
+  it("weighs usage left by the plan's capacity the reading reports, so a bigger plan with less left can still win", () => {
+    const sized = (label: string, used: number, planCapacity: number | null) =>
+      account(label, { session: [used, at(3)], weekly: [used, at(100)] }, { plan: "any", planLabel: "Any", planCapacity });
+    const big = sized("×20 at 30% left", 70, 20);
+    const small = sized("×5 untouched", 0, 5);
+    expect(order([small, big])).toEqual(["×20 at 30% left", "×5 untouched"]);
+    const bigLow = sized("×20 at 20% left", 80, 20);
+    expect(order([bigLow, small])).toEqual(["×5 untouched", "×20 at 20% left"]);
+    const unsized = sized("no capacity untouched", 0, null);
+    const fiveAtThirty = sized("×5 at 30% left", 70, 5);
+    expect(order([unsized, fiveAtThirty])).toEqual(["×5 at 30% left", "no capacity untouched"]);
+    const fiveAtTen = sized("×5 at 10% left", 90, 5);
+    expect(order([fiveAtTen, unsized])).toEqual(["no capacity untouched", "×5 at 10% left"]);
+    const textOnly = account("a label that reads ×20", { weekly: [70, at(100)] }, { plan: "max ×20", planLabel: "Max ×20", planCapacity: undefined });
+    const plain = account("plain untouched", { weekly: [0, at(100)] }, { plan: "pro", planLabel: "Pro", planCapacity: null });
+    expect(order([textOnly, plain])).toEqual(["plain untouched", "a label that reads ×20"]);
+  });
+
+  it("shows the plan's label as the reading reports it, and none without one", () => {
+    for (const planLabel of ["Max ×20", "Pro ×5", "Self serve business prolite", "Muse Code Power Usage"]) {
+      expect(cards([okCodex({ plan: "raw_id", planLabel })])[0].plan).toBe(planLabel);
+    }
+    expect(cards([okCodex({ plan: "pro", planLabel: null })])[0].plan).toBeNull();
+    expect(cards([okCodex({ plan: "pro", planLabel: undefined })])[0].plan).toBeNull();
   });
 
   it("measures usage left by the fuller of the two main windows, ignoring model buckets", () => {
@@ -205,9 +217,9 @@ describe("a card's identity", () => {
   });
 
   it("tells same-email accounts apart by plan, never by their workspace ids", () => {
-    const workspaces = [["personal", "ws-personal-7f3a", "prolite"], ["business", "ws-business-9c1e", "business"]] as const;
-    const shown = cards(workspaces.map(([id, workspaceId, plan], index) => okCodex({
-      account: { id: `profile:${id}`, label: "shared@example.com" }, currentAccount: index === 0, plan,
+    const workspaces = [["personal", "ws-personal-7f3a", "prolite", "Pro ×5"], ["business", "ws-business-9c1e", "business", "Business"]] as const;
+    const shown = cards(workspaces.map(([id, workspaceId, plan, planLabel], index) => okCodex({
+      account: { id: `profile:${id}`, label: "shared@example.com" }, currentAccount: index === 0, plan, planLabel,
       profile: saved("codex", id, `profile:${id}`, "shared@example.com", { legacyId: workspaceId, identity: { provider: "codex", userId: "same-user", workspaceId }, active: index === 0 }),
     })));
     expect(shown.map(card => [card.identity.label, card.plan])).toEqual([["shared@example.com", "Pro ×5"], ["shared@example.com", "Business"]]);
@@ -242,32 +254,33 @@ describe("a card's windows", () => {
   });
 
   it.each([
-    [0, null, "Starts with your first message"],
-    [17, null, "Reset time unavailable"],
-    [0, "invalid", "Reset time unavailable"],
-  ] as const)("says why a remembered Claude session at %s percent with reset %s shows no reset", (usedPercent, resetsAt, note) => {
+    [0, null, true, "Starts with your first message"],
+    [0, null, false, "Reset time unavailable"],
+    [0, null, undefined, "Reset time unavailable"],
+    [17, null, false, "Reset time unavailable"],
+    [0, "invalid", false, "Reset time unavailable"],
+  ] as const)("says why a remembered session at %s percent with reset %s and first-message flag %s shows no reset", (usedPercent, resetsAt, startsOnFirstMessage, note) => {
     const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent, resetsAt };
+    remembered.windows[1] = { ...remembered.windows[1], usedPercent, resetsAt, startsOnFirstMessage };
     expect(cards([remembered])[0].rows[0]).toEqual({
       id: "session", label: "5 hour · all models", percent: usedPercent, text: `${usedPercent}%`, color: undefined, note,
     });
   });
 
-  it("says a Claude model row at 0% with no reset has none, not that it waits for a first message", () => {
-    const remembered = okClaude({ currentAccount: false });
-    remembered.windows[2] = { ...remembered.windows[2], usedPercent: 0, resetsAt: null };
-    expect(cards([remembered])[0].rows[1]).toMatchObject({ id: "weekly_opus", note: "Reset time unavailable" });
+  it.each(LIMITS_PROVIDERS)("gives a %s window its first-message note from the window alone, whatever its kind", (provider) => {
+    const waiting = { id: "waiting", label: "Weekly · Model", kind: "model" as const, usedPercent: 0, resetsAt: null, observedAt: NOW, startsOnFirstMessage: true };
+    const unflagged = { ...waiting, id: "unflagged", startsOnFirstMessage: false };
+    const reading = { ...okCodex({ windows: [waiting, unflagged] }), provider };
+    expect(cards([reading], AT_NOW, provider)[0].rows.map(row => [row.id, row.note])).toEqual([
+      ["waiting", "Starts with your first message"],
+      ["unflagged", "Reset time unavailable"],
+    ]);
   });
 
-  it("keeps a reported countdown even when a remembered Claude session has zero usage", () => {
+  it("keeps a reported countdown even when a remembered session has zero usage", () => {
     const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z" };
+    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z", startsOnFirstMessage: true };
     expect(cards([remembered])[0].rows[0]).toMatchObject({ text: "0%", note: expect.stringMatching(/^resets in 3h 0m/) });
-  });
-
-  it("says a Codex session with no reset has none, not that it waits for a first message", () => {
-    const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 0, resetsAt: null, observedAt: NOW };
-    expect(cards([okCodex({ windows: [session] })])[0].rows[0].note).toBe("Reset time unavailable");
   });
 });
 
@@ -341,7 +354,7 @@ describe("a card's empty copy", () => {
     const empty = okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null });
     const [, withProfile] = cards([okCodex(), { ...empty, profile: saved("codex", "empty", "profile:empty", "empty@codex.example") }]);
     expect(withProfile.empty).toEqual({ reason: "usageUnavailable", copy: "Usage unavailable." });
-    expect(cards([okClaude({ windows: [], plan: null, account: null })])[0]).toMatchObject({
+    expect(cards([okClaude({ windows: [], plan: null, planLabel: null, planCapacity: null, account: null })])[0]).toMatchObject({
       plan: null, empty: { reason: "noWindows", copy: "Claude reported no rate-limit windows." },
     });
     expect(cards([okCodex({ windows: [], currentAccount: false })])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
@@ -477,11 +490,11 @@ describe("a saved Claude sign-in's end", () => {
 });
 
 describe("each provider's card features", () => {
-  type Features = { signIn: boolean; term: boolean; paidOffer: boolean; sessionNote: string };
+  type Features = { signIn: boolean; term: boolean; paidOffer: boolean };
   const EXPECTED: Record<LimitsProvider, Features> = {
-    claude: { signIn: true, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
-    codex: { signIn: false, term: true, paidOffer: true, sessionNote: "Reset time unavailable" },
-    muse: { signIn: false, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
+    claude: { signIn: true, term: false, paidOffer: false },
+    codex: { signIn: false, term: true, paidOffer: true },
+    muse: { signIn: false, term: false, paidOffer: false },
   };
 
   it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {
@@ -503,7 +516,6 @@ describe("each provider's card features", () => {
       signIn: card.signIn !== null,
       term: card.subscription !== null,
       paidOffer: card.figures.paidOffer !== null,
-      sessionNote: card.rows.find(row => row.id === "session")?.note,
     }).toEqual(EXPECTED[provider]);
   });
 });
@@ -527,7 +539,7 @@ describe("a card's header tags", () => {
   it("lead with a remembered card's status too, and leave the plan out when there is none", () => {
     const [, remembered] = cards([okCodex(), staleCodex({ subscription: renews })]);
     expect(kinds(remembered)).toEqual(["remembered", "term", "plan"]);
-    const [planless] = cards([okCodex({ ...savedRefreshPaused, plan: null, subscription: renews })]);
+    const [planless] = cards([okCodex({ ...savedRefreshPaused, plan: null, planLabel: null, planCapacity: null, subscription: renews })]);
     expect(kinds(planless)).toEqual(["usageStatus", "term"]);
   });
 });

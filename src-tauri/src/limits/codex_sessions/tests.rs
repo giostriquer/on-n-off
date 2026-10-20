@@ -21,6 +21,8 @@ fn remembered(id: &str, reset_at: &str) -> ProviderLimitsDto {
                     resets_at: Some(reset_at.to_string()),
                     window_seconds: Some(604_800),
                     observed_at: "2026-08-20T02:39:06.754Z".to_string(),
+                    role: None,
+                    starts_on_first_message: false,
                 }],
                 ..Reading::default()
             })
@@ -83,6 +85,8 @@ fn a_merged_window_is_the_one_the_window_module_builds_for_the_observation() {
             resets_at: Some("2026-08-24T23:34:34.000Z".into()),
             window_seconds: Some(604_800),
             observed_at: "2026-08-20T06:58:07.093Z".into(),
+            role: None,
+            starts_on_first_message: false,
         }
     );
 }

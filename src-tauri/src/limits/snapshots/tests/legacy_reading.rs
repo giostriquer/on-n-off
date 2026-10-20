@@ -59,59 +59,57 @@ fn weekly(dto: &ProviderLimitsDto) -> Option<(f64, &str)> {
         .map(|window| (window.used_percent, window.observed_at.as_str()))
 }
 
-#[test]
-fn a_first_muse_reading_keeps_the_weekly_its_legacy_history_last_saw() {
-    let home = scratch_dir("limits-legacy-weekly-muse");
-    let store = SnapshotStore::for_home(&home);
-    store
-        .save(&legacy(AgentId::Muse, "you@example.com"))
-        .unwrap();
-
-    let remembered = store.remember(idle(AgentId::Muse));
-
-    remembered.saved.unwrap();
-    assert_eq!(weekly(&remembered.card), Some((30.0, LEGACY_SEEN)));
-    assert_eq!(
-        remembered
-            .card
-            .reading
-            .windows
-            .iter()
-            .map(|window| (window.kind, window.used_percent))
-            .collect::<Vec<_>>(),
-        [
-            (LimitWindowKind::Weekly, 30.0),
-            (LimitWindowKind::Session, 0.0)
-        ]
-    );
-    let loaded = crate::limits::column(
-        &store.load(AgentId::Muse),
-        &crate::accounts::Roster::default(),
-        &crate::accounts::SignInDeadlines::new(),
-    );
-    assert_eq!(loaded.len(), 1, "the legacy card is superseded");
-    assert_eq!(
-        loaded[0]
-            .card
-            .account
-            .as_ref()
-            .map(|account| account.id.as_str()),
-        Some("profile:you")
-    );
-    assert_eq!(weekly(&loaded[0].card), Some((30.0, LEGACY_SEEN)));
-    fs::remove_dir_all(home).unwrap();
+fn inheriting() -> AgentId {
+    crate::provider_catalogue::WITH_LIMITS
+        .into_iter()
+        .find(|id| id.limits_facts().inherits_legacy_reading)
+        .expect("a provider whose saved profiles inherit their legacy reading")
 }
 
 #[test]
-fn claude_and_codex_scoped_readings_never_take_legacy_quotas() {
-    for provider in [AgentId::Claude, AgentId::Codex] {
+fn a_first_scoped_reading_keeps_its_legacy_weekly_exactly_when_its_provider_inherits_one() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
         let home = scratch_dir(&format!("limits-legacy-weekly-{}", provider.key()));
         let store = SnapshotStore::for_home(&home);
         store.save(&legacy(provider, "you@example.com")).unwrap();
 
         let remembered = store.remember(idle(provider));
 
-        assert_eq!(weekly(&remembered.card), None, "{provider:?}");
+        remembered.saved.unwrap();
+        if !provider.limits_facts().inherits_legacy_reading {
+            assert_eq!(weekly(&remembered.card), None, "{provider:?}");
+            fs::remove_dir_all(home).unwrap();
+            continue;
+        }
+        assert_eq!(weekly(&remembered.card), Some((30.0, LEGACY_SEEN)));
+        assert_eq!(
+            remembered
+                .card
+                .reading
+                .windows
+                .iter()
+                .map(|window| (window.kind, window.used_percent))
+                .collect::<Vec<_>>(),
+            [
+                (LimitWindowKind::Weekly, 30.0),
+                (LimitWindowKind::Session, 0.0)
+            ]
+        );
+        let loaded = crate::limits::column(
+            &store.load(provider),
+            &crate::accounts::Roster::default(),
+            &crate::accounts::SignInDeadlines::new(),
+        );
+        assert_eq!(loaded.len(), 1, "the legacy card is superseded");
+        assert_eq!(
+            loaded[0]
+                .card
+                .account
+                .as_ref()
+                .map(|account| account.id.as_str()),
+            Some("profile:you")
+        );
+        assert_eq!(weekly(&loaded[0].card), Some((30.0, LEGACY_SEEN)));
         fs::remove_dir_all(home).unwrap();
     }
 }
@@ -121,10 +119,10 @@ fn legacy_history_under_another_email_is_not_carried() {
     let home = scratch_dir("limits-legacy-weekly-other-email");
     let store = SnapshotStore::for_home(&home);
     store
-        .save(&legacy(AgentId::Muse, "someone@example.com"))
+        .save(&legacy(inheriting(), "someone@example.com"))
         .unwrap();
 
-    let remembered = store.remember(idle(AgentId::Muse));
+    let remembered = store.remember(idle(inheriting()));
 
     assert_eq!(weekly(&remembered.card), None);
     fs::remove_dir_all(home).unwrap();
@@ -135,9 +133,9 @@ fn a_failed_first_reading_does_not_take_the_legacy_reading() {
     let home = scratch_dir("limits-legacy-weekly-failed");
     let store = SnapshotStore::for_home(&home);
     store
-        .save(&legacy(AgentId::Muse, "you@example.com"))
+        .save(&legacy(inheriting(), "you@example.com"))
         .unwrap();
-    let mut failed = idle(AgentId::Muse);
+    let mut failed = idle(inheriting());
     failed.status = LimitsStatus::Failed;
     failed.reading = Reading::default();
 
@@ -145,7 +143,7 @@ fn a_failed_first_reading_does_not_take_the_legacy_reading() {
 
     assert!(remembered.card.reading.windows.is_empty());
     assert_eq!(remembered.card.reading.plan, None);
-    assert_eq!(store.load(AgentId::Muse).len(), 1);
+    assert_eq!(store.load(inheriting()).len(), 1);
     fs::remove_dir_all(home).unwrap();
 }
 
@@ -154,17 +152,17 @@ fn a_scoped_history_of_its_own_wins_over_the_legacy_one() {
     let home = scratch_dir("limits-legacy-weekly-own-history");
     let store = SnapshotStore::for_home(&home);
     store
-        .save(&legacy(AgentId::Muse, "you@example.com"))
+        .save(&legacy(inheriting(), "you@example.com"))
         .unwrap();
-    let mut own = legacy(AgentId::Muse, "You@Example.com");
-    own.account = idle(AgentId::Muse).account;
+    let mut own = legacy(inheriting(), "You@Example.com");
+    own.account = idle(inheriting()).account;
     own.reading.windows[0].used_percent = 50.0;
     for window in &mut own.reading.windows {
         window.observed_at = "2026-10-15T10:00:00.000Z".to_string();
     }
     store.save(&own).unwrap();
 
-    let remembered = store.remember(idle(AgentId::Muse));
+    let remembered = store.remember(idle(inheriting()));
 
     assert_eq!(
         weekly(&remembered.card),

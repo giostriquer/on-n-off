@@ -55,7 +55,7 @@ fn falls_due_after(
     at: DateTime<Utc>,
 ) -> Vec<Due> {
     let read = Served {
-        provider: AgentId::Codex,
+        provider: crate::provider_catalogue::BANKED_RESETS_PROVIDER,
         entries: readings.to_vec(),
         failure,
     };
@@ -146,20 +146,19 @@ fn at_its_time_a_reset_no_longer_needed_is_not_spent() {
 }
 
 #[test]
-fn the_signed_in_codex_card_decides_among_the_others() {
-    let claude = ProviderLimitsDto::for_test(AgentId::Claude, "claude-acct");
-    let remembered = ProviderLimitsDto {
+fn the_signed_in_card_of_a_provider_that_banks_resets_decides_among_the_others() {
+    let mut readings = vec![ProviderLimitsDto::for_test(
+        without_banked_resets(),
+        "other-acct",
+    )];
+    readings.push(ProviderLimitsDto {
         current_account: false,
         ..card("remembered", 20.0, RENEWS, NOW, 1)
-    };
+    });
+    readings.push(live(96.0, RENEWS));
     let mut waiting = scheduled();
 
-    let due = falls_due(
-        &mut waiting,
-        &[claude, remembered, live(96.0, RENEWS)],
-        &automatic(),
-        minutes_after_now(10),
-    );
+    let due = falls_due(&mut waiting, &readings, &automatic(), minutes_after_now(10));
 
     assert!(matches!(due.as_slice(), [Due::Spend(..)]), "{due:?}");
 }

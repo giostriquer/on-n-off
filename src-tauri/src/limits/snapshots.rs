@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use super::reading::{keep_remembered, newest, parse_observed_at};
 use crate::accounts::model::Identity;
 use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
+use crate::provider_catalogue::OnLoad;
 use crate::usage::cache_io::atomic_write;
 
 mod archive;
@@ -63,7 +64,8 @@ impl SnapshotStore {
     }
 
     fn predecessor(&self, card: &ProviderLimitsDto) -> Option<StoredSnapshot> {
-        if card.status != LimitsStatus::Ok || !Identity::legacy_key_is_whole(card.provider) {
+        if card.status != LimitsStatus::Ok || !card.provider.limits_facts().inherits_legacy_reading
+        {
             return None;
         }
         self.replaced_legacy(card.provider, card.account.as_ref()?)
@@ -208,6 +210,8 @@ impl StoredSnapshot {
             provider: dto.provider,
             account: dto.account.clone().expect("caller checked account"),
             reading: Reading {
+                plan_label: None,
+                plan_capacity: None,
                 reset_offer: None,
                 ..dto.reading.clone()
             },
@@ -225,10 +229,15 @@ impl StoredSnapshot {
     fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
         let mut reading = self.reading.known_at(now);
         super::window::keep_in_range(&mut reading);
-        match self.provider {
-            AgentId::Codex => super::codex::drop_hidden(&mut reading.windows),
-            AgentId::Claude => reading.reset_credits = None,
-            AgentId::Antigravity | AgentId::Cursor | AgentId::Muse => {}
+        super::plan::describe_reading(self.provider, &mut reading);
+        for step in self.provider.limits_facts().on_load {
+            match step {
+                OnLoad::DropHiddenWindows => super::codex::drop_hidden(&mut reading.windows),
+                OnLoad::DropResetCredits => reading.reset_credits = None,
+                OnLoad::MarkFirstMessageSessions => {
+                    super::window::mark_first_message_sessions(&mut reading.windows);
+                }
+            }
         }
         ProviderLimitsDto {
             provider: self.provider,

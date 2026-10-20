@@ -92,6 +92,7 @@ describe("Limits", () => {
               account: { id: "email:you@example.com", label: "you@example.com" },
               currentAccount: true,
               plan: "wonder",
+              planLabel: "Wonder",
               windows: [
                 { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 22, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW },
                 { id: "session", label: "5 hour · all models", kind: "session" as const, usedPercent: 41, resetsAt: "2026-08-17T22:15:00Z", windowSeconds: 18_000, observedAt: NOW },
@@ -111,7 +112,7 @@ describe("Limits", () => {
 
   it("says under a row why it shows no reset", async () => {
     const remembered = okClaude({ currentAccount: false, account: { id: "uuid-2", label: "other@claude.example" } });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: null };
+    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: null, startsOnFirstMessage: true };
     const codex = okCodex();
     codex.windows[1] = { ...codex.windows[1], resetsAt: null };
     answer([okClaude(), remembered], [codex]);
@@ -782,7 +783,7 @@ describe("archiving", () => {
     const weekly = { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 30, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW };
     const archived = new Set(["muse-old", "muse-spare"]);
     const muse = (id: string, label: string, currentAccount = false): LimitsColumnEntry =>
-      ({ provider: "muse", status: "ok", account: { id, label }, currentAccount, plan: "wonder", windows: [weekly], archived: archived.has(id) });
+      ({ provider: "muse", status: "ok", account: { id, label }, currentAccount, plan: "wonder", planLabel: "Wonder", windows: [weekly], archived: archived.has(id) });
     readLimits.mockImplementation(async (provider: AgentId) => provider === "muse"
       ? [muse("muse-now", "now@muse.example", true), muse("muse-old", "old@muse.example"), muse("muse-spare", "spare@muse.example")]
       : provider === "claude" ? [okClaude()] : [okCodex()]);

@@ -192,6 +192,8 @@ pub(super) fn weekly_reading(key: &str) -> crate::dto::ProviderLimitsDto {
                 window_seconds: Some(604_800),
                 resets_at: None,
                 observed_at: "2026-09-19T00:00:00Z".into(),
+                role: None,
+                starts_on_first_message: false,
             }],
             ..Default::default()
         },

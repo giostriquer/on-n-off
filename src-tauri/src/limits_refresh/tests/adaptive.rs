@@ -15,6 +15,8 @@ fn quota(used: f64, current: bool) -> ProviderLimitsDto {
         resets_at: None,
         window_seconds: None,
         observed_at: "2026-10-01T12:00:00Z".into(),
+        role: None,
+        starts_on_first_message: false,
     });
     card
 }

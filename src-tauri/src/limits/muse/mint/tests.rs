@@ -164,6 +164,8 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 length: Some(ONE_WEEK),
                 used_percent: 22.0,
                 reset: DateTime::from_timestamp(1_760_500_000, 0).map(ResetInstant::from),
+                role: None,
+                cycle_starts_on_first_message: false,
             },
             QuotaWindow {
                 id: "session".into(),
@@ -171,6 +173,8 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 length: Some(FIVE_HOURS),
                 used_percent: 41.0,
                 reset: DateTime::from_timestamp(1_760_000_000, 0).map(ResetInstant::from),
+                role: None,
+                cycle_starts_on_first_message: true,
             },
         ]
     );
@@ -191,6 +195,39 @@ fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
         DateTime::from_timestamp_millis(1_760_000_000_500).map(ResetInstant::from)
     );
     assert_eq!(facts[0].reset, None);
+}
+
+#[test]
+fn an_unused_session_without_a_reset_starts_with_the_first_message_and_the_week_never_does() {
+    let mut body = mint_body();
+    for window in ["weekly", "window"] {
+        body["subs_usage"][window]["used_percent"] = json!(0);
+        body["subs_usage"][window]["resets_at"] = json!(null);
+    }
+    let starts: Vec<(String, bool)> = mint_reading(body)
+        .reading
+        .windows
+        .into_iter()
+        .map(|window| (window.id, window.starts_on_first_message))
+        .collect();
+    assert_eq!(
+        starts,
+        [("weekly".to_string(), false), ("session".to_string(), true)]
+    );
+    let started: Vec<bool> = mint_reading(mint_body())
+        .reading
+        .windows
+        .iter()
+        .map(|window| window.starts_on_first_message)
+        .collect();
+    assert_eq!(started, [false, false]);
+    assert!(
+        crate::dto::AgentId::Muse
+            .limits_facts()
+            .on_load
+            .contains(&crate::provider_catalogue::OnLoad::MarkFirstMessageSessions),
+        "a Muse reading remembered before the flag is marked as it loads"
+    );
 }
 
 #[test]
@@ -241,7 +278,12 @@ fn an_active_subscription_without_a_usage_block_reads_as_an_idle_window() {
         Some(scoped_you().as_str())
     );
     assert_eq!(parsed.reading.plan.as_deref(), Some("Wonder"));
-    assert_eq!(facts(idle), [QuotaWindow::idle("session", FIVE_HOURS)]);
+    assert_eq!(
+        facts(idle.clone()),
+        [QuotaWindow::idle("session", FIVE_HOURS)]
+    );
+    let window = &parsed.reading.windows[0];
+    assert!(window.starts_on_first_message, "{window:?}");
 
     let unnamed = json!({"is_subs_active": true, "subs_tier_name": "27681631238169137"});
     assert_eq!(mint_reading(unnamed).reading.plan, None);

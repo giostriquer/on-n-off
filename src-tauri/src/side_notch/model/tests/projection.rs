@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::Reading;
+use crate::dto::{Reading, WindowRole};
 
 fn window(id: &str, label: &str, kind: LimitWindowKind) -> LimitWindowDto {
     LimitWindowDto {
@@ -10,6 +10,8 @@ fn window(id: &str, label: &str, kind: LimitWindowKind) -> LimitWindowDto {
         resets_at: None,
         window_seconds: None,
         observed_at: "2026-09-01T10:00:00Z".into(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 
@@ -23,6 +25,13 @@ fn session(id: &str) -> LimitWindowDto {
 
 fn model(id: &str, label: &str) -> LimitWindowDto {
     window(id, label, LimitWindowKind::Model)
+}
+
+fn ring(id: &str, label: &str) -> LimitWindowDto {
+    LimitWindowDto {
+        role: Some(WindowRole::InnerRing),
+        ..model(id, label)
+    }
 }
 
 fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
@@ -52,7 +61,7 @@ fn claudes_ring_leads_with_its_weekly_and_its_fable_window_fills_the_inner_ring(
             vec![
                 weekly("weekly_all"),
                 session("session"),
-                model(fable, "Weekly · Fable"),
+                ring(fable, "Weekly · Fable"),
             ],
         ));
 
@@ -67,27 +76,51 @@ fn claudes_ring_leads_with_its_weekly_and_its_fable_window_fills_the_inner_ring(
 }
 
 #[test]
-fn only_claudes_window_labelled_weekly_fable_fills_the_inner_ring() {
+fn the_window_its_reader_gave_the_inner_ring_role_fills_it_whatever_its_label() {
+    let renamed = project(signed_in(
+        AgentId::Claude,
+        vec![
+            weekly("weekly_all"),
+            ring("weekly_scoped:Fable 5", "Weekly · Fable 5"),
+        ],
+    ));
+    assert_eq!(
+        renamed.inner_ring,
+        Some(InnerRing::Fable {
+            window_id: "weekly_scoped:Fable 5".into()
+        })
+    );
+    let unmarked = project(signed_in(
+        AgentId::Claude,
+        vec![
+            weekly("weekly_all"),
+            model("weekly_fable", "Weekly · Fable"),
+        ],
+    ));
+    assert_eq!(unmarked.inner_ring, None);
     let opus = project(signed_in(
         AgentId::Claude,
         vec![weekly("weekly_all"), model("weekly_opus", "Weekly · Opus")],
     ));
     assert_eq!(opus.inner_ring, None);
-    let codex = project(signed_in(
-        AgentId::Codex,
-        vec![weekly("primary"), model("extra:fable", "Weekly · Fable")],
-    ));
-    assert_eq!(codex.inner_ring, None);
-    let spaced = project(signed_in(
-        AgentId::Claude,
-        vec![weekly("weekly_all"), model("fable", " weekly · FABLE ")],
-    ));
-    assert_eq!(
-        spaced.inner_ring,
-        Some(InnerRing::Fable {
-            window_id: "fable".into()
-        })
-    );
+}
+
+#[test]
+fn a_marked_window_wins_the_inner_ring_over_a_workspace_share() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let mut card = signed_in(
+            provider,
+            vec![weekly("weekly"), ring("ringed", "Weekly · Ringed")],
+        );
+        card.reading.workspace_credits = Some(share("25000", "8000", 32.0, false));
+        assert_eq!(
+            project(card).inner_ring,
+            Some(InnerRing::Fable {
+                window_id: "ringed".into()
+            }),
+            "{provider:?}"
+        );
+    }
 }
 
 #[test]
@@ -145,10 +178,7 @@ fn an_account_whose_refresh_is_paused_keeps_its_last_reading() {
     ] {
         let mut card = signed_in(
             AgentId::Claude,
-            vec![
-                weekly("weekly_all"),
-                model("weekly_fable", "Weekly · Fable"),
-            ],
+            vec![weekly("weekly_all"), ring("weekly_fable", "Weekly · Fable")],
         );
         card.status = status;
         card.message = Some("Paused".into());
@@ -260,7 +290,7 @@ fn the_named_windows_resolve_for_the_painter() {
             weekly("weekly_all"),
             session("session"),
             model("weekly_opus", "Weekly · Opus"),
-            model("weekly_fable", "Weekly · Fable"),
+            ring("weekly_fable", "Weekly · Fable"),
         ],
     ));
     assert_eq!(

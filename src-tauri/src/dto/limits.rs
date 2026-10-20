@@ -20,6 +20,12 @@ pub enum LimitWindowKind {
     Model,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum WindowRole {
+    InnerRing,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitWindowDto {
@@ -32,6 +38,10 @@ pub struct LimitWindowDto {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub window_seconds: Option<u64>,
     pub observed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<WindowRole>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub starts_on_first_message: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -146,6 +156,10 @@ pub struct LimitsAccountDto {
 pub struct Reading {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub plan_capacity: Option<u32>,
     pub windows: Vec<LimitWindowDto>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub credits: Option<LimitsCreditsDto>,

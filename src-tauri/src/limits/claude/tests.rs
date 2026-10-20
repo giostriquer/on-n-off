@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{AgentId, LimitsStatus};
+use crate::dto::{AgentId, LimitsStatus, WindowRole};
 use serde_json::json;
 
 const CAPTURED: &str = r#"{
@@ -36,6 +36,8 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 length: Some(FIVE_HOURS),
                 used_percent: 7.0,
                 reset: ResetInstant::parse("2026-08-18T04:59:59.692639+00:00"),
+                role: None,
+                cycle_starts_on_first_message: true,
             },
             QuotaWindow {
                 id: "weekly_all".into(),
@@ -43,6 +45,8 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 length: Some(ONE_WEEK),
                 used_percent: 12.0,
                 reset: ResetInstant::parse("2026-08-24T13:59:59.692659+00:00"),
+                role: None,
+                cycle_starts_on_first_message: false,
             },
         ]
     );
@@ -66,6 +70,8 @@ fn weekly_group_kinds_other_than_all_are_a_models_week() {
                 length: Some(ONE_WEEK),
                 used_percent: 40.0,
                 reset: None,
+                role: None,
+                cycle_starts_on_first_message: false,
             },
             QuotaWindow {
                 id: "weekly_sonnet_4_5".into(),
@@ -73,6 +79,8 @@ fn weekly_group_kinds_other_than_all_are_a_models_week() {
                 length: Some(ONE_WEEK),
                 used_percent: 3.5,
                 reset: None,
+                role: None,
+                cycle_starts_on_first_message: false,
             },
         ]
     );
@@ -103,6 +111,113 @@ fn scoped_weekly_limits_are_scoped_to_their_model_and_keep_distinct_ids() {
             ("weekly_scoped".to_string(), model("Scoped")),
             ("session:Fable".to_string(), Scope::AllModels),
         ]
+    );
+}
+
+#[test]
+fn the_fable_models_weekly_window_is_the_inner_ring_by_its_payload_key_whatever_its_case() {
+    let payload = json!({
+        "limits": [
+            {"kind": "weekly_all", "group": "weekly", "percent": 30},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 25,
+             "scope": {"model": {"id": null, "display_name": "Fable"}, "surface": null}},
+            {"kind": "weekly_fable", "group": "weekly", "percent": 9},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 4,
+             "scope": {"model": {"display_name": " FABLE "}}},
+            {"kind": "weekly_opus", "group": "weekly", "percent": 40},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 3,
+             "scope": {"model": null, "surface": "fable"}},
+            {"kind": "weekly_scoped", "group": "weekly", "percent": 2,
+             "scope": {"model": {"display_name": "Fable Lite"}}},
+            {"kind": "session", "group": "session", "percent": 2,
+             "scope": {"model": {"display_name": "Fable"}}}
+        ]
+    });
+    let roles: Vec<(String, Option<WindowRole>)> = parse_claude(&payload)
+        .into_iter()
+        .map(|window| (window.id, window.role))
+        .collect();
+    assert_eq!(
+        roles,
+        [
+            ("weekly_all".to_string(), None),
+            (
+                "weekly_scoped:Fable".to_string(),
+                Some(WindowRole::InnerRing)
+            ),
+            ("weekly_fable".to_string(), Some(WindowRole::InnerRing)),
+            (
+                "weekly_scoped:FABLE".to_string(),
+                Some(WindowRole::InnerRing)
+            ),
+            ("weekly_opus".to_string(), None),
+            ("weekly_scoped:fable".to_string(), None),
+            ("weekly_scoped:Fable Lite".to_string(), None),
+            ("session:Fable".to_string(), None),
+        ]
+    );
+}
+
+#[test]
+fn only_claudes_session_windows_start_with_the_first_message_and_say_so_while_unused() {
+    let payload = json!({
+        "limits": [
+            {"kind": "session", "group": "session", "percent": 0, "resets_at": null},
+            {"kind": "weekly_all", "group": "weekly", "percent": 0, "resets_at": null},
+            {"kind": "weekly_opus", "group": "weekly", "percent": 0}
+        ]
+    });
+    let starts: Vec<(String, bool, bool)> = parse_claude(&payload)
+        .into_iter()
+        .map(|window| {
+            let fact = window.cycle_starts_on_first_message;
+            let dto = window.into_dto();
+            (dto.id, fact, dto.starts_on_first_message)
+        })
+        .collect();
+    assert_eq!(
+        starts,
+        [
+            ("session".to_string(), true, true),
+            ("weekly_all".to_string(), false, false),
+            ("weekly_opus".to_string(), false, false),
+        ]
+    );
+    let started = json!({
+        "limits": [
+            {"kind": "session", "group": "session", "percent": 0,
+             "resets_at": "2026-08-18T04:59:59+00:00"},
+            {"kind": "session", "group": "session", "percent": 3, "resets_at": null}
+        ]
+    });
+    for window in parse_claude(&started) {
+        assert!(window.cycle_starts_on_first_message, "{window:?}");
+        assert!(
+            !window.clone().into_dto().starts_on_first_message,
+            "{window:?}"
+        );
+    }
+    let legacy = json!({
+        "five_hour": {"utilization": 0.0, "resets_at": null},
+        "seven_day": {"utilization": 0.0, "resets_at": null}
+    });
+    let legacy: Vec<(String, bool)> = parse_claude(&legacy)
+        .into_iter()
+        .map(|window| (window.id.clone(), window.into_dto().starts_on_first_message))
+        .collect();
+    assert_eq!(
+        legacy,
+        [
+            ("session".to_string(), true),
+            ("weekly_all".to_string(), false)
+        ]
+    );
+    assert!(
+        AgentId::Claude
+            .limits_facts()
+            .on_load
+            .contains(&crate::provider_catalogue::OnLoad::MarkFirstMessageSessions),
+        "a Claude reading remembered before the flag is marked as it loads"
     );
 }
 

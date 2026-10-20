@@ -37,6 +37,8 @@ function limits(
     account: { id, label },
     currentAccount,
     plan: provider === "claude" ? "max" : "pro",
+    planLabel: provider === "claude" ? "Max" : "Pro ×20",
+    planCapacity: provider === "claude" ? 5 : 20,
     windows: [
       {
         id: "weekly_all",
@@ -343,7 +345,7 @@ it("marks saved usage quietly in the popover and exposes its failure on focus", 
 
 it("says under a row why it shows no reset, as the Limits screen does", async () => {
   const kept = limits("claude", "claude-kept", "kept@claude.example", false);
-  kept.windows = [kept.windows[0], { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, observedAt: "2026-08-17T12:00:00Z" }];
+  kept.windows = [kept.windows[0], { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, observedAt: "2026-08-17T12:00:00Z", startsOnFirstMessage: true }];
   const codex = limits("codex", "codex-current", "current@codex.example", true);
   codex.windows = [codex.windows[0], { id: "extra", label: "Weekly · GPT-5.6-Luna", kind: "model", usedPercent: 3, resetsAt: null, observedAt: "2026-08-18T12:00:00Z" }];
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude"

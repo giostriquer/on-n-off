@@ -4,11 +4,12 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
-    AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto,
-    ProviderLimitsDto, Reading, ResetCreditOutcome,
+    LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto,
+    Reading, ResetCreditOutcome,
 };
 use crate::limits::{ReadFailure, ResetInstant};
 use crate::limits_refresh::Served;
+use crate::provider_catalogue::BANKED_RESETS_PROVIDER;
 
 const SPEND_CAP_PERCENT: u8 = 5;
 const LOWEST_SHARE_PERCENT: u8 = 1;
@@ -176,9 +177,11 @@ pub(crate) fn plan(
     alerts: &HashMap<String, ResetAlert>,
     now: DateTime<Utc>,
 ) -> Plan {
-    let codex = reads.iter().find(|read| read.provider == AgentId::Codex);
-    let due = waiting.fall_due(codex, alerts, now);
-    let cards = codex.map_or(&[][..], |read| read.entries.as_slice());
+    let banking = reads
+        .iter()
+        .find(|read| read.provider == BANKED_RESETS_PROVIDER);
+    let due = waiting.fall_due(banking, alerts, now);
+    let cards = banking.map_or(&[][..], |read| read.entries.as_slice());
     let (automatic, told): (Vec<_>, Vec<_>) = memory
         .offers(cards, alerts, now)
         .into_iter()
@@ -214,7 +217,7 @@ impl AlertMemory {
         self.0.retain(|account, _| alerts.contains_key(account));
         let mut offers = Vec::new();
         for card in readings {
-            let Some(account) = signed_in_codex(card) else {
+            let Some(account) = signed_in_with_banked_resets(card) else {
                 continue;
             };
             let Some(alert) = alerts.get(&account.id) else {
@@ -244,10 +247,14 @@ impl AlertMemory {
     }
 }
 
-fn signed_in_codex(card: &ProviderLimitsDto) -> Option<&LimitsAccountDto> {
+fn signed_in_with_banked_resets(card: &ProviderLimitsDto) -> Option<&LimitsAccountDto> {
     let account = card.account.as_ref()?;
-    (card.provider == AgentId::Codex && card.current_account && card.status == LimitsStatus::Ok)
+    (banks_resets(card) && card.current_account && card.status == LimitsStatus::Ok)
         .then_some(account)
+}
+
+fn banks_resets(card: &ProviderLimitsDto) -> bool {
+    card.provider == BANKED_RESETS_PROVIDER
 }
 
 fn low_reading(
@@ -255,7 +262,7 @@ fn low_reading(
     alert: &ResetAlert,
     now: DateTime<Utc>,
 ) -> Option<(LowReading, Offer)> {
-    let account = signed_in_codex(card)?;
+    let account = signed_in_with_banked_resets(card)?;
     let left = left_percent(&card.reading)?;
     if left > f64::from(alert.spend_share().0) {
         return None;
@@ -310,33 +317,33 @@ fn is_newer(later: &str, earlier: &str) -> bool {
         .is_some_and(|(later, earlier)| later > earlier)
 }
 
-enum CodexNow<'a> {
+enum BankingNow<'a> {
     Live(&'a ProviderLimitsDto),
     NobodySignedIn,
     Unknown,
 }
 
-fn codex_now(codex: Option<&Served>) -> CodexNow<'_> {
-    let Some(read) = codex else {
-        return CodexNow::Unknown;
+fn banking_now(banking: Option<&Served>) -> BankingNow<'_> {
+    let Some(read) = banking else {
+        return BankingNow::Unknown;
     };
     let current = read
         .entries
         .iter()
-        .find(|card| card.provider == AgentId::Codex && card.current_account);
+        .find(|card| banks_resets(card) && card.current_account);
     match (current, &read.failure) {
-        (Some(card), _) if signed_in_codex(card).is_some() => CodexNow::Live(card),
+        (Some(card), _) if signed_in_with_banked_resets(card).is_some() => BankingNow::Live(card),
         (Some(_), Some(ReadFailure::SignedOut | ReadFailure::Unsupported(_))) => {
-            CodexNow::NobodySignedIn
+            BankingNow::NobodySignedIn
         }
-        _ => CodexNow::Unknown,
+        _ => BankingNow::Unknown,
     }
 }
 
 impl Waiting {
     fn fall_due(
         &mut self,
-        codex: Option<&Served>,
+        banking: Option<&Served>,
         alerts: &HashMap<String, ResetAlert>,
         now: DateTime<Utc>,
     ) -> Vec<Due> {
@@ -345,21 +352,21 @@ impl Waiting {
         let late = |spend: &WaitingSpend| {
             spend.due_at + chrono::Duration::minutes(LATE_AFTER_MINUTES) < now
         };
-        let codex = codex_now(codex);
-        let decided = !matches!(codex, CodexNow::Unknown);
+        let banking = banking_now(banking);
+        let decided = !matches!(banking, BankingNow::Unknown);
         self.0
             .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))
             .map(|(account, spend)| {
                 if late(&spend) {
                     return Due::Kept(spend.kept_notice(Kept::Late));
                 }
-                let deciding_alert = match codex {
-                    CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
+                let deciding_alert = match banking {
+                    BankingNow::Live(card) => alerts.get(&account).filter(|alert| {
                         low_reading(card, alert, now).is_some_and(|(_, offer)| {
                             offer.account_id == account && offer.cycle.same_cycle_as(spend.cycle)
                         })
                     }),
-                    CodexNow::NobodySignedIn | CodexNow::Unknown => None,
+                    BankingNow::NobodySignedIn | BankingNow::Unknown => None,
                 };
                 match deciding_alert {
                     Some(alert) => Due::Spend(spend, alert.spend_share()),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::provider_catalogue::OnLoad;
 
 #[test]
 fn obsolete_v1_snapshots_are_ignored_without_rewriting_them() {
@@ -143,37 +144,57 @@ fn forgetting_an_account_whose_count_lapsed_still_removes_the_history_it_replace
 }
 
 #[test]
-fn a_remembered_claude_reset_count_is_dropped_as_the_snapshot_loads() {
-    let home = scratch_dir("limits-snap-claude-resets");
-    let store = SnapshotStore::for_home(&home);
-    let with_windows = serde_json::json!({
-        "schemaVersion": 2, "provider": "claude",
-        "account": {"id": "acct-1", "label": "a@x"},
-        "resetCredits": {"availableCount": 1},
-        "windows": [{"id": "seven_day", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
-                     "observedAt": "2026-08-17T10:00:00.000Z"}]
-    });
-    let only_resets = serde_json::json!({
-        "schemaVersion": 2, "provider": "claude",
-        "account": {"id": "acct-2", "label": "b@x"},
-        "resetCredits": {"availableCount": 1},
-        "windows": []
-    });
-    std::fs::create_dir_all(home.join(".on-n-off/limits")).unwrap();
-    for (name, snapshot) in [("acct_1", with_windows), ("acct_2", only_resets)] {
-        std::fs::write(
-            home.join(format!(".on-n-off/limits/claude-{name}-00000000.json")),
-            snapshot.to_string(),
-        )
-        .unwrap();
+fn a_remembered_reset_count_is_dropped_as_the_snapshot_loads_exactly_where_the_provider_says() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let home = scratch_dir(&format!("limits-snap-resets-{}", provider.key()));
+        let store = SnapshotStore::for_home(&home);
+        let with_windows = serde_json::json!({
+            "schemaVersion": 2, "provider": provider,
+            "account": {"id": "acct-1", "label": "a@x"},
+            "resetCredits": {"availableCount": 1},
+            "windows": [{"id": "seven_day", "label": "Weekly", "kind": "weekly", "usedPercent": 10.0,
+                         "observedAt": "2026-08-17T10:00:00.000Z"}]
+        });
+        let only_resets = serde_json::json!({
+            "schemaVersion": 2, "provider": provider,
+            "account": {"id": "acct-2", "label": "b@x"},
+            "resetCredits": {"availableCount": 1},
+            "windows": []
+        });
+        std::fs::create_dir_all(home.join(".on-n-off/limits")).unwrap();
+        for (name, snapshot) in [("acct-1", with_windows), ("acct-2", only_resets)] {
+            std::fs::write(
+                home.join(".on-n-off/limits")
+                    .join(file_name(provider, name)),
+                snapshot.to_string(),
+            )
+            .unwrap();
+        }
+
+        let mut loaded = store.load(provider);
+        loaded.sort_by_key(|card| card.account.as_ref().map(|account| account.id.clone()));
+
+        let dropped = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::DropResetCredits);
+        let ids: Vec<&str> = loaded
+            .iter()
+            .filter_map(|card| card.account.as_ref().map(|account| account.id.as_str()))
+            .collect();
+        let expected_ids: &[&str] = if dropped {
+            &["acct-1"]
+        } else {
+            &["acct-1", "acct-2"]
+        };
+        assert_eq!(ids, expected_ids, "{provider:?}");
+        assert_eq!(
+            loaded[0].reading.reset_credits.is_none(),
+            dropped,
+            "{provider:?}"
+        );
+        let _ = std::fs::remove_dir_all(&home);
     }
-
-    let loaded = store.load(AgentId::Claude);
-
-    assert_eq!(loaded.len(), 1, "{loaded:?}");
-    assert_eq!(loaded[0].account.as_ref().unwrap().id, "acct-1");
-    assert_eq!(loaded[0].reading.reset_credits, None);
-    let _ = std::fs::remove_dir_all(&home);
 }
 
 #[test]
@@ -314,18 +335,29 @@ fn a_remembered_codex_file_with_only_hidden_windows_is_not_loaded() {
 }
 
 #[test]
-fn another_providers_remembered_windows_load_whatever_their_names() {
-    let home = scratch_dir("limits-snap-hidden-rule-is-codexs");
-    let store = SnapshotStore::for_home(&home);
-    let mut claude = snapshot(AgentId::Claude, "user-1", "a@x", "2026-08-17T10:00:00.000Z");
-    let mut named_like_hidden = claude.reading.windows[0].clone();
-    named_like_hidden.id = "extra:codex_bengalfox".into();
-    named_like_hidden.label = "Weekly · GPT-Reserve".into();
-    named_like_hidden.kind = LimitWindowKind::Model;
-    claude.reading.windows.push(named_like_hidden);
-    store.save(&claude).unwrap();
+fn only_a_provider_whose_files_drop_hidden_windows_loses_windows_named_like_them() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let home = scratch_dir(&format!("limits-snap-hidden-rule-{}", provider.key()));
+        let store = SnapshotStore::for_home(&home);
+        let mut card = snapshot(provider, "user-1", "a@x", "2026-08-17T10:00:00.000Z");
+        let mut named_like_hidden = card.reading.windows[0].clone();
+        named_like_hidden.id = "extra:codex_bengalfox".into();
+        named_like_hidden.label = "Weekly · GPT-Reserve".into();
+        named_like_hidden.kind = LimitWindowKind::Model;
+        card.reading.windows.push(named_like_hidden);
+        store.save(&card).unwrap();
 
-    assert_eq!(store.load(AgentId::Claude)[0].reading.windows.len(), 2);
+        let hides = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::DropHiddenWindows);
+        assert_eq!(
+            store.load(provider)[0].reading.windows.len(),
+            if hides { 1 } else { 2 },
+            "{provider:?}"
+        );
+        let _ = std::fs::remove_dir_all(&home);
+    }
 }
 
 #[test]
@@ -362,4 +394,63 @@ fn a_remembered_file_out_of_range_loads_in_range_and_stays_as_written() {
         Some(100.0)
     );
     assert!(fs::read_to_string(&path).unwrap().contains("140"));
+}
+
+#[test]
+fn a_file_written_before_the_first_message_flag_marks_an_idle_session_where_its_provider_says() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let home = scratch_dir(&format!("limits-snap-first-message-{}", provider.key()));
+        let store = SnapshotStore::for_home(&home);
+        let window = |id: &str, kind: &str, used: f64, resets_at: Option<&str>| {
+            let mut window = serde_json::json!({"id": id, "label": id, "kind": kind,
+                "usedPercent": used, "observedAt": "2026-08-17T10:00:00.000Z"});
+            if let Some(at) = resets_at {
+                window["resetsAt"] = serde_json::json!(at);
+            }
+            window
+        };
+        let old_shape = serde_json::json!({
+            "schemaVersion": 2, "provider": provider,
+            "account": {"id": "acct-1", "label": "a@x"},
+            "windows": [
+                window("weekly", "weekly", 0.0, None),
+                window("idle", "session", 0.0, None),
+                window("used", "session", 4.0, None),
+                window("started", "session", 0.0, Some("2026-08-17T15:00:00Z")),
+                window("model", "model", 0.0, None)
+            ],
+            "observedAt": "2026-08-17T10:00:00.000Z"
+        });
+        fs::create_dir_all(store.dir()).unwrap();
+        let path = store.dir().join(file_name(provider, "acct-1"));
+        fs::write(&path, old_shape.to_string()).unwrap();
+
+        let loaded = store.load(provider).remove(0);
+
+        let marks = provider
+            .limits_facts()
+            .on_load
+            .contains(&OnLoad::MarkFirstMessageSessions);
+        let flagged: Vec<(&str, bool)> = loaded
+            .reading
+            .windows
+            .iter()
+            .map(|window| (window.id.as_str(), window.starts_on_first_message))
+            .collect();
+        assert_eq!(
+            flagged,
+            [
+                ("weekly", false),
+                ("idle", marks),
+                ("used", false),
+                ("started", false),
+                ("model", false)
+            ],
+            "{provider:?}"
+        );
+        assert!(!fs::read_to_string(&path)
+            .unwrap()
+            .contains("startsOnFirstMessage"));
+        let _ = fs::remove_dir_all(&home);
+    }
 }

@@ -115,6 +115,7 @@ pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
         subscription: None,
         reset_credits: reset_credits(payload.rate_limit_reset_credits.as_ref()),
         reset_offer: reset_offer(payload.rate_limit_upsell.as_ref()),
+        ..Reading::default()
     }
 }
 
@@ -218,6 +219,8 @@ fn quota_window(id: String, scope: Scope, entry: &RateLimitWindow) -> QuotaWindo
             .map(Duration::from_secs),
         used_percent: entry.used_percent,
         reset: reset_at_epoch(entry.resets_at),
+        role: None,
+        cycle_starts_on_first_message: false,
     }
 }
 
@@ -449,7 +452,7 @@ fn backend_figures(
         .reading
         .plan
         .as_deref()
-        .is_some_and(credits_spent::is_codex_workspace_plan);
+        .is_some_and(super::plan::is_codex_workspace_plan);
     let interval = crate::limits_refresh::poll_interval();
     card.reading.credits_spent = access.filter(|_| workspace).and_then(|access| {
         credits_spent::read_backed_off(access, urls.credit_usage, interval, now)

@@ -270,7 +270,7 @@ describe("card header", () => {
   async function claudeTags(widths: { line: number; name: number }) {
     vi.spyOn(Element.prototype, "clientWidth", "get").mockReturnValue(widths.line);
     vi.spyOn(Element.prototype, "scrollWidth", "get").mockReturnValue(widths.name);
-    answerClaudeCodex([okClaude({ plan: "max ×5" })], [okCodex()]);
+    answerClaudeCodex([okClaude({ plan: "max ×5", planLabel: "Max ×5", planCapacity: 5 })], [okCodex()]);
     const { unmount } = renderLimits();
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     const tags = within(claude).getByTestId("account-tags");
@@ -320,7 +320,7 @@ describe("card header", () => {
 
   it("draws the active account's dot beside its headline window, or in its header without one", async () => {
     const session = { id: "secondary", label: "5 hour · all models", kind: "session" as const, usedPercent: 12, resetsAt: "2026-08-17T23:00:00Z", observedAt: NOW };
-    answerClaudeCodex([okClaude({ plan: "max ×5" })], [okCodex({ windows: [session] }), staleCodex()]);
+    answerClaudeCodex([okClaude({ plan: "max ×5", planLabel: "Max ×5", planCapacity: 5 })], [okCodex({ windows: [session] }), staleCodex()]);
     renderLimits();
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
     const beside = within(claude).getByRole("img", { name: "Active account" });
