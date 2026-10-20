@@ -182,10 +182,11 @@ fn read_provider(
     force: bool,
     native: &Native<'_>,
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
-    saved: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>),
+    saved: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>) -> bool,
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> (Served, u64) {
     let mut unarchived = false;
+    let mut logins_changed = false;
     let (served, reading) =
         read_through_cache(cache, interval, force, native.login, |force, refresh| {
             let (mut cards, outcome) = if refresh.native {
@@ -199,13 +200,13 @@ fn read_provider(
                 (refresh.previous.to_vec(), None)
             };
             if refresh.saved {
-                saved(force, &mut cards);
+                logins_changed = saved(force, &mut cards);
             }
             flag(&mut cards);
             (cards, outcome)
         });
     announce(cache, reading);
-    if unarchived {
+    if unarchived || logins_changed {
         read_revision::announce(Source::Accounts);
     }
     (served, reading.revision())

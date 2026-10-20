@@ -1,0 +1,22 @@
+[
+  {
+    "state": "usable"
+  },
+  {
+    "state": "ending",
+    "endsAt": "2100-01-01T00:00:00Z"
+  },
+  {
+    "state": "ended",
+    "endsAt": "2020-01-01T00:00:00Z"
+  },
+  {
+    "state": "refused"
+  },
+  {
+    "state": "otherAccount"
+  },
+  {
+    "state": "missing"
+  }
+]

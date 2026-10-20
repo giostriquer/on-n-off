@@ -47,6 +47,10 @@ impl Home for ClaudeHome {
         )
     }
 
+    fn login_stamp(&self) -> Result<String, String> {
+        self.store.login_stamp()
+    }
+
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         NativeAccount::sign_in_deadline(&self.store)
     }

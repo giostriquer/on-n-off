@@ -1,7 +1,6 @@
 import { LIMITS_FEATURE_ROWS, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 
 export const LIMITS_IMPLEMENTATIONS = {
-  signInDeadline: ["claude"],
   subscriptionTerm: ["codex"],
   bankedResets: ["codex"],
   paidResetOffer: ["codex"],
@@ -19,7 +18,6 @@ function named<T extends string>(known: readonly T[], value: string | null): T |
 
 function features(row: FeatureRow): LimitsFeatures {
   return {
-    signInDeadline: named(LIMITS_IMPLEMENTATIONS.signInDeadline, row.signInDeadline),
     subscriptionTerm: named(LIMITS_IMPLEMENTATIONS.subscriptionTerm, row.subscriptionTerm),
     bankedResets: named(LIMITS_IMPLEMENTATIONS.bankedResets, row.bankedResets),
     paidResetOffer: named(LIMITS_IMPLEMENTATIONS.paidResetOffer, row.paidResetOffer),

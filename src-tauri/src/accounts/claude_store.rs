@@ -255,16 +255,34 @@ pub(crate) fn keychain_account(service: &str) -> Result<Option<String>, String> 
 }
 
 #[cfg(target_os = "macos")]
+pub(crate) fn keychain_stamp(service: &str) -> Result<Option<String>, String> {
+    let own = own_account();
+    let listed = match attributes(service, Some(&own))? {
+        Some(listed) => Some(listed),
+        None => attributes(service, None)?,
+    };
+    Ok(listed.map(|listed| crate::sha::sha256_hex(listed.as_bytes())))
+}
+
+#[cfg(target_os = "macos")]
 fn attributes_account(service: &str, account: Option<&str>) -> Result<Option<String>, String> {
+    attributes(service, account)?
+        .map(|listed| {
+            parse_keychain_account(&listed)
+                .ok_or_else(|| "Cannot identify the Claude Code Keychain entry.".to_string())
+        })
+        .transpose()
+}
+
+#[cfg(target_os = "macos")]
+fn attributes(service: &str, account: Option<&str>) -> Result<Option<String>, String> {
     use crate::process::CommandOutcome;
     match super::keychain::find_attributes(service, account, ACCOUNT_DEADLINE)? {
         CommandOutcome::Exited {
             success: true,
             stdout,
             ..
-        } => parse_keychain_account(&stdout)
-            .map(Some)
-            .ok_or_else(|| "Cannot identify the Claude Code Keychain entry.".to_string()),
+        } => Ok(Some(stdout)),
         CommandOutcome::Exited { stderr, .. } if stderr.contains("could not be found") => Ok(None),
         CommandOutcome::Exited { stderr, .. } => {
             Err(format!("Keychain lookup failed ({}).", stderr.trim()))

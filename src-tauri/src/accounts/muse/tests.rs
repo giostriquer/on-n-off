@@ -325,6 +325,56 @@ fn a_malformed_saved_login_is_refused_and_the_signed_in_one_left_alone() {
 }
 
 #[test]
+fn a_homes_login_stamp_follows_its_auth_file_without_reading_it() {
+    let dir = scratch_dir("muse-home-stamp");
+    let home = MuseHome::at(&dir);
+    let empty = home.login_stamp();
+    home.put(&login("you@example.com", "t1"), &()).unwrap();
+    let file = home.store.auth_file();
+    let touched = |seconds: u64| {
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + Duration::from_secs(seconds))
+            .unwrap();
+    };
+    touched(1_800_000_000);
+    let first = home.login_stamp();
+
+    assert_eq!(empty.as_deref(), Ok(native::ABSENT), "no login yet");
+    assert_ne!(first, empty);
+    assert_eq!(home.login_stamp(), first);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o000)).unwrap();
+        assert_eq!(home.login_stamp(), first, "the stamp never opens the file");
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let same_length = fs::read(&file).unwrap();
+    fs::write(&file, &same_length).unwrap();
+    touched(1_800_000_060);
+    assert_ne!(home.login_stamp(), first, "rewritten, the same length");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_home_whose_auth_file_cannot_be_looked_at_has_no_stamp() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = scratch_dir("muse-home-sealed");
+    let home = MuseHome::at(&dir);
+    home.put(&login("you@example.com", "t1"), &()).unwrap();
+    let config = home.store.auth_file().parent().unwrap().to_path_buf();
+
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o000)).unwrap();
+    let stamp = home.login_stamp();
+    fs::set_permissions(&config, fs::Permissions::from_mode(0o755)).unwrap();
+
+    assert!(stamp.is_err(), "{stamp:?}");
+}
+
+#[test]
 fn a_home_and_a_new_sign_in_read_usage_with_their_own_token() {
     let dir = scratch_dir("muse-home-usage");
     let (home_url, home_served) = serve_once("200 OK", &mint("you@example.com"));

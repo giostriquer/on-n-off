@@ -10,6 +10,7 @@ mod usage_renew;
 mod transaction;
 
 mod homes;
+mod login_state;
 
 pub(crate) mod claude;
 pub(crate) mod claude_store;
@@ -50,6 +51,7 @@ pub struct ProfileDto {
     archived: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     sign_in_ends_at: Option<String>,
+    login_state: login_state::LoginState,
 }
 #[derive(Default, Serialize)]
 #[serde(transparent)]
@@ -149,6 +151,7 @@ trait Home: Send + Sync {
         &self,
         identity: &model::Identity,
     ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure>;
+    fn login_stamp(&self) -> Result<String, String>;
     fn sign_in_deadline(&self) -> Option<model::SignInDeadline>;
     fn delete(&self, locks: Box<dyn NativeGuard>) -> Result<(), String>;
 }
@@ -248,35 +251,6 @@ impl Accounts {
     }
 }
 
-fn sign_in_ends_at(
-    profile: &store::Profile,
-    native: Option<&model::SignInDeadline>,
-    homes: Option<&impl Fn(&str) -> Result<Box<dyn Home>, String>>,
-) -> Option<String> {
-    let own = |deadline: &model::SignInDeadline| {
-        (deadline.identity == profile.identity).then_some(deadline.ends_at_ms)
-    };
-    let native = || native.and_then(own);
-    let saved = || {
-        let vault = profile.login.as_ref().and_then(|login| {
-            view(profile.identity.provider, login)
-                .ok()?
-                .sign_in_deadline()
-        });
-        vault
-            .or_else(|| homes?(profile.home.as_deref()?).ok()?.sign_in_deadline())
-            .as_ref()
-            .and_then(own)
-    };
-    let ends_at_ms = if profile.pending_activation {
-        saved()
-    } else {
-        native().or_else(saved)
-    }?;
-    chrono::DateTime::from_timestamp_millis(ends_at_ms)
-        .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
-}
-
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Accounts::live()?.list(provider)
 }
@@ -363,27 +337,49 @@ impl Accounts {
             .unwrap_or_default();
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
-        Ok(AccountsDto {
-            profiles: db
-                .profiles
-                .into_iter()
-                .filter(|p| p.identity.provider == provider)
-                .map(|p| ProfileDto {
-                    sign_in_ends_at: sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref()),
+        let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut read_ends = Vec::new();
+        let profiles = db
+            .profiles
+            .iter()
+            .filter(|p| p.identity.provider == provider)
+            .map(|p| {
+                let active = current.as_ref() == Some(&p.identity);
+                let kept = usage::kept(p, homes);
+                let deadline =
+                    login_state::Deadline::of(p, native_deadline.as_ref(), kept.as_ref());
+                if let Some(end) = deadline.read() {
+                    read_ends.push((p.id.clone(), p.home.clone(), end));
+                }
+                let standing = if active {
+                    login_state::Standing::SignedIn
+                } else {
+                    login_state::Standing::Saved(usage::parked(home, p, kept.as_ref()))
+                };
+                ProfileDto {
+                    sign_in_ends_at: deadline.spelled(),
+                    login_state: login_state::LoginState::of(p, &deadline, standing, now_ms),
                     needs_login: p.needs_login(),
                     archived: archived.contains(&p.identity.observation_key()),
                     category: categories.get(&p.identity.observation_key()).cloned(),
                     observation_id: p.identity.observation_key(),
                     legacy_id: p.identity.legacy_key(),
-                    active: current.as_ref() == Some(&p.identity),
-                    id: p.id,
-                    identity: p.identity,
-                    label: p.label,
-                    email: p.email,
-                    saved_at: p.saved_at,
+                    active,
+                    id: p.id.clone(),
+                    identity: p.identity.clone(),
+                    label: p.label.clone(),
+                    email: p.email.clone(),
+                    saved_at: p.saved_at.clone(),
                     pending_activation: p.pending_activation,
-                })
-                .collect(),
+                }
+            })
+            .collect();
+        if !read_ends.is_empty() {
+            let _ = login_state::remember_ends(home, &read_ends);
+        }
+        Ok(AccountsDto {
+            profiles,
             remember_accounts: discovery::enabled(home).unwrap_or(false),
             native_observation_id: current.as_ref().map(model::Identity::observation_key),
             native_account: current,

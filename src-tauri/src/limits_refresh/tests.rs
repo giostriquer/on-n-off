@@ -324,7 +324,7 @@ fn a_provider_read_holds_a_forced_read_for_the_rate_limited_login_and_reads_anot
             force,
             &native,
             &|_| false,
-            &|_, _| {},
+            &|_, _| false,
             &|_| {},
         )
     };
@@ -640,6 +640,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
     let changes = std::cell::Cell::new(true);
+    let logins_change = std::cell::Cell::new(false);
     let native = |_| {
         log.borrow_mut().push("native");
         native_read(vec![
@@ -663,6 +664,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         log.borrow_mut()
             .push(if force { "saved, forced" } else { "saved" });
         entries.push(snapshot("saved", false, LimitsStatus::Ok));
+        logins_change.get()
     };
     let flag = |entries: &mut [ProviderLimitsDto]| {
         assert!(
@@ -717,6 +719,14 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         read_revision::take_announced(),
         [Source::LimitsClaude],
         "nothing was unarchived, so the account list is not announced"
+    );
+
+    logins_change.set(true);
+    read(true);
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude, Source::Accounts],
+        "a saved login whose state the poll changed is announced on the account list"
     );
 }
 

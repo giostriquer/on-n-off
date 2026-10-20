@@ -95,7 +95,9 @@ source carries no comments (see [Code comments](#code-comments)).
   `LIMITS_IMPLEMENTATIONS`, the one list of the implementations the card model has, which also
   types each feature. A new provider has a row once Rust gives it one, `limitFeatures.test.ts`
   fails when a row names an implementation that list lacks, and reusing a feature means reusing
-  that implementation. A new header tag kind (`cardTags.ts`)
+  that implementation. Whether a saved login must sign in again is no feature: the card reads the
+  profile's login state (`loginState.ts`, from `accounts/login_state.rs`), the same for every
+  provider. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
   order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.

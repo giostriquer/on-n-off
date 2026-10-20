@@ -16,9 +16,10 @@ read could not move into its home, is never sent: its read fails until a later r
 polls saved Codex accounts with access-only HTTP requests without changing the active native login,
 through Codex's Limits reader, which the adapter dispatches (`read_usage`). At most two saved reads
 per provider run at once, with the Limits failure backoff per account
-(`limits_refresh::failure_backoff`) and provider retry-after handling. Rejected shared
-credentials, and logins that now sign in as a different account, wait for a changed generation and
-renew nothing.
+(`limits_refresh::failure_backoff`) and provider retry-after handling, whether the login is in the
+vault or in its home. A login its provider refused, and one that now signs in as a different
+account, waits for a changed generation and renews nothing, in its home as in the vault (Login
+state, below).
 The previous numeric reading and its observation time remain visible, and every card a poll
 produces is marked as a saved profile's (`saved_profile`), so it never reads as a remembered one.
 
@@ -52,18 +53,35 @@ native login and profiles already activated remain access-only until explicitly 
 
 A saved account's home (`accounts/homes.rs`) is a private store of the provider's own client, kept
 under `.on-n-off/accounts/homes/<id>`, where the account's one login waits while it is not the
-signed-in one. Only Claude has homes (`accounts/claude/home.rs`): a persistent Claude config dir.
-Claude Code renews the login there whenever Limits asks it for the account's usage
-(`limits::claude_cli`), so on-n-off sends no request with that login and sends no grant for it.
+signed-in one. Claude and Muse have homes; Codex has none. Claude's (`accounts/claude/home.rs`) is
+a persistent Claude config dir. Claude Code renews the login there whenever Limits asks it for the
+account's usage (`limits::claude_cli`), so on-n-off sends no request with that login and sends no
+grant for it. Muse's (`MuseHome`, `accounts/muse.rs`) keeps its login inline in the home's own
+`auth.json` and never renews (Provider adapters, below).
 
 Renewal never outlives the sign-in itself: Anthropic ends each one at the `refreshTokenExpiresAt`
 Claude Code stores with it, and only signing in again starts a new one. The account listing reads
-that date from the default store and from each saved login, in the vault or its home
-(`NativeAccount::sign_in_deadline`, `Home::sign_in_deadline`, `LoginView::sign_in_deadline`),
-credited only to the account the store's `oauthAccount` names. A sign-in awaiting use is newer than
+that date from the default store (`NativeAccount::sign_in_deadline`) and from each saved login,
+credited only to the account the login's `oauthAccount` names: a login in the vault from its view
+(`LoginView::sign_in_deadline`), already decrypted, and a login in its home from the date its
+profile records (`sign_in_end` on `Profile`, `SignInEnd` in `accounts/login_state.rs`), which is
+not a secret. on-n-off records it wherever it already holds the login: every save (save current,
+remembering, a sign-in's publication, a switch's capture of the outgoing login), the move into a
+home at check-in, the move out of it at check-out, and a forgotten home taken back. A profile an
+older version wrote has no record; its home is read once (`Home::sign_in_deadline`, through the
+store's own read) and what that read found, a date or none, is recorded with a metadata change
+(`ChangeKind::Metadata`), so a home is read at most once, never once per listing. A read that
+fails, a Keychain prompt denied or unanswered or a file that cannot be read, records none too, on
+purpose, so it never asks again; that home shows no date until on-n-off next holds its login. The limit: a
+login replaced in its home outside on-n-off, by running `claude /login` with that config dir, keeps
+the date recorded for the login it replaced until on-n-off next holds the login. A sign-in awaiting use is newer than
 whatever the default store still holds for its account, so it reads only its own login; otherwise
 the default store's date comes first. The card warns through the last seven days ([PROVIDERS.md](../../PROVIDERS.md)). The date survives
-Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when.
+Claude Code emptying a login Anthropic refused, so a sign-in that has already ended still says when
+for a saved account, in the vault or its home. It does not for a signed-in account with no saved
+login: once Claude Code empties its ended login, the default store holds no login, so the account
+is no longer the signed-in one and lists as `missing`, its card offering Sign in without the
+Sign-in ended tag.
 
 Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
 signed-in account, or the account's home. The issuer replaces a refresh token each time it renews
@@ -151,6 +169,66 @@ the ticket guards is rechecked under the lease afterwards, in one of three ways:
   the epoch and the login generation the reading was made with.
 
 The epoch and the recovery journal are private to the store.
+
+## Login state
+
+Every listed profile carries one login state (`loginState` on `ProfileDto`, `LoginState` in
+`accounts/login_state.rs`), and it is all a Limits card reads to ask for a new sign-in, for every
+provider:
+
+- `usable`: nothing says otherwise;
+- `ending`, with the date its sign-in ends: the adapter knows the date (Claude's
+  `refreshTokenExpiresAt`, Homes above; Codex and Muse report none) and it has not passed;
+- `ended`, with that date, once it has passed;
+- `refused`: the saved poll parked the login because its provider refused it or found it signed
+  out;
+- `otherAccount`: the saved poll parked it because it now answers for a different account;
+- `missing`: the profile keeps neither a vault login nor a home.
+
+When more than one applies, the first of missing, ended, another account, refused and ending wins,
+so a sign-in that ended still says when after the refusal its end brought. The signed-in
+account's state is its date alone, `usable`, `ending` or `ended`, never `missing`, `refused` or
+`otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
+failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
+in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
+account list is read; the UI reads the account list again just after the nearest `ending` date
+it has not been read since, and when the window shows again after such a date passed while it was
+hidden ([shared-reads.md](shared-reads.md)).
+
+The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
+each attempt is keyed by the profile and kept with the generation it read: the vault login's
+fingerprint, or the home's id with its login stamp (`Home::login_stamp`). The poll and the listing
+resolve where each profile's login is kept once (`usage::kept`: the vault login, or its home) and
+take its generation from that. A rate limit holds the
+next attempt until its Retry-After, any other failure the Limits failure backoff, and a refusal or
+another account parks the login: no attempt, forced or not, reads it again until its generation
+changes, by a new sign-in, a switch that captured a renewed login, or the provider's client
+renewing it in its home.
+
+A login stamp is evidence that changes whenever the home's login is written, and it never reads the
+login itself. A Claude home's is the attributes of its Keychain item (`find-generic-password`
+without `-w`: its account and modification date, which ask macOS for no access to the secret), under
+Claude Code's own account name first, then any, beside its `.credentials.json`'s metadata; a Muse
+home's is its `auth.json`'s metadata. File metadata is the file's id, size and modification time,
+read without opening the file. Reading the login instead would read Claude's item with `-w` from a
+background poll: Claude Code rewrites the item whenever it renews the login in the home, and macOS
+then resets the item's partition list to Claude's signing team, so that read would raise a
+"security wants to use" prompt. The vault login's fingerprint comes from the vault already
+unlocked for the poll. A stamp that cannot be taken mints no generation: the poll reads nothing and
+replays the verdict it has, and the listing keeps the parked verdict. The listing takes the poll's
+verdict only while the profile's generation is still the one parked (`usage::parked`), so a changed
+login is usable at once. A Muse login refused (401) in its home used to be read again on the backoff, while
+the same refusal in the vault waited for a new login.
+
+The poll's attempts live in memory, as its holds always have, and are not kept across a restart:
+the first saved poll after a restart finds nothing held, reads every saved login and parks a
+refused one again, so the state comes back within one Limits read; until then the listing says
+usable, or ending or ended from the date. A poll that changes a profile's parked verdict, or the
+generation a verdict is parked for, says so (`hold_back` compares the attempt it records with the
+one it replaces), and the Limits read that ran it announces the account list once its cache lock
+is released
+(`limits_refresh::read_provider`), as it does for an account it unarchived. The account list
+answers unforced, which reads the verdicts and polls nothing, so the exchange ends there.
 
 ## Provider adapters
 
@@ -506,7 +584,11 @@ A vault that cannot be read right now is a retryable IPC error for the subscript
 absent date.
 
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude, Codex and Muse;
-each card owns its usage, subscription date, primary action and optional category. The card frame
+each card owns its usage, subscription date, primary action and optional category. A saved
+profile's login state decides, for every provider, whether its card asks for a new sign-in: ended,
+refused or another account make Sign in again the primary action, with the state's sign-in tag and
+its message in place of the read's, and a refused login or another account keeps Use account in
+the ⋯ menu; ending shows its date through the last seven days; missing offers Sign in. The card frame
 (`LimitCardFrame`) draws each card's ⋯ menu and footer from the card action plan
 (`cardActionPlan.ts`), which decides every account action for every provider: Check limits now
 always, Edit category on every card with an account, the saved-login items and the footer's

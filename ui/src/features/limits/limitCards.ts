@@ -1,4 +1,4 @@
-import type { SavedProfile } from "$lib/accountTypes";
+import type { LoginState, SavedProfile } from "$lib/accountTypes";
 import type {
   LimitWindow,
   LimitsCredits,
@@ -12,7 +12,6 @@ import type {
 } from "$lib/limitsTypes";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { accountCards } from "./accountCards";
-import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
@@ -25,6 +24,7 @@ import {
   type LimitAccountPresentation,
   type LimitWindowPresentation,
 } from "./limitPresentation";
+import { signInPresentation, type SignInPresentation } from "./loginState";
 
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
 
@@ -76,6 +76,7 @@ export type LimitCard = {
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
+  login: LoginState | null;
   signIn: SignInPresentation | null;
   archived: boolean;
 };
@@ -159,7 +160,6 @@ type LegacyAccounts = Map<string, { id: string; email: string }[]>;
 function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, nativeLogin: NativeLogin | null, now: number): LimitCard {
   const { reading, profile } = slot;
   const name = providerLabel(provider);
-  const features = LIMITS_FEATURES[provider];
   const account = accountOf(slot);
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
@@ -168,7 +168,8 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
-  const signIn = features.signInDeadline === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
+  const login = profile?.loginState ?? null;
+  const signIn = login && signInPresentation(login, provider, now);
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null
     : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
@@ -204,6 +205,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       readStatus,
     },
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
+    login,
     signIn,
     archived: !leads && !!(reading ? reading.archived : profile?.archived),
   };
