@@ -477,6 +477,8 @@ test("both release checksum files come from the tested LF writer", { skip }, () 
     assert.ok(run.includes(output), `${name} writes ${output}`);
   }
   assert.doesNotMatch(readFileSync(join(directory, "release.yml"), "utf8"), /WriteAllLines/);
+});
+
 test("every installer build installs the pinned cargo-about first, for the bundled license notice", { skip }, () => {
   for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
     const install = step(job, "Install cargo-about");
