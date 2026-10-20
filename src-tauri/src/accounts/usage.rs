@@ -32,11 +32,13 @@ pub(super) struct FetchResult {
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-pub(crate) fn refresh(provider: AgentId, force: bool, entries: &mut Vec<ProviderLimitsDto>) {
-    let Ok(accounts) = super::Accounts::live() else {
-        return;
-    };
-    accounts.refresh_usage(provider, force, entries, &fetch_profile);
+pub(crate) fn refresh(
+    provider: AgentId,
+    force: bool,
+    entries: &mut Vec<ProviderLimitsDto>,
+) -> Option<super::Roster> {
+    let accounts = super::Accounts::live().ok()?;
+    accounts.refresh_usage(provider, force, entries, &fetch_profile)
 }
 
 type Fetch<'a> = dyn Fn(&Profile, &dyn Fn() -> Result<Store, String>) -> FetchResult + Sync + 'a;
@@ -48,15 +50,16 @@ impl super::Accounts {
         force: bool,
         entries: &mut Vec<ProviderLimitsDto>,
         fetch: &Fetch<'_>,
-    ) {
+    ) -> Option<super::Roster> {
         let home = &self.home;
         if !Store::vault_exists(home) {
-            return;
+            return Some(super::Roster::default());
         }
         let open = || Store::open_existing(home);
         let native = self
             .native(provider)
             .and_then(|native| native.subscription());
+        let current = native.clone().ok().flatten();
         let homes = self.account_homes(provider);
         if let (Some(homes), Ok(native)) = (&homes, &native) {
             super::homes::settle(home, provider, native.as_ref(), &open, homes);
@@ -73,6 +76,7 @@ impl super::Accounts {
         if let Some(homes) = &homes {
             refresh_homes(home, provider, force, entries, native, &open, homes);
         }
+        super::Roster::read(home, provider, current.as_ref())
     }
 }
 

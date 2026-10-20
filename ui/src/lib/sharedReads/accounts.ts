@@ -1,7 +1,7 @@
 import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import type { AccountCategories, AccountsReading } from "$lib/accountTypes";
-import type { AccountProvider, LimitsProvider } from "$lib/providers";
+import type { AccountsReading } from "$lib/accountTypes";
+import type { AccountProvider } from "$lib/providers";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
 
@@ -22,20 +22,6 @@ export function accountListQuery(provider: AccountProvider) {
   return queryOptions({ queryKey: accountListKey(provider), queryFn: () => api.readAccounts(provider), retry: false });
 }
 
-export function accountCategoriesQuery() {
-  return queryOptions({ queryKey: [...ACCOUNTS, "categories"], queryFn: () => api.readAccountCategories(), retry: false });
-}
-
-export function setCategoryLocally(client: QueryClient, provider: LimitsProvider, accountId: string, stored: string | null): void {
-  client.setQueryData<AccountCategories>(accountCategoriesQuery().queryKey, (categories) => {
-    if (!categories) return categories;
-    const accounts = { ...categories[provider] };
-    if (stored === null) delete accounts[accountId];
-    else accounts[accountId] = stored;
-    return { ...categories, [provider]: accounts };
-  });
-}
-
 export function accountPreferenceQuery() {
   return queryOptions({ queryKey: [...ACCOUNTS, "preferences"], queryFn: () => api.readAccountPreferences(), retry: false });
 }
@@ -54,19 +40,6 @@ export function codexSubscriptionQuery(accountId: string, poll = true) {
 
 export function cachedAccountList(client: QueryClient, provider: AccountProvider): AccountsReading | undefined {
   return client.getQueryData<AccountsReading>(accountListKey(provider));
-}
-
-export function markProfilesArchived(
-  client: QueryClient,
-  provider: AccountProvider,
-  observationIds: readonly string[],
-  archived: boolean,
-): void {
-  client.setQueryData<AccountsReading>(accountListKey(provider), (reading) => reading && {
-    ...reading,
-    profiles: reading.profiles.map((profile) =>
-      observationIds.includes(profile.observationId) ? { ...profile, archived } : profile),
-  });
 }
 
 export function rereadAccountListsAndPreference(client: QueryClient): Promise<void> {

@@ -293,7 +293,10 @@ beside one asks first, as Codex does.
   A category belongs to the account, not to a saved login: the vault's `categories` map holds one
   text per provider and card account id (the observation key), so every Limits card can have one,
   for every provider, saved or not. `read_account_categories` and `set_account_category` need no
-  account adapter, and the setter answers with the stored text. `Database` keeps a saved login's
+  account adapter, and the setter answers with the stored text. The Limits cards take their
+  categories from the Limits read, which reads them from the vault beside its saved profiles (the
+  Limits column, below), and a saved edit replaces that read's categories and announces it
+  (`limits_refresh::category_set`); the UI no longer reads the categories itself. `Database` keeps a saved login's
   profile copy in step with the map on every set and forget, and a login saved after its card was
   named takes the category, so an older app version still shows it; a profile category from an
   older version moves into the map when the vault loads. Forget drops the categories of every id
@@ -369,7 +372,8 @@ dates read from the logins, through `read_revision` once its leases are released
 remove for the provider whose card they add or remove. Use and sign out do so even when their
 native half fails, because a rollback or a failed logout may still have changed the native login;
 a sign-in does so only once published, and a change refused before it wrote anything is not
-announced. A category edit announces only the account list, which also invalidates the categories.
+announced. A category edit announces the account list and the provider's Limits read, whose column
+carries the category.
 
 ## Archived accounts
 
@@ -390,9 +394,11 @@ signed-in card cannot be archived.
   and no renewal of any kind. A private renewal runs only inside a poll, so it never runs for an archived login, and the
   renewal rules above are unchanged. If a provider expires an unused login meanwhile, unarchiving
   shows the usual sign-in-again state.
-- **Shown.** The shared read flags archived cards (`archived`), after the legacy history they
-  replaced is hidden, and the account list flags archived profiles. The Limits screen lists them
-  collapsed under each provider's cards, with Unarchive and Remove account; the popover shows none.
+- **Shown.** The shared read flags archived cards (`archived`), and its column folds the legacy
+  history they replaced into them and flags a saved profile no read answered for as archived when
+  its profile is, unless it is the native login (`limits::column`). The account list flags archived
+  profiles too. The Limits screen lists them collapsed under each provider's cards, with Unarchive
+  and Remove account; the popover shows none.
 - **What unarchives.** Unarchive, which then reads the provider again, forced, so the account comes
   back polled. Save account, Add account and Sign in again, as they undo a Remove. And becoming the
   signed-in account, whether the switch happened in on-n-off or in the provider's CLI: a provider
@@ -516,6 +522,31 @@ Remove account removes a saved login first when there is one, as the archived li
 card with no saved login, Archive account and Remove account act on its usage history only.
 Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
+
+### The Limits column
+
+Both Limits surfaces, the screen and the menu-bar popover, render one column per provider, and
+that column is the Limits read's (`read_limits`, served by `limits_refresh::read_column` as
+`ColumnEntryDto`s and built by `limits::column`). Each entry is a `ProviderLimitsDto` with the
+account facts a card needs beside it: its saved profile (`profile`, the same `ProfileDto` the account
+list gives), its category (`category`), the legacy history it replaced (`replaced`, which Remove
+account and Archive account act on with it) and, for a saved profile no read answered for yet, an
+entry of its own (`unread`). The card model (`limitColumn`) therefore joins nothing, and the popover
+lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
+own.
+
+The saved profiles and categories come from the saved accounts' refresh the read already makes
+(`accounts::usage::refresh`, which returns a `Roster`): each profile as the account list builds it
+(`roster::listed`, shared with `Accounts::list`), signed in when the native identity that refresh
+already read names it. The read keeps the last roster through reads that do not refresh the saved
+accounts, and through one that could not open the vault. Reading it adds no credential or
+Keychain read to the Limits path: it opens the vault only with the key this session has already
+unlocked (`Store::open_unlocked`), never asking the OS store, and reads no native login and no
+home's login. A sign-in's end needs a login's credentials (a home's Keychain item on macOS), so the
+column carries the end the account list last read (`AccountsDto::sign_in_deadlines`, handed to
+`limits_refresh::sign_in_deadlines_listed`, which announces the Limits read only when they change):
+the screen, whose account manager lists the accounts, shows it as before, and the popover shows it
+whenever the account list has been read in this session.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.
 Operations remain busy through readback, and a sign-out confirmation is checked against the
@@ -527,15 +558,18 @@ vault and reloads accounts; it does not start sign-in, create a vault, or change
 Card headers never display workspace IDs. Saved profiles keep their verified workspace identity;
 accounts that share an email are told apart by their plan badge when usage reports one, and by the
 optional category otherwise.
-When a saved profile has an actual scoped usage observation, the card list also suppresses its
-legacy observation using the verified provider, legacy identity key and matching email. The
-legacy key has one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for
-Claude, `email:` and the lowercased email for Muse, and none for providers without saved
-accounts. Every scoped card, the current Codex card and a saved account's failed first read
-included, and every listed profile carry it as `legacyId`; the UI join reads the profile's. So
-the join does not depend on the snapshot's optional `legacyId`, which older app versions can
-drop when rewriting history. It does not transfer old quotas or delete history, and preserves
-current legacy observations and accounts without a verified scoped replacement. Muse is the one
+When a scoped account has a successful reading, the column folds into it the legacy observation it
+replaces, by one rule (`snapshots::supersedes`, which Forget also uses): the scoped card's legacy id
+names the legacy card, which is not the signed-in read, and both carry the same email, compared
+trimmed and ignoring ASCII case only (a non-ASCII letter's case is not folded). The legacy key has
+one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for Claude, `email:` and
+the lowercased email for Muse, and none for providers without saved accounts. Every scoped card, the
+current Codex card and a saved account's failed first read included, and every listed profile carry
+it as `legacyId`; when a scoped snapshot lost its own, which older app versions can drop when
+rewriting history, the column takes the saved profile's. The Codex sessions merge never advances a
+folded legacy card (`codex_sessions::merge_recent`). The fold does not transfer old quotas or delete
+history, and preserves current legacy observations and accounts without a verified scoped
+replacement. Muse is the one
 exception to the transfer rule, because its legacy key is the whole identity
 (`Identity::legacy_key_is_whole`): when a Muse card's first successful scoped reading has no weekly
 window, the snapshot store fills it from the legacy snapshot with the same legacy id and email, the

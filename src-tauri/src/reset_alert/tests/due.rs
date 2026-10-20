@@ -57,6 +57,7 @@ fn falls_due_after(
     let read = Served {
         provider: AgentId::Codex,
         entries: readings.to_vec(),
+        column: Vec::new(),
         failure,
     };
     plan(&mut AlertMemory::default(), waiting, &[read], alerts, at).due

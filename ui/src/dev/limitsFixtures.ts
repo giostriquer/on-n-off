@@ -245,11 +245,13 @@ function accountDuplicate(): LimitsScenario {
 
 function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
   const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
-  return [CODEX[0], ...(reconnected ? [{ ...legacy,
-    account: { id: "profile:shared", label: "shared@example.com" },
+  return [CODEX[0], reconnected ? {
+    ...legacy,
+    account: { id: "profile:shared", legacyId: DUPLICATE_WORKSPACE, label: "shared@example.com" },
     savedProfile: true,
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
-  }] : []), legacy];
+    replaced: [legacy.account],
+  } : legacy];
 }
 
 function accountDuplicateAccounts(): AccountsReading {
@@ -378,32 +380,45 @@ export function limitsScenario(name: string) {
     const answer = chosen.accounts?.[which];
     return answer ? answer() : savedAccounts(which);
   };
+  const profilesOf = (which: LimitsProvider): SavedProfile[] => !hasSavedAccounts(which) ? []
+    : accountsOf(which).profiles.flatMap(profile => removedLogins[which].has(profile.id) ? []
+      : [archived[which].has(profile.observationId) ? { ...profile, archived: true } : profile]);
+  const categoriesOf = (which: LimitsProvider): Record<string, string> => {
+    const saved = profilesOf(which).flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
+    const merged = new Map<string, string | null>([...saved, ...categories[which]]);
+    return Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []));
+  };
+  const asColumn = (which: LimitsProvider, read: ProviderLimits[]): ProviderLimits[] => {
+    const profiles = profilesOf(which);
+    const named = categoriesOf(which);
+    const facts = (id: string | undefined) => ({
+      ...(profiles.find(profile => profile.observationId === id) ? { profile: profiles.find(profile => profile.observationId === id) } : {}),
+      ...(id && named[id] ? { category: named[id] } : {}),
+    });
+    const unread = profiles.filter(profile => !read.some(entry => entry.account?.id === profile.observationId)).map((profile): ProviderLimits => ({
+      provider: which, status: "ok", account: { id: profile.observationId, legacyId: profile.legacyId, label: profile.email },
+      currentAccount: false, windows: [], unread: true, archived: !!profile.archived && !profile.active, ...facts(profile.observationId),
+    }));
+    return [...read.map(entry => ({ ...entry, ...facts(entry.account?.id) })), ...unread];
+  };
   return {
     readLimits(agentId: unknown): ProviderLimits[] {
       const which = provider(agentId);
       if (!which) return [];
-      return (chosen[which] ?? OK[which])().flatMap(entry => {
+      return asColumn(which, (chosen[which] ?? OK[which])().flatMap(entry => {
         const id = entry.currentAccount ? null : entry.account?.id;
         if (!id) return [entry];
         if (forgotten[which].has(id)) return [];
         return [archived[which].has(id) ? { ...entry, archived: true } : entry];
-      });
+      }));
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
       const reading = which ? accountsOf(which) : savedAccounts(agent as AgentId);
-      return which ? {
-        ...reading,
-        profiles: reading.profiles.flatMap(profile => removedLogins[which].has(profile.id) ? []
-          : [archived[which].has(profile.observationId) ? { ...profile, archived: true } : profile]),
-      } : reading;
+      return which ? { ...reading, profiles: profilesOf(which) } : reading;
     },
     readCategories(): AccountCategories {
-      return Object.fromEntries(LIMITS_PROVIDERS.map(which => {
-        const saved = !hasSavedAccounts(which) ? [] : accountsOf(which).profiles.flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
-        const merged = new Map<string, string | null>([...saved, ...categories[which]]);
-        return [which, Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []))];
-      }));
+      return Object.fromEntries(LIMITS_PROVIDERS.map(which => [which, categoriesOf(which)]));
     },
     setCategory(agentId: unknown, accountId: unknown, category: unknown): string | null {
       const which = provider(agentId);

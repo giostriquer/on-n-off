@@ -30,13 +30,19 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
     fresh.reading.windows[0].used_percent = 42.0;
     fresh.reading.windows[0].observed_at = "2026-09-13T12:00:00Z".into();
     remember(home.path(), fresh.clone()).saved.unwrap();
-    let cards = SnapshotStore::for_home(home.path()).load(AgentId::Codex);
+    let column = crate::limits::column(
+        &SnapshotStore::for_home(home.path()).load(AgentId::Codex),
+        &crate::accounts::Roster::default(),
+        &crate::accounts::SignInDeadlines::new(),
+    );
+    let cards: Vec<_> = column.iter().map(|entry| &entry.card).collect();
     assert_eq!(cards.len(), 2);
     assert_eq!(
         cards[0].account.as_ref().unwrap().id,
         "profile:verified-user-team"
     );
     assert_eq!(cards[0].reading.windows[0].used_percent, 42.0);
+    assert_eq!(column[0].replaced[0].id, "team");
     assert_eq!(cards[1].account.as_ref().unwrap().id, "other-team");
     assert_eq!(cards[1].reading.windows[0].used_percent, 100.0);
     assert_eq!(

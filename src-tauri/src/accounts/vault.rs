@@ -67,9 +67,21 @@ impl SessionKeys {
 }
 static SESSION_KEYS: OnceLock<SessionKeys> = OnceLock::new();
 
-pub fn key(root: &Path, create: bool, retry: bool) -> KeyResult {
+fn scope_of(root: &Path) -> Result<String, String> {
     let canonical = fs::canonicalize(root).map_err(|_| "Cannot resolve profile storage.")?;
-    let scope = crate::sha::sha256_hex(canonical.to_string_lossy().as_bytes());
+    Ok(crate::sha::sha256_hex(
+        canonical.to_string_lossy().as_bytes(),
+    ))
+}
+
+pub fn unlocked_key(root: &Path) -> Option<[u8; 32]> {
+    let scope = scope_of(root).ok()?;
+    let entries = SESSION_KEYS.get()?.0.lock().ok()?;
+    entries.get(&scope)?.get()?.as_ref().ok().copied()
+}
+
+pub fn key(root: &Path, create: bool, retry: bool) -> KeyResult {
+    let scope = scope_of(root)?;
     SESSION_KEYS
         .get_or_init(SessionKeys::default)
         .get(&scope, retry, || read_key(&scope, create))

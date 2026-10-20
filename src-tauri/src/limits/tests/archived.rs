@@ -60,9 +60,15 @@ fn archived_accounts_are_flagged_and_still_hide_the_history_they_replaced() {
 
     let mut listed = aggregate_accounts(&store, read("acct-me", "me@example.com", 11));
     flag_archived_at(&home, AgentId::Codex, &mut listed);
+    let column = column(
+        &listed,
+        &crate::accounts::Roster::default(),
+        &crate::accounts::SignInDeadlines::new(),
+    );
+    let cards: Vec<_> = column.iter().map(|entry| entry.card.clone()).collect();
 
     assert_eq!(
-        summary(&listed),
+        summary(&cards),
         [
             ("acct-me", true, false),
             ("profile:a", false, true),
@@ -70,6 +76,7 @@ fn archived_accounts_are_flagged_and_still_hide_the_history_they_replaced() {
         ],
         "the archived legacy history stays hidden behind its archived card"
     );
+    assert_eq!(column[1].replaced[0].id, "team");
     let _ = std::fs::remove_dir_all(home);
 }
 

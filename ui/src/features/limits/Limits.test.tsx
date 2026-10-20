@@ -6,7 +6,7 @@ import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
+import { NOW, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -14,7 +14,6 @@ const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
 const setLimitsArchived = vi.hoisted(() => vi.fn());
-const readAccountCategories = vi.hoisted(() => vi.fn());
 
 const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
 const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
@@ -23,7 +22,7 @@ const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string
 });
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
 
-vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, readAccountCategories, setAccountCategory: vi.fn(), onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit, pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn() }));
+vi.mock("$lib/api", () => ({ readLimits, readAccounts, accountAction, readAccountPreferences:vi.fn().mockResolvedValue(false), readAccountActivationBlockers:vi.fn().mockResolvedValue([]), addAccount, cancelAccountLogin:vi.fn(), forgetLimitsSnapshot, setLimitsArchived, setAccountCategory: vi.fn(), onSharedReadChanged, readCodexSubscription: vi.fn().mockResolvedValue(null), consumeCodexResetCredit, pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn() }));
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -76,7 +75,6 @@ beforeEach(() => {
   forgetLimitsSnapshot.mockReset();
   forgetLimitsSnapshot.mockResolvedValue(undefined);
   setLimitsArchived.mockReset().mockResolvedValue(undefined);
-  readAccountCategories.mockReset().mockResolvedValue({});
 });
 
 afterEach(() => {
@@ -435,23 +433,22 @@ it.each([true, false])("shows the paid-through date through a header badge (usag
   expect(readCodexSubscription).toHaveBeenCalledTimes(1);
 });
 
-it("reads every card's categories again when the account lists are announced", async () => {
+it("shows a category edited elsewhere once the Limits read it comes with is announced", async () => {
   answer([okClaude()], [okCodex()]);
-  readAccountCategories.mockResolvedValueOnce({}).mockResolvedValue({ codex: { "acct-work": "Renamed elsewhere" } });
   renderLimits();
   const codex = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
-  await waitFor(() => expect(readAccountCategories).toHaveBeenCalledTimes(1));
   expect(within(codex).queryByText("Renamed elsewhere")).toBeNull();
+  answer([okClaude()], [okCodex({ category: "Renamed elsewhere" })]);
 
-  await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "accounts" }); });
+  await act(async () => { for (const handler of sharedReadHandlers) handler({ source: "limits:codex" }); });
 
   expect(await within(codex).findByText("Renamed elsewhere")).toBeInTheDocument();
 });
 
 it("places switching on the account usage card without a second account manager", async()=>{
- answer([okClaude()], [okCodex(),staleCodex()]);
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[{id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false}]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
- readAccountCategories.mockResolvedValue({codex:{"acct-personal":"Personal"}});
+ const saved={id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex" as const,userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",category:"Personal",savedAt:NOW,active:false,needsLogin:false};
+ answer([okClaude()], withSavedProfiles([okCodex(),staleCodex({category:"Personal"})],[saved]));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?[saved]:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  const personal=await screen.findByRole("region",{name:"Codex limits · personal@codex.example"});
  const use=await within(personal).findByRole("button",{name:"Use account"});
@@ -462,9 +459,10 @@ it("places switching on the account usage card without a second account manager"
  await waitFor(()=>expect(accountAction).toHaveBeenCalledWith("codex","use","saved-personal"));
 });
 
-it("keeps saved accounts available when usage cannot be read, never merges by email, and never shows workspace ids", async () => {
- answer([okClaude()], Promise.reject(new Error("usage offline")));
- readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?["ws-personal-7f3a","ws-business-9c1e"].map(id=>({id,observationId:`profile:${id}`,legacyId:id,identity:{provider:"codex",userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false})):[],nativeAccount:null,recoveryRequired:false,notice:null}));
+it("keeps saved accounts usable when no read answered for them, never merges by email, and never shows workspace ids", async () => {
+ const profiles=["ws-personal-7f3a","ws-business-9c1e"].map(id=>({id,observationId:`profile:${id}`,legacyId:id,identity:{provider:"codex" as const,userId:"same-user",workspaceId:id},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false}));
+ answer([okClaude()], withSavedProfiles([], profiles));
+ readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?profiles:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  renderLimits();
  const cards=await screen.findAllByRole("region",{name:"Codex limits · shared@example.com"});
  expect(cards).toHaveLength(2);
@@ -485,9 +483,9 @@ it("does not let an old current card save or sign out a different native account
 });
 
 it("keeps old account controls disabled until the post-switch account read finishes", async () => {
- answer([okClaude()], [okCodex(), staleCodex()]);
  const next = deferred<unknown>();
- const accounts={profiles:[{id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex",userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",savedAt:NOW,active:false,needsLogin:false}],nativeObservationId:"acct-work",nativeAccount:{provider:"codex",userId:"work",workspaceId:"work"},recoveryRequired:false,notice:null};
+ const accounts={profiles:[{id:"saved-personal",observationId:"acct-personal",legacyId:"personal",identity:{provider:"codex" as const,userId:"personal",workspaceId:"personal"},email:"personal@codex.example",label:"personal@codex.example",savedAt:NOW,active:false,needsLogin:false}],nativeObservationId:"acct-work",nativeAccount:{provider:"codex",userId:"work",workspaceId:"work"},recoveryRequired:false,notice:null};
+ answer([okClaude()], withSavedProfiles([okCodex(), staleCodex()], accounts.profiles));
  let codexReads=0;
  readAccounts.mockImplementation(async(provider:string)=>provider==="codex"?(++codexReads===1?accounts:next.promise):{profiles:[],nativeAccount:null,recoveryRequired:false,notice:null});
  renderLimits();
@@ -562,9 +560,9 @@ it("queues an explicit reload behind an in-flight background check", async () =>
 });
 
 it("removes reconciled legacy history with the saved card so refresh cannot resurrect it", async () => {
- const profile = {id:"saved",observationId:"profile:user-team",legacyId:"team",identity:{provider:"codex",userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
+ const profile = {id:"saved",observationId:"profile:user-team",legacyId:"team",identity:{provider:"codex" as const,userId:"user",workspaceId:"team"},email:"shared@example.com",label:"shared@example.com",savedAt:NOW,active:false,needsLogin:false};
  let profiles = [profile];
- let history = [okCodex({account:{id:profile.observationId,label:profile.email},currentAccount:false}),okCodex({account:{id:"team",label:profile.email},currentAccount:false}),staleCodex()];
+ let history = [okCodex({account:{id:profile.observationId,label:profile.email},currentAccount:false,profile,replaced:[{id:"team",label:profile.email}]}),staleCodex()];
  readLimits.mockImplementation(async(provider:string)=>provider==="codex"?history:provider==="claude"?[okClaude()]:[]);
  readAccounts.mockImplementation(async(provider:string)=>({profiles:provider==="codex"?profiles:[],nativeAccount:null,recoveryRequired:false,notice:null}));
  accountAction.mockImplementation(async()=>{profiles=[];});
@@ -661,9 +659,11 @@ it("quietly identifies last-known usage and reveals the reason on focus", async 
 });
 
 it("shows the copy the card model gives an empty card", async () => {
-  const saved = (id: string) => ({ id, observationId: `profile:${id}`, legacyId: id, identity: { provider: "codex", userId: id, workspaceId: id }, email: `${id}@codex.example`, label: `${id}@codex.example`, savedAt: NOW, active: false, needsLogin: false });
-  answer([okClaude({ windows: [], account: null })], [okCodex(), okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null })]);
-  readAccounts.mockImplementation(async (provider: string) => ({ profiles: provider === "codex" ? [saved("unread"), saved("empty")] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
+  const saved = (id: string) => ({ id, observationId: `profile:${id}`, legacyId: id, identity: { provider: "codex" as const, userId: id, workspaceId: id }, email: `${id}@codex.example`, label: `${id}@codex.example`, savedAt: NOW, active: false, needsLogin: false });
+  answer([okClaude({ windows: [], account: null })], withSavedProfiles(
+    [okCodex(), okCodex({ account: { id: "profile:empty", label: "empty@codex.example" }, currentAccount: false, windows: [], credits: null })],
+    [saved("unread"), saved("empty")],
+  ));
   renderLimits();
   expect(within(await screen.findByRole("region", { name: "Codex limits · unread@codex.example" })).getByText("Usage unavailable.")).toBeTruthy();
   expect(within(card("Codex limits · empty@codex.example")).getByText("Usage unavailable.")).toBeTruthy();
@@ -710,19 +710,19 @@ describe("archiving", () => {
     expect(elsewhere).toHaveFocus();
   });
 
-  it("archives and unarchives a saved login no read answers for, through the account list it comes from", async () => {
+  it("archives and unarchives a saved login no read answered for, through the Limits entry it comes with", async () => {
     const unread = { id: "unread", observationId: "profile:unread", legacyId: "team", identity: { provider: "codex" as const, userId: "unread", workspaceId: "team" }, email: "unread@codex.example", label: "unread@codex.example", savedAt: NOW, active: false, needsLogin: false };
-    answer([okClaude()], [okCodex()]);
+    answer([okClaude()], withSavedProfiles([okCodex()], [unread]));
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [unread] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
     const { client } = renderLimits();
-    const archivedFlag = () => client.getQueryData<{ profiles: { archived?: boolean }[] }>(["accounts", "codex"])?.profiles[0].archived;
+    const archivedFlag = () => client.getQueryData<ProviderLimits[]>(["limits", "codex"])?.find(entry => entry.unread)?.archived;
     fireEvent.click(await screen.findByRole("button", { name: "More actions for unread@codex.example" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
 
     await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith("codex", ["profile:unread"], true));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · unread@codex.example" })).toBeNull());
     expect(archivedFlag()).toBe(true);
-    expect(screen.getByRole("button", { name: "Archived (1)" }), "the account list moved it, not a read").toHaveFocus();
+    expect(screen.getByRole("button", { name: "Archived (1)" }), "its own entry moved it, not a read").toHaveFocus();
 
     fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
     fireEvent.click(screen.getByRole("button", { name: "Unarchive unread@codex.example" }));
@@ -803,8 +803,8 @@ describe("archiving", () => {
 
   it("removes an archived account as Remove account does: the saved login, then its history first", async () => {
     const profile = { id: "saved", observationId: "profile:user-team", legacyId: "team", identity: { provider: "codex" as const, userId: "user", workspaceId: "team" }, email: "shared@example.com", label: "shared@example.com", savedAt: NOW, active: false, needsLogin: false, archived: true };
-    let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true }),
-      okCodex({ account: { id: "team", label: profile.email }, currentAccount: false, archived: true })];
+    let history = [okCodex(), okCodex({ account: { id: profile.observationId, label: profile.email }, currentAccount: false, archived: true,
+      profile, replaced: [{ id: "team", label: profile.email }] })];
     readLimits.mockImplementation(async (provider: AgentId) => provider === "codex" ? history : provider === "claude" ? [okClaude()] : []);
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
     forgetLimitsSnapshot.mockImplementation(async (_provider: string, id: string) => { history = history.filter(entry => entry.account?.id !== id); });
@@ -838,7 +838,7 @@ describe("archiving", () => {
   function answerLapsed(others: ProviderLimits[] = []) {
     const profile = { id: "lapsed", observationId: "acct-personal", legacyId: "team", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
-    answer([okClaude()], [okCodex(), lapsed, ...others]);
+    answer([okClaude()], withSavedProfiles([okCodex(), lapsed, ...others], [profile]));
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [profile] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
   }
 

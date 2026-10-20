@@ -87,6 +87,7 @@ pub(super) struct NativeState {
     pub cleaned: Cell<usize>,
     pub homes: Option<Arc<Homes>>,
     pub deadline: RefCell<Option<SignInDeadline>>,
+    pub deadline_reads: Cell<usize>,
 }
 
 #[derive(Default)]
@@ -101,6 +102,7 @@ pub(super) struct Homes {
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
+    pub deadline_reads: Mutex<Vec<PathBuf>>,
 }
 
 struct FakeHome(Arc<Homes>, PathBuf);
@@ -161,6 +163,7 @@ impl Home for FakeHome {
         )))
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        self.0.deadline_reads.lock().unwrap().push(self.1.clone());
         let login = self.read().ok()??;
         let deadline = super::super::view(AgentId::Claude, &login)
             .ok()?
@@ -230,6 +233,7 @@ impl NativeAccount for FakeNative {
         Ok(())
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        self.0.deadline_reads.set(self.0.deadline_reads.get() + 1);
         self.0.deadline.borrow().clone()
     }
 }

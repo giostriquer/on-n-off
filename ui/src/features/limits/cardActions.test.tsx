@@ -5,7 +5,7 @@ import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
+import { NOW, okClaude, okCodex, okMuse, staleCodex, withSavedProfiles } from "./readingFixtures";
 
 const savedAccounts = vi.hoisted(() => ({ codex: true }));
 vi.mock("$lib/providers", async (importOriginal) => {
@@ -23,7 +23,7 @@ const addAccount = vi.hoisted(() => vi.fn());
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, accountAction, readAccountActivationBlockers, pendingResetSpends,
   readAccountPreferences: vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin: vi.fn(),
-  forgetLimitsSnapshot: vi.fn(), setLimitsArchived: vi.fn(), readAccountCategories: vi.fn().mockResolvedValue({}), setAccountCategory: vi.fn(),
+  forgetLimitsSnapshot: vi.fn(), setLimitsArchived: vi.fn(), setAccountCategory: vi.fn(),
   consumeCodexResetCredit: vi.fn(), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
@@ -39,7 +39,7 @@ function personal(): SavedProfile {
 }
 
 function answer(codex: ProviderLimits[], profiles: SavedProfile[] = []) {
-  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [okClaude()] : provider === "codex" ? codex : [okMuse()]));
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [okClaude()] : provider === "codex" ? withSavedProfiles(codex, profiles) : [okMuse()]));
   readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
     profiles: provider === "codex" ? profiles : [], nativeObservationId: provider === "codex" ? "acct-work" : null,
     nativeAccount: null, recoveryRequired: false, notice: null,

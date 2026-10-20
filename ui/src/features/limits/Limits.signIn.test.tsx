@@ -5,7 +5,7 @@ import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex } from "./readingFixtures";
+import { NOW, okClaude, okCodex, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -30,7 +30,7 @@ function profile(overrides: Partial<SavedProfile>): SavedProfile {
 }
 
 function answer(claude: ProviderLimits[], profiles: SavedProfile[]) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? [okCodex()] : []));
+  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? withSavedProfiles(claude, profiles) : agentId === "codex" ? [okCodex()] : []));
   readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
     profiles: provider === "claude" ? profiles : [], nativeAccount: null, recoveryRequired: false, notice: null,
   }));

@@ -54,6 +54,13 @@ and a login changed outside on-n-off, such as `muse login` in a terminal, is rea
 cache keeps the native read's state apart from the saved accounts' (`NativeState`): a native read
 replaces it whole, and a saved-accounts refresh leaves it as it was.
 
+The Limits read serves its column ([Limits](README.md#limits)), and two things replace that column
+without reading a provider: a saved category edit (`limits_refresh::category_set`, under the cache
+lock, as archiving does) and an account list whose sign-in ends differ from the ones the column
+carries (`limits_refresh::sign_in_deadlines_listed`, which keeps them outside the cache lock so the
+account list never waits on a read). Each bumps the revision and announces only when something
+changed, and the reads that answer the announcement are served from the cache.
+
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll
 per provider and one for pull requests, each due as soon as the shared cache's revision is newer
@@ -139,10 +146,10 @@ Each source is one module under `ui/src/lib/sharedReads/`: `limits.ts` (the thre
 `limits:<provider>` sources), `githubPrs.ts`, `resetSpends.ts` and `accounts.ts`. A source module
 is the only place that knows its query keys and its reads through `$lib/api`. Screens pass its
 query options to `useQuery` (`limitsQuery`, `githubPrsQuery`, `pendingResetSpendsQuery`,
-`accountListQuery`, `accountPreferenceQuery`, `accountCategoriesQuery`, `codexSubscriptionQuery`)
+`accountListQuery`, `accountPreferenceQuery`, `codexSubscriptionQuery`)
 and call its operations (`refreshLimits`, `refetchStaleLimits`, `rereadLimits`, `updateLimits`,
 `refreshGithubPrs`, `rereadPendingResetSpends`, `rereadAccountListsAndPreference`,
-`accountChanged`, `cachedAccountList`, `markProfilesArchived`, `setCategoryLocally`); they never
+`accountChanged`, `cachedAccountList`, `setCategoryLocally`); they never
 write a key. Each module also exports its source's entry for the
 announcement table, the keys an announcement of it invalidates, and `announcements.ts` builds the
 table from those entries alone. A key changed in one place is therefore changed in both. The

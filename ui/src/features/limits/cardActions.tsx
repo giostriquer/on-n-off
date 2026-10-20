@@ -7,8 +7,8 @@ import { SwitchAlongsideConfirmation } from "@/features/accounts/SwitchAlongside
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
-import { cachedAccountList, setCategoryLocally } from "$lib/sharedReads/accounts";
-import { checkLimitsNow } from "$lib/sharedReads/limits";
+import { cachedAccountList } from "$lib/sharedReads/accounts";
+import { checkLimitsNow, setCategoryLocally } from "$lib/sharedReads/limits";
 import { AutomaticSpend, usePendingResetSpend } from "./AutomaticSpend";
 import { UseBankedReset } from "./BankedResets";
 import { cardActionPlan, hasResetControls, type CheckNowEntry, type MainEntry, type MenuEntry } from "./cardActionPlan";

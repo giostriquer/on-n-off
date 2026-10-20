@@ -43,15 +43,17 @@ describe("limitsScenario", () => {
     expect(scenario.readAccounts("claude").profiles.map(profile => profile.observationId)).toEqual(["claude-1", "claude-2"]);
   });
 
-  it("brings accountDuplicate's scoped reading only once a sign-in starts, for that page alone", () => {
+  it("brings accountDuplicate's scoped reading, which replaces the history, only once a sign-in starts, for that page alone", () => {
     const scenario = limitsScenario("accountDuplicate");
     const legacy = "ca292064-c3f4-453c-b15a-43ef63c46478";
-    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy]);
+    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy, "profile:shared"]);
+    expect(scenario.readLimits("codex")[2].unread).toBe(true);
     limitsScenario("ok").addAccount();
-    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy]);
+    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", legacy, "profile:shared"]);
     scenario.addAccount();
-    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "profile:shared", legacy]);
-    expect(ids(limitsScenario("accountDuplicate").readLimits("codex"))).toEqual(["codex-1", legacy]);
+    expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1", "profile:shared"]);
+    expect(scenario.readLimits("codex")[1].replaced).toEqual([{ id: legacy, label: "shared@example.com" }]);
+    expect(ids(limitsScenario("accountDuplicate").readLimits("codex"))).toEqual(["codex-1", legacy, "profile:shared"]);
   });
 
   it("archives archivedAccounts' saved reading, profile-only login and history, and follows archive and unarchive for that page alone", () => {
@@ -60,16 +62,15 @@ describe("limitsScenario", () => {
       ...scenario.readLimits(agent).filter(entry => entry.archived).map(entry => entry.account?.id),
       ...scenario.readAccounts(agent).profiles.filter(profile => profile.archived).map(profile => profile.observationId),
     ];
-    expect(archived("claude")).toEqual(["claude-2", "claude-2", "profile:claude-unread"]);
-    expect(scenario.readAccounts("claude").profiles.map(profile => profile.observationId)).toContain("profile:claude-unread");
-    expect(ids(scenario.readLimits("claude"))).not.toContain("profile:claude-unread");
+    expect(archived("claude")).toEqual(["claude-2", "profile:claude-unread", "claude-2", "profile:claude-unread"]);
+    expect(scenario.readLimits("claude").find(entry => entry.account?.id === "profile:claude-unread")?.unread).toBe(true);
     expect(archived("codex")).toEqual(["codex-history"]);
     expect(scenario.readLimits("codex").find(entry => entry.account?.id === "codex-history")?.savedProfile).toBeFalsy();
 
     scenario.setArchived("codex", ["codex-2"], true);
     scenario.setArchived("claude", ["claude-2"], false);
     expect(archived("codex")).toEqual(["codex-2", "codex-history", "codex-2"]);
-    expect(archived("claude")).toEqual(["profile:claude-unread"]);
+    expect(archived("claude")).toEqual(["profile:claude-unread", "profile:claude-unread"]);
     expect(scenario.readLimits("claude")[0].archived, "never the signed-in card").toBeFalsy();
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
   });
@@ -93,7 +94,7 @@ describe("limitsScenario", () => {
     scenario.forgetSnapshot("codex", "codex-2");
     expect(ids(scenario.readLimits("codex"))).toEqual(["codex-1"]);
     expect(profiles("codex")).toEqual(["personal"]);
-    expect(ids(scenario.readLimits("claude")), "only the provider named").toEqual(["claude-1"]);
+    expect(ids(scenario.readLimits("claude")), "only the provider named").toEqual(["claude-1", "claude-2"]);
     expect(profiles("claude")).toEqual(["personal", "work"]);
 
     scenario.forgetSnapshot("codex", "codex-1");

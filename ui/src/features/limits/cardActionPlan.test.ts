@@ -4,7 +4,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
-import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
+import { NOW, okClaude, okCodex, okMuse, staleCodex, withSavedProfiles } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
@@ -43,7 +43,7 @@ type Setup = {
 };
 
 function card(provider: LimitsProvider, { entries, profiles = [], nativeLogin = { observationId: "someone-else", settled: true } }: Setup): LimitCard {
-  const cards = limitCards({ provider, entries, profiles, nativeLogin, now: AT_NOW });
+  const cards = limitCards({ provider, entries: withSavedProfiles(entries, profiles), nativeLogin, now: AT_NOW });
   return cards!.find(shown => shown.account?.id === accountId(provider))!;
 }
 
@@ -172,7 +172,7 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
   });
 
   it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
-    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], nativeLogin: null, now: AT_NOW })![0];
     const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
     expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
     expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
@@ -219,7 +219,7 @@ describe("Use banked reset", () => {
   });
 
   it("has no reset controls on a card whose read named no account, nor on a saved login no read answered for", () => {
-    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], nativeLogin: null, now: AT_NOW })![0];
     expect(planFor(anonymous, { entries: [], accounts: null, pendingSpend: SPEND }).footer).toBeNull();
     const unread = plan("codex", { entries: [], profiles: [profile("codex")], pendingSpend: SPEND });
     expect(unread.footer?.resets).toBeNull();
@@ -256,7 +256,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ needsLogin: true })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {
-    const shown = limitCards({ provider: "codex", entries: [reading], profiles: saved ? [saved] : [], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
+    const shown = limitCards({ provider: "codex", entries: withSavedProfiles([reading], saved ? [saved] : []), nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;
     expect(planFor(shown, { entries: [] }).footer?.main?.action === "archive").toBe(expected);
   });
@@ -287,7 +287,7 @@ describe("each entry", () => {
     expect(pending.footer).toEqual({
       main: { action: "useAccount", enabled: true, controls: CONTROLS, profileId: "saved-codex" },
       switchAlongside: { enabled: true, clients: RUNNING, controls: CONTROLS, profileId: "saved-codex" },
-      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true }), useBankedReset: null, automaticSpend: SPEND },
+      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), useBankedReset: null, automaticSpend: SPEND },
     });
     expect(pending.menu.find(entry => entry.action === "signInAgain")).toEqual({ action: "signInAgain", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
     expect(plan("codex", STATES.remembered("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: null });
@@ -295,7 +295,7 @@ describe("each entry", () => {
   });
 
   it("starts the category editor from the card's category", () => {
-    const shown = limitCards({ provider: "muse", entries: [reading("muse")], profiles: [], categories: { [accountId("muse")]: "Client A" }, nativeLogin: null, now: AT_NOW })![0];
+    const shown = limitCards({ provider: "muse", entries: [reading("muse", { category: "Client A" })], nativeLogin: null, now: AT_NOW })![0];
     expect(planFor(shown, { entries: [] }).menu[1]).toEqual({ action: "category", enabled: true, initial: "Client A" });
   });
 });

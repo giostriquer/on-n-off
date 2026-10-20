@@ -10,6 +10,10 @@ mod usage_renew;
 mod transaction;
 
 mod homes;
+mod roster;
+#[cfg(test)]
+pub(crate) use roster::roster_for_test;
+pub(crate) use roster::{Roster, SignInDeadlines};
 
 pub(crate) mod claude;
 pub(crate) mod claude_store;
@@ -31,7 +35,7 @@ use crate::provider_catalogue::WITH_SAVED_ACCOUNTS as PROVIDERS;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use transaction::{Native, NativeGuard};
-#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
     id: String,
@@ -278,7 +282,9 @@ fn sign_in_ends_at(
 }
 
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
-    Accounts::live()?.list(provider)
+    let listed = Accounts::live()?.list(provider)?;
+    crate::limits_refresh::sign_in_deadlines_listed(provider, listed.sign_in_deadlines());
+    Ok(listed)
 }
 pub fn unlock() -> Result<(), String> {
     let home = home()?;
@@ -298,7 +304,9 @@ pub fn set_account_category(
     account_id: &str,
     category: &str,
 ) -> Result<Option<String>, String> {
-    Accounts::live()?.set_account_category(provider, account_id, category)
+    let stored = Accounts::live()?.set_account_category(provider, account_id, category)?;
+    crate::limits_refresh::category_set(provider, account_id, stored.as_deref());
+    Ok(stored)
 }
 pub fn forget_categories(provider: AgentId, account_ids: &[String]) -> Result<(), String> {
     Accounts::live()?.forget_categories(provider, account_ids)
@@ -368,20 +376,9 @@ impl Accounts {
                 .profiles
                 .into_iter()
                 .filter(|p| p.identity.provider == provider)
-                .map(|p| ProfileDto {
-                    sign_in_ends_at: sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref()),
-                    needs_login: p.needs_login(),
-                    archived: archived.contains(&p.identity.observation_key()),
-                    category: categories.get(&p.identity.observation_key()).cloned(),
-                    observation_id: p.identity.observation_key(),
-                    legacy_id: p.identity.legacy_key(),
-                    active: current.as_ref() == Some(&p.identity),
-                    id: p.id,
-                    identity: p.identity,
-                    label: p.label,
-                    email: p.email,
-                    saved_at: p.saved_at,
-                    pending_activation: p.pending_activation,
+                .map(|p| {
+                    let ends = sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref());
+                    roster::listed(p, current.as_ref(), &archived, &categories, ends)
                 })
                 .collect(),
             remember_accounts: discovery::enabled(home).unwrap_or(false),

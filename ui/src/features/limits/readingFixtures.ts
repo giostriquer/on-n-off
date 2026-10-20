@@ -1,3 +1,4 @@
+import type { SavedProfile } from "$lib/accountTypes";
 import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 
@@ -67,4 +68,16 @@ export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLim
 
 export function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
   return { provider, status, message, currentAccount: true, windows: [] };
+}
+
+export function withSavedProfiles(entries: ProviderLimits[], profiles: SavedProfile[]): ProviderLimits[] {
+  const attached = entries.map(entry => {
+    const saved = profiles.find(candidate => candidate.observationId === entry.account?.id);
+    return saved ? { ...entry, profile: saved } : entry;
+  });
+  const unread = profiles.filter(saved => !entries.some(entry => entry.account?.id === saved.observationId)).map((saved): ProviderLimits => ({
+    provider: saved.identity.provider, status: "ok", account: { id: saved.observationId, legacyId: saved.legacyId, label: saved.email },
+    currentAccount: false, windows: [], unread: true, archived: !!saved.archived && !saved.active, profile: saved,
+  }));
+  return [...attached, ...unread];
 }

@@ -84,16 +84,21 @@ fn a_first_muse_reading_keeps_the_weekly_its_legacy_history_last_saw() {
             (LimitWindowKind::Session, 0.0)
         ]
     );
-    let loaded = store.load(AgentId::Muse);
+    let loaded = crate::limits::column(
+        &store.load(AgentId::Muse),
+        &crate::accounts::Roster::default(),
+        &crate::accounts::SignInDeadlines::new(),
+    );
     assert_eq!(loaded.len(), 1, "the legacy card is superseded");
     assert_eq!(
         loaded[0]
+            .card
             .account
             .as_ref()
             .map(|account| account.id.as_str()),
         Some("profile:you")
     );
-    assert_eq!(weekly(&loaded[0]), Some((30.0, LEGACY_SEEN)));
+    assert_eq!(weekly(&loaded[0].card), Some((30.0, LEGACY_SEEN)));
     fs::remove_dir_all(home).unwrap();
 }
 

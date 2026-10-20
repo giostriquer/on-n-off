@@ -103,12 +103,10 @@ impl SnapshotStore {
     }
 
     pub fn load(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
-        without_superseded(
-            self.stored(provider)
-                .into_iter()
-                .filter(|dto| dto.reading.has_observations())
-                .collect(),
-        )
+        self.stored(provider)
+            .into_iter()
+            .filter(|dto| dto.reading.has_observations())
+            .collect()
     }
 
     fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
@@ -141,7 +139,7 @@ impl SnapshotStore {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let changed = "Account history changed. Refresh accounts before removing it.";
-        if email.trim().is_empty() || account_id.starts_with("profile:") {
+        if email.trim().is_empty() || Identity::is_profile_key(account_id) {
             return Err(changed.into());
         }
         let path = self.dir.join(file_name(provider, account_id));
@@ -304,7 +302,7 @@ fn fnv1a(input: &str) -> u32 {
     })
 }
 
-fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
+pub(super) fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
     !legacy.current_account
         && scoped.provider == legacy.provider
         && scoped.status == LimitsStatus::Ok
@@ -315,8 +313,8 @@ fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
 }
 
 fn replaces(scoped: &LimitsAccountDto, legacy: &LimitsAccountDto) -> bool {
-    if !scoped.id.starts_with("profile:")
-        || legacy.id.starts_with("profile:")
+    if !Identity::is_profile_key(&scoped.id)
+        || Identity::is_profile_key(&legacy.id)
         || scoped.legacy_id.as_deref() != Some(legacy.id.as_str())
     {
         return false;
@@ -329,15 +327,10 @@ fn replaces(scoped: &LimitsAccountDto, legacy: &LimitsAccountDto) -> bool {
     }
 }
 
-pub(crate) fn without_superseded(accounts: Vec<ProviderLimitsDto>) -> Vec<ProviderLimitsDto> {
-    let hidden: Vec<bool> = accounts
+pub(super) fn superseded(accounts: &[ProviderLimitsDto]) -> Vec<bool> {
+    accounts
         .iter()
         .map(|old| accounts.iter().any(|new| supersedes(new, old)))
-        .collect();
-    accounts
-        .into_iter()
-        .zip(hidden)
-        .filter_map(|(dto, hidden)| (!hidden).then_some(dto))
         .collect()
 }
 

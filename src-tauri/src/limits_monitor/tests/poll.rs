@@ -70,6 +70,7 @@ impl Io for Fake {
                     .filter(|card| card.provider == provider)
                     .cloned()
                     .collect(),
+                column: Vec::new(),
                 failure: (provider == AgentId::Codex)
                     .then(|| self.codex_failure.borrow().clone())
                     .flatten(),

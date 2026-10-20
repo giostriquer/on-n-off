@@ -523,6 +523,11 @@ impl Store {
             super::vault::key(root, create, false)
         })
     }
+    pub fn open_unlocked(home: &std::path::Path) -> Result<Self, String> {
+        Self::open_with_key(home, false, |root, _| {
+            super::vault::unlocked_key(root).ok_or_else(|| "Saved accounts are locked.".into())
+        })
+    }
     pub(super) fn open_with_key(
         home: &std::path::Path,
         create: bool,

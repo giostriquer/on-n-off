@@ -386,8 +386,10 @@ their lease is free and provider processes are gone.
 
 New observation keys include both user and workspace/organization. Older snapshots still load as
 historical observations and are not assigned to an inferred workspace. A successful scoped read
-suppresses the old card when both its legacy provider ID and email match. This survives cache
-reloads without transferring unscoped usage; other users and workspaces remain separate. Muse is
+folds the old card into its own in the Limits read's column (`limits::column`) when both its legacy
+provider ID and email (trimmed, ASCII case ignored) match, the same for the Limits screen and the tray
+popover. This survives cache reloads without transferring unscoped usage; other users and
+workspaces remain separate. Muse is
 the exception: its legacy id, `email:` and the lowercased email, names the whole identity, so a
 Muse card's first successful scoped reading takes the weekly window its legacy card last read when
 the reading has none of its own, and the legacy card is then superseded. Forget

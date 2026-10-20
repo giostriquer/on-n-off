@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 mod adaptive;
+mod column;
 
 fn why() -> ReadFailure {
     ReadFailure::Unavailable("The source said why.".into())
@@ -25,9 +26,9 @@ fn native_read(cards: Vec<ProviderLimitsDto>) -> NativeRead {
     }
 }
 
-fn native(cards: Vec<ProviderLimitsDto>) -> (Vec<ProviderLimitsDto>, Option<NativeOutcome>) {
+fn native(cards: Vec<ProviderLimitsDto>) -> Fresh {
     let NativeRead { cards, outcome } = native_read(cards);
-    (cards, Some(outcome))
+    (cards, Some(outcome), None)
 }
 
 fn no_login() -> Option<String> {
@@ -37,6 +38,7 @@ fn no_login() -> Option<String> {
 fn cached(entries: Vec<ProviderLimitsDto>) -> CachedRead {
     CachedRead {
         entries,
+        roster: None,
         saved_refreshed_at: Instant::now(),
         native: NativeState {
             refreshed_at: Instant::now(),
@@ -45,6 +47,17 @@ fn cached(entries: Vec<ProviderLimitsDto>) -> CachedRead {
             outcome: NativeOutcome::default(),
         },
     }
+}
+
+fn age_native(cache: &Cache, seconds: u64) {
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .native
+        .refreshed_at = Instant::now() - Duration::from_secs(seconds);
 }
 
 fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> ProviderLimitsDto {
@@ -227,6 +240,7 @@ fn a_rate_limited_native_read_waits_out_its_retry_after_even_when_forced() {
             (
                 vec![snapshot("current", true, LimitsStatus::Failed)],
                 refresh.native.then(|| rate_limited("login-a")),
+                None,
             )
         })
     };
@@ -279,6 +293,7 @@ fn a_retry_after_holds_only_the_login_it_was_answered_for() {
                 (
                     vec![snapshot("current", true, LimitsStatus::Failed)],
                     refresh.native.then(|| rate_limited("login-a")),
+                    None,
                 )
             },
         )
@@ -310,7 +325,7 @@ fn the_native_failure_is_served_with_the_cards_it_was_read_with() {
     let cards = || vec![snapshot("current", true, LimitsStatus::SignedOut)];
 
     let (first, _) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
-        (cards(), Some(signed_out()))
+        (cards(), Some(signed_out()), None)
     });
     let (served, _) = read_through_cache(&cache, interval, false, &no_login, |_, _| {
         unreachable!("the cached read is still fresh")
@@ -324,7 +339,7 @@ fn the_native_failure_is_served_with_the_cards_it_was_read_with() {
         .saved_refreshed_at = Instant::now() - interval;
     let (saved_only, _) = read_through_cache(&cache, interval, false, &no_login, |_, refresh| {
         assert!(!refresh.native);
-        (cards(), None)
+        (cards(), None, None)
     });
 
     for read in [first, served, saved_only] {
@@ -625,6 +640,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         log.borrow_mut()
             .push(if force { "saved, forced" } else { "saved" });
         entries.push(snapshot("saved", false, LimitsStatus::Ok));
+        None
     };
     let flag = |entries: &mut [ProviderLimitsDto]| {
         assert!(

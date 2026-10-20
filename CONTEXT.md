@@ -62,6 +62,13 @@ profile Limits is polling, nor an archived account: one the user switched away f
 it, or a saved profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
 
+**Limits column**:
+Every account Limits shows for a provider, one entry each, as the Limits read gives it: the read
+accounts, with the legacy history a scoped account replaced folded into it, and each saved profile
+no read has answered for yet, each with its saved profile and category beside it. The Limits screen
+and the menu-bar popover show the same column.
+_Avoid_: card list, roster (the saved profiles it reads)
+
 **Signed-in state**:
 Whether a card's account is the one the provider's CLI uses: confirmed when its saved profile, or
 without one its read, says so and the account list names it; unconfirmed while the account list has

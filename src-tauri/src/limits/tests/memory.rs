@@ -179,6 +179,17 @@ fn scoped_snapshot(
     serde_json::from_value(value).unwrap()
 }
 
+fn folded(cards: &[ProviderLimitsDto]) -> Vec<ProviderLimitsDto> {
+    column(
+        cards,
+        &crate::accounts::Roster::default(),
+        &crate::accounts::SignInDeadlines::new(),
+    )
+    .into_iter()
+    .map(|entry| entry.card)
+    .collect()
+}
+
 #[test]
 fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
     for provider in [AgentId::Claude, AgentId::Codex] {
@@ -196,7 +207,7 @@ fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
             ))
             .unwrap();
         let current = scoped_snapshot(provider, "profile:scoped-a", "legacy-a", "a@x", 5.0);
-        let listed = aggregate_accounts(&store, current);
+        let listed = folded(&aggregate_accounts(&store, current));
         assert_eq!(
             listed.len(),
             2,
@@ -210,7 +221,7 @@ fn upgraded_identity_shows_one_card_and_stays_deduplicated_after_reload() {
             listed[1].account.as_ref().unwrap().label.as_deref(),
             Some("a@icloud.com")
         );
-        let reloaded = SnapshotStore::for_home(&home).load(provider);
+        let reloaded = folded(&SnapshotStore::for_home(&home).load(provider));
         assert_eq!(
             reloaded.len(),
             2,
@@ -250,9 +261,12 @@ fn identity_upgrade_does_not_merge_accounts_by_email_or_workspace_alone() {
         ))
         .unwrap();
     let current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
-    let listed = aggregate_accounts(&store, current);
+    let listed = folded(&aggregate_accounts(&store, current));
     assert_eq!(listed.len(), 4);
-    assert_eq!(SnapshotStore::for_home(&home).load(AgentId::Codex).len(), 4);
+    assert_eq!(
+        folded(&SnapshotStore::for_home(&home).load(AgentId::Codex)).len(),
+        4
+    );
 }
 
 #[test]
@@ -265,7 +279,7 @@ fn failed_upgrade_keeps_unscoped_history_without_attributing_it_to_the_new_ident
     let mut current = scoped_snapshot(AgentId::Codex, "profile:current", "workspace-a", "a@x", 5.0);
     current.status = LimitsStatus::Failed;
     current.reading.windows.clear();
-    let listed = aggregate_accounts(&store, current);
+    let listed = folded(&aggregate_accounts(&store, current));
     assert_eq!(listed.len(), 2);
     assert!(listed[0].reading.windows.is_empty());
     assert_eq!(listed[1].reading.windows[0].used_percent, 70.0);
@@ -288,7 +302,7 @@ fn saved_scoped_history_never_hides_a_current_unscoped_error() {
     current.status = LimitsStatus::Failed;
     current.message = Some("Current account could not be verified".into());
     current.reading.windows.clear();
-    let listed = aggregate_accounts(&store, current);
+    let listed = folded(&aggregate_accounts(&store, current));
     assert_eq!(
         listed.len(),
         2,

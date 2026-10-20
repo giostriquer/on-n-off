@@ -56,6 +56,14 @@ export function rereadLimits(client: QueryClient, provider: LimitsProvider): Pro
   return client.invalidateQueries({ queryKey: limitsKey(provider) });
 }
 
+export function setCategoryLocally(client: QueryClient, provider: LimitsProvider, accountId: string, stored: string | null): void {
+  updateLimits(client, provider, (entries) => entries.map((entry) => entry.account?.id !== accountId ? entry : {
+    ...entry,
+    category: stored,
+    profile: entry.profile && { ...entry.profile, category: stored },
+  }));
+}
+
 export function updateLimits(
   client: QueryClient,
   provider: LimitsProvider,

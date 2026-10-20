@@ -19,17 +19,6 @@ fn quota(used: f64, current: bool) -> ProviderLimitsDto {
     card
 }
 
-fn age_native(cache: &Cache, seconds: u64) {
-    cache
-        .read
-        .lock()
-        .unwrap()
-        .as_mut()
-        .unwrap()
-        .native
-        .refreshed_at = Instant::now() - Duration::from_secs(seconds);
-}
-
 #[test]
 fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() {
     for (used, current, status, expected_reads) in [
@@ -51,7 +40,10 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
             card.status = status;
             native_read(vec![card])
         };
-        let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
+        let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
+            saved_reads.set(saved_reads.get() + 1);
+            None
+        };
         let read = || {
             read_provider(
                 &cache,
@@ -102,6 +94,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     let saved = |_, entries: &mut Vec<ProviderLimitsDto>| {
         saved_reads.set(saved_reads.get() + 1);
         entries.push(saved_card.clone());
+        None
     };
     let read = || {
         read_provider(
@@ -145,7 +138,10 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
         native_reads.set(native_reads.get() + 1);
         native_read(vec![quota(used.get(), true)])
     };
-    let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
+    let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
+        saved_reads.set(saved_reads.get() + 1);
+        None
+    };
     let read = |force| {
         read_provider(
             &cache,
@@ -232,7 +228,10 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
         }
         native_read(vec![card])
     };
-    let saved = |_, _: &mut Vec<ProviderLimitsDto>| saved_reads.set(saved_reads.get() + 1);
+    let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
+        saved_reads.set(saved_reads.get() + 1);
+        None
+    };
     let read = || {
         read_provider(
             &cache,
@@ -297,7 +296,7 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
             force,
             &native,
             &|_| false,
-            &|_, _| {},
+            &|_, _| None,
             &|_| {},
         )
     };
@@ -338,7 +337,10 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
             native_read(vec![quota(95.0, true)])
         }
     };
-    let saved = |_, entries: &mut Vec<ProviderLimitsDto>| entries.push(quota(98.0, false));
+    let saved = |_, entries: &mut Vec<ProviderLimitsDto>| {
+        entries.push(quota(98.0, false));
+        None
+    };
     let read = || {
         read_provider(
             &cache,
@@ -380,7 +382,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
     });
     age_native(&cache, 300);
 
-    let (Served { entries, .. }, _) = read_provider(
+    let (Served { column, .. }, _) = read_provider(
         &cache,
         Duration::from_secs(1800),
         false,
@@ -390,7 +392,11 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &|_| {},
     );
 
-    assert_eq!(entries, [scoped]);
+    assert_eq!(
+        column.iter().map(|entry| &entry.card).collect::<Vec<_>>(),
+        [&scoped]
+    );
+    assert_eq!(column[0].replaced[0].id, "team-b");
 }
 
 #[test]
