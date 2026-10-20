@@ -5,7 +5,7 @@ use std::fmt::Display;
 use chrono::{DateTime, TimeZone, Utc};
 
 #[cfg(any(target_os = "windows", test))]
-use super::window::ResetInstant;
+use super::window::{unstarted, ResetInstant};
 #[cfg(any(target_os = "windows", test))]
 use crate::dto::{LimitWindowDto, LimitsWorkspaceCreditsDto};
 
@@ -122,7 +122,8 @@ impl WindowAt {
             used_now,
             reset,
             renewed,
-            idle: starts_on_first_message && reset.is_none() && used_now == Some(0.0),
+            idle: starts_on_first_message
+                && used_now.is_some_and(|used| unstarted(used, reset.is_some())),
             subject,
         }
     }
