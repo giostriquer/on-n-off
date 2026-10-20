@@ -110,6 +110,9 @@ export function checkSums(sumsText, bytesByName) {
   const unlisted = names.filter((name) => !sums.has(name));
   const extra = [...sums.keys()].filter((name) => !bytesByName.has(name));
   const checks = [
+    sumsText.includes("\r")
+      ? fail("SHA256SUMS.txt ends each line with LF alone, so shasum -c reads it", "it has CR line endings")
+      : pass("SHA256SUMS.txt ends each line with LF alone, so shasum -c reads it"),
     sameList(sums.keys(), names)
       ? pass("SHA256SUMS.txt lists every other asset, and nothing else")
       : fail(

@@ -466,6 +466,17 @@ test("Dependabot keeps the pins of every workflow and local action current", { s
   assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });
 
+test("both release checksum files come from the tested LF writer", { skip }, () => {
+  const release = load("release");
+  for (const [job, name, output] of [
+    ["build", "Record staged asset checksums", "STAGED_SHA256SUMS."],
+    ["publish-draft", "Prepare draft release and updater feed", "SHA256SUMS.txt"],
+  ]) {
+    const run = step(release.jobs[job], name).run;
+    assert.match(run, /\.\/scripts\/write-checksums\.ps1/, name);
+    assert.ok(run.includes(output), `${name} writes ${output}`);
+  }
+  assert.doesNotMatch(readFileSync(join(directory, "release.yml"), "utf8"), /WriteAllLines/);
 test("every installer build installs the pinned cargo-about first, for the bundled license notice", { skip }, () => {
   for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
     const install = step(job, "Install cargo-about");

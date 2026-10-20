@@ -249,6 +249,7 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 ./scripts/new-update-feed.test.ps1
 ./scripts/read-rust-toolchain.test.ps1
 ./scripts/prune-rust-toolchains.test.ps1
+./scripts/write-checksums.test.ps1
 ```
 
 ## Visual verification

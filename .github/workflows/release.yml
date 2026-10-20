@@ -204,23 +204,9 @@ jobs:
           INSTALLER: ${{ matrix.installer }}
         run: |
           $assetDirectory = Join-Path $env:RUNNER_TEMP 'release-assets'
-          $checksumLines = @(Get-ChildItem -LiteralPath $assetDirectory -File |
-            Sort-Object Name |
-            ForEach-Object {
-              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              "$hash  $($_.Name)"
-            })
-
-          if ($checksumLines.Count -eq 0) {
-            throw 'No release assets were staged.'
-          }
-          $checksumPath = Join-Path $assetDirectory "STAGED_SHA256SUMS.$env:INSTALLER.txt"
-          [System.IO.File]::WriteAllLines(
-            $checksumPath,
-            $checksumLines,
-            [System.Text.UTF8Encoding]::new($false)
-          )
-          Get-Content -LiteralPath $checksumPath
+          ./scripts/write-checksums.ps1 `
+            -Directory $assetDirectory `
+            -OutputPath (Join-Path $assetDirectory "STAGED_SHA256SUMS.$env:INSTALLER.txt")
 
       - name: Upload release assets
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -355,17 +341,9 @@ jobs:
             -PublishedAt ([string] $draft.createdAt) `
             -OutputPath (Join-Path $assetDirectory 'latest.json')
 
-          $checksumLines = Get-ChildItem -LiteralPath $assetDirectory -File |
-            Sort-Object Name |
-            ForEach-Object {
-              $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-              "$hash  $($_.Name)"
-            }
-          [System.IO.File]::WriteAllLines(
-            (Join-Path $assetDirectory 'SHA256SUMS.txt'),
-            $checksumLines,
-            [System.Text.UTF8Encoding]::new($false)
-          )
+          ./scripts/write-checksums.ps1 `
+            -Directory $assetDirectory `
+            -OutputPath (Join-Path $assetDirectory 'SHA256SUMS.txt')
 
       - name: Attest installers
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2

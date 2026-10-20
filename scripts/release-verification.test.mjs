@@ -240,7 +240,7 @@ function buildRelease({ tamper = () => {}, tamperSums = (text) => text, allowCha
   const bytesByName = new Map(release.files);
   for (const [name, text] of release.sigs) bytesByName.set(name, Buffer.from(text));
   bytesByName.set("latest.json", Buffer.from(latestText));
-  const sums = [...bytesByName].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join("\r\n");
+  const sums = [...bytesByName].map(([name, bytes]) => `${sha256(bytes)}  ${name}`).join("\n");
   const assets = [...bytesByName.keys(), "SHA256SUMS.txt"].sort();
   const expected = expectedAssetNames(PREVIOUS_ASSETS, "1.0.0", VERSION);
   return [
@@ -268,16 +268,16 @@ test("a valid release passes every group, and each tamper fails its own check", 
       "swapped SUMS hashes",
       {
         tamperSums: (text) => {
-          const lines = text.split("\r\n");
+          const lines = text.split("\n");
           const [license, dmg] = [lines.findIndex((l) => l.endsWith("  LICENSE")), lines.findIndex((l) => l.endsWith(`  ${DMG}`))];
           const hash = (i) => lines[i].slice(0, 64);
           [lines[license], lines[dmg]] = [`${hash(dmg)}  LICENSE`, `${hash(license)}  ${DMG}`];
-          return lines.join("\r\n");
+          return lines.join("\n");
         },
       },
       "sha256 LICENSE",
     ],
-    ["a missing SUMS line", { tamperSums: (text) => text.split("\r\n").filter((l) => !l.endsWith("  LICENSE")).join("\r\n") }, "SHA256SUMS.txt lists every other asset, and nothing else"],
+    ["a missing SUMS line", { tamperSums: (text) => text.split("\n").filter((l) => !l.endsWith("  LICENSE")).join("\n") }, "SHA256SUMS.txt lists every other asset, and nothing else"],
     ["a .sig of another asset", { tamper: (r) => r.sigs.set(`${EXE}.sig`, releaseSigner.signFile(r.files.get(DMG), `timestamp:1\tfile:${EXE}`)) }, `${EXE}.sig signs ${EXE}`],
     [
       "an edited trusted comment",
@@ -301,8 +301,9 @@ test("a valid release passes every group, and each tamper fails its own check", 
       `windows-x86_64-nsis signature equals ${EXE}.sig`,
     ],
     ["changed notes", { tamper: (r) => (r.body = `${NOTES}\n* a line added after publish-draft\n`) }, "latest.json notes match the release body (installed apps show these)"],
-    ["a SUMS line listed twice", { tamperSums: (text) => `${text}\r\n${text.split("\r\n")[0]}` }, "SHA256SUMS.txt is readable"],
-    ["a SUMS line for no asset", { tamperSums: (text) => `${text}\r\n${sha256("ghost")}  webapp_1.1.0_ghost.zip` }, "SHA256SUMS.txt lists every other asset, and nothing else"],
+    ["CRLF line endings in SUMS", { tamperSums: (text) => text.replaceAll("\n", "\r\n") }, "SHA256SUMS.txt ends each line with LF alone, so shasum -c reads it"],
+    ["a SUMS line listed twice", { tamperSums: (text) => `${text}\n${text.split("\n")[0]}` }, "SHA256SUMS.txt is readable"],
+    ["a SUMS line for no asset", { tamperSums: (text) => `${text}\n${sha256("ghost")}  webapp_1.1.0_ghost.zip` }, "SHA256SUMS.txt lists every other asset, and nothing else"],
     [
       "a .sig that is not a minisign signature, copied into the feed",
       {
