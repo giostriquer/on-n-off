@@ -177,6 +177,14 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
+pub(crate) fn check_history(
+    home: &Path,
+    agent: AgentId,
+    replaced: &[LimitsAccountDto],
+) -> Result<(), String> {
+    SnapshotStore::for_home(home).check_card_history(agent, replaced)
+}
+
 pub(crate) fn forget_history(
     home: &Path,
     agent: AgentId,

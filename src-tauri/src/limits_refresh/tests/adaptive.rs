@@ -129,7 +129,9 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     read();
     age_native(&cache, 300);
     used.set(100.0);
-    let (served, revision) = read();
+    let ProviderRead {
+        served, revision, ..
+    } = read();
     let entries = served.entries;
     assert_eq!(reads.get(), 2);
     assert_eq!(saved_reads.get(), 1);
@@ -137,7 +139,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     assert_eq!(revision, 2);
     age_native(&cache, 300);
     assert_eq!(
-        read().1,
+        read().revision,
         2,
         "exhausted usage must wait for the default interval"
     );
@@ -392,14 +394,16 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
     read();
     switched.set(true);
     age_native(&cache, 300);
-    let (served, revision) = read();
+    let ProviderRead {
+        served, revision, ..
+    } = read();
     let entries = served.entries;
     assert_eq!(entries.len(), 1);
     assert!(entries[0].current_account);
     assert_eq!(entries[0].reading.windows[0].used_percent, 20.0);
     age_native(&cache, 300);
     assert_eq!(
-        read().1,
+        read().revision,
         revision,
         "the new account uses its own usage to schedule reads"
     );
@@ -419,7 +423,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
     });
     age_native(&cache, 300);
 
-    let (Served { entries, .. }, _) = read_provider(
+    let entries = read_provider(
         &cache,
         Duration::from_secs(1800),
         false,
@@ -430,7 +434,9 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &|_| false,
         &|_, _| panic!("saved accounts are not due"),
         &|_| {},
-    );
+    )
+    .served
+    .entries;
 
     let column = cache.column(&entries);
     assert_eq!(

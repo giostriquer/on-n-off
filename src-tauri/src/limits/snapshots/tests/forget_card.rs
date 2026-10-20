@@ -115,3 +115,56 @@ fn a_card_with_no_history_on_disk_still_leaves_the_archive() {
     assert!(store.archived(AgentId::Codex).is_empty());
     std::fs::remove_dir_all(home).unwrap();
 }
+
+#[test]
+fn a_replaced_history_with_no_email_to_check_is_never_deleted_unchecked() {
+    let home = scratch_dir("limits-forget-card-unlabeled");
+    let store = stored(
+        &home,
+        &[
+            ("profile:team", "shared@example.com"),
+            ("team", "shared@example.com"),
+        ],
+    );
+    let unlabeled = LimitsAccountDto {
+        id: "team".into(),
+        legacy_id: None,
+        label: None,
+    };
+
+    assert_eq!(
+        store.forget_card(AgentId::Codex, "profile:team", &[unlabeled]),
+        Err("Account history changed. Refresh accounts before removing it.".to_string())
+    );
+    assert_eq!(held(&store), ["profile:team", "team"]);
+    std::fs::remove_dir_all(home).unwrap();
+}
+
+#[test]
+fn checking_a_cards_history_passes_what_still_matches_and_refuses_what_changed_hands() {
+    let home = scratch_dir("limits-check-card-history");
+    let store = stored(
+        &home,
+        &[
+            ("team", "shared@example.com"),
+            ("other", "second@example.com"),
+        ],
+    );
+
+    assert_eq!(
+        store.check_card_history(
+            AgentId::Codex,
+            &[
+                legacy("team", " Shared@Example.com "),
+                legacy("gone", "any@example.com")
+            ]
+        ),
+        Ok(()),
+        "a match, and history already gone"
+    );
+    assert!(store
+        .check_card_history(AgentId::Codex, &[legacy("other", "shared@example.com")])
+        .is_err());
+    assert_eq!(held(&store), ["other", "team"], "checking deletes nothing");
+    std::fs::remove_dir_all(home).unwrap();
+}

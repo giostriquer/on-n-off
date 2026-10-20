@@ -165,11 +165,7 @@ impl SnapshotStore {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for legacy in replaced {
-            if let Some(email) = &legacy.label {
-                self.check_history(provider, &legacy.id, email)?;
-            }
-        }
+        self.check_replaced(provider, replaced)?;
         let mut forgotten = Vec::new();
         for legacy in replaced {
             self.remove_file(provider, &legacy.id)?;
@@ -182,6 +178,27 @@ impl SnapshotStore {
         }
         self.unarchive_locked(provider, &forgotten)
             .map(|_| forgotten)
+    }
+
+    pub fn check_card_history(
+        &self,
+        provider: AgentId,
+        replaced: &[LimitsAccountDto],
+    ) -> Result<(), String> {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.check_replaced(provider, replaced)
+    }
+
+    fn check_replaced(
+        &self,
+        provider: AgentId,
+        replaced: &[LimitsAccountDto],
+    ) -> Result<(), String> {
+        replaced.iter().try_for_each(|legacy| {
+            self.check_history(provider, &legacy.id, legacy.label.as_deref().unwrap_or(""))
+        })
     }
 
     fn check_history(

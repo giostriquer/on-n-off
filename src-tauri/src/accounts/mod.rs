@@ -240,13 +240,16 @@ impl Notify for Announce {
 
 impl Accounts {
     fn live() -> Result<Self, String> {
-        Ok(Self {
-            home: home()?,
+        Ok(Self::at(home()?))
+    }
+    fn at(home: PathBuf) -> Self {
+        Self {
+            home,
             stores: Box::new(AdapterStores),
             clients: Box::new(RunningClients),
             notify: Box::new(Announce),
             browser: Box::new(SystemBrowser),
-        })
+        }
     }
     fn native(&self, provider: AgentId) -> Result<Box<dyn NativeAccount>, String> {
         self.stores.native(provider, &self.home)
@@ -289,10 +292,11 @@ pub fn remove(id: &str) -> Result<(), String> {
     Accounts::live()?.remove(id)
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Forgot {
     pub(crate) profile: bool,
     pub(crate) changed: bool,
+    pub(crate) home_left: Option<String>,
 }
 
 pub(crate) fn forget_account_at(
@@ -301,32 +305,7 @@ pub(crate) fn forget_account_at(
     account_id: &str,
     ids: &[String],
 ) -> Result<Forgot, String> {
-    if !store::Store::vault_exists(home) {
-        return Ok(Forgot::default());
-    }
-    let store = store::Store::open(home, false)?;
-    let saved = store
-        .load()?
-        .observed(provider, account_id)
-        .map(|profile| profile.id.clone());
-    let kind = match &saved {
-        Some(id) => {
-            login::cancel_expected(id);
-            store::ChangeKind::Account
-        }
-        None => store::ChangeKind::Metadata,
-    };
-    let changed = store.change(kind, |db| {
-        let removed = saved
-            .as_deref()
-            .and_then(|id| db.remove_profile(id))
-            .is_some();
-        Ok(db.forget_categories(provider, ids) || removed)
-    })?;
-    Ok(Forgot {
-        profile: saved.is_some(),
-        changed,
-    })
+    Accounts::at(home.to_path_buf()).forget_account(provider, account_id, ids)
 }
 pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
     Accounts::live()?.activate(provider, id, activation)
@@ -514,6 +493,54 @@ impl Accounts {
             self.notify.roster(provider);
         }
         Ok(())
+    }
+
+    fn forget_account(
+        &self,
+        provider: AgentId,
+        account_id: &str,
+        ids: &[String],
+    ) -> Result<Forgot, String> {
+        if !store::Store::vault_exists(&self.home) {
+            return Ok(Forgot::default());
+        }
+        let store = store::Store::open(&self.home, false)?;
+        let saved = store
+            .load()?
+            .observed(provider, account_id)
+            .map(|profile| profile.id.clone());
+        let kind = match &saved {
+            Some(id) => {
+                login::cancel_expected(id);
+                store::ChangeKind::Account
+            }
+            None => store::ChangeKind::Metadata,
+        };
+        let (changed, home) = store.change(kind, |db| {
+            let home = saved
+                .as_deref()
+                .and_then(|id| db.profiles.iter().find(|p| p.id == id))
+                .and_then(|profile| profile.home.clone());
+            let removed = saved
+                .as_deref()
+                .and_then(|id| db.remove_profile(id))
+                .is_some();
+            Ok((db.forget_categories(provider, ids) || removed, home))
+        })?;
+        Ok(Forgot {
+            profile: saved.is_some(),
+            changed,
+            home_left: home.and_then(|home| self.retire_home(provider, &home).err()),
+        })
+    }
+
+    fn retire_home(&self, provider: AgentId, id: &str) -> Result<(), String> {
+        let Some(homes) = self.account_homes(provider) else {
+            return Ok(());
+        };
+        let home = homes(id)?;
+        let locks = home.lock()?;
+        home.delete(locks)
     }
 
     fn remove(&self, id: &str) -> Result<(), String> {

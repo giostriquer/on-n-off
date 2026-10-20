@@ -241,6 +241,21 @@ describe("archiving", () => {
     expect(screen.queryByRole("button", { name: /^Archived/ })).toBeNull();
   });
 
+  it("clears a failed action's error once a later one goes through", async () => {
+    setLimitsAccountArchived.mockRejectedValueOnce({ kind: "message", message: "disk full", path: null });
+    serve([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })]);
+    renderLimits();
+    fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+    expect(await screen.findByText("Could not archive that account: disk full")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions for spare@codex.example" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
+
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Codex limits · spare@codex.example" })).toBeNull());
+    expect(screen.queryByText("Could not archive that account: disk full")).toBeNull();
+  });
+
   it("unarchives an account and leaves reading it again to the backend, whose one announcement brings it back", async () => {
     serve([okCodex(), staleCodex({ archived: true })]);
     renderLimits();

@@ -114,7 +114,8 @@ config dir>`, created by the first write under Claude Code's own account name
 Windows it is the home's `.credentials.json`, the file Claude Code keeps any login in there.
 
 A new sign-in (Add or Sign in again) and Sign out (for every saved workspace of the signed-out
-user) set the profile's home aside, and Remove takes the profile with it. A home no profile names
+user) set the profile's home aside, and Remove takes the profile with it; Remove account also
+retires the home in the same call (Remove account, below). A home no profile names
 then goes at the next read: every read lists the homes on disk before it reads the vault, and
 tears down each one no profile names, under the home's own Claude Code locks, its Keychain entry
 first, then the directory. A home's id is recorded in the vault before anything creates it, so one
@@ -521,7 +522,11 @@ holds from the Limits column it serves: the card's own id and the legacy history
 in (`replaced`), never ids the UI passes. The signed-in card is refused, as it offers neither. A
 remembered card with no saved login is the same call.
 
-Remove account changes two stores, in this order:
+Before it changes anything, while it plans the removal under the Limits cache lock, the snapshot
+store checks that every replaced legacy snapshot still carries the email the column folded it by
+(`SnapshotStore::check_card_history`); a legacy with no email to check, and one that changed
+hands, refuse the whole removal, so the saved login stays. Remove account then changes two
+stores, in this order:
 
 1. **The vault.** One account change, under the vault lease and its atomic replacement, removes
    the saved profile whose observation key is the card's id, keeps its identity out of automatic
@@ -532,30 +537,36 @@ Remove account changes two stores, in this order:
    did, with this session's key or the OS store's, and reads no native login, no home and no
    login secret. If this step fails, nothing has changed and nothing is announced: a vault that
    does not open refuses even a card with no saved login, which the blocked rule above keeps from
-   being asked.
+   being asked. Once the vault lease is released, and outside the cache lock, the home the removed
+   profile named is retired with that profile's own provider's home: under the home's own locks
+   it deletes the home's login (on macOS Claude's scoped Keychain entry) first, then the
+   directory, reading no login on the way (`Accounts::retire_home`). A home that cannot go now,
+   because its client holds it or it cannot be deleted, is left for a later read, which tears
+   down every home no profile names (Homes, above).
 2. **The usage history**, under the Limits cache lock, so no read of the provider runs beside it:
-   the snapshot store checks that every replaced legacy snapshot still carries the email the
-   column folded it by, then deletes them, the card's own snapshot and any legacy that one
-   supersedes on disk, and takes every deleted id out of the archive, all under its write lock
-   (`SnapshotStore::forget_card`). History that changed hands is refused before anything is
-   deleted. The cache drops the cards it deleted.
+   the snapshot store checks every replaced legacy snapshot's email again, the final guard,
+   then deletes them, the card's own snapshot and any legacy that one supersedes on disk, and
+   takes every deleted id out of the archive, all under its write lock
+   (`SnapshotStore::forget_card`). History that changed hands since the plan is refused before
+   anything is deleted. The cache drops the cards it deleted.
 
 When the history step fails after the saved login went, the one error says both ("The saved
-login was removed, but its usage history was not: …"), and the history stays as a remembered card
-without its saved login, which Remove account removes. Then the roster is reread with the
-session's key, when the vault changed, and the Limits read and the account list are each
+login was removed, but its usage history was not: …"), adding why the home was left when it
+was, and the history stays as a remembered card without its saved login, which Remove account
+removes. A home left behind while everything else went is no error. Then the roster is reread
+with the session's key, when the vault changed, and the Limits read and the account list are each
 announced at most once: the Limits read when the column changed, the account list when the vault
-did. The provider is not read again, so the card goes as soon as the announcement is answered;
-a home the removed profile named goes at the next saved refresh, like any home no profile names
-(Homes, above), and discovery is not woken.
+did. The provider's usage is not read again, so the card goes as soon as the announcement is
+answered, and discovery is not woken.
 
 Archive account writes the archive under the cache lock and flags the cached cards, rereads the
 roster when the archive changed, and announces the same way. Unarchive then reads the provider
-again, forced, before it announces, so its one announcement covers that read too. The UI patches
+again, forced (`AccountStores::read_again`); that read announces its own replacement, and the
+unarchive announces only what it did not, so each source is still announced once. The UI patches
 no cache; it waits for the announcement. The earlier commands stay registered with their shapes
 and their `api.ts` wrappers, though no screen calls them: `forget_limits_snapshot` forgets one
-snapshot as before, and `set_limits_archived` archives the ids it is given through the same path
-as Archive account.
+snapshot and the legacy it supersedes, as before, and drops every card it forgot from the cache;
+`set_limits_archived` archives the ids it is given through the same path as Archive account.
 
 ## Native scope and limitations
 

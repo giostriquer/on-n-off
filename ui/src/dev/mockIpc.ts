@@ -285,12 +285,12 @@ const handlers: Record<string, Handler> = {
   set_limits_archived: (args) => limits.setArchived(args.agentId, args.accountIds, args.archived),
   forget_limits_snapshot: (args) => limits.forgetSnapshot(args.agentId, args.accountId),
   remove_limits_account: (args) => {
-    const savedLogin = limits.removeAccount(args.agentId, args.accountId);
-    announce(`limits:${String(args.agentId)}`);
-    if (savedLogin) announce("accounts");
+    const changed = limits.removeAccount(args.agentId, args.accountId);
+    if (changed.column) announce(`limits:${String(args.agentId)}`);
+    if (changed.vault) announce("accounts");
   },
   set_limits_account_archived: (args) => {
-    limits.setAccountArchived(args.agentId, args.accountId, args.archived);
+    if (!limits.setAccountArchived(args.agentId, args.accountId, args.archived)) return;
     announce(`limits:${String(args.agentId)}`);
     announce("accounts");
   },

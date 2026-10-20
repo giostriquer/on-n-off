@@ -64,10 +64,10 @@ pub(crate) struct Changed {
 }
 
 impl Changed {
-    fn and(self, other: Self) -> Self {
+    fn without(self, announced: Self) -> Self {
         Self {
-            limits: self.limits || other.limits,
-            accounts: self.accounts || other.accounts,
+            limits: self.limits && !announced.limits,
+            accounts: self.accounts && !announced.accounts,
         }
     }
 
@@ -79,6 +79,12 @@ impl Changed {
             read_revision::announce(Source::Accounts);
         }
     }
+}
+
+pub(crate) struct ProviderRead {
+    served: Served,
+    revision: u64,
+    announced: Changed,
 }
 
 struct Refresh<'a> {
@@ -227,14 +233,11 @@ pub fn read_limits_revisioned(agent: AgentId, force: bool) -> (Vec<ProviderLimit
 }
 
 pub(crate) fn read_served(agent: AgentId, force: bool) -> (Served, u64) {
-    let (served, revision, changed) = read_served_quietly(agent, force);
-    if let Some(cache) = cache_for(agent) {
-        changed.send(cache.source);
-    }
-    (served, revision)
+    let read = read_announced(agent, force);
+    (read.served, read.revision)
 }
 
-fn read_served_quietly(agent: AgentId, force: bool) -> (Served, u64, Changed) {
+fn read_announced(agent: AgentId, force: bool) -> ProviderRead {
     let Some(cache) = cache_for(agent) else {
         let read = crate::limits::read_limits(agent, force);
         let served = Served {
@@ -242,21 +245,21 @@ fn read_served_quietly(agent: AgentId, force: bool) -> (Served, u64, Changed) {
             entries: read.cards,
             failure: read.outcome.failure,
         };
-        return (served, 0, Changed::default());
+        return ProviderRead {
+            served,
+            revision: 0,
+            announced: Changed::default(),
+        };
     };
     let Some(_account_read) = crate::accounts::activity::read(agent) else {
-        let read = cache
-            .read
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        return (
-            cache.served(read.as_ref()),
-            cache.revision.current(),
-            Changed::default(),
-        );
+        return ProviderRead {
+            served: cache.served(cache.lock_read().as_ref()),
+            revision: cache.revision.current(),
+            announced: Changed::default(),
+        };
     };
     let interval = poll_interval();
-    read_provider_quietly(
+    read_provider(
         cache,
         interval,
         force,
@@ -275,7 +278,7 @@ struct Native<'a> {
     login: &'a dyn Fn() -> Option<String>,
 }
 
-fn read_provider_quietly(
+fn read_provider(
     cache: &Cache,
     interval: Duration,
     force: bool,
@@ -283,7 +286,7 @@ fn read_provider_quietly(
     unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
     refresh_and_list: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>) -> Option<Roster>,
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
-) -> (Served, u64, Changed) {
+) -> ProviderRead {
     let mut unarchived = false;
     let (served, reading) =
         read_through_cache(cache, interval, force, native.login, |force, refresh| {
@@ -306,14 +309,16 @@ fn read_provider_quietly(
             flag(&mut cards);
             (cards, outcome)
         });
-    (
+    let announced = Changed {
+        limits: reading.replaced(),
+        accounts: unarchived,
+    };
+    announced.send(cache.source);
+    ProviderRead {
         served,
-        reading.revision(),
-        Changed {
-            limits: reading.replaced(),
-            accounts: unarchived,
-        },
-    )
+        revision: reading.revision(),
+        announced,
+    }
 }
 
 fn keep_saved_cards(
@@ -372,7 +377,14 @@ fn account_stores(agent: AgentId) -> Result<(&'static Cache, account_actions::At
     let cache = cache_for(agent)
         .ok_or_else(|| format!("{} has no Limits accounts.", agent.display_name()))?;
     let home = crate::paths::user_home().map_err(|error| error.message)?;
-    Ok((cache, account_actions::AtHome { home, agent }))
+    Ok((
+        cache,
+        account_actions::AtHome {
+            home,
+            agent,
+            read: |agent, force| read_announced(agent, force).announced,
+        },
+    ))
 }
 
 pub fn forget_snapshot(
@@ -380,16 +392,11 @@ pub fn forget_snapshot(
     account_id: &str,
     expected_email: Option<&str>,
 ) -> Result<Vec<String>, String> {
-    let Some(cache) = cache_for(agent) else {
-        return crate::limits::forget_snapshot(agent, account_id, expected_email);
-    };
-    let mut forgotten = Vec::new();
-    let reading = forget_through_cache(cache, account_id, || {
-        forgotten = crate::limits::forget_snapshot(agent, account_id, expected_email)?;
-        Ok(())
-    })?;
-    announce(cache, reading);
-    Ok(forgotten)
+    let forget = || crate::limits::forget_snapshot(agent, account_id, expected_email);
+    match cache_for(agent) {
+        Some(cache) => account_actions::forget_with(cache, forget),
+        None => forget(),
+    }
 }
 
 pub fn set_archived(agent: AgentId, ids: &[String], archived: bool) -> Result<(), String> {
@@ -505,10 +512,7 @@ fn read_through_cache<F>(
 where
     F: FnOnce(bool, Refresh<'_>) -> (Vec<ProviderLimitsDto>, Option<NativeOutcome>),
 {
-    let mut cached = cache
-        .read
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut cached = cache.lock_read();
     let now = Instant::now();
     let native = cached.as_ref().is_none_or(|entry| {
         !entry.native.holds_back(now, native_login)
@@ -565,32 +569,6 @@ where
     )
 }
 
-fn forget_through_cache<F>(cache: &Cache, account_id: &str, forget: F) -> Result<Reading, String>
-where
-    F: FnOnce() -> Result<(), String>,
-{
-    let mut cached = cache
-        .read
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
-    forget()?;
-    let Some(entry) = cached.as_mut() else {
-        return Ok(Reading::Unchanged(cache.revision.current()));
-    };
-    let before = entry.entries.len();
-    entry.entries.retain(|snapshot| {
-        snapshot.current_account
-            || snapshot
-                .account
-                .as_ref()
-                .is_none_or(|account| account.id != account_id)
-    });
-    if entry.entries.len() == before {
-        return Ok(Reading::Unchanged(cache.revision.current()));
-    }
-    Ok(Reading::Replaced(cache.revision.bump()))
-}
-
 fn cache_is_fresh(
     refreshed_at: Instant,
     now: Instant,
@@ -616,10 +594,7 @@ pub(crate) fn account_changed(agent: AgentId) {
 }
 
 fn account_changed_in(cache: &Cache, relist: impl FnOnce() -> Option<Roster>, read: impl FnOnce()) {
-    *cache
-        .read
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    *cache.lock_read() = None;
     announce(cache, reread_roster(cache, relist));
     read();
 }

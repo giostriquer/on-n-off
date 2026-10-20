@@ -36,28 +36,6 @@ fn no_login() -> Option<String> {
     None
 }
 
-fn read_provider(
-    cache: &Cache,
-    interval: Duration,
-    force: bool,
-    native: &Native<'_>,
-    unarchive: &dyn Fn(&[ProviderLimitsDto]) -> bool,
-    refresh_and_list: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>) -> Option<Roster>,
-    flag: &dyn Fn(&mut [ProviderLimitsDto]),
-) -> (Served, u64) {
-    let (served, revision, changed) = read_provider_quietly(
-        cache,
-        interval,
-        force,
-        native,
-        unarchive,
-        refresh_and_list,
-        flag,
-    );
-    changed.send(cache.source);
-    (served, revision)
-}
-
 fn cached(entries: Vec<ProviderLimitsDto>) -> CachedRead {
     CachedRead {
         entries,
@@ -514,40 +492,6 @@ fn a_failed_read_is_remembered_so_answering_its_announcement_costs_no_provider_c
     assert_eq!(served.entries[0].status, LimitsStatus::Failed);
 }
 
-#[test]
-fn forgetting_a_snapshot_removes_it_from_the_shared_cache_only_after_disk_success() {
-    let cache = Cache::new(AgentId::Claude, Source::LimitsClaude);
-    *cache.read.lock().unwrap() = Some(cached(vec![
-        snapshot("current", true, LimitsStatus::Ok),
-        snapshot("forgotten", false, LimitsStatus::Ok),
-    ]));
-
-    let dropped = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
-    assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
-        1
-    );
-    assert_eq!(
-        dropped,
-        Reading::Replaced(1),
-        "the other window lists remembered accounts too, so it has to be told this one is gone"
-    );
-
-    let already_gone = forget_through_cache(&cache, "forgotten", || Ok(())).unwrap();
-    assert_eq!(
-        already_gone,
-        Reading::Unchanged(1),
-        "nothing was removed, so nobody is sent to re-read"
-    );
-
-    let result = forget_through_cache(&cache, "current", || Err("disk failed".into()));
-    assert_eq!(result, Err("disk failed".into()));
-    assert_eq!(
-        cache.read.lock().unwrap().as_ref().unwrap().entries.len(),
-        1
-    );
-}
-
 fn seeded(entries: Vec<ProviderLimitsDto>) -> Cache {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     *cache.read.lock().unwrap() = Some(cached(entries));
@@ -633,7 +577,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
             login: &no_login,
         };
         read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag)
-            .0
+            .served
             .entries
     };
 

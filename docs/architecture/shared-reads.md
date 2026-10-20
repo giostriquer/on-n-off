@@ -72,8 +72,9 @@ ends have one writer, the account list, which hands them over with that reread
 what it holds changed, and the reads that answer the announcement are served from the cache.
 Remove account and Archive account change the cards they name in the cache, reread the roster
 with them, and announce once for the whole action: the Limits read once if either changed, the
-account list once if the vault or the archive did; an unarchive's forced read of the provider runs
-before that announcement and is announced with it ([accounts.md](accounts.md#remove-account)).
+account list once if the vault or the archive did; an unarchive's forced read of the provider
+announces its own replacement first, and the unarchive then announces only what that read did not
+([accounts.md](accounts.md#remove-account)).
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

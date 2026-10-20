@@ -469,25 +469,30 @@ export function limitsScenario(name: string) {
       const which = provider(agentId);
       return which ? columnOf(which) : [];
     },
-    removeAccount(agentId: unknown, accountId: unknown): boolean {
+    removeAccount(agentId: unknown, accountId: unknown): { column: boolean; vault: boolean } {
       const which = provider(agentId);
-      if (!which || typeof accountId !== "string") return false;
+      if (!which || typeof accountId !== "string") return { column: false, vault: false };
+      const before = JSON.stringify(columnOf(which));
       const saved = profilesOf(which).find(profile => profile.observationId === accountId);
-      for (const id of heldBy(which, accountId)) {
+      const named = categoriesOf(which);
+      const ids = heldBy(which, accountId);
+      for (const id of ids) {
         forgotten[which].add(id);
         archived[which].delete(id);
         categories[which].set(id, null);
       }
       if (saved) removedLogins[which].add(saved.id);
-      return !!saved;
+      return { column: JSON.stringify(columnOf(which)) !== before, vault: !!saved || ids.some(id => id in named) };
     },
-    setAccountArchived(agentId: unknown, accountId: unknown, value: unknown) {
+    setAccountArchived(agentId: unknown, accountId: unknown, value: unknown): boolean {
       const which = provider(agentId);
-      if (!which || typeof accountId !== "string") return;
-      for (const id of heldBy(which, accountId)) {
+      if (!which || typeof accountId !== "string") return false;
+      return heldBy(which, accountId).reduce((changed, id) => {
+        const had = archived[which].has(id);
         if (value === true) archived[which].add(id);
         else archived[which].delete(id);
-      }
+        return changed || had !== archived[which].has(id);
+      }, false);
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
