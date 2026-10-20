@@ -99,6 +99,7 @@ fn a_first_scoped_reading_keeps_its_legacy_weekly_exactly_when_its_provider_inhe
             &store.load(provider),
             &crate::accounts::Roster::default(),
             &crate::accounts::SignInDeadlines::new(),
+            0,
         );
         assert_eq!(loaded.len(), 1, "the legacy card is superseded");
         assert_eq!(

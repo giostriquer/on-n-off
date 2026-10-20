@@ -104,7 +104,12 @@ impl Cache {
                 listing.ends.clone(),
             )
         };
-        crate::limits::column(entries, &roster, &ends)
+        crate::limits::column(
+            entries,
+            &roster,
+            &ends,
+            chrono::Utc::now().timestamp_millis(),
+        )
     }
 
     fn keep_listed(&self, roster: Roster, rereads_before: u64) {
@@ -175,7 +180,12 @@ pub fn read_column(agent: AgentId, force: bool) -> Vec<ColumnEntryDto> {
     let entries = read_served(agent, force).0.entries;
     match cache_for(agent) {
         Some(cache) => cache.column(&entries),
-        None => crate::limits::column(&entries, &Roster::default(), &SignInDeadlines::new()),
+        None => crate::limits::column(
+            &entries,
+            &Roster::default(),
+            &SignInDeadlines::new(),
+            chrono::Utc::now().timestamp_millis(),
+        ),
     }
 }
 

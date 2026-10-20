@@ -1,6 +1,7 @@
 import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import type { AccountsReading } from "$lib/accountTypes";
+import { parseInstant } from "$lib/limitsFormat";
 import type { AccountProvider } from "$lib/providers";
 import type { SharedReadSource } from "$lib/types";
 import { rereadLimits } from "./limits";
@@ -9,6 +10,9 @@ const ACCOUNTS = ["accounts"] as const;
 const CODEX_SUBSCRIPTIONS = ["subscription", "codex"] as const;
 const ANNOUNCED = [ACCOUNTS, CODEX_SUBSCRIPTIONS] as const;
 const DAY_MS = 24 * 60 * 60_000;
+const JUST_AFTER_MS = 1_000;
+const MINUTE_MS = 60_000;
+const LONGEST_TIMER_MS = 2 ** 31 - 1;
 
 function accountListKey(provider: AccountProvider) {
   return [...ACCOUNTS, provider] as const;
@@ -19,7 +23,34 @@ export const accountsAnnouncements = {
 } satisfies Record<Extract<SharedReadSource, "accounts">, readonly QueryKey[]>;
 
 export function accountListQuery(provider: AccountProvider) {
-  return queryOptions({ queryKey: accountListKey(provider), queryFn: () => api.readAccounts(provider), retry: false });
+  return queryOptions({
+    queryKey: accountListKey(provider),
+    queryFn: () => api.readAccounts(provider),
+    retry: false,
+    refetchInterval: (query) => query.state.status === "error"
+      ? false
+      : untilSignInEnds(query.state.data, query.state.dataUpdatedAt, Date.now()),
+    refetchOnWindowFocus: (query) => query.state.status !== "error"
+      && signInEndedSinceRead(query.state.data, query.state.dataUpdatedAt, Date.now()) ? "always" : false,
+  });
+}
+
+function unreadEnds(reading: AccountsReading | undefined, readAt: number): number[] {
+  return (reading?.profiles ?? []).flatMap(({ loginState }) => {
+    const until = loginState.state === "ending" ? parseInstant(loginState.endsAt) : null;
+    return until !== null && until > readAt ? [until] : [];
+  });
+}
+
+export function untilSignInEnds(reading: AccountsReading | undefined, readAt: number, now: number): number | false {
+  const ends = unreadEnds(reading, readAt);
+  if (ends.length === 0) return false;
+  const nearest = Math.min(...ends);
+  return nearest > now ? Math.min(nearest - now + JUST_AFTER_MS, LONGEST_TIMER_MS) : MINUTE_MS;
+}
+
+export function signInEndedSinceRead(reading: AccountsReading | undefined, readAt: number, now: number): boolean {
+  return unreadEnds(reading, readAt).some((until) => until <= now);
 }
 
 export function accountPreferenceQuery() {

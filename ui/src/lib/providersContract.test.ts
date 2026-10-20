@@ -7,6 +7,7 @@ import {
   RAIL_ORDER,
   USAGE_PROVIDERS,
   providerBinary,
+  providerClient,
   providerLabel,
   type AccountProvider,
   type LimitsProvider,
@@ -35,6 +36,10 @@ describe("the provider catalogue Rust keeps", () => {
       expect(providerLabel(id), id).toBe(rows[id].displayName);
       expect(providerBinary(id), id).toBe(rows[id].binary);
     }
+  });
+
+  it("names the client each Limits provider's sign-in belongs to", () => {
+    for (const id of LIMITS_PROVIDERS) expect(providerClient(id), id).toBe(rows[id].limitsClient);
   });
 
   it("gives the Limits and saved-account lists, and the types drawn from them, exactly the providers whose rows have those screens", () => {

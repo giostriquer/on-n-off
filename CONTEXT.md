@@ -28,6 +28,12 @@ When a quota window renews, as its provider reported it. Two within two seconds 
 the same instant, and one names the window's current cycle.
 _Avoid_: reset string, reset timestamp
 
+**Window at an instant**:
+What a quota window reads at a given moment, alike on every surface: 0% used once its reset instant
+has passed, reached only at 100% used, unreadable outside 0–100%, and idle while it is unused, has
+no reset and starts with the first message.
+_Avoid_: live percent, current window
+
 **Reading**:
 Everything one read reported about one provider account: its quota windows, its figures and its
 account details.
@@ -122,8 +128,18 @@ _Avoid_: saved account, vault entry
 
 **Account home**:
 A private store of the provider's own client, kept for one saved profile, where its one login waits
-while it is not the signed-in one and where that client renews it. Only Claude has them.
+while it is not the signed-in one and where that client renews it, when it can. Claude and Muse have
+them; Codex has none.
 _Avoid_: shadow, isolated home (that is a sign-in's, removed once it is done)
+
+**Login state**:
+Whether a saved profile's login can still be used: usable; ending, with the date its sign-in ends;
+ended, once that date has passed; refused, when its provider refused it or found it signed out;
+another account, when it now signs in as a different account; or missing, when nothing is kept
+for it. The last poll decides refused and another account, for the login it read, until that login
+changes; the signed-in account's is its sign-in's end alone. Every Limits card reads it, for every
+provider, to ask for a new sign-in.
+_Avoid_: needs login, rejected, expired
 
 **Account change**:
 An action that changes which logins are saved or which one the provider's CLI uses: save, remove,

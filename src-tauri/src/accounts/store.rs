@@ -1,4 +1,4 @@
-use super::{model::Identity, transaction::Recovery};
+use super::{login_state::SignInEnd, model::Identity, transaction::Recovery};
 use crate::dto::AgentId;
 use crate::file_lease::FileLease;
 use serde::{Deserialize, Serialize};
@@ -34,6 +34,8 @@ pub struct Profile {
     pub home: Option<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub signed_out: bool,
+    #[serde(default, skip_serializing_if = "SignInEnd::is_unread")]
+    pub sign_in_end: SignInEnd,
 }
 impl Profile {
     pub fn needs_login(&self) -> bool {
@@ -395,11 +397,13 @@ impl Database {
                 .unwrap_or_else(|| "Email unavailable".into());
             profile.pending_activation = false;
             profile.usage_renewal_owned = false;
+            profile.sign_in_end = SignInEnd::of(&identity, &login);
             profile.login = Some(login);
             profile.saved_at = chrono::Utc::now().to_rfc3339();
             return Ok(profile.id.clone());
         }
         let id = uuid::Uuid::new_v4().to_string();
+        let sign_in_end = SignInEnd::of(&identity, &login);
         let category = self
             .category(identity.provider, &identity.observation_key())
             .map(str::to_owned);
@@ -415,6 +419,7 @@ impl Database {
             usage_renewal_owned: false,
             home: None,
             signed_out: false,
+            sign_in_end,
         });
         Ok(id)
     }

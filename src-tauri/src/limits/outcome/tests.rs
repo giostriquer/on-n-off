@@ -184,23 +184,24 @@ fn a_signed_in_card_reads_each_failure_with_its_status_account_and_backoff() {
 }
 
 #[test]
-fn a_saved_read_parks_only_a_vault_login_that_ended_or_signs_in_as_another() {
+fn a_saved_read_parks_a_login_that_ended_or_signs_in_as_another_wherever_it_is_kept() {
     for failure in failures() {
-        let parks = matches!(
-            failure,
-            ReadFailure::SignedOut | ReadFailure::LoginRefused | ReadFailure::OtherAccount
-        );
+        let parks = match failure {
+            ReadFailure::SignedOut | ReadFailure::LoginRefused => Some(Parked::Refused),
+            ReadFailure::OtherAccount => Some(Parked::OtherAccount),
+            _ => None,
+        };
         let retry = Duration::from_secs(if matches!(failure, ReadFailure::RateLimited(_)) {
             30
         } else {
             0
         });
-        for (which, context, parks) in [(Saved::Login, LOGIN, parks), (Saved::Home, HOME, false)] {
+        for (which, context) in [(Saved::Login, LOGIN), (Saved::Home, HOME)] {
             assert_eq!(
                 saved(AgentId::Muse, which, &failure, NOW),
                 SavedVerdict {
                     message: message(AgentId::Muse, context, &failure),
-                    parks_login: parks,
+                    parks,
                     retry,
                 },
                 "{failure:?} in {which:?}"

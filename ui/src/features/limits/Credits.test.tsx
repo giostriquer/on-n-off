@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import type { LimitsCredits, LimitsCreditsSpent, LimitsWorkspaceCredits } from "$lib/limitsTypes";
 import { CreditsRows } from "./Credits";
@@ -46,6 +46,16 @@ describe("CreditsRows", () => {
 
     expect(shown.filled).toBe("100");
     expect(shown.note).toBe("limit reached · resets Oct 1");
+  });
+
+  it("tells a screen reader the percent the figure shows: 99 short of the limit, nothing when unreadable", () => {
+    const almost = rows({ workspaceShare: share({ usedPercent: 99.5 }) });
+    expect([almost.filled, almost.figure?.textContent, almost.meter?.getAttribute("aria-valuetext")]).toEqual(["99", "99%", null]);
+    cleanup();
+
+    const unreadable = rows({ workspaceShare: share({ usedPercent: 120 }) });
+    expect([unreadable.filled, unreadable.figure?.textContent]).toEqual([null, "—"]);
+    expect(unreadable.meter?.getAttribute("aria-valuetext")).toBe("Usage unavailable");
   });
 
   it("fills the bar in Codex's accent while there is room", () => {

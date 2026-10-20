@@ -77,6 +77,7 @@ export function useCardActions({ provider, card, now, checking, onArchive, onRem
         }} />,
       };
       case "signInAgain": return { id: entry.action, label: "Sign in again", disabled: !entry.enabled, run: () => void entry.controls.add(entry.profileId, account.id) };
+      case "useAccount": return { id: entry.action, label: "Use account", disabled: !entry.enabled, run: () => startSwitch(entry.controls, entry.profileId) };
       case "removeLogin": return confirmItem({
         id: entry.action, label: "Remove saved login", question: `Remove the saved login for ${account.name}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled: !entry.enabled,
         onConfirm: async done => { await entry.controls.action("remove", entry.profileId); done(); },

@@ -28,11 +28,11 @@ const ENDED = "2026-08-16T20:00:00Z";
 function profile(provider: AgentId, id: string, email: string, overrides: Partial<SavedProfile> = {}): SavedProfile {
   return {
     id, observationId: `profile:${id}`, legacyId: id, identity: { provider, userId: id, workspaceId: "team" },
-    label: email, email, savedAt: NOW, active: false, needsLogin: false, ...overrides,
+    label: email, email, savedAt: NOW, active: false, loginState: { state: "usable" as const }, ...overrides,
   };
 }
 
-const claudeMe = profile("claude", "me", "me@claude.example", { active: true, signInEndsAt: ENDED });
+const claudeMe = profile("claude", "me", "me@claude.example", { active: true, loginState: { state: "ended", endsAt: ENDED } });
 const codexWork = profile("codex", "work", "work@codex.example", { active: true });
 const codexShared = profile("codex", "shared", "shared@codex.example");
 const codexFresh = profile("codex", "fresh", "fresh@codex.example");

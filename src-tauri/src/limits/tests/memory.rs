@@ -184,6 +184,7 @@ fn folded(cards: &[ProviderLimitsDto]) -> Vec<ProviderLimitsDto> {
         cards,
         &crate::accounts::Roster::default(),
         &crate::accounts::SignInDeadlines::new(),
+        0,
     )
     .into_iter()
     .map(|entry| entry.card)

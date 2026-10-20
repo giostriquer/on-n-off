@@ -17,6 +17,7 @@ mod reading;
 mod renewal;
 mod snapshots;
 mod window;
+pub(crate) mod window_at;
 
 #[cfg(test)]
 pub(crate) use codex::codex_card;

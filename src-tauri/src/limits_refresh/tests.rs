@@ -661,6 +661,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     let _ = read_revision::take_announced();
     let log = std::cell::RefCell::new(Vec::new());
     let changes = std::cell::Cell::new(true);
+    let logins_change = std::cell::Cell::new(false);
     let native = |_| {
         log.borrow_mut().push("native");
         native_read(vec![
@@ -684,7 +685,7 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         log.borrow_mut()
             .push(if force { "saved, forced" } else { "saved" });
         entries.push(snapshot("saved", false, LimitsStatus::Ok));
-        None
+        logins_change.get().then(Roster::default)
     };
     let flag = |entries: &mut [ProviderLimitsDto]| {
         assert!(
@@ -739,6 +740,14 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
         read_revision::take_announced(),
         [Source::LimitsClaude],
         "nothing was unarchived, so the account list is not announced"
+    );
+
+    logins_change.set(true);
+    read(true);
+    assert_eq!(
+        read_revision::take_announced(),
+        [Source::LimitsClaude],
+        "a roster the poll listed reaches the column with the Limits read alone"
     );
 }
 

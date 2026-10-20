@@ -1,4 +1,4 @@
-import type { SavedProfile } from "$lib/accountTypes";
+import type { LoginState, SavedProfile } from "$lib/accountTypes";
 import type {
   LimitWindow,
   LimitsColumnEntry,
@@ -12,7 +12,6 @@ import type {
   ProviderLimits,
 } from "$lib/limitsTypes";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
-import { claudeSignIn, type SignInPresentation } from "./claudeSignIn";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
@@ -25,6 +24,7 @@ import {
   type LimitAccountPresentation,
   type LimitWindowPresentation,
 } from "./limitPresentation";
+import { signInPresentation, type SignInPresentation } from "./loginState";
 
 export type CardWindow = LimitWindowPresentation & { id: string; label: string };
 
@@ -76,6 +76,7 @@ export type LimitCard = {
     readStatus: LimitsStatus;
   };
   subscription: CardSubscription | null;
+  login: LoginState | null;
   signIn: SignInPresentation | null;
   archived: boolean;
 };
@@ -149,7 +150,6 @@ function forgetSteps({ entry }: Slot, accountId: string): ForgetStep[] {
 function presentCard(slot: Slot, provider: LimitsProvider, index: number, nativeLogin: NativeLogin | null, now: number): LimitCard {
   const { entry, reading, profile } = slot;
   const name = providerLabel(provider);
-  const features = LIMITS_FEATURES[provider];
   const account = entry.account ?? null;
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
@@ -158,7 +158,8 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
   const { headline, rest } = reading ? headlineWindow(reading) : { headline: undefined, rest: [] };
   const readStatus = reading?.status ?? "ok";
   const hasWindows = (reading?.windows.length ?? 0) > 0;
-  const signIn = features.signInDeadline === "claude" ? claudeSignIn(profile?.signInEndsAt, now) : null;
+  const login = profile?.loginState ?? null;
+  const signIn = login && signInPresentation(login, provider, now);
   const message = signIn?.message ? { text: signIn.message, tone: "error" as const }
     : presentation.message === null ? null
     : { text: presentation.message, tone: readStatus === "failed" ? "error" as const : "muted" as const };
@@ -182,7 +183,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
     signedIn,
     leads,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, now)),
+    rows: rest.map(window => presentWindow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
@@ -194,6 +195,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
       readStatus,
     },
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
+    login,
     signIn,
     archived: !!entry.archived,
   };
@@ -211,11 +213,6 @@ function subscription(
 
 function presentWindow(window: LimitWindow, now: number): CardWindow {
   return { id: window.id, label: window.label, ...presentLimitWindow(window, now) };
-}
-
-function presentRow(window: LimitWindow, now: number): CardWindow {
-  const presented = presentWindow(window, now);
-  return { ...presented, note: presented.note || (window.startsOnFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
 }
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };

@@ -20,7 +20,13 @@ fn as_listed(profile: &impl serde::Serialize) -> serde_json::Value {
     let fields = json.as_object_mut().unwrap();
     fields.remove("signInEndsAt");
     fields.remove("active");
+    fields.remove("loginState");
     json
+}
+
+fn in_column(listed: &crate::accounts::Listed) -> serde_json::Value {
+    serde_json::to_value(listed.in_column(&crate::accounts::SignInDeadlines::new(), None, 0))
+        .unwrap()
 }
 
 #[test]
@@ -56,7 +62,11 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in
     harness.heard();
     let listed = harness.accounts().list(AgentId::Claude).unwrap();
 
-    let read: Vec<_> = roster.profiles().iter().map(as_listed).collect();
+    let read: Vec<_> = roster
+        .profiles()
+        .iter()
+        .map(|p| as_listed(&in_column(p)))
+        .collect();
     let shown: Vec<_> = serde_json::to_value(&listed).unwrap()["profiles"]
         .as_array()
         .unwrap()
@@ -68,7 +78,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in
         roster
             .profiles()
             .iter()
-            .map(|p| serde_json::to_value(p).unwrap()["active"].clone())
+            .map(|p| in_column(p)["active"].clone())
             .collect::<Vec<_>>(),
         [false, false],
         "who is signed in is the native read's, decided as the column is built"

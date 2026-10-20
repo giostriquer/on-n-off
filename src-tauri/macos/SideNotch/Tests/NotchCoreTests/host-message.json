@@ -143,9 +143,9 @@
               "id": "session",
               "label": "5 hour · all models",
               "kind": "session",
-              "usedPercent": 12.0,
-              "resetsAt": "2026-09-01T13:00:00Z",
-              "observedAt": "2026-09-01T10:00:00Z"
+              "usedPercent": 0.0,
+              "observedAt": "2026-09-01T10:00:00Z",
+              "startsOnFirstMessage": true
             },
             {
               "id": "weekly_scoped:Fable",

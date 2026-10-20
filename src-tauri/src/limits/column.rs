@@ -1,11 +1,12 @@
 use super::snapshots::{superseded, supersedes};
-use crate::accounts::{ProfileDto, Roster, SignInDeadlines};
+use crate::accounts::{Listed, Roster, SignInDeadlines};
 use crate::dto::{ColumnEntryDto, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
 
 pub(crate) fn column(
     entries: &[ProviderLimitsDto],
     roster: &Roster,
     ends: &SignInDeadlines,
+    now_ms: i64,
 ) -> Vec<ColumnEntryDto> {
     let signed_in = entries
         .iter()
@@ -27,7 +28,7 @@ pub(crate) fn column(
             ColumnEntryDto {
                 profile: id
                     .and_then(|id| roster.profile(id))
-                    .map(|profile| profile.in_column(ends, signed_in)),
+                    .map(|profile| profile.in_column(ends, signed_in, now_ms)),
                 category: id.and_then(|id| roster.category(id)).map(str::to_owned),
                 replaced: cards
                     .iter()
@@ -46,7 +47,7 @@ pub(crate) fn column(
                 .is_some_and(|account| account.id == profile.observation_id())
         });
         if !read {
-            column.push(unread(profile, roster, ends));
+            column.push(unread(profile, roster, ends, now_ms));
         }
     }
     column
@@ -57,14 +58,19 @@ fn with_legacy_id(mut card: ProviderLimitsDto, roster: &Roster) -> ProviderLimit
         if account.legacy_id.is_none() {
             account.legacy_id = roster
                 .profile(&account.id)
-                .and_then(ProfileDto::legacy_id)
+                .and_then(Listed::legacy_id)
                 .map(str::to_owned);
         }
     }
     card
 }
 
-fn unread(profile: &ProfileDto, roster: &Roster, ends: &SignInDeadlines) -> ColumnEntryDto {
+fn unread(
+    profile: &Listed,
+    roster: &Roster,
+    ends: &SignInDeadlines,
+    now_ms: i64,
+) -> ColumnEntryDto {
     let id = profile.observation_id();
     ColumnEntryDto {
         card: ProviderLimitsDto {
@@ -81,7 +87,7 @@ fn unread(profile: &ProfileDto, roster: &Roster, ends: &SignInDeadlines) -> Colu
             archived: profile.archived(),
             reading: Reading::default(),
         },
-        profile: Some(profile.in_column(ends, None)),
+        profile: Some(profile.in_column(ends, None, now_ms)),
         category: roster.category(id).map(str::to_owned),
         replaced: Vec::new(),
         unread: true,

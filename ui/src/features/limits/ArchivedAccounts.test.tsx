@@ -8,7 +8,7 @@ import { NOW, okCodex, staleCodex } from "./readingFixtures";
 
 const unread: SavedProfile = {
   id: "unread", observationId: "profile:unread", legacyId: "team", identity: { provider: "codex", userId: "unread", workspaceId: "team" },
-  email: "unread@codex.example", label: "unread@codex.example", category: "Client B", savedAt: NOW, active: false, needsLogin: false, archived: true,
+  email: "unread@codex.example", label: "unread@codex.example", category: "Client B", savedAt: NOW, active: false, loginState: { state: "usable" }, archived: true,
 };
 
 function archived(): LimitCard[] {

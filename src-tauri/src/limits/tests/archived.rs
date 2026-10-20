@@ -64,6 +64,7 @@ fn archived_accounts_are_flagged_and_still_hide_the_history_they_replaced() {
         &listed,
         &crate::accounts::Roster::default(),
         &crate::accounts::SignInDeadlines::new(),
+        0,
     );
     let cards: Vec<_> = column.iter().map(|entry| entry.card.clone()).collect();
 

@@ -38,6 +38,10 @@ export function providerLabel(id: AgentId): string {
   return ROWS[id].displayName;
 }
 
+export function providerClient(id: LimitsProvider): string {
+  return ROWS[id].limitsClient ?? ROWS[id].displayName;
+}
+
 export function providerBinary(id: AgentId): string {
   return ROWS[id].binary;
 }

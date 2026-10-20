@@ -34,6 +34,7 @@ fn a_new_sign_in_supersedes_only_matching_legacy_history_without_relabeling_its_
         &SnapshotStore::for_home(home.path()).load(AgentId::Codex),
         &crate::accounts::Roster::default(),
         &crate::accounts::SignInDeadlines::new(),
+        0,
     );
     let cards: Vec<_> = column.iter().map(|entry| &entry.card).collect();
     assert_eq!(cards.len(), 2);

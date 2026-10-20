@@ -87,6 +87,7 @@ fn a_saved_profiles_reading_replaces_the_history_its_listed_legacy_id_names_and_
             &[card, old],
             &roster(account.provider, &[(account.clone(), "you@example.com")]),
             &no_ends(),
+            0,
         );
 
         assert_eq!(
@@ -127,6 +128,7 @@ fn a_saved_muse_logins_email_keyed_history_folds_into_its_scoped_card() {
         ],
         &roster(AgentId::Muse, &[(you.clone(), "you@example.com")]),
         &no_ends(),
+        0,
     );
 
     assert_eq!(
@@ -149,6 +151,7 @@ fn the_email_matches_ignoring_ascii_case_and_surrounding_space_but_not_other_cas
         ],
         &roster(AgentId::Codex, &[(ascii.clone(), "person@example.com")]),
         &no_ends(),
+        0,
     );
     assert_eq!(ids(&folded), [ascii.observation_key().as_str()]);
 
@@ -160,6 +163,7 @@ fn the_email_matches_ignoring_ascii_case_and_surrounding_space_but_not_other_cas
         ],
         &roster(AgentId::Codex, &[(accented.clone(), "josé@example.com")]),
         &no_ends(),
+        0,
     );
     assert_eq!(
         ids(&kept),
@@ -203,7 +207,7 @@ fn history_stays_beside_a_replacement_it_cannot_verify() {
             vec![scoped(&account, "you@example.com"), current_history],
         ),
     ] {
-        let column = column(&entries, &Roster::default(), &no_ends());
+        let column = column(&entries, &Roster::default(), &no_ends(), 0);
         assert_eq!(column.len(), 2, "{case}");
         assert!(
             column.iter().all(|entry| entry.replaced.is_empty()),
@@ -223,6 +227,7 @@ fn a_scoped_card_without_a_saved_profile_still_replaces_the_history_it_names() {
         ],
         &Roster::default(),
         &no_ends(),
+        0,
     );
 
     assert_eq!(ids(&column), [account.observation_key().as_str()]);
@@ -248,6 +253,7 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
             &[(unread_key.as_str(), "Client B")],
         ),
         &SignInDeadlines::from([(unread_key.clone(), "2026-09-30T12:00:00Z".into())]),
+        0,
     );
 
     assert_eq!(
@@ -272,12 +278,9 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
     assert_eq!(entry.card.status, LimitsStatus::Ok);
     assert!(!entry.card.current_account && !entry.card.archived);
     assert!(entry.card.reading.windows.is_empty());
-    assert_eq!(
-        entry.profile.as_ref().map(|p| p.observation_id()),
-        Some(unread.observation_key().as_str())
-    );
     assert_eq!(entry.category.as_deref(), Some("Client B"));
     let profile = serde_json::to_value(entry.profile.as_ref().unwrap()).unwrap();
+    assert_eq!(profile["observationId"], unread.observation_key());
     assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
     assert_eq!(profile["active"], false);
 }
@@ -299,6 +302,7 @@ fn an_unread_entry_is_archived_as_its_profile_is() {
             &[],
         ),
         &no_ends(),
+        0,
     );
 
     assert_eq!(
@@ -337,10 +341,10 @@ fn the_signed_in_profile_is_the_one_the_native_read_names_and_none_when_it_names
     nobody.status = LimitsStatus::SignedOut;
 
     assert_eq!(
-        active(&column(&[signed_in], &roster, &no_ends())),
+        active(&column(&[signed_in], &roster, &no_ends(), 0)),
         [b.observation_key()]
     );
-    assert!(active(&column(&[nobody], &roster, &no_ends())).is_empty());
+    assert!(active(&column(&[nobody], &roster, &no_ends(), 0)).is_empty());
 }
 
 #[test]
@@ -351,7 +355,7 @@ fn history_merged_into_an_archived_card_is_listed_with_it() {
     let mut old = history(&account, "you@example.com");
     old.archived = true;
 
-    let column = column(&[card, old], &Roster::default(), &no_ends());
+    let column = column(&[card, old], &Roster::default(), &no_ends(), 0);
 
     assert_eq!(column.len(), 1);
     assert!(column[0].card.archived);
@@ -373,6 +377,7 @@ fn every_entry_carries_its_accounts_category_and_a_saved_accounts_profile() {
             &[(saved_key.as_str(), "Client A"), ("history", "Old team")],
         ),
         &no_ends(),
+        0,
     );
 
     assert_eq!(
@@ -393,6 +398,7 @@ fn a_saved_profile_carries_the_sign_in_end_the_account_list_last_read() {
         &[scoped(&account, "you@example.com")],
         &roster(AgentId::Claude, &[(account.clone(), "you@example.com")]),
         &ends,
+        0,
     );
 
     let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
@@ -414,6 +420,7 @@ fn the_column_reaches_the_ui_as_the_reading_with_its_account_facts_beside_it() {
             &[(account.observation_key().as_str(), "Client A")],
         ),
         &no_ends(),
+        0,
     );
 
     let wire = serde_json::to_value(&column).unwrap();

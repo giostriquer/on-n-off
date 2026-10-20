@@ -3,6 +3,7 @@ import type { ProviderLimits } from "$lib/limitsTypes";
 import { codexTermEnded } from "./codexSubscriptionTerm";
 import { isSignedIn, type CardAccount, type LimitCard } from "./limitCards";
 import { LIMITS_FEATURES } from "./limitFeatures";
+import { asksToSignInAgain } from "./loginState";
 
 export type AccountList<C> = {
   controls: C;
@@ -25,11 +26,13 @@ type SavedLogin<C> = { controls: C; profileId: string };
 
 export type CheckNowEntry = { action: "checkNow"; enabled: boolean };
 export type ArchiveEntry = { action: "archive"; enabled: boolean; busy: boolean };
+type UseAccountEntry<C> = { action: "useAccount"; enabled: boolean } & SavedLogin<C>;
 
 export type MenuEntry<C> =
   | CheckNowEntry
   | { action: "category"; enabled: boolean; initial: string }
   | ({ action: "signInAgain"; enabled: boolean } & SavedLogin<C>)
+  | UseAccountEntry<C>
   | ({ action: "removeLogin"; enabled: boolean } & SavedLogin<C>)
   | ArchiveEntry
   | { action: "resetAlert" }
@@ -42,7 +45,7 @@ export type MainEntry<C> =
   | ArchiveEntry
   | { action: "saveAccount"; enabled: boolean; controls: C }
   | { action: "signIn"; enabled: boolean; controls: C; profileId: string | null }
-  | ({ action: "useAccount"; enabled: boolean } & SavedLogin<C>);
+  | UseAccountEntry<C>;
 
 export type SwitchAlongside<C> = { enabled: boolean; clients: string[] } & SavedLogin<C>;
 
@@ -90,18 +93,20 @@ export function cardActionPlan<C>({ card, now, checking, accounts, archiving, re
     archive: { action: "archive", enabled: can, busy: archiving },
   };
   const switchAlongside = switchAlongsideOf(shown);
+  const { main, displaced } = mainOf(shown, now);
   return {
     account: card.account,
-    menu: [checkNow, ...menuOf(shown)],
-    footer: { main: mainOf(shown, now), switchAlongside, resets: resetsOf(shown, switchAlongside !== null, pendingSpend) },
+    menu: [checkNow, ...menuOf(shown, displaced)],
+    footer: { main, switchAlongside, resets: resetsOf(shown, switchAlongside !== null, pendingSpend) },
   };
 }
 
-function menuOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>): MenuEntry<C>[] {
+function menuOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>, displaced: UseAccountEntry<C> | null): MenuEntry<C>[] {
   const saved = accounts && profile ? { controls: accounts.controls, profileId: profile.id } : null;
   return [
     { action: "category", enabled: can, initial: card.identity.category ?? "" },
     ...(saved ? [{ action: "signInAgain" as const, enabled: can, ...saved }] : []),
+    ...(displaced ? [displaced] : []),
     ...(saved && signedIn ? [{ action: "removeLogin" as const, enabled: can, ...saved }] : []),
     ...(signedIn ? [] : [archive]),
     ...(LIMITS_FEATURES[card.provider].bankedResets ? [{ action: "resetAlert" as const }] : []),
@@ -110,19 +115,32 @@ function menuOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive 
   ];
 }
 
-function mainOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>, now: number): MainEntry<C> | null {
+type Main<C> = { main: MainEntry<C> | null; displaced: UseAccountEntry<C> | null };
+
+function mainOf<C>(shown: Shown<C>, now: number): Main<C> {
+  const { card, profile, accounts, can } = shown;
+  const ordinary = ordinaryMainOf(shown, now);
+  if (!accounts || !profile || ordinary?.action === "cancelSignIn" || !asksToSignInAgain(card.login)) return { main: ordinary, displaced: null };
+  const usable = card.login?.state === "refused" || card.login?.state === "otherAccount";
+  return {
+    main: { action: "signInAgain", enabled: can, controls: accounts.controls, profileId: profile.id },
+    displaced: usable && ordinary?.action === "useAccount" ? ordinary : null,
+  };
+}
+
+function ordinaryMainOf<C>({ card, profile, accounts, can, signedIn, confirmed, archive }: Shown<C>, now: number): MainEntry<C> | null {
   if (!accounts) return null;
   const { controls } = accounts;
   if (accounts.signingIn) return { action: "cancelSignIn", enabled: accounts.signingIn === "running", busy: accounts.signingIn === "canceling", controls };
   if (!profile) return signedIn ? { action: "saveAccount", enabled: can && confirmed, controls } : { action: "signIn", enabled: can, controls, profileId: null };
-  if (card.signIn?.state === "ended") return { action: "signInAgain", enabled: can, controls, profileId: profile.id };
-  if (!signedIn && !card.leads && !profile.needsLogin && codexTermEnded(card.subscription?.term, now)) return archive;
+  const missing = card.login?.state === "missing";
+  if (!signedIn && !card.leads && !missing && codexTermEnded(card.subscription?.term, now)) return archive;
   if (signedIn && !profile.pendingActivation) return null;
-  return { action: profile.needsLogin ? "signIn" : "useAccount", enabled: can, controls, profileId: profile.id };
+  return { action: missing ? "signIn" : "useAccount", enabled: can, controls, profileId: profile.id };
 }
 
-function switchAlongsideOf<C>({ profile, accounts, can }: Shown<C>): SwitchAlongside<C> | null {
-  if (!accounts?.runningClients || !profile || profile.needsLogin) return null;
+function switchAlongsideOf<C>({ card, profile, accounts, can }: Shown<C>): SwitchAlongside<C> | null {
+  if (!accounts?.runningClients || !profile || card.login?.state === "missing") return null;
   return { enabled: can, clients: accounts.runningClients, controls: accounts.controls, profileId: profile.id };
 }
 

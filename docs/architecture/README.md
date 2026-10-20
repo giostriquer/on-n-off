@@ -215,8 +215,9 @@ provider's own client:
   form's bounds, the ten-minute delay and an alert's share. `ui/src/lib/resetAlertRule.test.ts`
   checks them against `src-tauri/src/reset_alert/fixtures/rule.json`, which a Rust test keeps
   equal to what the rule does. The card's own "how much is left" (`usageLeft`,
-  `limitPresentation.ts`) counts a window past its reset as 0% used, because a reading ages on
-  screen; the rule judges live readings and does not.
+  `limitPresentation.ts`) counts a window past its reset as 0% used, as every surface reads a
+  window at an instant (below), because a reading ages on screen; the rule judges live readings
+  and does not.
 
 Every quota window is built in one place, `limits/window.rs`. A reader maps its provider's answer
 to `QuotaWindow` facts (id, scope, length, used percent, reset instant) and nothing else;
@@ -238,9 +239,10 @@ spent or the subscription term (`limits/reading.rs`), whether session rollouts a
 capacity hold by construction: `keep_remembered` drops whatever either reading carried and works
 them out again from the plan it kept.
 
-Every window that leaves `limits/` is within 0–100, which the notch helper
-needs, since it refuses a whole message that holds one meter outside it. Three clamps share that
-job, and each governs its own path:
+Every window that leaves `limits/` is within 0–100, since no surface can draw a meter outside it:
+each draws such a window as unreadable, a dash, and the macOS helper used to refuse the whole
+message for one, which blanked the notch. Three clamps share that job, and each governs its own
+path:
 
 - `QuotaWindow::into_dto` clamps every window a reader builds, the one the Codex sessions merge
   advances included, so a fresh window is in range before anything else sees it.
@@ -249,6 +251,37 @@ job, and each governs its own path:
   loads, while the file keeps what was written. Removing it would let one old file blank the notch.
 - `window::keep_in_range` in `pipeline::finish` is the outer guard on every read, signed-in or
   saved, and clamps the workspace-credit share a read computes.
+
+What a window reads at an instant is decided once, in `limits/window_at.rs`: `WindowAt` (`of` a
+window, `of_share` a workspace-credit share, in its `instant` child, which only the Windows painter
+and tests compile) given the window and the time. Its reset cycle is decided once: pending until its
+reset instant, renewed from it, and without a reset idle when its reader says the window starts with
+the first message, else unknown. The flag is set only through `window::unstarted`, so the surfaces
+trust it and never check the usage again. Its used now is 0 once renewed, and none when its used
+percent is not a number or lies outside 0–100, which every surface draws as a dash and an empty
+meter in the unreadable ink, and a screen reader hears as "Usage unavailable". It is reached only at
+100% used. The figure behind the percent text is 100 only then, so 99.5% reads "99%"; a sliver under
+1% reads "<1%" and counts as 1; otherwise the percent is rounded, a half up. That figure is what the
+card's meters tell a screen reader and what the banked reset's confirmation says is left. The meter's level
+is the base ink up to 70%, a blend toward the trip red eased by the square root of how far it is
+through 70–90%, and the trip red from 90%. The reset note names the reset instant in the local zone,
+a window's as a weekday and a 24-hour clock (`Mon 14:00`), a share's as a date (`Dec 1`); a window
+without one says "Reset time unavailable" and an idle one says it starts with the first message,
+where a share without one says nothing. The card writes the note in full ("resets in 2d 3h · Mon
+14:00", "reset 1h ago · Mon 14:00", "Starts with your first message"); both notches drop the
+countdown, which their popover's row has no room for, and shorten the idle note ("Resets Mon
+14:00", "Reset Mon 14:00", "Starts with first message"). The limits monitor asks the same
+module whether a window is reached and how a notification words a percent, so "reset from 99% to
+<1% used" reads as the card does.
+
+The module does no I/O and reads no clock: the Windows painter is given the time by its window, and
+the drawers that redraw between reads ask it again. The card restates the rules in
+`ui/src/lib/windowAt.ts`, with the meter inks beside the levels, and the macOS helper in `NotchCore`
+(`Quota.cycle`, `WorkspaceCredits`, `meterLevel`), since each redraws on its own clock. All three read the cases in
+`limits/window_at/fixtures/window-cases.json`, pinned to one instant and one time zone: the Rust
+tests assert every field but the card's wording, `windowAt.test.ts` every field but the notch's,
+and `NotchCoreChecks` what the helper draws. A row names each surface's wording (`card`, `notch`), so
+a rule or a word changed on one side fails until the others follow.
 
 Reset times are compared only as `ResetInstant`s, parsed from a window's `resetsAt` once. The type
 itself compares and orders by the exact instant, so equality a struct derives and any sort stay
@@ -271,7 +304,9 @@ app-server for a saved profile would write its credential to disk. Neither renew
 Claude Code renews a home's login, a Codex login on-n-off owns renews before its read, and one it
 does not own is never renewed. A saved read tells a refused login, one that now signs in as another
 account and a rate limit apart (its read outcome, below), and the poll backs off accordingly: a
-vault login refused, or now signing in as another account, waits for a new login; any other failure
+login refused, or now signing in as another account, waits for a new login, in the vault or in its
+home alike, and the account list says so as the profile's login state
+([accounts.md](accounts.md#login-state)); any other failure
 waits the Limits failure backoff (`limits_refresh::failure_backoff`, [shared-reads.md](shared-reads.md#the-mechanism)),
 or a rate limit's Retry-After when that is longer. Every card a
 saved poll produces says so (`saved_profile`), which is how the UI knows a remembered reading from a
@@ -299,9 +334,9 @@ Around it, one function per read context gives its caller the rest:
   backoff (a failed card does) and how long a Retry-After holds the next read, and serves the
   failure with the cards.
 - `saved` gives a saved poll its `SavedVerdict`: the message, how long a Retry-After holds the
-  next poll, and whether a vault login is parked until a new one (an ended login, or one that now
-  signs in as another account); an account home is never parked. A saved card that failed always
-  reads failed.
+  next poll, and whether the login is parked until a new one, and as what (`Parked`): refused, for
+  a login the provider refused or found signed out, or another account. A login in its home parks
+  as one in the vault does. A saved card that failed always reads failed.
 - `saved_card` and `first_usage` decide acceptance, a reading with something observed for the
   expected account. They are the only makers of `Accepted`, the type the accounts adapters'
   `read_usage`, an account home's `read_usage` and a sign-in's `first_usage` hand back, so the saved
@@ -339,6 +374,12 @@ state (or none, for a provider without an account manager), the card's own archi
 flight and whether an automatic banked reset is waiting for its account. It returns the ⋯ menu in
 order and the footer: the main button (Cancel sign-in, Sign in again, Archive account, Save
 account, Sign in or Use account), the Switch anyway confirmation, and the banked reset controls.
+Whether a saved login must sign in again is the profile's login state alone, for every provider
+(`LimitCard.login`, `ui/src/features/limits/loginState.ts`): ended, refused or another account put
+Sign in again in the main button's place, and for a refused login or another account the menu
+keeps Use account, since the client that owns the login may still renew it once it is used; a
+missing login offers Sign in. The same state gives the card its sign-in tag and, when it asks for
+a new sign-in, its message in place of the read's.
 Each entry carries what its handler needs, `useCardActions` binds a handler to each and
 `LimitCardFrame` draws them. The banked reset controls depend only on the provider's feature and
 the card's reading, never on an account manager, and a waiting automatic reset keeps its countdown and Cancel while Switch anyway is
@@ -664,6 +705,7 @@ the code today; a change that moves one updates its row.
 | --- | --- |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
+| Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows painter (`side_notch/win_paint.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |
@@ -678,7 +720,8 @@ the code today; a change that moves one updates its row.
 | Read outcome | `limits/outcome.rs`: `ReadFailure` and `Read`, which every reader returns; the wording table `message` (with `Context` and `Saved`); the per-context mappings `signed_in` (with `NativeOutcome`), `saved` (`SavedVerdict`), `saved_card` and `first_usage` (the only makers of `Accepted`) and `verified`; the wording facts are `LimitsFacts` in the provider catalogue |
 | Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`, with the Retry-After floor its `NativeOutcome` gives, held only while the native login is the one it was read for), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects); `accounts/muse_store.rs` reads Muse Code's device login for its Limits read only |
-| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`), and listed for the Limits column in the provider's `Roster` (`accounts/roster.rs`, whose `Roster::of` the account list shares); its usage is polled in `accounts/usage.rs`: a Claude profile's in its home by Claude Code's own report (`Home::read_usage`, `read_usage` in `limits/claude_cli.rs`), a Codex profile's through Codex's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`), and its card carries `saved_profile` |
+| Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`), and listed for the Limits column in the provider's `Roster` (`accounts/roster.rs`, whose `Roster::of` the account list shares); its usage is polled in `accounts/usage.rs` by one path (`poll`, which attempts, holds and parks a login by its `Generation`) over where the login is kept (`Kept`): in the vault, through the provider's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`, `read_saved_muse`), or in its home (`Home::read_usage`: Claude Code's own report, `read_usage` in `limits/claude_cli.rs`, or Muse's key-mint read); the date its home's sign-in ends is `sign_in_end`, and its card carries `saved_profile` |
+| Login state | `LoginState` (`accounts/login_state.rs`), on each listed profile as `loginState` (`ProfileDto`, `accounts::list`), from where the login is kept (`usage::kept`), its `Deadline` (the native store's, a vault login's view, or a home's recorded `SignInEnd`), and, for a profile not signed in (`Standing`), what the saved poll parked (`usage::parked`, kept in memory with the poll's holds by each login's `Generation`, a home's being its `Home::login_stamp`, which reads no secret; `accounts/usage.rs`); the Limits column carries the same state on each entry's profile (`Listed::in_column`, `accounts/roster.rs`), signed in for the served current card's account, its deadline from the ends the account list last read or the recorded `SignInEnd`, and its parked verdict from memory (`usage::recorded_parked`); read by the card model as `LimitCard.login` and presented by `signInPresentation` (`ui/src/features/limits/loginState.ts`); the account list reads itself again when an `ending` date passes (`untilSignInEnds`, `ui/src/lib/sharedReads/accounts.ts`) |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |

@@ -1,4 +1,5 @@
 use super::{
+    login_state::SignInEnd,
     model::Identity,
     store::{Database, Guard, Login, Profile, Store, Ticket},
     transaction::NativeGuard,
@@ -65,10 +66,14 @@ pub(super) fn check_out(
     };
     match (live, &profile.login) {
         (Some(login), None) if own => {
+            profile.sign_in_end = SignInEnd::of(&profile.identity, &login);
             profile.login = Some(login);
             Ok(Some(CheckedOut { home, locks }))
         }
-        (Some(_), Some(_)) if own => Ok(Some(CheckedOut { home, locks })),
+        (Some(_), Some(saved)) if own => {
+            profile.sign_in_end = SignInEnd::of(&profile.identity, saved);
+            Ok(Some(CheckedOut { home, locks }))
+        }
         (_, Some(_)) => Ok(None),
         (Some(_), None) => {
             Err("This account's saved login signs in as a different account. Sign in again.".into())
@@ -157,6 +162,7 @@ fn check_in(
     open()?.publish(&held, |db| {
         let target = held_profile(db, &profile.id)?;
         if target.home.as_deref() == Some(id.as_str()) {
+            target.sign_in_end = SignInEnd::of(&target.identity, &login);
             target.login = None;
         }
         Ok(())
@@ -191,11 +197,13 @@ fn take_back_or_tear_down(
     let locks = home.lock()?;
     let owner = home.read()?.and_then(|login| {
         let identity = home.identify(&login).ok()?;
-        db.profiles
+        let owner = db
+            .profiles
             .iter()
-            .find(|p| p.identity == identity && p.needs_login() && !p.signed_out)
+            .find(|p| p.identity == identity && p.needs_login() && !p.signed_out)?;
+        Some((owner, SignInEnd::of(&identity, &login)))
     });
-    let Some(owner) = owner else {
+    let Some((owner, sign_in_end)) = owner else {
         return home.delete(locks);
     };
     drop(locks);
@@ -205,6 +213,7 @@ fn take_back_or_tear_down(
             return Err("The account changed while its home was taken back.".into());
         }
         target.home = Some(id.to_string());
+        target.sign_in_end = sign_in_end;
         Ok(())
     })
 }

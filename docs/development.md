@@ -102,7 +102,9 @@ source carries no comments (see [Code comments](#code-comments)).
   `LIMITS_IMPLEMENTATIONS`, the one list of the implementations the card model has, which also
   types each feature. A new provider has a row once Rust gives it one, `limitFeatures.test.ts`
   fails when a row names an implementation that list lacks, and reusing a feature means reusing
-  that implementation. A new header tag kind (`cardTags.ts`)
+  that implementation. Whether a saved login must sign in again is no feature: the card reads the
+  profile's login state (`loginState.ts`, from `accounts/login_state.rs`), the same for every
+  provider. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
   order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.
@@ -117,11 +119,17 @@ source carries no comments (see [Code comments](#code-comments)).
   `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider,
   `limitCards.test.ts` pins each provider's features, and `cardActionPlan.test.ts` is the table of
   every provider's actions in every card state.
-- A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
-  side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
-  endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the
+- What a quota window or workspace share reads at an instant (its reset cycle, used now, reached,
+  its percent figure and text, its reset note, its meter level): `limits/window_at.rs`, which the limits
+  monitor and the Windows painter use, the painter with the clock its window passes in, never
+  `Utc::now()` of its own. The card restates it in `ui/src/lib/windowAt.ts` and the macOS helper in
+  `NotchCore/Models.swift` and `Meter.swift`; all three read
+  `src-tauri/src/limits/window_at/fixtures/window-cases.json`, whose rows name each surface's
+  wording (`card`, `notch`), so a change to one side fails until the others follow
+  ([why](architecture/README.md#limits)). A meter's ink comes from its level alone:
+  `usageMeterColor` (`ui/src/lib/windowAt.ts`), `meter_color` (`side_notch/model.rs`) and
+  `meterInk` (`Meter.swift`). `--warn` is for *pending*, never for a meter: it is lighter than the
   accents it would replace, so a meter stepping into it reads as cooling down just as it runs out.
-  Change the shape and change all three, each of which has a test pinning it.
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together

@@ -324,3 +324,129 @@ fn a_homes_sign_in_says_when_it_ends_until_the_home_is_emptied() {
     assert_eq!(ended, ends, "an emptied login keeps the date it ended at");
     assert_eq!(emptied, None, "on-n-off's sign-out keeps no date");
 }
+
+fn touched(file: &std::path::Path, seconds: u64) {
+    std::fs::File::options()
+        .write(true)
+        .open(file)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+        .unwrap();
+}
+
+#[test]
+fn a_homes_login_stamp_follows_its_credentials_file_without_reading_it() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    let file = root.path().join(".claude/.credentials.json");
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    let (first_login, renewed_login) = (login("b1").auth.to_string(), login("b2").auth.to_string());
+    assert_eq!(first_login.len(), renewed_login.len());
+
+    let ((empty, first, again, unreadable, renewed), sent) = keychain(|| {
+        let empty = home.login_stamp();
+        std::fs::write(&file, &first_login).unwrap();
+        touched(&file, 1_800_000_000);
+        let first = home.login_stamp();
+        let again = home.login_stamp();
+        #[cfg(unix)]
+        let unreadable = {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+            let stamp = home.login_stamp();
+            std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+            stamp
+        };
+        #[cfg(not(unix))]
+        let unreadable = home.login_stamp();
+        std::fs::write(&file, &renewed_login).unwrap();
+        touched(&file, 1_800_000_060);
+        (empty, first, again, unreadable, home.login_stamp())
+    });
+
+    assert!(empty.is_ok() && first.is_ok());
+    assert_ne!(empty, first, "a login written into the home");
+    assert_eq!(first, again);
+    assert_eq!(unreadable, first, "the stamp never opens the file");
+    assert_ne!(renewed, first, "a renewed login of the same length");
+    assert!(
+        sent.iter().all(|command| !command.contains(" -w")),
+        "{sent:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_home_whose_store_cannot_be_looked_at_has_no_stamp() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    let config = root.path().join(".claude");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(
+        config.join(".credentials.json"),
+        login("b1").auth.to_string(),
+    )
+    .unwrap();
+
+    let (stamp, _) = keychain(|| {
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let stamp = home.login_stamp();
+        std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o755)).unwrap();
+        stamp
+    });
+
+    assert!(stamp.is_err(), "{stamp:?}");
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn a_homes_login_stamp_reads_its_keychain_items_attributes_and_never_its_secret() {
+    use crate::process::CommandOutcome;
+    use std::{cell::Cell, rc::Rc};
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    let written = Rc::new(Cell::new(1));
+    let item = written.clone();
+    let runner = move |command: &str| {
+        if command.contains(" -a ") {
+            return CommandOutcome::Exited {
+                success: false,
+                stdout: String::new(),
+                stderr: "security: SecKeychainSearchCopyNext: The specified item could not be found in the keychain.".into(),
+            };
+        }
+        CommandOutcome::Exited {
+            success: !command.contains(" -w "),
+            stdout: format!(
+                "    \"acct\"<blob>=\"someone-else\"\n    \"mdat\"<timedate>=\"2026102010000{}Z\"\n",
+                item.get()
+            ),
+            stderr: String::new(),
+        }
+    };
+
+    let ((first, again, rewritten), sent) =
+        crate::accounts::keychain::with_test_runner(runner, || {
+            let first = home.login_stamp();
+            let again = home.login_stamp();
+            written.set(2);
+            (first, again, home.login_stamp())
+        });
+
+    assert!(first.is_ok());
+    assert_eq!(first, again);
+    assert_ne!(
+        rewritten, first,
+        "the item filed under another account was rewritten"
+    );
+    assert!(
+        sent.iter().any(|command| !command.contains(" -a ")),
+        "{sent:?}"
+    );
+    assert!(
+        sent.iter().all(|command| command.starts_with("find-generic-password")
+            && !command.contains(" -w")),
+        "{sent:?}"
+    );
+}

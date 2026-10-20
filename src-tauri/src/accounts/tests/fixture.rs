@@ -48,13 +48,26 @@ pub(super) fn codex(user: &str, generation: &str) -> Login {
     }
 }
 
+pub(super) fn muse(email: &str, generation: &str) -> Login {
+    Login {
+        auth: json!({"access_token": format!("access-{generation}"), "api_key": "key"}),
+        account: json!({"mechanism": "oauth", "user_email": email}),
+    }
+}
+
 pub(super) fn generation(login: Option<&Login>) -> Option<String> {
     let auth = &login?.auth;
     let token = auth
         .pointer("/claudeAiOauth/refreshToken")
-        .or_else(|| auth.pointer("/tokens/refresh_token"))?
+        .or_else(|| auth.pointer("/tokens/refresh_token"))
+        .or_else(|| auth.pointer("/access_token"))?
         .as_str()?;
-    Some(token.trim_start_matches("refresh-").to_owned())
+    Some(
+        token
+            .trim_start_matches("refresh-")
+            .trim_start_matches("access-")
+            .to_owned(),
+    )
 }
 
 pub(super) fn fingerprint(provider: AgentId, login: &Login) -> String {
@@ -103,9 +116,11 @@ pub(super) struct Homes {
     pub deleted: Mutex<Vec<PathBuf>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
     pub deadline_reads: Mutex<Vec<PathBuf>>,
+    pub secrets_read: Mutex<usize>,
+    pub sealed: Mutex<bool>,
 }
 
-struct FakeHome(Arc<Homes>, PathBuf);
+struct FakeHome(Arc<Homes>, PathBuf, AgentId);
 impl FakeHome {
     fn refused(&self) -> Result<(), String> {
         if self.0.refuses.lock().unwrap().contains(&self.1) {
@@ -124,13 +139,18 @@ impl Home for FakeHome {
         Ok(Box::new(()))
     }
     fn read(&self) -> Result<Option<Login>, String> {
+        assert!(
+            !*self.0.sealed.lock().unwrap(),
+            "read a home's login secret"
+        );
+        *self.0.secrets_read.lock().unwrap() += 1;
         if self.0.unreadable.lock().unwrap().contains(&self.1) {
             return Err("The home's login could not be read.".into());
         }
         Ok(self.0.logins.lock().unwrap().get(&self.1).cloned())
     }
     fn identify(&self, login: &Login) -> Result<Identity, String> {
-        super::super::view(AgentId::Claude, login)?.identity()
+        super::super::view(self.2, login)?.identity()
     }
     fn put(&self, login: &Login, _: &dyn NativeGuard) -> Result<Option<Login>, String> {
         self.refused()?;
@@ -158,16 +178,24 @@ impl Home for FakeHome {
         if let Some(answer) = self.0.answer.lock().unwrap().clone() {
             return Err(answer);
         }
-        Ok(crate::limits::Accepted::for_test(weekly_reading(
+        Ok(crate::limits::Accepted::for_test(provider_reading(
+            self.2,
             &identity.observation_key(),
         )))
+    }
+    fn login_stamp(&self) -> Result<String, String> {
+        if self.0.unreadable.lock().unwrap().contains(&self.1) {
+            return Err("The home's login could not be stamped.".into());
+        }
+        Ok(self.0.logins.lock().unwrap().get(&self.1).map_or_else(
+            || super::super::native::ABSENT.into(),
+            |login| fingerprint(self.2, login),
+        ))
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         self.0.deadline_reads.lock().unwrap().push(self.1.clone());
         let login = self.read().ok()??;
-        let deadline = super::super::view(AgentId::Claude, &login)
-            .ok()?
-            .sign_in_deadline();
+        let deadline = super::super::view(self.2, &login).ok()?.sign_in_deadline();
         deadline
     }
     fn delete(&self, _: Box<dyn NativeGuard>) -> Result<(), String> {
@@ -182,22 +210,24 @@ impl Home for FakeHome {
 }
 
 pub(super) fn weekly_reading(key: &str) -> crate::dto::ProviderLimitsDto {
-    crate::dto::ProviderLimitsDto::for_test(AgentId::Claude, key).with_reading(
-        crate::dto::Reading {
-            windows: vec![crate::dto::LimitWindowDto {
-                id: "weekly".into(),
-                label: "Weekly".into(),
-                kind: crate::dto::LimitWindowKind::Weekly,
-                used_percent: 42.0,
-                window_seconds: Some(604_800),
-                resets_at: None,
-                observed_at: "2026-09-19T00:00:00Z".into(),
-                role: None,
-                starts_on_first_message: false,
-            }],
-            ..Default::default()
-        },
-    )
+    provider_reading(AgentId::Claude, key)
+}
+
+pub(super) fn provider_reading(provider: AgentId, key: &str) -> crate::dto::ProviderLimitsDto {
+    crate::dto::ProviderLimitsDto::for_test(provider, key).with_reading(crate::dto::Reading {
+        windows: vec![crate::dto::LimitWindowDto {
+            id: "weekly".into(),
+            label: "Weekly".into(),
+            kind: crate::dto::LimitWindowKind::Weekly,
+            used_percent: 42.0,
+            window_seconds: Some(604_800),
+            resets_at: None,
+            observed_at: "2026-09-19T00:00:00Z".into(),
+            role: None,
+            starts_on_first_message: false,
+        }],
+        ..Default::default()
+    })
 }
 #[derive(Clone)]
 struct FakeNative(Rc<NativeState>, AgentId);
@@ -256,13 +286,10 @@ impl NativeStores for FakeStores {
         )))
     }
     fn homes(&self, provider: AgentId) -> Option<Box<MakeHome<'_>>> {
-        let homes = self
-            .0
-            .homes
-            .clone()
-            .filter(|_| provider == AgentId::Claude)?;
+        super::super::adapter(provider).ok()?.homes()?;
+        let homes = self.0.homes.clone()?;
         Some(Box::new(move |dir| {
-            Box::new(FakeHome(homes.clone(), dir.into())) as Box<dyn Home>
+            Box::new(FakeHome(homes.clone(), dir.into(), provider)) as Box<dyn Home>
         }))
     }
 }

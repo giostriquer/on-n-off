@@ -163,6 +163,7 @@ fn homed(harness: &Harness, profile: usize, login: super::super::store::Login) {
     harness.seed(|db| {
         db.profiles[profile].login = None;
         db.profiles[profile].home = Some(id.clone());
+        db.profiles[profile].sign_in_end = super::super::login_state::SignInEnd::Unread;
     });
     let dir = super::super::homes::dir(harness.path(), &id).unwrap();
     harness.homes().logins.lock().unwrap().insert(dir, login);

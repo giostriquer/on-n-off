@@ -28,10 +28,10 @@ function Cards() {
     <AccountCard profile={profile} />
   </section>)}</>;
 }
-const OTHER: SavedProfile = { id: "profile-b", observationId: "profile:billing-b", legacyId: "other", identity: { ...identity, userId: "user-b" }, label: "other@example.com", email: "other@example.com", active: false, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" };
+const OTHER: SavedProfile = { id: "profile-b", observationId: "profile:billing-b", legacyId: "other", identity: { ...identity, userId: "user-b" }, label: "other@example.com", email: "other@example.com", active: false, loginState: { state: "usable" }, savedAt: "2026-09-12T12:00:00Z" };
 function setup({ preferences = false, onCommit, signedIn = false, others = [] }: { preferences?: boolean; onCommit?: () => void; signedIn?: boolean; others?: SavedProfile[] } = {}) {
   vi.mocked(api.readAccountPreferences).mockResolvedValue(false);
-  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", legacyId: "team", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, needsLogin: false, savedAt: "2026-09-12T12:00:00Z" }, ...others], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
+  vi.mocked(api.readAccounts).mockResolvedValue({ profiles: [{ id: "profile-a", observationId: "profile:billing-a", legacyId: "team", identity, label: "Legacy name", email: "person@example.com", category: "Client A", active: signedIn, loginState: { state: "usable" }, savedAt: "2026-09-12T12:00:00Z" }, ...others], ...(signedIn ? { nativeObservationId: "profile:billing-a" } : {}), nativeAccount: null, recoveryRequired: false, notice: null });
   vi.mocked(api.accountAction).mockResolvedValue();
   vi.mocked(api.readAccountActivationBlockers).mockResolvedValue([]);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
