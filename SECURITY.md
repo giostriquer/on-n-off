@@ -55,3 +55,5 @@ gh attestation verify <downloaded file> --repo giostriquer/on-n-off
 
 It also lists SHA-256 checksums in `SHA256SUMS.txt`. Compare a file's checksum
 (`shasum -a 256 <file>` on macOS, `Get-FileHash <file>` in PowerShell) with its line there.
+Releases after v0.35.6 write that file with LF line endings, so in the download folder
+`shasum -a 256 --ignore-missing -c SHA256SUMS.txt` checks every file you downloaded.
