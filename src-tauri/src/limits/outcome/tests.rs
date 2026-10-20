@@ -6,10 +6,12 @@ const NOW: i64 = 1_800_000_000;
 const LOGIN: Context = Context::Saved(Saved::Login);
 const HOME: Context = Context::Saved(Saved::Home);
 
+pub(in crate::limits) type Expected = fn(&ReadFailure) -> bool;
+
 pub(in crate::limits) fn every_failure_keeps_the_account_its_answer_names(
     provider: AgentId,
     answered: Read,
-    failing: Vec<Read>,
+    failing: Vec<(Read, Expected)>,
 ) {
     let identity = |card: &ProviderLimitsDto| {
         card.account
@@ -20,9 +22,11 @@ pub(in crate::limits) fn every_failure_keeps_the_account_its_answer_names(
     assert_eq!(card.status, LimitsStatus::Ok, "{:?}", card.message);
     let account = identity(&card).expect("an answer names its account");
     assert!(!failing.is_empty());
-    for read in failing {
+    for (read, expected) in failing {
         let case = format!("{:?}", read.answer.as_ref().err());
-        let (card, _) = signed_in(provider, read);
+        let (card, outcome) = signed_in(provider, read);
+        let failure = outcome.failure.expect("a failing read");
+        assert!(expected(&failure), "{case}: read as {failure:?}");
         assert_ne!(card.status, LimitsStatus::Ok, "{case}");
         assert_eq!(
             identity(&card),
@@ -151,6 +155,7 @@ fn a_signed_in_card_reads_each_failure_with_its_status_account_and_backoff() {
         (Failed, true),
     ];
     let known = answered("profile:you", Reading::default()).account;
+    assert_eq!(statuses.len(), failures().len());
     for (failure, (status, keeps)) in failures().into_iter().zip(statuses) {
         let (card, outcome) = signed_in(
             AgentId::Muse,
@@ -474,4 +479,30 @@ fn an_answer_that_observed_nothing_keeps_the_account_and_name_it_carried() {
     let account = card.account.expect("the account the answer named");
     assert_eq!(account.id, key);
     assert_eq!(account.label.as_deref(), Some("you@example.com"));
+}
+
+#[test]
+fn every_provider_words_every_failure_in_every_context() {
+    let contexts = [Context::SignedIn, LOGIN, HOME, Context::Verify];
+    let unsupported = [
+        Unsupported::NoLimits,
+        Unsupported::ApiKey,
+        Unsupported::AccountType("team".into()),
+        Unsupported::BillingIncomplete,
+        Unsupported::Inactive,
+    ];
+    let every_failure = failures()
+        .into_iter()
+        .chain(unsupported.into_iter().map(ReadFailure::Unsupported));
+    for failure in every_failure {
+        for provider in crate::provider_catalogue::WITH_LIMITS {
+            for context in contexts {
+                let words = message(provider, context, &failure);
+                assert!(
+                    !words.trim().is_empty() && !words.contains('{') && !words.contains('}'),
+                    "{provider:?} {context:?} {failure:?}: {words:?}"
+                );
+            }
+        }
+    }
 }

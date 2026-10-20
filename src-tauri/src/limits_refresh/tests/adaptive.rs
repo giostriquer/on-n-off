@@ -60,7 +60,10 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
                 &cache,
                 Duration::from_secs(1800),
                 false,
-                &native,
+                &Native {
+                    read: &native,
+                    login: &no_login,
+                },
                 &|_| false,
                 &saved,
                 &|_| {},
@@ -112,7 +115,10 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
             &cache,
             Duration::from_secs(1800),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -158,7 +164,10 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
             &cache,
             Duration::from_secs(1800),
             force,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -217,6 +226,12 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
             .refreshed_at,
         native_at
     );
+    read(false);
+    assert_eq!(
+        (native_reads.get(), saved_reads.get()),
+        (4, 2),
+        "the saved accounts just read wait their interval again"
+    );
 
     read(true);
     assert_eq!(
@@ -248,7 +263,10 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
             &cache,
             Duration::from_secs(900),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -305,7 +323,10 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
             &cache,
             Duration::from_secs(1800),
             force,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &|_, _| false,
             &|_| {},
@@ -357,7 +378,10 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
             &cache,
             Duration::from_secs(1800),
             false,
-            &native,
+            &Native {
+                read: &native,
+                login: &no_login,
+            },
             &|_| false,
             &saved,
             &|_| {},
@@ -397,7 +421,10 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &cache,
         Duration::from_secs(1800),
         false,
-        &|_| native_read(vec![scoped.clone()]),
+        &Native {
+            read: &|_| native_read(vec![scoped.clone()]),
+            login: &no_login,
+        },
         &|_| false,
         &|_, _| panic!("saved accounts are not due"),
         &|_| {},
