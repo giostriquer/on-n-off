@@ -77,7 +77,8 @@ configuration, transcripts and saved logins stay on your machine. The app itself
 - `codeload.github.com`, to download those installs;
 - `raw.githubusercontent.com`, for plugin details and LiteLLM's public model price list behind
   usage estimates;
-- `github.com`, for the update feed on GitHub Releases.
+- `github.com`, for the update feed and update downloads on GitHub Releases, which GitHub serves
+  from its release download host (currently `release-assets.githubusercontent.com`).
 
 Claude limits come from Claude Code's own usage report: on-n-off sends nothing to Anthropic itself.
 The tools it starts (`claude`, `codex`, `agy`, `muse`, `gh` and `npx`) make their own requests as

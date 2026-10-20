@@ -20,12 +20,15 @@ function sourceUrls() {
   return files.flatMap((file) => [...readFileSync(join(root, file), "utf8").matchAll(URL_LITERAL)]);
 }
 
+const updateRedirects = ["release-assets.githubusercontent.com"];
+
 const excluded = (url) => Object.keys(neverContacted).some((literal) => url.startsWith(literal));
 
 function contactedHosts() {
   const hosts = new Set(sourceUrls().filter((match) => !excluded(match[0])).map((match) => match[1]));
   const tauri = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"));
   for (const endpoint of tauri.plugins.updater.endpoints) hosts.add(new URL(endpoint).hostname);
+  for (const host of updateRedirects) hosts.add(host);
   return [...hosts].sort();
 }
 
