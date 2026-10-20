@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
-import { limitCards, type CardWindow } from "./limitCards";
 import { ResetAlertsContext } from "./resetAlerts";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
@@ -33,14 +32,10 @@ function codex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
   };
 }
 
-type ButtonProps = { entry: ProviderLimits; headline?: CardWindow | null; offered?: boolean; disabled?: boolean; label?: string };
+type ButtonProps = { entry: ProviderLimits; resetsIn?: string | null; offered?: boolean; disabled?: boolean; label?: string };
 
-function cardHeadline(entry: ProviderLimits): CardWindow | null {
-  return limitCards({ provider: "codex", entries: [entry], nativeLogin: null, now: NOW })![0].headline;
-}
-
-function button({ entry, headline = cardHeadline(entry), offered = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
-  return <UseBankedReset entry={entry} headline={headline} label={label} offered={offered} now={NOW} disabled={disabled} />;
+function button({ entry, resetsIn = "4d 4h", offered = true, disabled = false, label = "work@codex.example" }: ButtonProps) {
+  return <UseBankedReset entry={entry} resetsIn={resetsIn} label={label} offered={offered} now={NOW} disabled={disabled} />;
 }
 
 function useReset() {
@@ -156,14 +151,14 @@ describe("UseBankedReset", () => {
   const hasLeft = (left: number) => `work@codex.example has ${left}% of its Codex limit left and renews by itself in 4d 4h. ${EFFECT}`;
 
   it.each([
-    ["60% left", [weekly(40), session(12)], `${hasLeft(60)} More than 5% of the limit is still left: the reset gives back only the 40% used so far.`],
-    ["6% left", [weekly(94)], `${hasLeft(6)} More than 5% of the limit is still left: the reset gives back only the 94% used so far.`],
-    ["exactly 5% left", [weekly(95)], hasLeft(5)],
-    ["the fuller main window deciding", [weekly(40), session(96)], hasLeft(4)],
-    ["a weekly window past its reset, which counts down nothing", [{ ...weekly(97), resetsAt: "2026-08-17T19:00:00Z" }], `work@codex.example has 100% of its Codex limit left. ${EFFECT} More than 5% of the limit is still left: the reset gives back only the 0% used so far.`],
-    ["no telling how much is left, which claims no share", [], `on-n-off can't read how much of work@codex.example's Codex limit is left. ${EFFECT} More than 5% of the limit may still be left.`],
-  ] as const)("with %s the reset can be used, and the confirmation warns only above the share", (_, windows, description) => {
-    render(button({ entry: codex({ windows: [...windows] }) }));
+    ["60% left", [weekly(40), session(12)], "4d 4h", `${hasLeft(60)} More than 5% of the limit is still left: the reset gives back only the 40% used so far.`],
+    ["6% left", [weekly(94)], "4d 4h", `${hasLeft(6)} More than 5% of the limit is still left: the reset gives back only the 94% used so far.`],
+    ["exactly 5% left", [weekly(95)], "4d 4h", hasLeft(5)],
+    ["the fuller main window deciding", [weekly(40), session(96)], "4d 4h", hasLeft(4)],
+    ["a weekly window past its reset, which counts down nothing", [{ ...weekly(97), resetsAt: "2026-08-17T19:00:00Z" }], null, `work@codex.example has 100% of its Codex limit left. ${EFFECT} More than 5% of the limit is still left: the reset gives back only the 0% used so far.`],
+    ["no telling how much is left, which claims no share", [], null, `on-n-off can't read how much of work@codex.example's Codex limit is left. ${EFFECT} More than 5% of the limit may still be left.`],
+  ] as const)("with %s the reset can be used, and the confirmation warns only above the share", (_, windows, resetsIn, description) => {
+    render(button({ entry: codex({ windows: [...windows] }), resetsIn }));
 
     expect(useReset()).toHaveProperty("disabled", false);
     expect(useReset().getAttribute("aria-describedby")).toBeNull();
@@ -226,10 +221,9 @@ describe("UseBankedReset", () => {
     expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 
-  it("says when the limit renews by itself from the headline window its card chose, never from a window of its own", () => {
+  it("says when the limit renews by itself from the countdown its card gives, never from a window of its own", () => {
     const entry = codex({ windows: [weekly(96)] });
-    const chosen = cardHeadline(entry)!;
-    const { rerender } = render(button({ entry, headline: { ...chosen, resetsIn: "1h 5m" } }));
+    const { rerender } = render(button({ entry, resetsIn: "1h 5m" }));
 
     fireEvent.click(useReset());
     expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(
@@ -237,7 +231,7 @@ describe("UseBankedReset", () => {
     );
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Cancel" }));
 
-    rerender(button({ entry, headline: null }));
+    rerender(button({ entry, resetsIn: null }));
     fireEvent.click(useReset());
     expect(screen.getByRole("alertdialog", { name: "Use this reset?" })).toHaveAccessibleDescription(
       `work@codex.example has 4% of its Codex limit left. ${EFFECT}`,

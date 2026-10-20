@@ -21,7 +21,7 @@ import type {
 import type { GithubPrs } from "./githubTypes";
 import type { LimitsColumnEntry, ResetCreditOutcome } from "./limitsTypes";
 import type { NotchChanged, NotchSettings, NotchSnapshot } from "./notchTypes";
-import type { LimitsProvider } from "./providers";
+import type { AccountProvider, LimitsProvider } from "./providers";
 import type { UsageHistoryStatus, UsageSummary, UsageSummaryInput } from "./usageTypes";
 
 export function listAgents(): Promise<AgentInfo[]> {
@@ -240,16 +240,16 @@ export function readCodexSubscription(accountId: string): Promise<import("./subs
   return invoke("read_codex_subscription", { accountId });
 }
 
-export function readAccounts(agent: import("./providers").AccountProvider): Promise<import("./accountTypes").AccountsReading> {
+export function readAccounts(agent: AccountProvider): Promise<import("./accountTypes").AccountsReading> {
   return invoke("read_accounts", { agent });
 }
-export function accountAction(agent: import("./providers").AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string): Promise<void> {
+export function accountAction(agent: AccountProvider, action: import("./accountTypes").AccountAction, profileId?: string): Promise<void> {
   return invoke("account_action", { agent, action, profileId: profileId ?? null });
 }
-export function readAccountActivationBlockers(agent: import("./providers").AccountProvider): Promise<string[]> {
+export function readAccountActivationBlockers(agent: AccountProvider): Promise<string[]> {
   return invoke("read_account_activation_blockers", { agent });
 }
-export function addAccount(agent: import("./providers").AccountProvider, operationId: string, profileId?: string): Promise<void> {
+export function addAccount(agent: AccountProvider, operationId: string, profileId?: string): Promise<void> {
   return invoke("add_account", { agent, operationId, profileId: profileId ?? null });
 }
 export function readAccountCategories(): Promise<import("./accountTypes").AccountCategories> {

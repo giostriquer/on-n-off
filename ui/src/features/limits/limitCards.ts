@@ -22,11 +22,11 @@ import {
   usageLeft,
   type CardStatus,
   type LimitAccountPresentation,
-  type LimitWindowPresentation,
+  type QuotaWindowPresentation,
 } from "./limitPresentation";
 import { signInPresentation, type SignInPresentation } from "./loginState";
 
-export type CardWindow = LimitWindowPresentation & { id: string; label: string; resetsIn: string | null };
+export type CardWindow = QuotaWindowPresentation & { id: string; label: string };
 
 export type CardFigures = {
   ownBalance: LimitsCredits | null;
