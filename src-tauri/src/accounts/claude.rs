@@ -509,8 +509,6 @@ impl LoginView for ClaudeLogin<'_> {
             .is_some_and(|expires_at| expires_at <= now_ms)
     }
 
-    /// Claude Code keeps `refreshTokenExpiresAt` beside the tokens, and keeps it when it empties a
-    /// login Anthropic stopped renewing, so a sign-in that has already ended still says when.
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         Some(SignInDeadline {
             ends_at_ms: self

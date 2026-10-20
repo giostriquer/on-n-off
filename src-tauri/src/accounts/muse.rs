@@ -1,7 +1,7 @@
 use super::{
     clients::Client,
     model::{self, AccessToken, Identity, LoginView},
-    muse_store::{self, Keychain, SystemKeychain, SIGNED_IN},
+    muse_store::{self, Keychain, MuseCredential, SystemKeychain, SIGNED_IN},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -220,7 +220,9 @@ impl NativeAccount for MuseNative {
 
     fn subscription(&self) -> Result<Option<Identity>, String> {
         match self.read()? {
-            Some(login) if MuseView::of(&login).oauth() => self.identify(&login).map(Some),
+            Some(login) if MuseView::of(&login).access_token().is_some() => {
+                self.identify(&login).map(Some)
+            }
             _ => Ok(None),
         }
     }
@@ -314,19 +316,23 @@ impl<'a> MuseView<'a> {
     }
 
     pub(crate) fn access_token(&self) -> Option<AccessToken> {
-        model::string(self.auth, "/access_token")
-            .ok()
-            .map(AccessToken::new)
+        match self.auth.as_object().and_then(muse_store::credential_of) {
+            Some(MuseCredential::Token(token)) => Some(token),
+            _ => None,
+        }
     }
 
-    fn oauth(&self) -> bool {
-        self.account.get("mechanism").and_then(Value::as_str) == Some("oauth")
+    fn api_key(&self) -> bool {
+        matches!(
+            self.auth.as_object().and_then(muse_store::credential_of),
+            Some(MuseCredential::ApiKey)
+        )
     }
 }
 
 impl LoginView for MuseView<'_> {
     fn identity(&self) -> Result<Identity, String> {
-        if !self.oauth() {
+        if self.api_key() {
             return Err("API key logins cannot be saved as subscription profiles.".into());
         }
         model::string(self.auth, "/access_token")?;

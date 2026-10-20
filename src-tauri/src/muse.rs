@@ -1,6 +1,3 @@
-// Muse (Muse Code) adapter: settings, MCP and skill activation live under
-// the config root (`paths::muse_config_for`); plugins and sessions live
-// under the data root (`paths::muse_data_for`). Layout notes: PROVIDERS.md.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -187,10 +184,6 @@ impl MuseAdapter {
             .collect())
     }
 
-    /// Marketplace name, its source root and the snapshot version per plugin
-    /// id, for every plugin a configured marketplace's snapshot lists. The
-    /// caller still checks the plugin's recorded source path against the
-    /// root before crediting the marketplace.
     fn marketplace_hints(&self) -> HashMap<String, Vec<MarketplaceHint>> {
         let mut hints = HashMap::new();
         let Ok(data) = self.data_root() else {
@@ -344,8 +337,6 @@ impl AgentAdapter for MuseAdapter {
     }
 
     fn info(&self) -> AgentInfo {
-        // `muse plugins marketplace add` needs a name the install sheet
-        // does not collect, so git sources stay a terminal job.
         let mut info = crate::cli_locate::agent_info(AgentId::Muse);
         info.install_git = false;
         info

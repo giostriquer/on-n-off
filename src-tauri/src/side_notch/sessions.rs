@@ -254,9 +254,6 @@ fn find_text(value: &serde_json::Value, key: &str) -> Option<String> {
     }
 }
 
-/// `Some(true)` when the newest turn marker in the tail starts a model call,
-/// `Some(false)` when it ends one. Muse has no explicit task boundary event,
-/// so this is the same order heuristic the Codex reader applies to its own.
 fn muse_tail_boundary(transcript: &Path) -> Option<bool> {
     let mut file = fs::File::open(transcript).ok()?;
     let length = file.metadata().ok()?.len();

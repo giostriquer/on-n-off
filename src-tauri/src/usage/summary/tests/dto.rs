@@ -140,8 +140,6 @@ fn pinned(home: &Path, summary: &UsageSummaryDto) -> Value {
     value["readAt"] = json!("<read at>");
     value["scanDurationMs"] = json!("<scan duration>");
     for source in value["sources"].as_array_mut().unwrap() {
-        // Muse's data root is the one provider path that differs by OS
-        // (AppData on Windows, ~/.local/share elsewhere), so pin it by name.
         if source["provider"] == json!("muse") {
             source["resolvedPath"] = json!("<muse sessions>");
             continue;

@@ -248,8 +248,6 @@ impl Accounts {
     }
 }
 
-/// A sign-in awaiting use is newer than whatever the default store still holds for the account, so
-/// it reads only its own login; otherwise the default store, which Claude Code renews, comes first.
 fn sign_in_ends_at(
     profile: &store::Profile,
     native: Option<&model::SignInDeadline>,

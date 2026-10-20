@@ -113,11 +113,6 @@ pub fn might_carry_usage(line: &str, provider: UsageProvider) -> bool {
     }
 }
 
-/// Muse writes two usage-bearing lines per model call: a
-/// `goal_usage_attribution` record (quantity only, no model) and the
-/// `model_completed` event (model plus the full cache split). Counting the
-/// event alone counts each call once; the line's own id is the dedupe key,
-/// so a transcript copied under a second root does not double-count.
 pub fn parse_muse_line(line: &str) -> Option<UsageRecord> {
     let parsed: Value = serde_json::from_str(line).ok()?;
     let obj = parsed.as_object()?;
@@ -130,7 +125,6 @@ pub fn parse_muse_line(line: &str) -> Option<UsageRecord> {
     if model.is_empty() {
         return None;
     }
-    // `recorded_at` is epoch microseconds.
     let timestamp_ms = obj.get("recorded_at").and_then(|v| v.as_i64())? / 1_000;
     let session_id = obj
         .get("stream")
@@ -153,7 +147,6 @@ pub fn parse_muse_line(line: &str) -> Option<UsageRecord> {
     let cache_creation_tokens = get("cache_write_tokens");
     let output_tokens = get("output_tokens");
     let totals = TokenTotals {
-        // Meta reports the cached share inside `input_tokens`.
         uncached_input_tokens: input_tokens
             .saturating_sub(cache_read_tokens)
             .saturating_sub(cache_creation_tokens),
