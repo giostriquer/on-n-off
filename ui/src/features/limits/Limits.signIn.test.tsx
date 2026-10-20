@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex } from "./readingFixtures";
 
@@ -39,8 +40,7 @@ function answer(claude: ProviderLimits[], profiles: SavedProfile[]) {
   }));
 }
 
-function renderLimits() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
+function renderLimits(client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })) {
   render(<QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>);
 }
 
@@ -147,6 +147,35 @@ describe("a Claude sign-in's end", () => {
     expect(await within(card).findByRole("button", { name: "Claude sign-in ended Aug 17" })).toHaveClass("term-badge--expired");
     expect(within(card).getByText("Claude ended this sign-in on Aug 17. Sign in again to use this account.")).toBeTruthy();
     expect(readAccounts.mock.calls.length).toBeGreaterThan(reads);
+  });
+
+  it("ends at its date even when the window was hidden as the date passed", async () => {
+    vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
+    vi.setSystemTime(new Date(NOW));
+    const HOUR = 3_600_000;
+    const endsAt = new Date(Date.parse(NOW) + 3 * HOUR).toISOString();
+    answer([okClaude()], [profile(ending(endsAt))]);
+    renderLimits(createMainWindowQueryClient());
+    const card = await signedInCard();
+    expect(await within(card).findByRole("button", { name: "Claude sign-in ends Aug 17" })).toBeTruthy();
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    answer([okClaude()], [profile(ended(endsAt))]);
+    const reads = readAccounts.mock.calls.length;
+
+    try {
+      await act(async () => { vi.advanceTimersByTime(3 * HOUR + 2 * 60_000); });
+      expect(readAccounts.mock.calls.length, "read while hidden").toBe(reads);
+      visibility.mockReturnValue("visible");
+      await act(async () => {
+        window.dispatchEvent(new Event("visibilitychange"));
+        vi.advanceTimersByTime(60_000);
+      });
+    } finally {
+      visibility.mockRestore();
+    }
+
+    expect(await within(card).findByRole("button", { name: "Claude sign-in ended Aug 17" })).toHaveClass("term-badge--expired");
+    expect(readAccounts.mock.calls.length).toBe(reads + 1);
   });
 
   it("asks the account list once after its date, and not again while the list keeps failing", async () => {

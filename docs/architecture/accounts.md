@@ -191,8 +191,9 @@ account's state is its date alone, `usable`, `ending` or `ended`, never `missing
 `otherAccount` (`Standing::SignedIn`): the saved poll never reads it, its own read names what
 failed, and a signed-in account with no saved login (signed out in on-n-off, then signed in again
 in the CLI) still shows when its sign-in ends. Whether a date has passed is decided here, when the
-account list is read; the UI reads the account list again once, just after the nearest `ending`
-date still ahead ([shared-reads.md](shared-reads.md)).
+account list is read; the UI reads the account list again just after the nearest `ending` date
+it has not been read since, and when the window shows again after such a date passed while it was
+hidden ([shared-reads.md](shared-reads.md)).
 
 The saved poll is one path for a login in the vault and one in its home (`accounts/usage.rs`):
 each attempt is keyed by the profile and kept with the generation it read: the vault login's
