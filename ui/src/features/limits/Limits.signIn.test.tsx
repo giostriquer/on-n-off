@@ -2,23 +2,29 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { createMainWindowQueryClient } from "$lib/queryClients";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex } from "./readingFixtures";
+import { NOW, okClaude, okCodex, staleCodex, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
 const accountAction = vi.hoisted(() => vi.fn());
+const announced = vi.hoisted(() => new Set<(change: { source: string }) => void>());
 
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, addAccount, accountAction,
   forgetLimitsSnapshot: vi.fn().mockResolvedValue(undefined), setLimitsArchived: vi.fn().mockResolvedValue(undefined),
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   cancelAccountLogin: vi.fn().mockResolvedValue(undefined), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
-  onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
+  onSharedReadChanged: (listener: (change: { source: string }) => void) => {
+    announced.add(listener);
+    return Promise.resolve(() => { announced.delete(listener); });
+  },
+  readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
 const DAY = 86_400_000;
@@ -33,15 +39,15 @@ function profile(overrides: Partial<SavedProfile>): SavedProfile {
   };
 }
 
-function answer(claude: ProviderLimits[], profiles: SavedProfile[]) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? [okCodex()] : []));
+function answer(claude: LimitsColumnEntry[], profiles: SavedProfile[]) {
+  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? withSavedProfiles(claude, profiles) : agentId === "codex" ? [okCodex()] : []));
   readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
     profiles: provider === "claude" ? profiles : [], nativeAccount: null, recoveryRequired: false, notice: null,
   }));
 }
 
 function renderLimits(client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } })) {
-  render(<QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><SharedReads /><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>);
 }
 
 const signedInCard = () => screen.findByRole("region", { name: "Claude limits · me@claude.example" });
@@ -133,7 +139,7 @@ describe("a Claude sign-in's end", () => {
     expect(within(card).queryByRole("button", { name: "Use account" })).toBeNull();
   });
 
-  it("ends when the account list says so, read again once its date passes", async () => {
+  it("ends when the account list says so, read again once its date passes and listed into the column", async () => {
     vi.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     vi.setSystemTime(new Date(NOW));
     const endsAt = new Date(Date.parse(NOW) + 30_000).toISOString();
@@ -144,9 +150,11 @@ describe("a Claude sign-in's end", () => {
     const reads = readAccounts.mock.calls.length;
     answer([okClaude()], [profile(ended(endsAt))]);
     await act(async () => { vi.advanceTimersByTime(60_000); });
+    expect(readAccounts.mock.calls.length).toBeGreaterThan(reads);
+    expect(within(card).getByRole("button", { name: "Claude sign-in ends Aug 17" }), "the card waits for the column").toBeTruthy();
+    act(() => { for (const listener of announced) listener({ source: "limits:claude" }); });
     expect(await within(card).findByRole("button", { name: "Claude sign-in ended Aug 17" })).toHaveClass("term-badge--expired");
     expect(within(card).getByText("Claude ended this sign-in on Aug 17. Sign in again to use this account.")).toBeTruthy();
-    expect(readAccounts.mock.calls.length).toBeGreaterThan(reads);
   });
 
   it("ends at its date even when the window was hidden as the date passed", async () => {
@@ -205,7 +213,7 @@ describe("a saved login its provider refused", () => {
 
   beforeEach(() => {
     const saved = staleCodex({ savedProfile: true, status: "failed", message: "Usage refresh needs sign-in again or renewal by the client that owns this login." });
-    readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "codex" ? [okCodex(), saved] : []));
+    readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "codex" ? withSavedProfiles([okCodex(), saved], [refused]) : []));
     readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
       profiles: provider === "codex" ? [refused] : [], nativeAccount: null, recoveryRequired: false, notice: null,
     }));

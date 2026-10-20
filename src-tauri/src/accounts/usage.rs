@@ -24,6 +24,32 @@ enum Generation {
     Home { id: String, stamp: String },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum LoginKey {
+    Vault(String),
+    Home(String),
+}
+
+impl Generation {
+    fn is_for(&self, login: &LoginKey) -> bool {
+        match (self, login) {
+            (Self::Vault(fingerprint), LoginKey::Vault(listed)) => fingerprint == listed,
+            (Self::Home { id, .. }, LoginKey::Home(listed)) => id == listed,
+            _ => false,
+        }
+    }
+}
+
+pub(super) fn login_key(profile: &Profile) -> Option<LoginKey> {
+    match (&profile.login, profile.home.as_deref()) {
+        (Some(login), _) => super::view(profile.identity.provider, login)
+            .ok()
+            .map(|view| LoginKey::Vault(view.fingerprint())),
+        (None, Some(id)) => Some(LoginKey::Home(id.to_owned())),
+        (None, None) => None,
+    }
+}
+
 #[derive(Clone)]
 struct Attempt {
     generation: Generation,
@@ -36,10 +62,6 @@ struct Attempt {
 impl Attempt {
     fn holds(&self, force: bool) -> bool {
         self.parked.is_some() || (Instant::now() < self.next && (!force || self.error.is_some()))
-    }
-
-    fn verdict(&self) -> Option<(Generation, Parked)> {
-        Some((self.generation.clone(), self.parked?))
     }
 }
 
@@ -96,14 +118,12 @@ impl Kept<'_> {
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-pub(crate) fn refresh(
+pub(crate) fn refresh_and_list(
     provider: AgentId,
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
-) -> bool {
-    let Ok(accounts) = super::Accounts::live() else {
-        return false;
-    };
+) -> Option<super::Roster> {
+    let accounts = super::Accounts::live().ok()?;
     accounts.refresh_usage(provider, force, entries, &fetch_profile)
 }
 
@@ -116,10 +136,10 @@ impl super::Accounts {
         force: bool,
         entries: &mut Vec<ProviderLimitsDto>,
         fetch: &Fetch<'_>,
-    ) -> bool {
+    ) -> Option<super::Roster> {
         let home = &self.home;
         if !Store::vault_exists(home) {
-            return false;
+            return Some(super::Roster::default());
         }
         let open = || Store::open_existing(home);
         let native = self
@@ -136,6 +156,7 @@ impl super::Accounts {
             fetch: &|profile| fetch(profile, &open),
         };
         refresh_profiles(home, provider, force, entries, native, &reads)
+            .or_else(|| super::Roster::read(home, provider))
     }
 }
 
@@ -152,16 +173,12 @@ fn refresh_profiles(
     entries: &mut Vec<ProviderLimitsDto>,
     native: Result<Option<Identity>, String>,
     reads: &Reads<'_>,
-) -> bool {
+) -> Option<super::Roster> {
     let Reads { open, homes, fetch } = *reads;
-    let Ok(native) = native else {
-        return false;
-    };
-    let Ok(db) = open().and_then(|s| s.load()) else {
-        return false;
-    };
+    let native = native.ok()?;
+    let db = open().and_then(|s| s.load()).ok()?;
     let Ok(ticket) = db.ticket(Guard::SignIn) else {
-        return false;
+        return Some(super::Roster::recorded(&db, home, provider));
     };
     let archived = crate::limits::archived(home, provider);
     let due: Vec<(&Profile, Kept)> = db
@@ -174,7 +191,6 @@ fn refresh_profiles(
         })
         .filter_map(|profile| Some((profile, kept(profile, homes)?)))
         .collect();
-    let mut changed = false;
     for batch in due.chunks(2) {
         let results = std::thread::scope(|scope| {
             let tasks: Vec<_> = batch
@@ -186,33 +202,58 @@ fn refresh_profiles(
                 .collect();
             tasks
                 .into_iter()
-                .map(|t| t.join().unwrap_or((None, false)))
+                .map(|t| t.join().unwrap_or(None))
                 .collect::<Vec<_>>()
         });
-        for ((profile, _), (result, verdict_changed)) in batch.iter().zip(results) {
+        for ((profile, _), result) in batch.iter().zip(results) {
             merge(entries, profile, result);
-            changed |= verdict_changed;
         }
     }
-    changed
+    Some(super::Roster::recorded(&db, home, provider))
 }
 
-fn attempt_key(home: &Path, profile: &Profile) -> String {
-    format!("{}:{}", home.display(), profile.id)
+fn attempt_key(home: &Path, profile_id: &str) -> String {
+    format!("{}:{profile_id}", home.display())
+}
+
+fn parked_attempt(home: &Path, profile_id: &str) -> Option<(Generation, Parked)> {
+    let attempts = ATTEMPTS.get()?.lock().ok()?;
+    let attempt = attempts.get(&attempt_key(home, profile_id))?;
+    Some((attempt.generation.clone(), attempt.parked?))
 }
 
 pub(super) fn parked(home: &Path, profile: &Profile, kept: Option<&Kept<'_>>) -> Option<Parked> {
-    let attempt = ATTEMPTS
-        .get()?
-        .lock()
-        .ok()?
-        .get(&attempt_key(home, profile))?
-        .clone();
-    let parked = attempt.parked?;
+    let (parked_for, parked) = parked_attempt(home, &profile.id)?;
     match kept?.generation(profile) {
-        Ok(now) => (now == attempt.generation).then_some(parked),
+        Ok(now) => (now == parked_for).then_some(parked),
         Err(_) => Some(parked),
     }
+}
+
+pub(super) fn parked_for(home: &Path, profile_id: &str, login: &LoginKey) -> Option<Parked> {
+    let (parked_for, parked) = parked_attempt(home, profile_id)?;
+    parked_for.is_for(login).then_some(parked)
+}
+
+#[cfg(test)]
+pub(super) fn park_for_test(home: &Path, profile_id: &str, login: &LoginKey, parked: Parked) {
+    let generation = match login {
+        LoginKey::Vault(fingerprint) => Generation::Vault(fingerprint.clone()),
+        LoginKey::Home(id) => Generation::Home {
+            id: id.clone(),
+            stamp: String::new(),
+        },
+    };
+    ATTEMPTS.get_or_init(Mutex::default).lock().unwrap().insert(
+        attempt_key(home, profile_id),
+        Attempt {
+            generation,
+            next: Instant::now(),
+            failures: 0,
+            error: None,
+            parked: Some(parked),
+        },
+    );
 }
 
 struct Held {
@@ -220,7 +261,7 @@ struct Held {
     ticket: Ticket,
 }
 
-type Polled = (Option<Result<ProviderLimitsDto, String>>, bool);
+type Polled = Option<Result<ProviderLimitsDto, String>>;
 
 fn poll(
     home: &Path,
@@ -231,15 +272,15 @@ fn poll(
     open: &dyn Fn() -> Result<Store, String>,
     fetch: &dyn Fn(&Profile) -> FetchResult,
 ) -> Polled {
-    let key = attempt_key(home, profile);
+    let key = attempt_key(home, &profile.id);
     let attempts = ATTEMPTS.get_or_init(Mutex::default);
     let Ok(previous) = attempts.lock().map(|attempts| attempts.get(&key).cloned()) else {
-        return (None, false);
+        return None;
     };
     let replay = |attempt: Option<&Attempt>, held: &Ticket| {
         let unchanged = open().is_ok_and(|store| store.recheck(held).is_ok());
         let error = attempt.and_then(|attempt| attempt.error.clone());
-        (error.filter(|_| unchanged).map(Err), false)
+        error.filter(|_| unchanged).map(Err)
     };
     let Ok(now) = kept.held(profile, ticket) else {
         return replay(previous.as_ref(), ticket);
@@ -251,9 +292,7 @@ fn poll(
     let (after, result) = match kept {
         Kept::Vault(_) => {
             let fetched = fetch(profile);
-            let Some(login) = fetched.login else {
-                return (None, false);
-            };
+            let login = fetched.login?;
             (Kept::Vault(&login).held(profile, ticket), fetched.result)
         }
         Kept::Home(_, account_home) => {
@@ -262,7 +301,7 @@ fn poll(
         }
     };
     let Ok(after) = after else {
-        return (None, false);
+        return None;
     };
     let mut outcome = verdict_of(kept.saved(), profile, &result);
     let published = publish(home, profile, result, &mut outcome, &|| {
@@ -270,7 +309,7 @@ fn poll(
         store.recheck(&after.ticket).ok()?;
         Some(store)
     });
-    let changed = hold_back(
+    hold_back(
         attempts,
         key,
         after.generation,
@@ -278,7 +317,7 @@ fn poll(
         outcome,
         crate::limits_refresh::poll_interval(),
     );
-    (published, changed)
+    published
 }
 
 fn publish(
@@ -321,7 +360,7 @@ fn hold_back(
     previous: Option<&Attempt>,
     outcome: Option<SavedVerdict>,
     interval: Duration,
-) -> bool {
+) {
     let failures = match outcome {
         Some(_) => previous.map_or(1, |a| a.failures.saturating_add(1)),
         None => 0,
@@ -340,12 +379,9 @@ fn hold_back(
         error,
         parked,
     };
-    let Ok(mut attempts) = attempts.lock() else {
-        return false;
-    };
-    let verdict = attempt.verdict();
-    let replaced = attempts.insert(key, attempt);
-    replaced.as_ref().and_then(Attempt::verdict) != verdict
+    if let Ok(mut attempts) = attempts.lock() {
+        attempts.insert(key, attempt);
+    }
 }
 
 const UNSAVED: &str = "Could not save the latest usage reading.";

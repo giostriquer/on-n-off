@@ -28,7 +28,7 @@ function shown(provider: LimitsProvider, loginState: LoginState): Shown {
     id: `saved-${provider}`, observationId: account.id, legacyId: provider, identity: { provider, userId: provider, workspaceId: provider },
     email: account.label, label: account.label!, savedAt: NOW, active: false, loginState,
   };
-  const card = limitCards({ provider, entries: [reading], profiles: [profile], nativeLogin: { observationId: "someone-else", settled: true }, now: AT_NOW })!
+  const card = limitCards({ provider, entries: [{ ...reading, profile }], nativeLogin: { observationId: "someone-else", settled: true }, now: AT_NOW })!
     .find(candidate => candidate.account?.id === account.id)!;
   const plan = cardActionPlan({
     card, now: AT_NOW, checking: false, archiving: false, removing: false, pendingSpend: null,

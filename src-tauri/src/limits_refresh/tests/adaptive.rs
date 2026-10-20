@@ -55,7 +55,7 @@ fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() 
         };
         let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
             saved_reads.set(saved_reads.get() + 1);
-            false
+            None
         };
         let read = || {
             read_provider(
@@ -110,7 +110,7 @@ fn reaching_a_hundred_percent_restores_the_default_and_keeps_saved_cards() {
     let saved = |_, entries: &mut Vec<ProviderLimitsDto>| {
         saved_reads.set(saved_reads.get() + 1);
         entries.push(saved_card.clone());
-        false
+        None
     };
     let read = || {
         read_provider(
@@ -159,7 +159,7 @@ fn saved_deadlines_survive_extra_native_reads_and_do_not_reset_the_native_deadli
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
         saved_reads.set(saved_reads.get() + 1);
-        false
+        None
     };
     let read = |force| {
         read_provider(
@@ -258,7 +258,7 @@ fn a_failed_native_read_backs_off_without_holding_back_saved_accounts() {
     };
     let saved = |_, _: &mut Vec<ProviderLimitsDto>| {
         saved_reads.set(saved_reads.get() + 1);
-        false
+        None
     };
     let read = || {
         read_provider(
@@ -330,7 +330,7 @@ fn the_fullest_window_controls_acceleration_and_a_reset_restores_the_default() {
                 login: &no_login,
             },
             &|_| false,
-            &|_, _| false,
+            &|_, _| None,
             &|_| {},
         )
     };
@@ -373,7 +373,7 @@ fn an_external_switch_does_not_replace_the_new_active_card_with_its_saved_card()
     };
     let saved = |_, entries: &mut Vec<ProviderLimitsDto>| {
         entries.push(quota(98.0, false));
-        false
+        None
     };
     let read = || {
         read_provider(
@@ -432,7 +432,12 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &|_| {},
     );
 
-    assert_eq!(entries, [scoped]);
+    let column = cache.column(&entries);
+    assert_eq!(
+        column.iter().map(|entry| &entry.card).collect::<Vec<_>>(),
+        [&scoped]
+    );
+    assert_eq!(column[0].replaced[0].id, "team-b");
 }
 
 #[test]

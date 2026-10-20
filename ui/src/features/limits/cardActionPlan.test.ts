@@ -1,19 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
-import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
+import { NOW, okClaude, okCodex, okMuse, staleCodex, withSavedProfiles } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 const DAY = 86_400_000;
 const before = (days: number) => new Date(AT_NOW - days * DAY).toISOString();
 const BANKED = { availableCount: 1, nextExpiresAt: null };
 
-const READING: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const READING: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
-function reading(provider: LimitsProvider, overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+function reading(provider: LimitsProvider, overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return READING[provider]({ resetCredits: BANKED, ...overrides });
 }
 
@@ -35,7 +35,7 @@ const RUNNING = ["Acme Studio (codex)"];
 const SPEND = { dueAt: "2026-08-17T20:08:00Z" };
 
 type Setup = {
-  entries: ProviderLimits[];
+  entries: LimitsColumnEntry[];
   profiles?: SavedProfile[];
   nativeLogin?: NativeLogin | null;
   accounts?: AccountList<string> | null;
@@ -43,7 +43,7 @@ type Setup = {
 };
 
 function card(provider: LimitsProvider, { entries, profiles = [], nativeLogin = { observationId: "someone-else", settled: true } }: Setup): LimitCard {
-  const cards = limitCards({ provider, entries, profiles, nativeLogin, now: AT_NOW });
+  const cards = limitCards({ provider, entries: withSavedProfiles(entries, profiles), nativeLogin, now: AT_NOW });
   return cards!.find(shown => shown.account?.id === accountId(provider))!;
 }
 
@@ -172,7 +172,7 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
   });
 
   it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
-    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", message: null, currentAccount: true, windows: [] }], nativeLogin: null, now: AT_NOW })![0];
     const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
     expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
     expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
@@ -186,9 +186,8 @@ describe("a card's one signed-in state", () => {
     expect(signedIn(STATES["current confirmed"]("codex"))).toBe("confirmed");
     expect(signedIn({ ...STATES["current confirmed"]("codex"), nativeLogin: { observationId: accountId("codex"), settled: false } })).toBe("unconfirmed");
     expect(signedIn(STATES["current unconfirmed"]("codex"))).toBe("unconfirmed");
-    expect(signedIn({ entries: [reading("codex")], profiles: [profile("codex")] }), "a signed-out read still names its account").toBe("no");
-    expect(signedIn({ entries: [reading("codex", { currentAccount: false })], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
-    expect(signedIn({ entries: [], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
+    expect(signedIn(STATES.saved("codex"))).toBe("no");
+    expect(signedIn({ entries: [], profiles: [profile("codex")], nativeLogin: { observationId: accountId("codex"), settled: true } }), "a saved login no read answered for").toBe("no");
     expect(signedIn(STATES.remembered("codex"))).toBe("no");
   });
 
@@ -210,7 +209,6 @@ describe("Use banked reset", () => {
       [reading("codex", { resetCredits: null })],
       [reading("codex", { resetCredits: { availableCount: 1, nextExpiresAt: before(0.001) } })],
     ]) expect(offered({ ...live, entries })).toBeNull();
-    expect(offered({ ...live, profiles: [profile("codex")] }), "not the signed-in account").toBeNull();
   });
 
   it("gives way to a Switch anyway confirmation on its card, which a waiting automatic reset's Cancel does not", () => {
@@ -219,7 +217,7 @@ describe("Use banked reset", () => {
   });
 
   it("has no reset controls on a card whose read named no account, nor on a saved login no read answered for", () => {
-    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], profiles: [], nativeLogin: null, now: AT_NOW })![0];
+    const anonymous = limitCards({ provider: "codex", entries: [reading("codex", { account: null })], nativeLogin: null, now: AT_NOW })![0];
     expect(planFor(anonymous, { entries: [], accounts: null, pendingSpend: SPEND }).footer).toBeNull();
     const unread = plan("codex", { entries: [], profiles: [profile("codex")], pendingSpend: SPEND });
     expect(unread.footer?.resets).toBeNull();
@@ -237,26 +235,24 @@ describe("the footer of a saved account whose subscription ended", () => {
   const PASSED = "2026-08-10T00:00:00Z";
   const AHEAD = "2026-09-10T00:00:00Z";
   const term = (willRenew: boolean, activeUntil: string) => ({ activeUntil, willRenew, checkedAt: NOW });
-  const codexSaved = (subscription: ProviderLimits["subscription"], overrides: Partial<ProviderLimits> = {}) =>
+  const codexSaved = (subscription: LimitsColumnEntry["subscription"], overrides: Partial<LimitsColumnEntry> = {}) =>
     staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
   const profileOf = (overrides: Partial<SavedProfile> = {}): SavedProfile => ({
     id: "saved", observationId: "profile:saved", legacyId: "saved", identity: { provider: "codex", userId: "saved", workspaceId: "saved" },
     email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, loginState: { state: "usable" }, ...overrides,
   });
 
-  it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
+  it.each<[string, boolean, LimitsColumnEntry, SavedProfile | null]>([
     ["Codex: will not renew and its date has passed", true, codexSaved(term(false, PASSED)), profileOf()],
     ["Codex: will not renew, but its date is ahead", false, codexSaved(term(false, AHEAD)), profileOf()],
     ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf()],
     ["Codex: no term read", false, codexSaved(null), profileOf()],
     ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf()],
     ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf({ active: true })],
-    ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf()],
-    ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf({ active: true })],
     ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
     ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf({ loginState: { state: "missing" } })],
   ])("%s → Archive account in place of Use account: %s", (_case, expected, reading, saved) => {
-    const shown = limitCards({ provider: "codex", entries: [reading], profiles: saved ? [saved] : [], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
+    const shown = limitCards({ provider: "codex", entries: withSavedProfiles([reading], saved ? [saved] : []), nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;
     expect(planFor(shown, { entries: [] }).footer?.main?.action === "archive").toBe(expected);
   });
@@ -265,7 +261,7 @@ describe("the footer of a saved account whose subscription ended", () => {
     ["refused", { state: "refused" }],
     ["now another account", { state: "otherAccount" }],
   ])("a saved login %s asks to sign in again before it is archived, Archive account kept in the menu", (_case, loginState) => {
-    const shown = limitCards({ provider: "codex", entries: [codexSaved(term(false, PASSED))], profiles: [profileOf({ loginState })], nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
+    const shown = limitCards({ provider: "codex", entries: withSavedProfiles([codexSaved(term(false, PASSED))], [profileOf({ loginState })]), nativeLogin: { observationId: "profile:saved", settled: true }, now: AT_NOW })!
       .find(card => card.account?.id === "profile:saved")!;
     expect(describe_(planFor(shown, { entries: [] }))).toEqual({ menu: "checkNow category signInAgain archive resetAlert remove", footer: "signInAgain" });
   });
@@ -296,7 +292,7 @@ describe("each entry", () => {
     expect(pending.footer).toEqual({
       main: { action: "useAccount", enabled: true, controls: CONTROLS, profileId: "saved-codex" },
       switchAlongside: { enabled: true, clients: RUNNING, controls: CONTROLS, profileId: "saved-codex" },
-      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true }), useBankedReset: null, automaticSpend: SPEND },
+      resets: { reading: reading("codex", { currentAccount: false, savedProfile: true, profile: profile("codex") }), useBankedReset: null, automaticSpend: SPEND },
     });
     expect(pending.menu.find(entry => entry.action === "signInAgain")).toEqual({ action: "signInAgain", enabled: true, controls: CONTROLS, profileId: "saved-codex" });
     expect(plan("codex", STATES.remembered("codex")).footer?.main).toEqual({ action: "signIn", enabled: true, controls: CONTROLS, profileId: null });
@@ -304,7 +300,7 @@ describe("each entry", () => {
   });
 
   it("starts the category editor from the card's category", () => {
-    const shown = limitCards({ provider: "muse", entries: [reading("muse")], profiles: [], categories: { [accountId("muse")]: "Client A" }, nativeLogin: null, now: AT_NOW })![0];
+    const shown = limitCards({ provider: "muse", entries: [reading("muse", { category: "Client A" })], nativeLogin: null, now: AT_NOW })![0];
     expect(planFor(shown, { entries: [] }).menu[1]).toEqual({ action: "category", enabled: true, initial: "Client A" });
   });
 });

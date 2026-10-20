@@ -1,6 +1,7 @@
 import type { LoginState, SavedProfile } from "$lib/accountTypes";
 import type {
   LimitWindow,
+  LimitsColumnEntry,
   LimitsCredits,
   LimitsCreditsSpent,
   LimitsResetCredits,
@@ -11,7 +12,6 @@ import type {
   ProviderLimits,
 } from "$lib/limitsTypes";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
-import { accountCards } from "./accountCards";
 import { LIMITS_FEATURES } from "./limitFeatures";
 import {
   headlineWindow,
@@ -83,26 +83,17 @@ export type LimitCard = {
 
 export type LimitCardsInput = {
   provider: LimitsProvider;
-  entries: ProviderLimits[] | undefined;
-  profiles: SavedProfile[];
-  categories?: Readonly<Record<string, string>>;
+  entries: LimitsColumnEntry[] | undefined;
   nativeLogin: NativeLogin | null;
   now: number;
 };
 
-type Slot = { reading: ProviderLimits; profile: SavedProfile | null } | { reading: null; profile: SavedProfile };
+type Slot = { entry: LimitsColumnEntry; reading: ProviderLimits | null; profile: SavedProfile | null };
 
-export function limitCards({ provider, entries, profiles, categories = {}, nativeLogin, now }: LimitCardsInput): LimitCard[] | null {
-  if (!entries && profiles.length === 0) return null;
-  const { entries: readings, legacyAccounts } = accountCards(entries ?? [], profiles);
-  const slots: Slot[] = readings.map(reading => ({
-    reading,
-    profile: profiles.find(profile => profile.observationId === reading.account?.id) ?? null,
-  }));
-  for (const profile of profiles) {
-    if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
-  }
-  return orderSlots(slots, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, nativeLogin, now));
+export function limitCards({ provider, entries, nativeLogin, now }: LimitCardsInput): LimitCard[] | null {
+  if (!entries) return null;
+  const slots: Slot[] = entries.map(entry => ({ entry, reading: entry.unread ? null : entry, profile: entry.profile ?? null }));
+  return orderSlots(slots, now).map((slot, index) => presentCard(slot, provider, index, nativeLogin, now));
 }
 
 export function isSignedIn(card: LimitCard): boolean {
@@ -116,18 +107,12 @@ export function limitColumn(input: LimitCardsInput): LimitColumn | null {
   return cards && { visible: cards.filter(card => !card.archived), archived: cards.filter(card => card.archived) };
 }
 
-function accountOf(slot: Slot) {
-  return slot.reading ? slot.reading.account ?? null : { id: slot.profile.observationId, label: slot.profile.email };
-}
-
 function leadsColumn(slot: Slot): boolean {
-  return slot.reading ? slot.reading.currentAccount : slot.profile.active;
+  return !!slot.reading?.currentAccount;
 }
 
 function signedInState(slot: Slot, accountId: string | undefined, nativeLogin: NativeLogin | null): SignedIn {
-  if (accountId === undefined) return "no";
-  const claimed = slot.profile ? slot.profile.active : !!slot.reading?.currentAccount;
-  if (!claimed) return "no";
+  if (accountId === undefined || !leadsColumn(slot)) return "no";
   if (!nativeLogin) return "confirmed";
   return nativeLogin.settled && nativeLogin.observationId === accountId ? "confirmed" : "unconfirmed";
 }
@@ -155,12 +140,15 @@ function compare(a: number, b: number): number {
 
 const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnown: false, updatedAt: null };
 
-type LegacyAccounts = Map<string, { id: string; email: string }[]>;
+function forgetSteps({ entry }: Slot, accountId: string): ForgetStep[] {
+  const history = (entry.replaced ?? []).map(({ id, label }) => (label ? { accountId: id, expectedEmail: label } : { accountId: id }));
+  return [...history, { accountId }];
+}
 
-function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacyAccounts: LegacyAccounts, categories: Readonly<Record<string, string>>, nativeLogin: NativeLogin | null, now: number): LimitCard {
-  const { reading, profile } = slot;
+function presentCard(slot: Slot, provider: LimitsProvider, index: number, nativeLogin: NativeLogin | null, now: number): LimitCard {
+  const { entry, reading, profile } = slot;
   const name = providerLabel(provider);
-  const account = accountOf(slot);
+  const account = entry.account ?? null;
   const leads = leadsColumn(slot);
   const signedIn = signedInState(slot, account?.id, nativeLogin);
   const label = profile?.email ?? account?.label ?? null;
@@ -179,13 +167,13 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     identity: {
       label: label ?? name,
       ariaLabel: label ? `${name} limits · ${label}` : `${name} limits`,
-      category: (account && categories[account.id]) || null,
+      category: entry.category || null,
     },
     account: account && {
       id: account.id,
       name: label ?? account.id,
       profile,
-      forget: [...(legacyAccounts.get(account.id) ?? []).map(({ id, email }) => ({ accountId: id, expectedEmail: email })), { accountId: account.id }],
+      forget: forgetSteps(slot, account.id),
     },
     reading,
     plan: reading?.planLabel || null,
@@ -207,7 +195,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
     login,
     signIn,
-    archived: !leads && !!(reading ? reading.archived : profile?.archived),
+    archived: !!entry.archived,
   };
 }
 

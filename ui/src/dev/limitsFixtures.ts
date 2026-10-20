@@ -1,8 +1,9 @@
-import type { AccountCategories, AccountsReading, SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
-import { hasLimits, hasSavedAccounts, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
+import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
+import type { LimitsColumnEntry, ProviderLimits } from "$lib/limitsTypes";
+import { hasLimits, hasSavedAccounts, isAgentId, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
+import { asColumn } from "./limitsColumn";
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -428,32 +429,30 @@ export function limitsScenario(name: string) {
     const answer = chosen.accounts?.[which];
     return answer ? answer() : savedAccounts(which);
   };
+  const profilesOf = (which: LimitsProvider): SavedProfile[] => !hasSavedAccounts(which) ? []
+    : accountsOf(which).profiles.flatMap(profile => removedLogins[which].has(profile.id) ? []
+      : [archived[which].has(profile.observationId) ? { ...profile, archived: true } : profile]);
+  const categoriesOf = (which: LimitsProvider): Record<string, string> => {
+    const saved = profilesOf(which).flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
+    const merged = new Map<string, string | null>([...saved, ...categories[which]]);
+    return Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []));
+  };
   return {
-    readLimits(agentId: unknown): ProviderLimits[] {
+    readLimits(agentId: unknown): LimitsColumnEntry[] {
       const which = provider(agentId);
       if (!which) return [];
-      return (chosen[which] ?? OK[which])().flatMap(entry => {
+      const read = (chosen[which] ?? OK[which])().flatMap(entry => {
         const id = entry.currentAccount ? null : entry.account?.id;
         if (!id) return [entry];
         if (forgotten[which].has(id)) return [];
         return [archived[which].has(id) ? { ...entry, archived: true } : entry];
       });
+      return asColumn(read, profilesOf(which), categoriesOf(which));
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
       const reading = which ? accountsOf(which) : savedAccounts(agent as AgentId);
-      return which ? {
-        ...reading,
-        profiles: reading.profiles.flatMap(profile => removedLogins[which].has(profile.id) ? []
-          : [archived[which].has(profile.observationId) ? { ...profile, archived: true } : profile]),
-      } : reading;
-    },
-    readCategories(): AccountCategories {
-      return Object.fromEntries(LIMITS_PROVIDERS.map(which => {
-        const saved = !hasSavedAccounts(which) ? [] : accountsOf(which).profiles.flatMap(profile => profile.category ? [[profile.observationId, profile.category] as const] : []);
-        const merged = new Map<string, string | null>([...saved, ...categories[which]]);
-        return [which, Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []))];
-      }));
+      return which ? { ...reading, profiles: profilesOf(which) } : reading;
     },
     setCategory(agentId: unknown, accountId: unknown, category: unknown): string | null {
       const which = provider(agentId);

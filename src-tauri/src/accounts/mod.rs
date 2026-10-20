@@ -10,6 +10,10 @@ mod usage_renew;
 mod transaction;
 
 mod homes;
+mod roster;
+#[cfg(test)]
+pub(crate) use roster::{roster_for_test, roster_with_logins_for_test};
+pub(crate) use roster::{Listed, Roster, SignInDeadlines};
 mod login_state;
 
 pub(crate) mod claude;
@@ -32,7 +36,7 @@ use crate::provider_catalogue::WITH_SAVED_ACCOUNTS as PROVIDERS;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use transaction::{Native, NativeGuard};
-#[derive(Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileDto {
     id: String,
@@ -164,6 +168,8 @@ trait Clients {
 trait Notify {
     fn changed(&self, provider: AgentId);
     fn accounts(&self);
+    fn roster(&self, provider: AgentId);
+    fn listed(&self, provider: AgentId, ends: SignInDeadlines);
 }
 
 trait Browser {
@@ -224,6 +230,12 @@ impl Notify for Announce {
     fn accounts(&self) {
         crate::read_revision::announce(crate::read_revision::Source::Accounts);
     }
+    fn roster(&self, provider: AgentId) {
+        crate::limits_refresh::roster_changed(provider);
+    }
+    fn listed(&self, provider: AgentId, ends: SignInDeadlines) {
+        crate::limits_refresh::accounts_listed(provider, ends);
+    }
 }
 
 impl Accounts {
@@ -255,11 +267,7 @@ pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Accounts::live()?.list(provider)
 }
 pub fn unlock() -> Result<(), String> {
-    let home = home()?;
-    if !store::Store::vault_exists(&home) {
-        return Ok(());
-    }
-    store::Store::open(&home, false)?.load().map(|_| ())
+    Accounts::live()?.unlock()
 }
 pub fn save_current(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.save_current(provider)
@@ -309,6 +317,12 @@ impl Activation {
 
 impl Accounts {
     fn list(&self, provider: AgentId) -> Result<AccountsDto, String> {
+        let (listed, ends) = self.listing(provider)?;
+        self.notify.listed(provider, ends);
+        Ok(listed)
+    }
+
+    fn listing(&self, provider: AgentId) -> Result<(AccountsDto, SignInDeadlines), String> {
         let _read = activity::read(provider)
             .ok_or("An account change is running. Retry when it finishes.")?;
         let home = &self.home;
@@ -329,22 +343,17 @@ impl Accounts {
         let recovery_required = db
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
-        let archived = crate::limits::archived(home, provider);
-        let categories = db
-            .categories()
-            .get(provider.key())
-            .cloned()
-            .unwrap_or_default();
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
         let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
-        let now_ms = chrono::Utc::now().timestamp_millis();
         let mut read_ends = Vec::new();
-        let profiles = db
-            .profiles
-            .iter()
-            .filter(|p| p.identity.provider == provider)
-            .map(|p| {
+        let roster = Roster::of(
+            &db,
+            home,
+            provider,
+            &crate::limits::archived(home, provider),
+            chrono::Utc::now().timestamp_millis(),
+            &mut |p| {
                 let active = current.as_ref() == Some(&p.identity);
                 let kept = usage::kept(p, homes);
                 let deadline =
@@ -352,40 +361,29 @@ impl Accounts {
                 if let Some(end) = deadline.read() {
                     read_ends.push((p.id.clone(), p.home.clone(), end));
                 }
-                let standing = if active {
-                    login_state::Standing::SignedIn
-                } else {
-                    login_state::Standing::Saved(usage::parked(home, p, kept.as_ref()))
-                };
-                ProfileDto {
-                    sign_in_ends_at: deadline.spelled(),
-                    login_state: login_state::LoginState::of(p, &deadline, standing, now_ms),
-                    needs_login: p.needs_login(),
-                    archived: archived.contains(&p.identity.observation_key()),
-                    category: categories.get(&p.identity.observation_key()).cloned(),
-                    observation_id: p.identity.observation_key(),
-                    legacy_id: p.identity.legacy_key(),
+                let parked = (!active)
+                    .then(|| usage::parked(home, p, kept.as_ref()))
+                    .flatten();
+                roster::Facts {
                     active,
-                    id: p.id.clone(),
-                    identity: p.identity.clone(),
-                    label: p.label.clone(),
-                    email: p.email.clone(),
-                    saved_at: p.saved_at.clone(),
-                    pending_activation: p.pending_activation,
+                    deadline,
+                    parked,
                 }
-            })
-            .collect();
+            },
+        );
         if !read_ends.is_empty() {
             let _ = login_state::remember_ends(home, &read_ends);
         }
-        Ok(AccountsDto {
-            profiles,
+        let ends = roster.sign_in_deadlines();
+        let listed = AccountsDto {
+            profiles: roster.into_profiles(),
             remember_accounts: discovery::enabled(home).unwrap_or(false),
             native_observation_id: current.as_ref().map(model::Identity::observation_key),
             native_account: current,
             recovery_required,
             notice: notice.or_else(|| discovery::notice(provider)),
-        })
+        };
+        Ok((listed, ends))
     }
 
     fn save_current(&self, provider: AgentId) -> Result<(), String> {
@@ -429,6 +427,17 @@ impl Accounts {
         Ok(())
     }
 
+    fn unlock(&self) -> Result<(), String> {
+        if !store::Store::vault_exists(&self.home) {
+            return Ok(());
+        }
+        store::Store::open(&self.home, false)?.load()?;
+        for provider in PROVIDERS {
+            self.notify.roster(provider);
+        }
+        Ok(())
+    }
+
     fn categories(&self) -> Result<CategoriesDto, String> {
         if !store::Store::vault_exists(&self.home) {
             return Ok(CategoriesDto::default());
@@ -448,6 +457,7 @@ impl Accounts {
                 db.set_account_category(provider, account_id, category)
             })?;
         self.notify.accounts();
+        self.notify.roster(provider);
         Ok(stored)
     }
 
@@ -461,6 +471,7 @@ impl Accounts {
             })?;
         if changed {
             self.notify.accounts();
+            self.notify.roster(provider);
         }
         Ok(())
     }

@@ -93,7 +93,7 @@ fn a_saved_login_is_missing_then_ended_then_another_account_then_refused_then_en
             for parked in [None, Some(Parked::Refused), Some(Parked::OtherAccount)] {
                 let profile = profile(saved_login);
                 let state = LoginState::of(
-                    &profile,
+                    profile.needs_login(),
                     &deadline(&profile, date),
                     Standing::Saved(parked),
                     NOW_MS,
@@ -114,7 +114,7 @@ fn a_signed_in_login_is_its_date_alone() {
         for date in [Date::None, Date::Ahead, Date::Now, Date::Passed] {
             let profile = profile(saved_login);
             let state = LoginState::of(
-                &profile,
+                profile.needs_login(),
                 &deadline(&profile, date),
                 Standing::SignedIn,
                 NOW_MS,
@@ -133,7 +133,7 @@ fn a_date_reached_this_very_millisecond_has_ended() {
     let profile = profile(true);
     assert_eq!(
         LoginState::of(
-            &profile,
+            profile.needs_login(),
             &deadline(&profile, Date::Now),
             Standing::Saved(Some(Parked::Refused)),
             NOW_MS

@@ -95,16 +95,22 @@ fn a_first_scoped_reading_keeps_its_legacy_weekly_exactly_when_its_provider_inhe
                 (LimitWindowKind::Session, 0.0)
             ]
         );
-        let loaded = store.load(provider);
+        let loaded = crate::limits::column(
+            &store.load(provider),
+            &crate::accounts::Roster::default(),
+            &crate::accounts::SignInDeadlines::new(),
+            0,
+        );
         assert_eq!(loaded.len(), 1, "the legacy card is superseded");
         assert_eq!(
             loaded[0]
+                .card
                 .account
                 .as_ref()
                 .map(|account| account.id.as_str()),
             Some("profile:you")
         );
-        assert_eq!(weekly(&loaded[0]), Some((30.0, LEGACY_SEEN)));
+        assert_eq!(weekly(&loaded[0].card), Some((30.0, LEGACY_SEEN)));
         fs::remove_dir_all(home).unwrap();
     }
 }

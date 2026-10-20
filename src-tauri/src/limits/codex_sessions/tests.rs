@@ -299,6 +299,39 @@ fn an_ambiguous_session_observation_does_not_change_any_account() {
 }
 
 #[test]
+fn history_a_scoped_card_replaced_is_never_the_account_an_observation_updates() {
+    let home = scratch_dir("limits-codex-session-superseded");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+    )
+    .unwrap();
+    let mut scoped = remembered("profile:old", "2026-08-25T23:34:33Z").with_legacy_id("acct-old");
+    scoped.account.as_mut().unwrap().label = Some("acct-old@example.com".into());
+    let mut accounts = vec![
+        scoped,
+        remembered("acct-old", "2026-08-24T23:34:33Z"),
+        remembered("acct-kept", "2026-08-24T23:34:33Z"),
+    ];
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    let updates = merge_recent(&home, now, &mut accounts);
+
+    assert_eq!(updates, 1);
+    assert_eq!(
+        accounts
+            .iter()
+            .map(|account| account.reading.windows[0].used_percent)
+            .collect::<Vec<_>>(),
+        [86.0, 86.0, 100.0]
+    );
+}
+
+#[test]
 fn a_session_observation_does_not_match_a_window_without_an_exact_duration() {
     let home = scratch_dir("limits-codex-session-missing-duration");
     let sessions = home.join(".codex/sessions/2026/08/20");

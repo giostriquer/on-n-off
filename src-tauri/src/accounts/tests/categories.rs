@@ -36,7 +36,13 @@ fn an_account_without_a_saved_login_keeps_its_category_by_account_id() {
         category(&harness.accounts(), AgentId::Muse, "email:you@example.com").as_deref(),
         Some("Client A / research")
     );
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+    assert_eq!(
+        harness.heard(),
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Muse), true)
+        ]
+    );
 }
 
 #[test]
@@ -165,7 +171,13 @@ fn forgetting_accounts_drops_their_categories_only() {
     let categories = accounts.categories().unwrap().0;
     assert_eq!(categories["codex"].len(), 1);
     assert_eq!(categories["codex"]["kept"], "Kept");
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+    assert_eq!(
+        harness.heard(),
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Codex), true)
+        ]
+    );
 }
 
 #[test]
@@ -295,7 +307,13 @@ fn a_category_edit_persists_without_rejecting_sign_ins_in_flight() {
         Some("Client A")
     );
     assert!(harness.vouches(&sign_in));
-    assert_eq!(harness.heard(), [(Heard::Accounts, true)]);
+    assert_eq!(
+        harness.heard(),
+        [
+            (Heard::Accounts, true),
+            (Heard::Roster(AgentId::Claude), true)
+        ]
+    );
 }
 
 #[test]

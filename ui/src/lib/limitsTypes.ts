@@ -1,3 +1,4 @@
+import type { SavedProfile } from "./accountTypes";
 import type { AgentId } from "./types";
 
 export type LimitsStatus = "ok" | "signedOut" | "unauthenticated" | "unsupported" | "failed";
@@ -58,6 +59,7 @@ export type ResetCreditOutcome = "reset" | "nothingToReset" | "noCredit" | "alre
 
 export type LimitsAccount = {
   id: string;
+  legacyId?: string | null;
   label?: string | null;
 };
 
@@ -88,4 +90,11 @@ export type ProviderLimits = {
   subscription?: LimitsSubscription | null;
   resetCredits?: LimitsResetCredits | null;
   resetOffer?: LimitsResetOffer | null;
+};
+
+export type LimitsColumnEntry = ProviderLimits & {
+  profile?: SavedProfile | null;
+  category?: string | null;
+  replaced?: LimitsAccount[];
+  unread?: boolean;
 };

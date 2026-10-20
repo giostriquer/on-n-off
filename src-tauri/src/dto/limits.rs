@@ -212,6 +212,21 @@ pub struct ProviderLimitsDto {
     pub reading: Reading,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ColumnEntryDto {
+    #[serde(flatten)]
+    pub card: ProviderLimitsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<crate::accounts::ProfileDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub replaced: Vec<LimitsAccountDto>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unread: bool,
+}
+
 #[cfg(test)]
 impl ProviderLimitsDto {
     pub fn for_test(provider: AgentId, account_id: &str) -> Self {

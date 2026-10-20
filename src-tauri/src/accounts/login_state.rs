@@ -87,6 +87,21 @@ impl Deadline {
         }
     }
 
+    pub(super) fn recorded(profile: &Profile) -> Self {
+        Self::at(profile.sign_in_end.ends_at_ms())
+    }
+
+    pub(super) fn at(ends_at_ms: Option<i64>) -> Self {
+        Self {
+            ends_at_ms,
+            read: None,
+        }
+    }
+
+    pub(super) fn ends_at_ms(&self) -> Option<i64> {
+        self.ends_at_ms
+    }
+
     fn saved(profile: &Profile, kept: Option<&Kept<'_>>) -> Self {
         let recorded = |end: SignInEnd| Self {
             ends_at_ms: end.ends_at_ms(),
@@ -128,7 +143,7 @@ impl Deadline {
 
 impl LoginState {
     pub(super) fn of(
-        profile: &Profile,
+        needs_login: bool,
         deadline: &Deadline,
         standing: Standing,
         now_ms: i64,
@@ -136,7 +151,7 @@ impl LoginState {
         let dated = deadline.state(now_ms);
         match standing {
             Standing::SignedIn => dated.unwrap_or_default(),
-            Standing::Saved(_) if profile.needs_login() => Self::Missing,
+            Standing::Saved(_) if needs_login => Self::Missing,
             Standing::Saved(parked) => match (dated, parked) {
                 (Some(ended @ Self::Ended { .. }), _) => ended,
                 (_, Some(Parked::OtherAccount)) => Self::OtherAccount,

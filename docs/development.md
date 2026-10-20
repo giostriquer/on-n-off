@@ -75,6 +75,13 @@ source carries no comments (see [Code comments](#code-comments)).
   `LIMITS_CHECK_MINUTES` (`ui/src/lib/sharedReads/limits.ts`) is checked against
   `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
   keeps the fixture equal to `check_interval`.
+- Which accounts a Limits column lists, the legacy history each folds in, and the saved profile and
+  category beside each: the Limits read's column (`limits::column`, served by
+  `limits_refresh::read_column`), never a join in the UI. Both Limits surfaces render it through
+  `limitColumn`, which takes the entries alone; a fact a card needs about its saved profile is added
+  to the column (and to `ProfileDto` through `Roster::of`, which the account list shares), read
+  without a credential, never joined from the account list again
+  ([why](architecture/accounts.md#the-limits-column)).
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
   shell, header, tags, ⋯ menu and footer from the card model; a card adds only its body. Which
   actions a card offers, in what order and whether each is enabled, is the card action plan's

@@ -83,14 +83,24 @@ impl Saved {
         *self.answer.lock().unwrap() = failure;
     }
 
-    fn poll(&self, force: bool) -> bool {
-        self.polled(force).0
+    fn poll(&self, force: bool) -> Value {
+        let roster = self
+            .polled(force)
+            .0
+            .expect("the saved refresh lists its profiles");
+        let profile = roster.in_column(
+            &roster.profiles()[0],
+            &crate::accounts::SignInDeadlines::new(),
+            None,
+            chrono::Utc::now().timestamp_millis(),
+        );
+        serde_json::to_value(profile).unwrap()["loginState"].clone()
     }
 
-    fn polled(&self, force: bool) -> (bool, Vec<ProviderLimitsDto>) {
+    fn polled(&self, force: bool) -> (Option<crate::accounts::Roster>, Vec<ProviderLimitsDto>) {
         let mut entries = Vec::new();
         let (fetched, answer, provider) = (&self.fetched, &self.answer, self.provider);
-        let changed =
+        let roster =
             self.harness
                 .accounts()
                 .refresh_usage(provider, force, &mut entries, &|profile, _| {
@@ -106,7 +116,7 @@ impl Saved {
                         },
                     }
                 });
-        (changed, entries)
+        (roster, entries)
     }
 
     fn card(&self, force: bool) -> Option<ProviderLimitsDto> {
@@ -152,6 +162,21 @@ impl Saved {
 
     fn state(&self) -> Value {
         login_states(&self.harness, self.provider).remove(0)
+    }
+
+    fn column_state(&self) -> Value {
+        let roster = crate::accounts::Roster::recorded(
+            &self.harness.vault(),
+            self.harness.path(),
+            self.provider,
+        );
+        let profile = roster.in_column(
+            &roster.profiles()[0],
+            &crate::accounts::SignInDeadlines::new(),
+            None,
+            chrono::Utc::now().timestamp_millis(),
+        );
+        serde_json::to_value(profile).unwrap()["loginState"].clone()
     }
 }
 
@@ -293,30 +318,42 @@ fn a_poll_says_whether_a_saved_login_now_refuses_or_answers_for_another_account(
 }
 
 #[test]
-fn a_new_login_is_usable_again_and_the_poll_says_the_state_changed() {
+fn a_new_login_is_usable_again_and_the_saved_refresh_lists_each_state_it_reaches() {
     for (provider, kept) in KINDS {
         let saved = Saved::new(provider, kept);
-        assert!(
-            !saved.poll(false),
-            "{provider:?} in {kept:?}: nothing changed"
-        );
+        let usable = json!({"state": "usable"});
+        let other = json!({"state": "otherAccount"});
+        assert_eq!(saved.poll(false), usable, "{provider:?} in {kept:?}");
         super::super::usage::tests::elapse(saved.harness.path());
         saved.answering(Some(ReadFailure::OtherAccount));
-        assert!(
+        assert_eq!(
             saved.poll(true),
+            other,
             "{provider:?} in {kept:?}: now another account"
         );
-        assert!(!saved.poll(true), "{provider:?} in {kept:?}: still parked");
-        assert_eq!(saved.state(), json!({"state": "otherAccount"}));
+        assert_eq!(
+            saved.poll(true),
+            other,
+            "{provider:?} in {kept:?}: still parked"
+        );
+        assert_eq!(saved.state(), other);
 
         saved.answering(None);
         saved.sign_in_again("g2");
+        assert_eq!(saved.state(), usable, "{provider:?} in {kept:?}");
         assert_eq!(
-            saved.state(),
-            json!({"state": "usable"}),
-            "{provider:?} in {kept:?}"
+            saved.column_state(),
+            match kept {
+                Kept::Vault => usable.clone(),
+                Kept::Home => other.clone(),
+            },
+            "{provider:?} in {kept:?}: the column drops a verdict once the vault login is another, and keeps a home's until the poll reads it, since it takes no stamp"
         );
-        assert!(saved.poll(false), "{provider:?} in {kept:?}: usable again");
+        assert_eq!(
+            saved.poll(false),
+            usable,
+            "{provider:?} in {kept:?}: usable again"
+        );
     }
 }
 
@@ -394,7 +431,11 @@ fn a_home_whose_login_cannot_be_stamped_keeps_its_verdict_and_is_not_read_again(
 
     super::super::usage::tests::elapse(saved.harness.path());
     saved.answering(None);
-    assert!(!saved.poll(true), "nothing new is known");
+    assert_eq!(
+        saved.poll(true),
+        json!({"state": "refused"}),
+        "nothing new is known"
+    );
 
     assert_eq!(
         saved.reads(),

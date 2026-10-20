@@ -41,6 +41,7 @@ mod login_precedence;
 mod login_state;
 mod profiles;
 mod remembering;
+mod roster;
 mod saved_claims;
 mod saved_usage;
 mod sign_in_end;

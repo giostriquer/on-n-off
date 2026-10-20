@@ -7,6 +7,7 @@ use serde::Deserialize;
 
 use super::codex::{main_windows, RateLimitWindow};
 use super::window::{QuotaWindow, ResetInstant};
+use crate::accounts::model::Identity;
 use crate::dto::{LimitWindowDto, ProviderLimitsDto};
 
 const LOOKBACK_DAYS: i64 = 8;
@@ -48,17 +49,19 @@ pub(super) fn merge_recent(
     let mut observations = read_recent(home, now);
     observations.sort_by_key(|observation| observation.observed_at);
     let mut updates = 0;
+    let superseded = super::snapshots::superseded(accounts);
     for observation in observations {
         let observed = observation.window.into_dto();
         let matches: Vec<(usize, usize)> = accounts
             .iter()
             .enumerate()
-            .filter(|(_, account)| {
+            .filter(|(index, account)| {
                 !account.current_account
+                    && !superseded[*index]
                     && account
                         .account
                         .as_ref()
-                        .is_none_or(|a| !a.id.starts_with("profile:"))
+                        .is_none_or(|a| !Identity::is_profile_key(&a.id))
             })
             .flat_map(|(account_index, account)| {
                 account

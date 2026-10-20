@@ -136,6 +136,9 @@ impl super::Accounts {
             update_notice(provider, None);
         }
         self.notify.accounts();
+        for provider in PROVIDERS {
+            self.notify.roster(provider);
+        }
         Ok(())
     }
 
@@ -145,6 +148,9 @@ impl super::Accounts {
         let noticed = update_notice(provider, result.err());
         if saved || noticed {
             self.notify.accounts();
+        }
+        if saved {
+            self.notify.roster(provider);
         }
     }
 

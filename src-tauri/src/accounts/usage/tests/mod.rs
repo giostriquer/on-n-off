@@ -100,7 +100,6 @@ fn poll_vault(
         open,
         fetch,
     )
-    .0
 }
 
 #[test]

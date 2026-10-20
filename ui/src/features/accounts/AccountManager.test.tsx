@@ -16,7 +16,8 @@ const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "t
 const NOW = Date.parse("2026-09-12T12:00:00Z");
 function AccountCard({ profile }: { profile: SavedProfile }) {
   const manager = useAccountManagement();
-  const [card] = limitCards({ provider: "codex", entries: undefined, profiles: [profile], nativeLogin: manager?.nativeLogin ?? null, now: NOW })!;
+  const entry = { provider: "codex" as const, status: "ok" as const, account: { id: profile.observationId, label: profile.email }, currentAccount: profile.active, windows: [], unread: !profile.active, profile };
+  const [card] = limitCards({ provider: "codex", entries: [entry], nativeLogin: manager?.nativeLogin ?? null, now: NOW })!;
   const actions = useCardActions({ provider: "codex", card, now: NOW, checking: false, onArchive: async () => {}, onRemove: async () => {} });
   return <><header><ActionMenu label={profile.email!} items={actions.menu} /></header><footer>{actions.footer}</footer></>;
 }

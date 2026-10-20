@@ -100,6 +100,7 @@ pub(super) struct NativeState {
     pub cleaned: Cell<usize>,
     pub homes: Option<Arc<Homes>>,
     pub deadline: RefCell<Option<SignInDeadline>>,
+    pub deadline_reads: Cell<usize>,
 }
 
 #[derive(Default)]
@@ -114,6 +115,7 @@ pub(super) struct Homes {
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
     pub answer: Mutex<Option<crate::limits::ReadFailure>>,
+    pub deadline_reads: Mutex<Vec<PathBuf>>,
     pub secrets_read: Mutex<usize>,
     pub sealed: Mutex<bool>,
 }
@@ -191,6 +193,7 @@ impl Home for FakeHome {
         ))
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        self.0.deadline_reads.lock().unwrap().push(self.1.clone());
         let login = self.read().ok()??;
         let deadline = super::super::view(self.2, &login).ok()?.sign_in_deadline();
         deadline
@@ -262,6 +265,7 @@ impl NativeAccount for FakeNative {
         Ok(())
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
+        self.0.deadline_reads.set(self.0.deadline_reads.get() + 1);
         self.0.deadline.borrow().clone()
     }
 }
@@ -389,6 +393,8 @@ impl Browser for FakeBrowser {
 pub(super) enum Heard {
     Changed(AgentId),
     Accounts,
+    Roster(AgentId),
+    Listed(AgentId, crate::accounts::SignInDeadlines),
 }
 pub(super) struct Recorder {
     home: PathBuf,
@@ -411,6 +417,12 @@ impl Notify for Listener {
     }
     fn accounts(&self) {
         self.record(Heard::Accounts);
+    }
+    fn roster(&self, provider: AgentId) {
+        self.record(Heard::Roster(provider));
+    }
+    fn listed(&self, provider: AgentId, ends: crate::accounts::SignInDeadlines) {
+        self.record(Heard::Listed(provider, ends));
     }
 }
 
