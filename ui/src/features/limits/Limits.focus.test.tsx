@@ -2,21 +2,27 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderLimits } from "$lib/limitsTypes";
-import type { AgentId } from "$lib/types";
+import type { LimitsProvider } from "$lib/providers";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const accountAction = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
-const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
-const setLimitsArchived = vi.hoisted(() => vi.fn());
+const removeLimitsAccount = vi.hoisted(() => vi.fn());
+const setLimitsAccountArchived = vi.hoisted(() => vi.fn());
+const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
+const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
+  sharedReadHandlers.add(handler);
+  return Promise.resolve(() => { sharedReadHandlers.delete(handler); });
+});
 
 vi.mock("$lib/api", () => ({
-  readLimits, readAccounts, accountAction, forgetLimitsSnapshot, setLimitsArchived,
+  readLimits, readAccounts, accountAction, removeLimitsAccount, setLimitsAccountArchived, onSharedReadChanged,
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   addAccount: vi.fn().mockResolvedValue(undefined), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
-  onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
+  readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
 function deferred<T>() {
@@ -25,13 +31,28 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+let columns: Record<LimitsProvider, ProviderLimits[]>;
+
 function answer(claude: ProviderLimits[], codex: ProviderLimits[]) {
-  readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
+  columns = { claude, codex, muse: [] };
+}
+
+function changed(provider: LimitsProvider, edit: (entries: ProviderLimits[]) => ProviderLimits[]) {
+  columns[provider] = edit(columns[provider]);
+  for (const handler of sharedReadHandlers) handler({ source: `limits:${provider}` });
+}
+
+function removed(provider: LimitsProvider, accountId: string) {
+  changed(provider, entries => entries.filter(entry => entry.currentAccount || entry.account?.id !== accountId));
+}
+
+function archived(provider: LimitsProvider, accountId: string, value: boolean) {
+  changed(provider, entries => entries.map(entry => !entry.currentAccount && entry.account?.id === accountId ? { ...entry, archived: value } : entry));
 }
 
 function renderLimits() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-  const screenTree = () => <QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>;
+  const screenTree = () => <QueryClientProvider client={client}><SharedReads /><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>;
   const view = render(screenTree());
   return { renderAgain: () => view.rerender(screenTree()) };
 }
@@ -41,9 +62,9 @@ beforeEach(() => {
   vi.setSystemTime(new Date(NOW));
   readAccounts.mockReset().mockResolvedValue({ profiles: [], nativeAccount: null, recoveryRequired: false, notice: null });
   accountAction.mockReset().mockResolvedValue(undefined);
-  readLimits.mockReset();
-  forgetLimitsSnapshot.mockReset().mockResolvedValue(undefined);
-  setLimitsArchived.mockReset().mockResolvedValue(undefined);
+  readLimits.mockReset().mockImplementation(async (provider: LimitsProvider) => columns[provider]);
+  removeLimitsAccount.mockReset().mockImplementation(async (provider: LimitsProvider, accountId: string) => removed(provider, accountId));
+  setLimitsAccountArchived.mockReset().mockImplementation(async (provider: LimitsProvider, accountId: string, value: boolean) => archived(provider, accountId, value));
 });
 
 afterEach(() => {
@@ -77,7 +98,7 @@ describe("focus as an account leaves", () => {
 
   it("goes to the archived list when an archive resolves after the user tabbed within its card", async () => {
     const archiving = deferred<void>();
-    setLimitsArchived.mockReturnValue(archiving.promise);
+    setLimitsAccountArchived.mockImplementation(async (provider: LimitsProvider, accountId: string, value: boolean) => { await archiving.promise; archived(provider, accountId, value); });
     answer([okClaude()], [okCodex(), staleCodex()]);
     renderLimits();
     fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));
@@ -93,7 +114,7 @@ describe("focus as an account leaves", () => {
 
   it("stays where the user moved it while the removal waited", async () => {
     const forgetting = deferred<void>();
-    forgetLimitsSnapshot.mockReturnValue(forgetting.promise);
+    removeLimitsAccount.mockImplementation(async (provider: LimitsProvider, accountId: string) => { await forgetting.promise; removed(provider, accountId); });
     answer([okClaude()], [okCodex(), staleCodex(), spare]);
     const { renderAgain } = renderLimits();
     fireEvent.click(await screen.findByRole("button", { name: "More actions for personal@codex.example" }));

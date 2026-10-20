@@ -181,6 +181,14 @@ impl Database {
             .iter_mut()
             .find(|p| observes(p, provider, key))
     }
+    pub fn remove_profile(&mut self, id: &str) -> Option<AgentId> {
+        let identity = self.profiles.iter().find(|p| p.id == id)?.identity.clone();
+        if !self.ignored_accounts.contains(&identity) {
+            self.ignored_accounts.push(identity.clone());
+        }
+        self.profiles.retain(|p| p.id != id);
+        Some(identity.provider)
+    }
     pub fn reenroll(&mut self, identity: &Identity) {
         self.ignored_accounts.retain(|ignored| ignored != identity);
     }

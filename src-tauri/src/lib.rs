@@ -122,6 +122,8 @@ pub fn run() {
             commands::read_codex_subscription,
             commands::forget_limits_snapshot,
             commands::set_limits_archived,
+            commands::remove_limits_account,
+            commands::set_limits_account_archived,
             commands::read_account_categories,
             commands::set_account_category,
             commands::consume_codex_reset_credit,

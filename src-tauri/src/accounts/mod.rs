@@ -288,6 +288,46 @@ pub fn forget_categories(provider: AgentId, account_ids: &[String]) -> Result<()
 pub fn remove(id: &str) -> Result<(), String> {
     Accounts::live()?.remove(id)
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct Forgot {
+    pub(crate) profile: bool,
+    pub(crate) changed: bool,
+}
+
+pub(crate) fn forget_account_at(
+    home: &Path,
+    provider: AgentId,
+    account_id: &str,
+    ids: &[String],
+) -> Result<Forgot, String> {
+    if !store::Store::vault_exists(home) {
+        return Ok(Forgot::default());
+    }
+    let store = store::Store::open(home, false)?;
+    let saved = store
+        .load()?
+        .observed(provider, account_id)
+        .map(|profile| profile.id.clone());
+    let kind = match &saved {
+        Some(id) => {
+            login::cancel_expected(id);
+            store::ChangeKind::Account
+        }
+        None => store::ChangeKind::Metadata,
+    };
+    let changed = store.change(kind, |db| {
+        let removed = saved
+            .as_deref()
+            .and_then(|id| db.remove_profile(id))
+            .is_some();
+        Ok(db.forget_categories(provider, ids) || removed)
+    })?;
+    Ok(Forgot {
+        profile: saved.is_some(),
+        changed,
+    })
+}
 pub fn use_profile(provider: AgentId, id: &str, activation: Activation) -> Result<(), String> {
     Accounts::live()?.activate(provider, id, activation)
 }
@@ -478,17 +518,8 @@ impl Accounts {
 
     fn remove(&self, id: &str) -> Result<(), String> {
         login::cancel_expected(id);
-        let removed =
-            store::Store::open(&self.home, false)?.change(store::ChangeKind::Account, |db| {
-                let removed = db.profiles.iter().find(|p| p.id == id).map(|profile| {
-                    if !db.ignored_accounts.contains(&profile.identity) {
-                        db.ignored_accounts.push(profile.identity.clone());
-                    }
-                    profile.identity.provider
-                });
-                db.profiles.retain(|p| p.id != id);
-                Ok(removed)
-            })?;
+        let removed = store::Store::open(&self.home, false)?
+            .change(store::ChangeKind::Account, |db| Ok(db.remove_profile(id)))?;
         match removed {
             Some(provider) => self.notify.changed(provider),
             None => self.notify.accounts(),

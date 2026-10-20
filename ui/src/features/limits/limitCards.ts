@@ -38,13 +38,10 @@ export type CardFigures = {
 
 export type CardSubscription = { accountId: string; poll: boolean; term: LimitsSubscription | null };
 
-export type ForgetStep = { accountId: string; expectedEmail?: string };
-
 export type CardAccount = {
   id: string;
   name: string;
   profile: SavedProfile | null;
-  forget: ForgetStep[];
 };
 
 export type SignedIn = "confirmed" | "unconfirmed" | "no";
@@ -140,11 +137,6 @@ function compare(a: number, b: number): number {
 
 const UNREAD: LimitAccountPresentation = { status: null, message: null, lastKnown: false, updatedAt: null };
 
-function forgetSteps({ entry }: Slot, accountId: string): ForgetStep[] {
-  const history = (entry.replaced ?? []).map(({ id, label }) => (label ? { accountId: id, expectedEmail: label } : { accountId: id }));
-  return [...history, { accountId }];
-}
-
 function presentCard(slot: Slot, provider: LimitsProvider, index: number, nativeLogin: NativeLogin | null, now: number): LimitCard {
   const { entry, reading, profile } = slot;
   const name = providerLabel(provider);
@@ -173,7 +165,6 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
       id: account.id,
       name: label ?? account.id,
       profile,
-      forget: forgetSteps(slot, account.id),
     },
     reading,
     plan: reading?.planLabel || null,

@@ -458,6 +458,30 @@ pub async fn set_limits_archived(
 }
 
 #[tauri::command]
+pub async fn remove_limits_account(
+    agent_id: AgentId,
+    account_id: String,
+) -> Result<(), AdapterError> {
+    blocking("limits account removal", move || {
+        crate::limits_refresh::remove_account(agent_id, &account_id).map_err(AdapterError::message)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn set_limits_account_archived(
+    agent_id: AgentId,
+    account_id: String,
+    archived: bool,
+) -> Result<(), AdapterError> {
+    blocking("limits account archive", move || {
+        crate::limits_refresh::set_account_archived(agent_id, &account_id, archived)
+            .map_err(AdapterError::message)
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn read_github_prs(force: bool) -> Result<GithubPrsDto, AdapterError> {
     blocking("github read", move || Ok(crate::github::read_prs(force))).await
 }

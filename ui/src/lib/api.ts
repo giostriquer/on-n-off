@@ -169,6 +169,14 @@ export function setLimitsArchived(agentId: AgentId, accountIds: string[], archiv
   return invoke("set_limits_archived", { agentId, accountIds, archived });
 }
 
+export function removeLimitsAccount(agentId: import("./providers").LimitsProvider, accountId: string): Promise<void> {
+  return invoke("remove_limits_account", { agentId, accountId });
+}
+
+export function setLimitsAccountArchived(agentId: import("./providers").LimitsProvider, accountId: string, archived: boolean): Promise<void> {
+  return invoke("set_limits_account_archived", { agentId, accountId, archived });
+}
+
 export function readGithubPrs(force = false): Promise<GithubPrs> {
   return invoke("read_github_prs", { force });
 }

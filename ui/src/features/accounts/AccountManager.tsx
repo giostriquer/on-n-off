@@ -25,9 +25,9 @@ function useController(provider: AccountProvider) {
   async function refresh() {
     await accountChanged(client, provider);
   }
-  async function action(action: AccountAction, id?: string, after?: () => Promise<void>) {
+  async function action(action: AccountAction, id?: string) {
     setBusy(action); setError(null);
-    try { await api.accountAction(provider, action, id); await after?.(); }
+    try { await api.accountAction(provider, action, id); }
     catch (error) { setError(parseInvokeError(error).message); throw error; }
     finally { try { await refresh(); } finally { setBusy(null); } }
   }
@@ -55,10 +55,6 @@ function useController(provider: AccountProvider) {
       }
     }
   }
-  async function removeAccount(profileId: string | undefined, forget: () => Promise<void>) {
-    if (profileId) await action("remove", profileId, forget);
-    else await forget();
-  }
   async function cancel() {
     const id = operation.current;
     if (!id || busy === "cancelLogin") return;
@@ -72,7 +68,7 @@ function useController(provider: AccountProvider) {
   }
   const blocked = !!busy || query.isPending || !!query.error || !!query.data?.recoveryRequired;
   const nativeLogin = { observationId: query.data?.nativeObservationId ?? null, settled: !query.isFetching };
-  return { provider, query, busy, blocked, nativeLogin, error, action, removeAccount, use, add, cancel, loginTarget };
+  return { provider, query, busy, blocked, nativeLogin, error, action, use, add, cancel, loginTarget };
 }
 export type AccountController = ReturnType<typeof useController>;
 const Controllers = createContext<Record<AccountProvider, AccountController> | null>(null);

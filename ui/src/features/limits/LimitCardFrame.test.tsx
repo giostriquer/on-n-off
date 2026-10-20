@@ -4,20 +4,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
+import { SharedReads } from "$lib/sharedReads/announcements";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, okMuse, staleCodex } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const readLimits = vi.hoisted(() => vi.fn());
-const forgetLimitsSnapshot = vi.hoisted(() => vi.fn());
-const setLimitsArchived = vi.hoisted(() => vi.fn());
+const removeLimitsAccount = vi.hoisted(() => vi.fn());
+const setLimitsAccountArchived = vi.hoisted(() => vi.fn());
 const setAccountCategory = vi.hoisted(() => vi.fn());
+const sharedReadHandlers = vi.hoisted(() => new Set<(change: { source: string }) => void>());
+const onSharedReadChanged = vi.hoisted(() => (handler: (change: { source: string }) => void) => {
+  sharedReadHandlers.add(handler);
+  return Promise.resolve(() => { sharedReadHandlers.delete(handler); });
+});
 
 vi.mock("$lib/api", () => ({
-  readLimits, readAccounts, accountAction: vi.fn(), forgetLimitsSnapshot, setLimitsArchived, setAccountCategory,
+  readLimits, readAccounts, accountAction: vi.fn(), removeLimitsAccount, setLimitsAccountArchived, setAccountCategory, onSharedReadChanged,
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
-  onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
+  readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
 const CURRENT: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
@@ -29,13 +35,25 @@ function remembered(provider: LimitsProvider): LimitsColumnEntry {
   return CURRENT[provider]({ currentAccount: false, account: { id: `${provider}-old`, label: oldLabel(provider) } });
 }
 
+const gone = new Set<string>();
+const away = new Set<string>();
+
 function answer(read: (provider: LimitsProvider) => LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>) {
-  readLimits.mockImplementation((provider: LimitsProvider) => Promise.resolve(read(provider)));
+  readLimits.mockImplementation(async (provider: LimitsProvider) => (await read(provider)).flatMap(entry => {
+    const id = entry.currentAccount ? null : entry.account?.id;
+    if (id && gone.has(`${provider} ${id}`)) return [];
+    return [id && away.has(`${provider} ${id}`) ? { ...entry, archived: true } : entry];
+  }));
+}
+
+function announced(provider: LimitsProvider, ids: Set<string>, accountId: string) {
+  ids.add(`${provider} ${accountId}`);
+  for (const handler of sharedReadHandlers) handler({ source: `limits:${provider}` });
 }
 
 function renderLimits() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
-  return render(<QueryClientProvider client={client}><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><SharedReads /><Limits resetAlerts={{}} onResetAlertsChange={async () => undefined} /></QueryClientProvider>);
 }
 
 function card(name: string) {
@@ -52,8 +70,10 @@ beforeEach(() => {
   vi.setSystemTime(new Date(NOW));
   readAccounts.mockReset().mockResolvedValue({ profiles: [], nativeAccount: null, recoveryRequired: false, notice: null });
   readLimits.mockReset();
-  forgetLimitsSnapshot.mockReset().mockResolvedValue(undefined);
-  setLimitsArchived.mockReset().mockResolvedValue(undefined);
+  gone.clear();
+  away.clear();
+  removeLimitsAccount.mockReset().mockImplementation(async (provider: LimitsProvider, accountId: string) => announced(provider, gone, accountId));
+  setLimitsAccountArchived.mockReset().mockImplementation(async (provider: LimitsProvider, accountId: string) => announced(provider, away, accountId));
   setAccountCategory.mockReset().mockImplementation(async (_provider: LimitsProvider, _account: string, category: string) => category.trim() || null);
 });
 
@@ -82,7 +102,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
     openMenu(old, oldLabel(provider));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
-    await waitFor(() => expect(setLimitsArchived).toHaveBeenCalledWith(provider, [`${provider}-old`], true));
+    await waitFor(() => expect(setLimitsAccountArchived.mock.calls).toEqual([[provider, `${provider}-old`, true]]));
     await waitFor(() => expect(screen.queryByRole("region", { name: `${name} limits · ${oldLabel(provider)}` })).toBeNull());
   });
 
@@ -92,9 +112,9 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
     openMenu(old, oldLabel(provider));
     fireEvent.click(screen.getByRole("button", { name: "Remove account" }));
-    expect(forgetLimitsSnapshot).not.toHaveBeenCalled();
+    expect(removeLimitsAccount).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Confirm removal" }));
-    await waitFor(() => expect(forgetLimitsSnapshot).toHaveBeenCalledWith(provider, `${provider}-old`, undefined));
+    await waitFor(() => expect(removeLimitsAccount.mock.calls).toEqual([[provider, `${provider}-old`]]));
     await waitFor(() => expect(screen.queryByRole("region", { name: `${name} limits · ${oldLabel(provider)}` })).toBeNull());
   });
 
@@ -120,12 +140,12 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     fireEvent.click(within(screen.getByRole("group", { name: "Confirm account action" })).getByRole("button", { name: "Cancel" }));
     expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull();
     expect(within(old).getByRole("button", { name: `More actions for ${oldLabel(provider)}` })).toHaveFocus();
-    expect(forgetLimitsSnapshot).not.toHaveBeenCalled();
+    expect(removeLimitsAccount).not.toHaveBeenCalled();
   });
 
   it("runs a confirmed removal once, and says why it failed in its confirmation", async () => {
     let fail!: (reason: Error) => void;
-    forgetLimitsSnapshot.mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = reject; }));
+    removeLimitsAccount.mockImplementationOnce(() => new Promise<void>((_, reject) => { fail = reject; }));
     answer(read => [CURRENT[read](), remembered(read)]);
     renderLimits();
     const old = await screen.findByRole("region", { name: `${name} limits · ${oldLabel(provider)}` });
@@ -136,7 +156,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     await waitFor(() => expect(confirm).toBeDisabled());
     if (hasSavedAccounts(provider)) expect(within(old).getByRole("button", { name: "Sign in" })).toBeDisabled();
     fireEvent.click(confirm);
-    expect(forgetLimitsSnapshot).toHaveBeenCalledTimes(1);
+    expect(removeLimitsAccount).toHaveBeenCalledTimes(1);
     await act(async () => fail(new Error("history is locked")));
     expect(within(old).getByRole("alert")).toHaveTextContent("history is locked");
     expect(confirm).toBeEnabled();

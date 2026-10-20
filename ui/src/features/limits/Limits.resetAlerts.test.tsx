@@ -12,7 +12,7 @@ const requestNotificationPermission = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, requestNotificationPermission,
-  accountAction: vi.fn(), forgetLimitsSnapshot: vi.fn(), setLimitsArchived: vi.fn(),
+  accountAction: vi.fn(), removeLimitsAccount: vi.fn(), setLimitsAccountArchived: vi.fn(),
   readAccountPreferences: vi.fn().mockResolvedValue(false), readAccountActivationBlockers: vi.fn().mockResolvedValue([]),
   addAccount: vi.fn(), cancelAccountLogin: vi.fn(), consumeCodexResetCredit: vi.fn(), pendingResetSpends: vi.fn().mockResolvedValue([]), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),

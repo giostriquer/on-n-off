@@ -389,12 +389,14 @@ beside one asks first, as Codex does.
   text per provider and card account id (the observation key), so every Limits card can have one,
   for every provider, saved or not. `read_account_categories` and `set_account_category` need no
   account adapter, and the setter answers with the stored text. The Limits cards take their
-  categories from the Limits read's roster (the Limits column, below), which a saved edit or
-  forget rereads (`Notify::roster`); the UI no longer reads the categories itself. `Database` keeps a saved login's
+  categories from the Limits read's roster (the Limits column, below), which a saved edit, a
+  forget and Remove account reread (`Notify::roster`, `limits_refresh::account_actions`); the UI no
+  longer reads the categories itself. `Database` keeps a saved login's
   profile copy in step with the map on every set and forget, and a login saved after its card was
   named takes the category, so an older app version still shows it; a profile category from an
-  older version moves into the map when the vault loads. Forget drops the categories of every id
-  it forgets, legacy ids included.
+  older version moves into the map when the vault loads. Remove account drops the categories of
+  every id the card holds, legacy ids included, in the vault change that removes its saved login
+  (Remove account, below); the older Forget command drops those of every id it forgets.
 - **Add / sign in again** launches official CLI authentication in an isolated native home. It checks
   the resulting identity, verifies the expected profile during reauthentication, then saves it.
   Before publication it attempts a usage/plan read using that isolated login: Codex uses app-server
@@ -417,7 +419,9 @@ beside one asks first, as Codex does.
   before revocation. It is intentionally distinct from switching.
 - **Remove** removes the app-owned profile only and excludes that stable identity from automatic
   remembering until explicitly saved/added again, and retires its home. It does not sign out a
-  native client.
+  native client. This is Remove saved login on the signed-in card; Remove account on any other
+  card removes the profile together with its usage history in one operation (Remove account,
+  below).
 
 An in-process reservation and a cross-process shared/exclusive activity lease exclude provider
 reads from account activation. A separate lease serializes vault access. Existing vault keys are unlocked before acquiring the shared storage lease, so an OS prompt does
@@ -463,7 +467,8 @@ configuration publication, validation and rollback; the account journal is its p
 participant. Claude credential publication merges only `claudeAiOauth`, preserving current MCP
 OAuth entries. Every account change replaces the shared Limits reading, and the Codex subscription
 dates read from the logins, through `read_revision` once its leases are released: save current and
-remove for the provider whose card they add or remove. Use and sign out do so even when their
+Remove saved login for the provider whose card they add or remove. Remove account edits the
+reading in place instead of reading the provider again (below). Use and sign out do so even when their
 native half fails, because a rollback or a failed logout may still have changed the native login;
 a sign-in does so only once published, and a change refused before it wrote anything is not
 announced. A category edit or forget announces the account list and rereads the provider's Limits
@@ -479,8 +484,9 @@ only from its menu. Nothing archives one on a timer, at expiry, or for disuse. T
 signed-in card cannot be archived.
 
 - **Storage.** The archived ids live in plaintext in `<home>/.on-n-off/limits/archived.json`,
-  per provider, beside the snapshots and keyed by the ids Forget takes: a card's own id and the
-  legacy ids merged into it, so its legacy history is archived with it. Writes hold the snapshot
+  per provider, beside the snapshots and keyed by account id. Archive account archives a card's
+  own id and the legacy ids its column entry folded into it (`replaced`), which Rust reads from
+  the column it serves (Remove account, below), so its legacy history is archived with it. Writes hold the snapshot
   lock and replace the file whole. The file needs no vault key, so the popover and a locked vault
   honour it, and archiving a history card never creates a vault. A missing or malformed file
   archives nothing; the next write replaces a malformed one.
@@ -501,10 +507,55 @@ signed-in card cannot be archived.
   Its legacy id comes along only while that history is the one the account replaced, by the rule
   that hides it (the same email), since in a shared workspace it can hold another member's.
   Automatic remembering never unarchives.
-- **Removed.** Remove account on an archived account works as it does on a card, through the same
-  sequence and under the same blocked rule: never while the account list is loading or failed,
-  when no card knows its saved login. Forget takes every id whose snapshot it deletes out of the
-  archive.
+- **Removed.** Remove account on an archived account is the same operation as on a card, under
+  the same blocked rule: never while the account list is loading, failed or waiting for recovery,
+  when the vault the removal changes may not open. It takes every id whose snapshot it deletes out
+  of the archive.
+
+## Remove account
+
+Remove account and Archive account are one Rust operation each, which the Limits screen calls
+once with the card's provider and account id: `remove_limits_account` and
+`set_limits_account_archived` (`limits_refresh/account_actions.rs`). Rust works out what the card
+holds from the Limits column it serves: the card's own id and the legacy history its entry folded
+in (`replaced`), never ids the UI passes. The signed-in card is refused, as it offers neither. A
+remembered card with no saved login is the same call.
+
+Remove account changes two stores, in this order:
+
+1. **The vault.** One account change, under the vault lease and its atomic replacement, removes
+   the saved profile whose observation key is the card's id, keeps its identity out of automatic
+   remembering as Remove does, and drops the categories of every id the card holds
+   (`accounts::forget_account_at`). The profile is found in the vault it opens, not in the column.
+   Without one it is a metadata change, which bumps no sign-in epoch and is allowed during
+   recovery; without a vault it changes nothing and creates none. It opens the vault as Remove
+   did, with this session's key or the OS store's, and reads no native login, no home and no
+   login secret. If this step fails, nothing has changed and nothing is announced: a vault that
+   does not open refuses even a card with no saved login, which the blocked rule above keeps from
+   being asked.
+2. **The usage history**, under the Limits cache lock, so no read of the provider runs beside it:
+   the snapshot store checks that every replaced legacy snapshot still carries the email the
+   column folded it by, then deletes them, the card's own snapshot and any legacy that one
+   supersedes on disk, and takes every deleted id out of the archive, all under its write lock
+   (`SnapshotStore::forget_card`). History that changed hands is refused before anything is
+   deleted. The cache drops the cards it deleted.
+
+When the history step fails after the saved login went, the one error says both ("The saved
+login was removed, but its usage history was not: …"), and the history stays as a remembered card
+without its saved login, which Remove account removes. Then the roster is reread with the
+session's key, when the vault changed, and the Limits read and the account list are each
+announced at most once: the Limits read when the column changed, the account list when the vault
+did. The provider is not read again, so the card goes as soon as the announcement is answered;
+a home the removed profile named goes at the next saved refresh, like any home no profile names
+(Homes, above), and discovery is not woken.
+
+Archive account writes the archive under the cache lock and flags the cached cards, rereads the
+roster when the archive changed, and announces the same way. Unarchive then reads the provider
+again, forced, before it announces, so its one announcement covers that read too. The UI patches
+no cache; it waits for the announcement. The earlier commands stay registered with their shapes
+and their `api.ts` wrappers, though no screen calls them: `forget_limits_snapshot` forgets one
+snapshot as before, and `set_limits_archived` archives the ids it is given through the same path
+as Archive account.
 
 ## Native scope and limitations
 
@@ -616,8 +667,9 @@ the ⋯ menu; ending shows its date through the last seven days; missing offers 
 always, Edit category on every card with an account, the saved-login items and the footer's
 primary action wherever there is an account manager, and Archive account and Remove account on
 every card that is not signed in.
-Remove account removes a saved login first when there is one, as the archived list does; on a
-card with no saved login, Archive account and Remove account act on its usage history only.
+Remove account and Archive account each send one command naming the card's account, from a card
+and from the archived list alike (Remove account, above); on a card with no saved login they act
+on its usage history only.
 Saved identities
 join observations only by exact observation key, and remain visible when usage reads fail.
 
@@ -628,7 +680,7 @@ that column is the Limits read's (`read_limits`, served by `limits_refresh::read
 `ColumnEntryDto`s and built by `limits::column`). Each entry is a `ProviderLimitsDto` with the
 account facts a card needs beside it: its saved profile (`profile`, the same `ProfileDto` the account
 list gives), its category (`category`), the legacy history it replaced (`replaced`, which Remove
-account and Archive account act on with it) and, for a saved profile no read answered for yet, an
+account and Archive account take with it, read by Rust from the column it serves) and, for a saved profile no read answered for yet, an
 entry of its own (`unread`). The card model (`limitColumn`) therefore joins nothing, and the popover
 lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
 own.
@@ -642,7 +694,7 @@ config, a denied Keychain probe, a login that names no account) rereads it with 
 (`Roster::read`), so the saved profiles stay listed. Every vault write rereads it too
 (`limits_refresh::roster_changed`): an account change (`account_changed`, before the provider is
 read again), automatic remembering when it saves a login or is turned on, unlock, a category edit or
-forget (all through `Notify::roster`), archive and unarchive, and the account list once it has read
+forget (all through `Notify::roster`), Remove account, archive and unarchive, and the account list once it has read
 the vault (`Notify::listed`), which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
 the roster alike (`Roster::of`, given each profile's facts: the listing's read its native login,
 deadlines and verdicts; the roster's are its recorded end alone). Who is signed
@@ -688,10 +740,11 @@ exception to the transfer rule, because its legacy key is the whole identity
 window, the snapshot store fills it from the legacy snapshot with the same legacy id and email, the
 way a later reading keeps its own last weekly. Meta omits Muse's usage while the 5-hour window is
 idle, so without this the first reading after the id change would show no weekly at all.
-The confirmed Remove account action retains that association and explicitly forgets matched
-legacy history before its scoped snapshot, so the next read cannot resurrect the removed card.
-Legacy deletion passes an optional expected email through the existing Forget command. Storage
-rechecks that email under the snapshot write lock and refuses changed or unreadable history;
-older callers that omit the guard retain the existing command behavior.
+Remove account takes that association with it: it deletes the matched legacy history with the
+scoped snapshot, so the next read cannot resurrect the removed card. Each legacy snapshot goes only
+while it still carries the email the column folded it by: the snapshot store rechecks every one
+under its write lock before it deletes any, and refuses changed or unreadable history. The older
+Forget command keeps its optional expected email, with the same recheck, for a caller that passes
+one.
 
 

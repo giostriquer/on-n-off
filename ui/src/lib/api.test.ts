@@ -5,7 +5,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const open = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open }));
 
-import { cancelResetSpend, clearUsageHistory, pendingResetSpends, pickCliBinary, pickFolder, setLimitsArchived, usageHistoryStatus } from "./api";
+import { cancelResetSpend, clearUsageHistory, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, usageHistoryStatus } from "./api";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -44,4 +44,16 @@ it("archives the accounts a card names through the command lib.rs registers", as
   await setLimitsArchived("codex", ["team"], true);
 
   expect(invoke.mock.calls).toEqual([["set_limits_archived", { agentId: "codex", accountIds: ["team"], archived: true }]]);
+});
+
+it("removes, archives and unarchives a card by its account alone, one command each", async () => {
+  await removeLimitsAccount("codex", "profile:team");
+  await setLimitsAccountArchived("claude", "user-a", true);
+  await setLimitsAccountArchived("muse", "email:you@example.com", false);
+
+  expect(invoke.mock.calls).toEqual([
+    ["remove_limits_account", { agentId: "codex", accountId: "profile:team" }],
+    ["set_limits_account_archived", { agentId: "claude", accountId: "user-a", archived: true }],
+    ["set_limits_account_archived", { agentId: "muse", accountId: "email:you@example.com", archived: false }],
+  ]);
 });

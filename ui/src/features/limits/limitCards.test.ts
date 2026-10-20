@@ -35,7 +35,7 @@ describe("which cards a provider shows", () => {
     expect(card).toEqual({
       key: "remembered-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
-      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }] },
+      account: { id: "profile:unread", name: "unread@claude.example", profile },
       reading: null, plan: null, status: null, signedIn: "no", leads: false, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
@@ -63,15 +63,17 @@ describe("which cards a provider shows", () => {
     expect(shown.map(card => [card.account?.id, card.empty?.reason ?? null])).toEqual([["team", null], ["profile:user-team", "usageUnavailable"]]);
   });
 
-  it("forgets the history the read folded into a card before the card itself", () => {
+  it("names a card by its own account alone, with the history the read folded into it left to Rust", () => {
     const scoped = okCodex({ account: { id: "profile:user-team", legacyId: "team", label: "shared@example.com" }, currentAccount: false,
       windows: [{ id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 0, observedAt: NOW }],
       replaced: [{ id: "team", label: "Shared@Example.com" }] });
     const shown = cards([scoped, staleCodex()]);
     expect(labels(shown)).toEqual(["shared@example.com", "personal@codex.example"]);
     expect(shown[0].headline?.text).toBe("0%");
-    expect(shown[0].account?.forget).toEqual([{ accountId: "team", expectedEmail: "Shared@Example.com" }, { accountId: "profile:user-team" }]);
-    expect(shown[1].account?.forget).toEqual([{ accountId: "acct-personal" }]);
+    expect(shown.map(card => card.account)).toEqual([
+      { id: "profile:user-team", name: "shared@example.com", profile: null },
+      { id: "acct-personal", name: "personal@codex.example", profile: null },
+    ]);
   });
 });
 
@@ -452,12 +454,12 @@ describe("archived accounts", () => {
     expect(shown?.visible.map(card => card.archived)).toEqual([false, false, false]);
   });
 
-  it("archives a card with the legacy history merged into it, whose ids it takes along", () => {
+  it("lists an archived card with the legacy history merged into it as one row, named by its own account", () => {
     const scoped = okCodex({ account: { id: "profile:user-team", label: "shared@example.com" }, currentAccount: false, archived: true,
       replaced: [{ id: "team", label: "shared@example.com" }] });
     const shown = column([signedIn, scoped]);
     expect(shown && labels(shown.archived)).toEqual(["shared@example.com"]);
-    expect(shown?.archived[0].account?.forget).toEqual([{ accountId: "team", expectedEmail: "shared@example.com" }, { accountId: "profile:user-team" }]);
+    expect(shown?.archived.map(card => card.account?.id)).toEqual(["profile:user-team"]);
   });
 
   it("is nothing until a read answers", () => {

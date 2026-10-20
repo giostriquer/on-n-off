@@ -140,41 +140,82 @@ impl SnapshotStore {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let changed = "Account history changed. Refresh accounts before removing it.";
-        if email.trim().is_empty() || Identity::is_profile_key(account_id) {
-            return Err(changed.into());
-        }
-        let path = self.dir.join(file_name(provider, account_id));
-        let forgotten = [account_id.to_string()];
-        let raw = match fs::read_to_string(&path) {
-            Ok(raw) => raw,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return self
-                    .unarchive_locked(provider, &forgotten)
-                    .map(|_| forgotten.to_vec());
-            }
-            Err(_) => return Err(changed.into()),
-        };
-        let stored = decode(&raw).ok_or(changed)?;
-        if stored.provider != provider
-            || stored.account.id != account_id
-            || !stored
-                .account
-                .label
-                .as_deref()
-                .is_some_and(|label| label.trim().eq_ignore_ascii_case(email.trim()))
-        {
-            return Err(changed.into());
-        }
+        self.check_history(provider, account_id, email)?;
         self.remove_file(provider, account_id)?;
+        let forgotten = vec![account_id.to_string()];
         self.unarchive_locked(provider, &forgotten)
-            .map(|_| forgotten.to_vec())
+            .map(|_| forgotten)
     }
 
     pub fn forget(&self, provider: AgentId, account_id: &str) -> Result<Vec<String>, String> {
         let _write = SNAPSHOT_WRITES
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let forgotten = self.forget_locked(provider, account_id)?;
+        self.unarchive_locked(provider, &forgotten)
+            .map(|_| forgotten)
+    }
+
+    pub fn forget_card(
+        &self,
+        provider: AgentId,
+        account_id: &str,
+        replaced: &[LimitsAccountDto],
+    ) -> Result<Vec<String>, String> {
+        let _write = SNAPSHOT_WRITES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for legacy in replaced {
+            if let Some(email) = &legacy.label {
+                self.check_history(provider, &legacy.id, email)?;
+            }
+        }
+        let mut forgotten = Vec::new();
+        for legacy in replaced {
+            self.remove_file(provider, &legacy.id)?;
+            forgotten.push(legacy.id.clone());
+        }
+        for id in self.forget_locked(provider, account_id)? {
+            if !forgotten.contains(&id) {
+                forgotten.push(id);
+            }
+        }
+        self.unarchive_locked(provider, &forgotten)
+            .map(|_| forgotten)
+    }
+
+    fn check_history(
+        &self,
+        provider: AgentId,
+        account_id: &str,
+        email: &str,
+    ) -> Result<(), String> {
+        let changed = "Account history changed. Refresh accounts before removing it.";
+        if email.trim().is_empty() || Identity::is_profile_key(account_id) {
+            return Err(changed.into());
+        }
+        let path = self.dir.join(file_name(provider, account_id));
+        let raw = match fs::read_to_string(&path) {
+            Ok(raw) => raw,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(changed.into()),
+        };
+        let stored = decode(&raw).ok_or(changed)?;
+        let same = stored.provider == provider
+            && stored.account.id == account_id
+            && stored
+                .account
+                .label
+                .as_deref()
+                .is_some_and(|label| label.trim().eq_ignore_ascii_case(email.trim()));
+        if same {
+            Ok(())
+        } else {
+            Err(changed.into())
+        }
+    }
+
+    fn forget_locked(&self, provider: AgentId, account_id: &str) -> Result<Vec<String>, String> {
         let all = self.stored(provider);
         let mut forgotten = Vec::new();
         if let Some(target) = all
@@ -189,8 +230,7 @@ impl SnapshotStore {
         }
         self.remove_file(provider, account_id)?;
         forgotten.push(account_id.to_string());
-        self.unarchive_locked(provider, &forgotten)
-            .map(|_| forgotten)
+        Ok(forgotten)
     }
 
     fn remove_file(&self, provider: AgentId, account_id: &str) -> Result<(), String> {

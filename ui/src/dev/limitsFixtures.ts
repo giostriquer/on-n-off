@@ -437,17 +437,43 @@ export function limitsScenario(name: string) {
     const merged = new Map<string, string | null>([...saved, ...categories[which]]);
     return Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []));
   };
+  const columnOf = (which: LimitsProvider): LimitsColumnEntry[] => {
+    const read = (chosen[which] ?? OK[which])().flatMap(entry => {
+      const id = entry.currentAccount ? null : entry.account?.id;
+      if (!id) return [entry];
+      if (forgotten[which].has(id)) return [];
+      return [archived[which].has(id) ? { ...entry, archived: true } : entry];
+    });
+    return asColumn(read, profilesOf(which), categoriesOf(which));
+  };
+  const heldBy = (which: LimitsProvider, accountId: string): string[] => {
+    const entry = columnOf(which).find(candidate => !candidate.currentAccount && candidate.account?.id === accountId);
+    return [...(entry?.replaced ?? []).map(legacy => legacy.id), accountId];
+  };
   return {
     readLimits(agentId: unknown): LimitsColumnEntry[] {
       const which = provider(agentId);
-      if (!which) return [];
-      const read = (chosen[which] ?? OK[which])().flatMap(entry => {
-        const id = entry.currentAccount ? null : entry.account?.id;
-        if (!id) return [entry];
-        if (forgotten[which].has(id)) return [];
-        return [archived[which].has(id) ? { ...entry, archived: true } : entry];
-      });
-      return asColumn(read, profilesOf(which), categoriesOf(which));
+      return which ? columnOf(which) : [];
+    },
+    removeAccount(agentId: unknown, accountId: unknown): boolean {
+      const which = provider(agentId);
+      if (!which || typeof accountId !== "string") return false;
+      const saved = profilesOf(which).find(profile => profile.observationId === accountId);
+      for (const id of heldBy(which, accountId)) {
+        forgotten[which].add(id);
+        archived[which].delete(id);
+        categories[which].set(id, null);
+      }
+      if (saved) removedLogins[which].add(saved.id);
+      return !!saved;
+    },
+    setAccountArchived(agentId: unknown, accountId: unknown, value: unknown) {
+      const which = provider(agentId);
+      if (!which || typeof accountId !== "string") return;
+      for (const id of heldBy(which, accountId)) {
+        if (value === true) archived[which].add(id);
+        else archived[which].delete(id);
+      }
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
