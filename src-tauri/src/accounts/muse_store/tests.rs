@@ -237,6 +237,17 @@ fn a_denied_lookup_is_remembered_until_auth_json_changes() {
 }
 
 #[test]
+#[cfg(not(target_os = "macos"))]
+fn off_macos_a_keychain_stored_login_reads_as_unread() {
+    assert_eq!(SystemKeychain.read(), Err(UNREACHABLE.to_string()));
+    let login = login_in(&config_with_auth(KEYCHAIN_AUTH), NOW, &|| {
+        SystemKeychain.read()
+    });
+    assert_eq!(state(&login), "unread");
+    assert_eq!(login.email.as_deref(), Some("you@example.com"));
+}
+
+#[test]
 fn an_expiry_of_another_shape_keeps_the_token() {
     for expires_at in [r#""2030-01-01""#, "1.5e9", "null"] {
         let config = config_with_auth(&format!(
