@@ -18,10 +18,11 @@ const readAccounts = vi.hoisted(() => vi.fn());
 const accountAction = vi.hoisted(() => vi.fn());
 const readAccountActivationBlockers = vi.hoisted(() => vi.fn());
 const pendingResetSpends = vi.hoisted(() => vi.fn());
+const addAccount = vi.hoisted(() => vi.fn());
 
 vi.mock("$lib/api", () => ({
   readLimits, readAccounts, accountAction, readAccountActivationBlockers, pendingResetSpends,
-  readAccountPreferences: vi.fn().mockResolvedValue(false), addAccount: vi.fn(), cancelAccountLogin: vi.fn(),
+  readAccountPreferences: vi.fn().mockResolvedValue(false), addAccount, cancelAccountLogin: vi.fn(),
   forgetLimitsSnapshot: vi.fn(), setLimitsArchived: vi.fn(), readAccountCategories: vi.fn().mockResolvedValue({}), setAccountCategory: vi.fn(),
   consumeCodexResetCredit: vi.fn(), cancelResetSpend: vi.fn(),
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
@@ -59,6 +60,7 @@ beforeEach(() => {
   accountAction.mockReset().mockResolvedValue(undefined);
   readAccountActivationBlockers.mockReset().mockResolvedValue([]);
   pendingResetSpends.mockReset().mockResolvedValue([]);
+  addAccount.mockReset().mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -89,5 +91,32 @@ describe("a card's banked reset controls", () => {
     expect(within(card).getByRole("button", { name: CANCEL_SPEND })).toBeEnabled();
     expect(within(card).getByText(/^Using a banked reset at/)).toBeTruthy();
     await waitFor(() => expect(accountAction).not.toHaveBeenCalled());
+  });
+});
+
+describe("a card's footer button", () => {
+  it("saves the signed-in login it shows once the account list names it", async () => {
+    answer([okCodex()]);
+    renderLimits();
+    const card = await screen.findByRole("region", { name: "Codex limits · work@codex.example" });
+    const save = await within(card).findByRole("button", { name: "Save account" });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.click(save);
+    await waitFor(() => expect(accountAction).toHaveBeenCalledWith("codex", "save", undefined));
+    expect(addAccount).not.toHaveBeenCalled();
+  });
+
+  it("signs in to an account it has no saved login for, and to a saved login's own profile when that needs it", async () => {
+    answer([okCodex(), staleCodex(), staleCodex({ account: { id: "acct-spare", label: "spare@codex.example" } })], [{ ...personal(), observationId: "acct-spare", email: "spare@codex.example", label: "spare@codex.example", needsLogin: true }]);
+    renderLimits();
+    const history = await screen.findByRole("region", { name: "Codex limits · personal@codex.example" });
+    fireEvent.click(await within(history).findByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(addAccount).toHaveBeenLastCalledWith("codex", expect.any(String), undefined));
+    const saved = screen.getByRole("region", { name: "Codex limits · spare@codex.example" });
+    const signIn = within(saved).getByRole("button", { name: "Sign in" });
+    await waitFor(() => expect(signIn).toBeEnabled());
+    fireEvent.click(signIn);
+    await waitFor(() => expect(addAccount).toHaveBeenLastCalledWith("codex", expect.any(String), "saved-personal"));
+    expect(accountAction).not.toHaveBeenCalled();
   });
 });

@@ -412,6 +412,13 @@ describe("a card's subscription badge", () => {
     expect(cards([statusOnly("codex", "signedOut", null)])[0].subscription).toBeNull();
   });
 
+  it("refreshes by the signed-in state, not by the read: the saved profile's word comes first", () => {
+    const poll = (entry: ProviderLimits, active: boolean) =>
+      cards([entry], [saved("codex", "work", "acct-work", "work@codex.example", { active })])[0].subscription?.poll;
+    expect(poll(okCodex({ currentAccount: false }), true), "the account list already names it").toBe(true);
+    expect(poll(okCodex(), false), "the read names it, but its saved login is not the one in use").toBe(false);
+  });
+
   it("is never on a Claude card: Claude Code reports no subscription term", () => {
     expect(cards([okClaude()])[0].subscription).toBeNull();
   });

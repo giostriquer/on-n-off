@@ -91,7 +91,7 @@ const STATES = {
     profiles: [profile(provider)],
   }),
   "signing in": (provider: LimitsProvider): Setup => ({
-    entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)], accounts: { ...LIST, signingIn: "running" },
+    entries: [reading(provider, { currentAccount: false, savedProfile: true })], profiles: [profile(provider)], accounts: { ...LIST, signingIn: "running", blocked: true },
   }),
   remembered: (provider: LimitsProvider): Setup => ({ entries: [reading(provider, { currentAccount: false })] }),
   "pending automatic spend": (provider: LimitsProvider): Setup => ({
@@ -104,6 +104,7 @@ const STATES = {
 type State = keyof typeof STATES;
 type Expected = { menu: string; footer: string };
 
+const UNHELD = ["checkNow", "resetAlert", "cancelSignIn", "automaticSpend"];
 const SIGNED_IN = "checkNow category signInAgain removeLogin signOut";
 const SAVED = "checkNow category signInAgain archive remove";
 const CODEX_SAVED = "checkNow category signInAgain archive resetAlert remove";
@@ -117,7 +118,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "needs login": { menu: SAVED, footer: "signIn" },
     "sign-in ended": { menu: SAVED, footer: "signInAgain" },
     "term ended": { menu: SAVED, footer: "useAccount" },
-    "signing in": { menu: SAVED, footer: "cancelSignIn" },
+    "signing in": { menu: "checkNow category- signInAgain- archive- remove-", footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive remove", footer: "signIn" },
     "pending automatic spend": { menu: SAVED, footer: "useAccount switchAnyway" },
     "no account manager": { menu: "checkNow category", footer: "" },
@@ -130,7 +131,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "needs login": { menu: CODEX_SAVED, footer: "signIn" },
     "sign-in ended": { menu: CODEX_SAVED, footer: "useAccount" },
     "term ended": { menu: CODEX_SAVED, footer: "archive" },
-    "signing in": { menu: CODEX_SAVED, footer: "cancelSignIn" },
+    "signing in": { menu: "checkNow category- signInAgain- archive- resetAlert remove-", footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive resetAlert remove", footer: "signIn" },
     "pending automatic spend": { menu: CODEX_SAVED, footer: "useAccount switchAnyway automaticSpend" },
     "no account manager": { menu: "checkNow category resetAlert", footer: "useBankedReset automaticSpend" },
@@ -143,7 +144,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
     "needs login": { menu: SAVED, footer: "signIn" },
     "sign-in ended": { menu: SAVED, footer: "useAccount" },
     "term ended": { menu: SAVED, footer: "useAccount" },
-    "signing in": { menu: SAVED, footer: "cancelSignIn" },
+    "signing in": { menu: "checkNow category- signInAgain- archive- remove-", footer: "cancelSignIn" },
     remembered: { menu: "checkNow category archive remove", footer: "signIn" },
     "pending automatic spend": { menu: SAVED, footer: "useAccount switchAnyway" },
     "no account manager": { menu: "checkNow category", footer: "" },
@@ -155,11 +156,15 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
     expect(describe_(plan(provider, STATES[state](provider)))).toEqual(TABLE[provider][state]);
   });
 
-  it("holds every account action while the account list cannot act or the card's removal runs, but never Check limits now", () => {
-    const blocked = { menu: "checkNow category- signInAgain- archive- remove-", footer: "useAccount-" };
-    const withAlert = provider === "codex" ? { ...blocked, menu: "checkNow category- signInAgain- archive- resetAlert remove-" } : blocked;
-    expect(describe_(plan(provider, { ...STATES.saved(provider), accounts: { ...LIST, blocked: true } }))).toEqual(withAlert);
-    expect(describe_(plan(provider, STATES.saved(provider), { removing: true }))).toEqual(withAlert);
+  it.each(Object.keys(STATES) as State[])("holds every account action on a card %s while the account list cannot act or its removal runs", state => {
+    const setup = STATES[state](provider);
+    const runs = [plan(provider, setup, { removing: true })];
+    if (setup.accounts !== null) runs.push(plan(provider, { ...setup, accounts: { ...(setup.accounts ?? LIST), blocked: true } }));
+    for (const shown of runs) {
+      const { menu, footer } = describe_(shown);
+      const enabled = `${menu} ${footer}`.split(" ").filter(token => token && !token.endsWith("-"));
+      expect(enabled.filter(token => !UNHELD.includes(token))).toEqual([]);
+    }
   });
 
   it("disables only Check limits now while the provider is being checked", () => {
