@@ -13,11 +13,15 @@ const neverContacted = {
   "cursor.com": "the install command shown for the Cursor CLI",
 };
 
-function contactedHosts() {
+function sourceHosts() {
   const files = execFileSync("git", ["ls-files", "-z", "--", "src-tauri/src/*.rs"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter((file) => file && !/(^|\/)tests(\.rs|\/)|fixtures\.rs$/.test(file));
-  const hosts = new Set(files.flatMap((file) => [...readFileSync(join(root, file), "utf8").matchAll(HOST)].map((match) => match[1])));
+  return new Set(files.flatMap((file) => [...readFileSync(join(root, file), "utf8").matchAll(HOST)].map((match) => match[1])));
+}
+
+function contactedHosts() {
+  const hosts = sourceHosts();
   const tauri = JSON.parse(readFileSync(join(root, "src-tauri", "tauri.conf.json"), "utf8"));
   for (const endpoint of tauri.plugins.updater.endpoints) hosts.add(new URL(endpoint).hostname);
   for (const host of Object.keys(neverContacted)) hosts.delete(host);
@@ -35,7 +39,7 @@ test("the README's Privacy section names exactly the hosts the app itself contac
   assert.deepEqual(privacyHosts(), contactedHosts());
 });
 
-test("every host the scan sets aside still appears in the source, so the exclusions cannot go stale", () => {
-  const source = execFileSync("git", ["grep", "-hoE", "https://[a-z0-9.-]+", "--", "src-tauri/src/*.rs"], { cwd: root, encoding: "utf8" });
-  for (const host of Object.keys(neverContacted)) assert.ok(source.includes(`https://${host}`), host);
+test("every host the scan sets aside still appears in the scanned source, so the exclusions cannot go stale", () => {
+  const hosts = sourceHosts();
+  for (const host of Object.keys(neverContacted)) assert.ok(hosts.has(host), host);
 });
