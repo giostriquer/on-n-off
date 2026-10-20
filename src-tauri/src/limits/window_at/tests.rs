@@ -74,6 +74,21 @@ fn the_figure_behind_every_percent_text_is_the_one_each_case_names() {
 }
 
 #[test]
+fn no_percent_short_of_the_limit_reads_as_the_limit() {
+    let sweep = (0..=200).map(|step| f64::from(step) / 2.0);
+    for used in sweep.chain([99.4, 99.5, 99.9]) {
+        let figure = figure_of(used);
+        assert!(
+            figure <= 99 || used >= 100.0,
+            "{used}% reads as figure {figure}"
+        );
+        if used >= 1.0 {
+            assert_eq!(text_of(Some(used)), format!("{figure}%"), "{used}%");
+        }
+    }
+}
+
+#[test]
 fn the_monitor_reads_a_raw_percent_by_the_rules_every_surface_draws() {
     let cases = cases();
     for case in &cases.windows {

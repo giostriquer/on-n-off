@@ -37,7 +37,8 @@ fn a_sign_ins_first_usage_is_claude_codes_report_in_its_config_dir() {
     let card = crate::accounts::native::with_test_cli(&stub, || {
         native.first_usage(root.path(), &identity())
     })
-    .expect("a card");
+    .expect("a card")
+    .into_card();
 
     assert_eq!(
         card.account.map(|a| a.id),

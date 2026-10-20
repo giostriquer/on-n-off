@@ -9,7 +9,12 @@ fn poll(
     cards: &[ProviderLimitsDto],
     alerts: &HashMap<String, ResetAlert>,
 ) -> Plan {
-    plan(memory, &mut Waiting::default(), cards, alerts, now())
+    let read = Served {
+        provider: crate::provider_catalogue::BANKED_RESETS_PROVIDER,
+        entries: cards.to_vec(),
+        failure: None,
+    };
+    plan(memory, &mut Waiting::default(), &[read], alerts, now())
 }
 
 fn offered(

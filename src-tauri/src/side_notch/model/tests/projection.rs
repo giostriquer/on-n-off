@@ -300,7 +300,10 @@ fn the_named_windows_resolve_for_the_painter() {
             weekly("weekly_all"),
             session("session"),
             model("weekly_opus", "Weekly · Opus"),
-            ring("weekly_fable", "Weekly · Fable"),
+            LimitWindowDto {
+                used_percent: 63.0,
+                ..ring("weekly_fable", "Weekly · Fable")
+            },
         ],
     ));
     assert_eq!(
@@ -311,8 +314,9 @@ fn the_named_windows_resolve_for_the_painter() {
     let (inner, at) = claude.inner_at(now).expect("the Fable ring");
     assert!(matches!(inner, InnerRing::Fable { .. }));
     assert_eq!(
-        at,
-        WindowAt::of(&ring("weekly_fable", "Weekly · Fable"), now)
+        at.used_now(),
+        Some(63.0),
+        "the ring is the Fable window's own reading"
     );
 
     let mut member = signed_in(AgentId::Codex, vec![weekly("primary")]);

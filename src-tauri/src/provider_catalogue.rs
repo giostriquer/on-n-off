@@ -15,6 +15,8 @@ pub struct ProviderFacts {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LimitsFacts {
+    pub client: &'static str,
+    pub vendor: &'static str,
     pub inherits_legacy_reading: bool,
     pub on_load: &'static [OnLoad],
     pub credits_spent: Option<CreditsSpent>,
@@ -70,6 +72,8 @@ pub enum PaidResetOffer {
 
 impl LimitsFacts {
     pub const NONE: Self = Self {
+        client: "",
+        vendor: "",
         inherits_legacy_reading: false,
         on_load: &[],
         credits_spent: None,
@@ -79,6 +83,14 @@ impl LimitsFacts {
         subscription_term: None,
         paid_reset_offer: None,
     };
+
+    pub const fn named(client: &'static str, vendor: &'static str) -> Self {
+        Self {
+            client,
+            vendor,
+            ..Self::NONE
+        }
+    }
 }
 
 impl AgentId {
@@ -100,7 +112,7 @@ impl AgentId {
                 limits: Some(LimitsFacts {
                     on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
                     sign_in_deadline: Some(SignInDeadline::Claude),
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Claude Code", "Anthropic")
                 }),
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
@@ -117,7 +129,7 @@ impl AgentId {
                     banked_resets: Some(BankedResets::Codex),
                     subscription_term: Some(SubscriptionTerm::Codex),
                     paid_reset_offer: Some(PaidResetOffer::Codex),
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Codex CLI", "OpenAI")
                 }),
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
@@ -148,7 +160,7 @@ impl AgentId {
                 limits: Some(LimitsFacts {
                     inherits_legacy_reading: true,
                     on_load: &[OnLoad::MarkFirstMessageSessions],
-                    ..LimitsFacts::NONE
+                    ..LimitsFacts::named("Muse Code", "Meta")
                 }),
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: true,
@@ -251,6 +263,24 @@ const _: () = assert!(
 );
 
 pub const BANKED_RESETS_PROVIDER: AgentId = WITH_BANKED_RESETS[0];
+
+const _: () = assert!(
+    every_limits_row_is_named(),
+    "every provider with Limits names its client and vendor: start its row from LimitsFacts::named"
+);
+
+const fn every_limits_row_is_named() -> bool {
+    let mut i = 0;
+    while i < AgentId::ALL.len() {
+        if let Some(facts) = AgentId::ALL[i].facts().limits {
+            if facts.client.is_empty() || facts.vendor.is_empty() {
+                return false;
+            }
+        }
+        i += 1;
+    }
+    true
+}
 
 const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;

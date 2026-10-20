@@ -35,7 +35,7 @@ pub(super) fn account(id: &str, label: &str) -> LimitsAccountDto {
 
 #[test]
 fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
-    let dtos = read_limits(AgentId::Cursor, false);
+    let dtos = read_limits(AgentId::Cursor, false).cards;
     assert_eq!(dtos.len(), 1);
     assert_eq!(dtos[0].provider, AgentId::Cursor);
     assert_eq!(dtos[0].status, LimitsStatus::Failed);
@@ -43,6 +43,52 @@ fn without_a_user_home_a_read_says_it_cannot_reach_the_login() {
         dtos[0].message.as_deref(),
         Some("Could not read the stored login: a test build has no user home")
     );
+}
+
+#[test]
+fn a_login_is_verified_only_by_a_read_that_answered_for_it() {
+    assert_eq!(
+        verify_signed_in(AgentId::Codex, false),
+        Err("a test build has no user home".to_string())
+    );
+    let home = scratch_dir("limits-verify");
+    let refused = |provider| {
+        outcome::verified(provider, Some(&ReadFailure::Unavailable(String::new()))).unwrap_err()
+    };
+    let missing_claude = home.join("no-such-claude");
+    assert_eq!(
+        crate::accounts::native::with_test_cli(&missing_claude, || {
+            verify_signed_in_at(AgentId::Claude, false, &home)
+        }),
+        Err(refused(AgentId::Claude)),
+        "Claude Code is not installed"
+    );
+    assert_eq!(
+        verify_signed_in_at(AgentId::Muse, false, &home),
+        Err(refused(AgentId::Muse)),
+        "Muse is signed out"
+    );
+    let config = crate::paths::muse_config_for(&home);
+    fs::create_dir_all(&config).unwrap();
+    fs::write(
+        config.join("auth.json"),
+        json!({"providers": {"meta": {"access_token": "device-token", "user_email": "you@example.com", "expires_at": 1}}}).to_string(),
+    )
+    .unwrap();
+    assert_eq!(
+        verify_signed_in_at(AgentId::Muse, false, &home),
+        Err(refused(AgentId::Muse)),
+        "Muse's login has expired"
+    );
+    assert!(verify_signed_in_at(AgentId::Cursor, false, &home).is_err());
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
+fn without_a_user_home_no_native_login_is_named() {
+    for provider in AgentId::ALL {
+        assert_eq!(native_login(provider), None, "{provider:?}");
+    }
 }
 
 #[test]
@@ -104,7 +150,7 @@ fn a_limits_read_waits_while_its_provider_is_being_read() {
         let home = home.clone();
         std::thread::spawn(move || {
             let cards = crate::accounts::native::with_test_cli(&stub, || {
-                read_limits_at(AgentId::Claude, false, &home)
+                read_limits_at(AgentId::Claude, false, &home).cards
             });
             let _ = sent.send(cards);
         })
@@ -133,7 +179,7 @@ fn providers_without_a_subscription_are_unsupported() {
         .collect();
     assert!(!unsupported.is_empty());
     for provider in unsupported {
-        let dtos = read_limits_at(provider, false, &home);
+        let dtos = read_limits_at(provider, false, &home).cards;
         assert_eq!(dtos.len(), 1);
         assert_eq!(dtos[0].provider, provider);
         assert_eq!(dtos[0].status, LimitsStatus::Unsupported);
@@ -356,7 +402,7 @@ fn probe_real_home_limits() {
 fn print_real_home_limits() {
     let home = crate::paths::probe_home();
     for provider in crate::provider_catalogue::WITH_LIMITS {
-        for dto in read_limits_at(provider, false, &home) {
+        for dto in read_limits_at(provider, false, &home).cards {
             println!(
                     "{:?}: current_account={} account={:?} status={:?} plan={:?} message={:?} credits={:?}",
                     provider,

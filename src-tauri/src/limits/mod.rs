@@ -9,6 +9,7 @@ pub(crate) mod credits_spent;
 pub(crate) mod json;
 pub(crate) mod login;
 mod muse;
+pub(crate) mod outcome;
 mod pipeline;
 mod plan;
 mod reading;
@@ -22,7 +23,8 @@ pub(crate) mod window_at;
 pub(crate) use codex::codex_card;
 pub use codex::consume_codex_reset_credit;
 pub(crate) use codex::{read_saved_codex, CodexEndpoints};
-pub(crate) use muse::mint::read_saved as read_saved_muse;
+pub(crate) use muse::mint::{read_saved as read_saved_muse, verify as verify_saved_muse};
+pub(crate) use outcome::{Accepted, NativeOutcome, ReadFailure};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::{without_superseded, Remembered};
 #[cfg(test)]
@@ -36,10 +38,13 @@ use std::sync::{Mutex, MutexGuard};
 use chrono::Utc;
 
 use crate::accounts::model::Identity;
-use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading};
-use crate::http::HttpError;
+#[cfg(test)]
+use crate::dto::LimitsStatus;
+use crate::dto::{AgentId, LimitsAccountDto, ProviderLimitsDto, Reading};
 use crate::paths;
 use crate::provider_catalogue::SessionRollouts;
+use outcome::Read;
+#[cfg(test)]
 use pipeline::finish;
 use snapshots::SnapshotStore;
 
@@ -97,25 +102,32 @@ struct Sources<'a> {
     now_ms: i64,
 }
 
-pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
+pub(crate) struct NativeRead {
+    pub(crate) cards: Vec<ProviderLimitsDto>,
+    pub(crate) outcome: NativeOutcome,
+}
+
+pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
     let home = match paths::user_home() {
         Ok(home) => home,
         Err(error) => {
-            return vec![finish(
+            let (card, outcome) = outcome::signed_in(
                 agent,
-                LimitsStatus::Failed,
-                Some(format!(
+                Read::anonymous(ReadFailure::Unavailable(format!(
                     "Could not read the stored login: {}",
                     error.message
-                )),
-                Parsed::default(),
-            )]
+                ))),
+            );
+            return NativeRead {
+                cards: vec![card],
+                outcome,
+            };
         }
     };
     read_limits_at(agent, force, &home)
 }
 
-fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimitsDto> {
+fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> NativeRead {
     read_limits_in(
         agent,
         force,
@@ -124,6 +136,31 @@ fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> Vec<ProviderLimit
             now_ms: Utc::now().timestamp_millis(),
         },
     )
+}
+
+pub(crate) fn native_login(agent: AgentId) -> Option<String> {
+    let home = paths::user_home().ok()?;
+    native_login_at(agent, &home)
+}
+
+fn native_login_at(agent: AgentId, home: &Path) -> Option<String> {
+    (limits_reader(agent)?.login)(home).map(|account| account.id)
+}
+
+pub(crate) fn verify_signed_in(agent: AgentId, force: bool) -> Result<(), String> {
+    let home = paths::user_home().map_err(|error| error.message)?;
+    verify_signed_in_at(agent, force, &home)
+}
+
+fn verify_signed_in_at(agent: AgentId, force: bool, home: &Path) -> Result<(), String> {
+    let failure = match limits_reader(agent) {
+        Some(reader) => {
+            let _provider_guard = provider_read_guard(agent);
+            (reader.read)(home, force).answer.err()
+        }
+        None => Some(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
+    };
+    outcome::verified(agent, failure.as_ref())
 }
 
 pub fn forget_snapshot(
@@ -138,54 +175,66 @@ pub fn forget_snapshot(
     SnapshotStore::for_home(&home).forget(agent, account_id)
 }
 
-type Reader = fn(&Path, bool) -> ProviderLimitsDto;
+#[derive(Clone, Copy)]
+struct Reader {
+    read: fn(&Path, bool) -> Read,
+    login: fn(&Path) -> Option<LimitsAccountDto>,
+}
 
 fn limits_reader(agent: AgentId) -> Option<Reader> {
     match agent {
-        AgentId::Claude => Some(|home, _| claude::claude_current(home)),
-        AgentId::Codex => Some(codex::codex_limits),
-        AgentId::Muse => Some(|home, _| muse::muse_current(home)),
+        AgentId::Claude => Some(Reader {
+            read: |home, _| claude::claude_current(home),
+            login: claude::known_account,
+        }),
+        AgentId::Codex => Some(Reader {
+            read: codex::codex_read,
+            login: codex_app_server::known_account,
+        }),
+        AgentId::Muse => Some(Reader {
+            read: |home, _| muse::muse_current(home),
+            login: muse::known_account,
+        }),
         AgentId::Antigravity | AgentId::Cursor => None,
     }
 }
 
-fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<ProviderLimitsDto> {
-    let Some(read) = limits_reader(agent) else {
-        return vec![finish(
+fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRead {
+    let Some(reader) = limits_reader(agent) else {
+        let (card, outcome) = outcome::signed_in(
             agent,
-            LimitsStatus::Unsupported,
-            Some(format!(
-                "{} has no subscription limits to show.",
-                agent.display_name()
-            )),
-            Parsed::default(),
-        )];
+            Read::anonymous(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
+        );
+        return NativeRead {
+            cards: vec![card],
+            outcome,
+        };
     };
     let _provider_guard = provider_read_guard(agent);
-    read_accounts(agent, sources, |home| read(home, force))
+    read_accounts(agent, sources, |home| (reader.read)(home, force))
 }
 
 fn read_accounts(
     agent: AgentId,
     sources: Sources<'_>,
-    read: impl FnOnce(&Path) -> ProviderLimitsDto,
-) -> Vec<ProviderLimitsDto> {
+    read: impl FnOnce(&Path) -> Read,
+) -> NativeRead {
     let home = sources.home;
     let observed_at =
         chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
-    let current = read(home);
+    let (current, outcome) = outcome::signed_in(agent, read(home));
     let store = SnapshotStore::for_home(home);
-    let mut accounts = aggregate_accounts(&store, current);
+    let mut cards = aggregate_accounts(&store, current);
     match agent.limits_facts().session_rollouts {
         Some(SessionRollouts::Codex) => {
-            let before = accounts.clone();
-            if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
-                store.save_changed(&before, &accounts);
+            let before = cards.clone();
+            if codex_sessions::merge_recent(home, observed_at, &mut cards) > 0 {
+                store.save_changed(&before, &cards);
             }
         }
         None => {}
     }
-    accounts
+    NativeRead { cards, outcome }
 }
 
 fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {
@@ -297,19 +346,6 @@ pub(crate) fn remembered(home: &Path, provider: AgentId) -> Vec<ProviderLimitsDt
     SnapshotStore::for_home(home).load(provider)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum SavedReadError {
-    Http(HttpError),
-    OtherAccount,
-    Unavailable(&'static str),
-}
-
-impl From<HttpError> for SavedReadError {
-    fn from(error: HttpError) -> Self {
-        Self::Http(error)
-    }
-}
-
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SavedReadUrls<'a> {
     pub(crate) codex: CodexEndpoints<'a>,
@@ -321,22 +357,6 @@ impl SavedReadUrls<'static> {
         codex: codex::CODEX,
         muse: muse::mint::KEY_ENDPOINT,
     };
-}
-
-fn saved_card(
-    identity: &Identity,
-    mut parsed: Parsed,
-) -> Result<ProviderLimitsDto, SavedReadError> {
-    let label = parsed.account.and_then(|account| account.label);
-    parsed.account = Some(scoped_account(identity, label));
-    let mut dto = finish(identity.provider, LimitsStatus::Ok, None, parsed);
-    dto.current_account = false;
-    if !dto.reading.has_observations() {
-        return Err(
-            HttpError::Parse("Usage response contained no quota observations.".into()).into(),
-        );
-    }
-    Ok(dto)
 }
 
 pub(crate) fn scoped_account(identity: &Identity, label: Option<String>) -> LimitsAccountDto {

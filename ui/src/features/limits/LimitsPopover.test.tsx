@@ -122,7 +122,7 @@ describe("LimitsPopover", () => {
     const account = await screen.findByRole("article", { name: "Claude limits · current@claude.example" });
     const weekly = within(account).getByRole("meter", { name: "Weekly · all models" });
     expect([weekly.getAttribute("aria-valuenow"), weekly.getAttribute("aria-valuetext")]).toEqual(["99", null]);
-    expect(within(account).getByText("99%")).toBeTruthy();
+    expect(within(account).getByText("99%")).toHaveStyle({ color: "var(--trip)" });
     const session = within(account).getByRole("meter", { name: "5 hour · all models" });
     expect([session.getAttribute("aria-valuenow"), session.getAttribute("aria-valuetext")]).toEqual([null, "Usage unavailable"]);
     expect(within(account).getByText("—")).toBeTruthy();

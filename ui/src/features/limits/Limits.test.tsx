@@ -212,6 +212,16 @@ describe("Limits", () => {
     expect(fill).not.toContain("var(--warn)");
   });
 
+  it("turns a spent headline's figure red, as its meter is", async () => {
+    const spent = okClaude();
+    spent.windows = [{ ...spent.windows[0], usedPercent: 95 }];
+    answer([spent], [okCodex()]);
+    renderLimits();
+
+    const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+    expect(within(claude).getByText("95%")).toHaveStyle({ color: "var(--trip)" });
+  });
+
   it("says the signed-in account's refresh is paused above its message, with nothing to sign into or forget", async () => {
     const message = "Access token expired — send a prompt with `claude` to renew it, then refresh here.";
     answer([okClaude({ status: "unauthenticated", standing: lastObserved("readPaused", message, "muted") })], [okCodex()]);

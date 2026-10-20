@@ -100,7 +100,7 @@ pub(super) struct Homes {
     pub read: Mutex<Vec<PathBuf>>,
     pub emptied: Mutex<Vec<PathBuf>>,
     pub deleted: Mutex<Vec<PathBuf>>,
-    pub answer: Mutex<Option<crate::limits::SavedReadError>>,
+    pub answer: Mutex<Option<crate::limits::ReadFailure>>,
 }
 
 struct FakeHome(Arc<Homes>, PathBuf);
@@ -151,12 +151,14 @@ impl Home for FakeHome {
     fn read_usage(
         &self,
         identity: &Identity,
-    ) -> Result<crate::dto::ProviderLimitsDto, crate::limits::SavedReadError> {
+    ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure> {
         self.0.read.lock().unwrap().push(self.1.clone());
         if let Some(answer) = self.0.answer.lock().unwrap().clone() {
             return Err(answer);
         }
-        Ok(weekly_reading(&identity.observation_key()))
+        Ok(crate::limits::Accepted::for_test(weekly_reading(
+            &identity.observation_key(),
+        )))
     }
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         let login = self.read().ok()??;
@@ -305,7 +307,7 @@ impl IsolatedSignIn for FakeIsolated {
         let line = line.trim();
         line.starts_with("https://").then_some(line)
     }
-    fn first_usage(&self, _: &Path, _: &Identity) -> Option<crate::dto::ProviderLimitsDto> {
+    fn first_usage(&self, _: &Path, _: &Identity) -> Option<crate::limits::Accepted> {
         None
     }
     fn clean(&self) -> Result<(), String> {

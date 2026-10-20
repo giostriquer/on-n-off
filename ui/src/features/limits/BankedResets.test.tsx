@@ -155,6 +155,7 @@ describe("UseBankedReset", () => {
     ["6% left", [weekly(94)], `${hasLeft(6)} More than 5% of the limit is still left: the reset gives back only the 94% used so far.`],
     ["exactly 5% left", [weekly(95)], hasLeft(5)],
     ["the fuller main window deciding", [weekly(40), session(96)], hasLeft(4)],
+    ["a weekly window past its reset, which counts down nothing", [{ ...weekly(97), resetsAt: "2026-08-17T19:00:00Z" }], `work@codex.example has 100% of its Codex limit left. ${EFFECT} More than 5% of the limit is still left: the reset gives back only the 0% used so far.`],
     ["no telling how much is left, which claims no share", [], `on-n-off can't read how much of work@codex.example's Codex limit is left. ${EFFECT} More than 5% of the limit may still be left.`],
   ] as const)("with %s the reset can be used, and the confirmation warns only above the share", (_, windows, description) => {
     render(button({ entry: codex({ windows: [...windows] }) }));

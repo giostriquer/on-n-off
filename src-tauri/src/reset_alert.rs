@@ -7,7 +7,8 @@ use crate::dto::{
     LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto,
     Reading, ResetCreditOutcome,
 };
-use crate::limits::ResetInstant;
+use crate::limits::{ReadFailure, ResetInstant};
+use crate::limits_refresh::Served;
 use crate::provider_catalogue::BANKED_RESETS_PROVIDER;
 
 const SPEND_CAP_PERCENT: u8 = 5;
@@ -169,16 +170,20 @@ enum Kept {
     Late,
 }
 
-pub fn plan(
+pub(crate) fn plan(
     memory: &mut AlertMemory,
     waiting: &mut Waiting,
-    readings: &[ProviderLimitsDto],
+    reads: &[Served],
     alerts: &HashMap<String, ResetAlert>,
     now: DateTime<Utc>,
 ) -> Plan {
-    let due = waiting.fall_due(readings, alerts, now);
+    let banking = reads
+        .iter()
+        .find(|read| read.provider == BANKED_RESETS_PROVIDER);
+    let due = waiting.fall_due(banking, alerts, now);
+    let cards = banking.map_or(&[][..], |read| read.entries.as_slice());
     let (automatic, told): (Vec<_>, Vec<_>) = memory
-        .offers(readings, alerts, now)
+        .offers(cards, alerts, now)
         .into_iter()
         .partition(|offer| offer.automatic);
     Plan {
@@ -318,13 +323,19 @@ enum BankingNow<'a> {
     Unknown,
 }
 
-fn banking_now(readings: &[ProviderLimitsDto]) -> BankingNow<'_> {
-    let current = readings
+fn banking_now(banking: Option<&Served>) -> BankingNow<'_> {
+    let Some(read) = banking else {
+        return BankingNow::Unknown;
+    };
+    let current = read
+        .entries
         .iter()
         .find(|card| banks_resets(card) && card.current_account);
-    match current {
-        Some(card) if signed_in_with_banked_resets(card).is_some() => BankingNow::Live(card),
-        Some(card) if card.status != LimitsStatus::Failed => BankingNow::NobodySignedIn,
+    match (current, &read.failure) {
+        (Some(card), _) if signed_in_with_banked_resets(card).is_some() => BankingNow::Live(card),
+        (Some(_), Some(ReadFailure::SignedOut | ReadFailure::Unsupported(_))) => {
+            BankingNow::NobodySignedIn
+        }
         _ => BankingNow::Unknown,
     }
 }
@@ -332,7 +343,7 @@ fn banking_now(readings: &[ProviderLimitsDto]) -> BankingNow<'_> {
 impl Waiting {
     fn fall_due(
         &mut self,
-        readings: &[ProviderLimitsDto],
+        banking: Option<&Served>,
         alerts: &HashMap<String, ResetAlert>,
         now: DateTime<Utc>,
     ) -> Vec<Due> {
@@ -341,7 +352,7 @@ impl Waiting {
         let late = |spend: &WaitingSpend| {
             spend.due_at + chrono::Duration::minutes(LATE_AFTER_MINUTES) < now
         };
-        let banking = banking_now(readings);
+        let banking = banking_now(banking);
         let decided = !matches!(banking, BankingNow::Unknown);
         self.0
             .extract_if(|_, spend| spend.due_at <= now && (decided || late(spend)))

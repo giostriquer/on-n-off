@@ -1,6 +1,6 @@
 use super::*;
 
-fn signed_in(dir: &tempfile::TempDir, cli: &AgentCli) -> ProviderLimitsDto {
+fn signed_in(dir: &tempfile::TempDir, cli: &AgentCli) -> Read {
     read_signed_in_within(
         &|_| cli.command(),
         &dir.path().join(".claude.json"),
@@ -13,19 +13,20 @@ fn signed_in(dir: &tempfile::TempDir, cli: &AgentCli) -> ProviderLimitsDto {
 fn a_report_reads_as_the_signed_in_card_of_the_account_the_config_dir_names() {
     let (dir, cli) = home(&config("user", "team"), REPORT, CliStub::new("claude"));
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Ok);
-    assert!(card.current_account);
-    let account = card.account.expect("the signed-in account");
+    assert_eq!(
+        read.account.map(|account| account.id),
+        Some(identity().observation_key())
+    );
+    let answer = read.answer.expect("the signed-in account's reading");
+    let account = answer.account.expect("the signed-in account");
     assert_eq!(account.id, identity().observation_key());
     assert_eq!(account.legacy_id.as_deref(), Some("user"));
     assert_eq!(account.label.as_deref(), Some("you@example.com"));
-    assert_eq!(card.reading.plan.as_deref(), Some("max ×20"));
-    assert_eq!(card.reading.plan_label.as_deref(), Some("Max ×20"));
-    assert_eq!(card.reading.plan_capacity, Some(20));
-    assert_eq!(card.reading.windows.len(), 3);
-    let roles: Vec<(&str, Option<crate::dto::WindowRole>, bool)> = card
+    assert_eq!(answer.reading.plan.as_deref(), Some("max ×20"));
+    assert_eq!(answer.reading.windows.len(), 3);
+    let mut roles: Vec<(&str, Option<crate::dto::WindowRole>, bool)> = answer
         .reading
         .windows
         .iter()
@@ -37,11 +38,12 @@ fn a_report_reads_as_the_signed_in_card_of_the_account_the_config_dir_names() {
             )
         })
         .collect();
+    roles.sort_by_key(|(id, _, _)| *id);
     assert_eq!(
         roles,
         [
-            ("weekly_all", None, false),
             ("session", None, false),
+            ("weekly_all", None, false),
             (
                 "weekly_scoped:Fable",
                 Some(crate::dto::WindowRole::InnerRing),
@@ -59,10 +61,9 @@ fn an_account_without_an_organization_is_known_by_its_own_id() {
     .to_string();
     let (dir, cli) = home(&config, REPORT, CliStub::new("claude"));
 
-    let card = signed_in(&dir, &cli);
+    let answer = signed_in(&dir, &cli).answer.expect("a reading");
 
-    assert_eq!(card.status, LimitsStatus::Ok);
-    assert_eq!(card.account.expect("the account").id, "user");
+    assert_eq!(answer.account.expect("the account").id, "user");
 }
 
 #[test]
@@ -75,19 +76,14 @@ fn a_signed_out_config_dir_asks_for_a_sign_in() {
         .cli(status_dir.path());
 
     let next = usage_then_status(&usage, &status);
-    let card = read_signed_in_within(
+    let read = read_signed_in_within(
         &|_| next(),
         &dir.path().join(".claude.json"),
         &dir.path().join("usage"),
         ANSWER,
     );
 
-    assert_eq!(card.status, LimitsStatus::SignedOut);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("Sign in with `claude` to see subscription limits.")
-    );
-    assert_eq!(card.account.expect("the account").id, "default");
+    assert_eq!(read.answer.unwrap_err(), ReadFailure::SignedOut);
 }
 
 #[test]
@@ -98,21 +94,20 @@ fn a_failed_read_keeps_the_account_so_its_remembered_card_stands_in() {
         CliStub::new("claude").exit(1),
     );
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Failed);
     assert_eq!(
-        card.message.as_deref(),
-        Some("Claude Code could not report usage.")
+        read.answer.unwrap_err(),
+        ReadFailure::Unavailable(UNREPORTED.into())
     );
     assert_eq!(
-        card.account.expect("the account").id,
+        read.account.expect("the account").id,
         identity().observation_key()
     );
 }
 
 #[test]
-fn no_report_from_a_config_dir_still_signed_in_is_a_failed_read() {
+fn no_report_from_a_config_dir_still_signed_in_answers_no_window() {
     let (dir, usage) = home(&config("user", "team"), "", CliStub::new("claude"));
     let status_dir = tempfile::tempdir().unwrap();
     let status = CliStub::new("claude")
@@ -120,32 +115,24 @@ fn no_report_from_a_config_dir_still_signed_in_is_a_failed_read() {
         .cli(status_dir.path());
 
     let next = usage_then_status(&usage, &status);
-    let card = read_signed_in_within(
+    let read = read_signed_in_within(
         &|_| next(),
         &dir.path().join(".claude.json"),
         &dir.path().join("usage"),
         ANSWER,
     );
 
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("Claude Code reported no usage.")
-    );
+    assert!(read.answer.expect("an answer").reading.windows.is_empty());
 }
 
 #[test]
-fn a_report_with_no_readable_window_is_a_failed_read() {
+fn a_report_with_no_readable_window_answers_no_window() {
     let output = r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[{"kind":"lunar","group":"lunar","percent":1}]}}}"#;
     let (dir, cli) = home(&config("user", "team"), output, CliStub::new("claude"));
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("Claude Code reported no usage.")
-    );
+    assert!(read.answer.expect("an answer").reading.windows.is_empty());
 }
 
 #[test]
@@ -171,17 +158,12 @@ fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
             .stdout_file("report.jsonl")
             .cli(dir.path());
 
-        let card = signed_in(&dir, &cli);
+        let read = signed_in(&dir, &cli);
 
-        assert_eq!(card.status, LimitsStatus::Failed, "{after}");
         assert_eq!(
-            card.message.as_deref(),
-            Some("The signed-in Claude account changed while its usage was read."),
+            read.answer.unwrap_err(),
+            ReadFailure::AccountChanged,
             "{after}"
-        );
-        assert!(
-            card.reading.windows.is_empty(),
-            "showed the report: {after}"
         );
         assert!(
             !dir.path().join("usage").exists(),
@@ -194,11 +176,15 @@ fn a_report_after_which_the_config_dir_names_another_account_is_not_shown() {
 fn a_config_dir_naming_no_account_reads_as_the_default_account() {
     let (dir, cli) = home("{}", REPORT, CliStub::new("claude"));
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Ok);
-    assert_eq!(card.account.expect("the account").id, "default");
-    assert_eq!(card.reading.windows.len(), 3);
+    assert_eq!(
+        read.account.as_ref().map(|a| a.id.as_str()),
+        Some("default")
+    );
+    let answer = read.answer.expect("a reading");
+    assert_eq!(answer.account.expect("the account").id, "default");
+    assert_eq!(answer.reading.windows.len(), 3);
 }
 
 #[test]
@@ -212,10 +198,12 @@ fn a_claude_code_too_old_to_leave_customizations_out_asks_for_an_update() {
             .exit(1),
     );
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(card.message.as_deref(), Some(OUTDATED));
+    assert_eq!(
+        read.answer.unwrap_err(),
+        ReadFailure::Unavailable(OUTDATED.into())
+    );
     let args = std::fs::read_to_string(dir.path().join("args.txt")).unwrap();
     let runs: Vec<&str> = args.lines().collect();
     assert_eq!(runs.len(), 1, "{args}");
@@ -232,11 +220,11 @@ fn another_unknown_option_is_not_read_as_an_outdated_claude_code() {
             .exit(1),
     );
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
     assert_eq!(
-        card.message.as_deref(),
-        Some("Claude Code could not report usage.")
+        read.answer.unwrap_err(),
+        ReadFailure::Unavailable(UNREPORTED.into())
     );
 }
 
@@ -265,9 +253,9 @@ fn claude_code_never_reports_from_a_usage_dir_that_names_another_account() {
     ] {
         let (dir, cli) = usage_dir_left_with(native, &left);
 
-        let card = signed_in(&dir, &cli);
+        let read = signed_in(&dir, &cli);
 
-        assert_eq!(card.status, LimitsStatus::Ok, "{native} / {left}");
+        assert!(read.answer.is_ok(), "{native} / {left}");
         assert!(
             !dir.path().join("seen.json").exists(),
             "Claude Code reported from a usage dir naming another account: {native} / {left}"
@@ -284,9 +272,9 @@ fn a_usage_dir_that_names_the_signed_in_account_is_kept() {
     for kept in [config("user", "team"), "{}".to_string()] {
         let (dir, cli) = usage_dir_left_with(&kept, &kept);
 
-        let card = signed_in(&dir, &cli);
+        let read = signed_in(&dir, &cli);
 
-        assert_eq!(card.status, LimitsStatus::Ok, "{kept}");
+        assert!(read.answer.is_ok(), "{kept}");
         assert_eq!(
             std::fs::read_to_string(dir.path().join("seen.json")).unwrap(),
             kept
@@ -304,20 +292,83 @@ fn a_usage_dir_that_cannot_be_cleared_fails_the_read_without_asking_claude_code(
     );
     std::fs::write(dir.path().join("usage"), "a file where the dir belongs").unwrap();
 
-    let card = signed_in(&dir, &cli);
+    let read = signed_in(&dir, &cli);
 
-    assert_eq!(card.status, LimitsStatus::Failed);
     assert!(
-        card.message.as_deref().is_some_and(
-            |message| message.starts_with("Could not clear Claude Code's usage config dir")
-        ),
+        matches!(&read.answer, Err(ReadFailure::Unavailable(why))
+            if why.starts_with("Could not clear Claude Code's usage config dir")),
         "{:?}",
-        card.message
+        read.answer
     );
     assert_eq!(
-        card.account.expect("the account").id,
+        read.account.expect("the account").id,
         identity().observation_key()
     );
-    assert!(card.reading.windows.is_empty());
     assert!(!dir.path().join("args.txt").exists());
+}
+
+#[test]
+fn every_failure_after_the_config_dir_names_the_account_keeps_it() {
+    use crate::limits::outcome::tests::{
+        every_failure_keeps_the_account_its_answer_names, Expected,
+    };
+    let account = config("user", "team");
+    let failing_with = |stub: CliStub, stdout: &str| {
+        let (dir, cli) = home(&account, stdout, stub);
+        signed_in(&dir, &cli)
+    };
+    let changed = {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".claude.json"), &account).unwrap();
+        std::fs::write(
+            dir.path().join("after.json"),
+            config("someone-else", "team"),
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("report.jsonl"), REPORT).unwrap();
+        let cli = CliStub::new("claude")
+            .copy("after.json", ".claude.json")
+            .stdout_file("report.jsonl")
+            .cli(dir.path());
+        signed_in(&dir, &cli)
+    };
+    let uncleared = {
+        let (dir, cli) = home(&account, REPORT, CliStub::new("claude"));
+        std::fs::write(dir.path().join("usage"), "a file where the dir belongs").unwrap();
+        signed_in(&dir, &cli)
+    };
+    let (dir, cli) = home(&account, REPORT, CliStub::new("claude"));
+    let answered = signed_in(&dir, &cli);
+
+    every_failure_keeps_the_account_its_answer_names(
+        AgentId::Claude,
+        answered,
+        vec![
+            (
+                failing_with(CliStub::new("claude").exit(1), REPORT),
+                (|failure| *failure == ReadFailure::Unavailable(UNREPORTED.into())) as Expected,
+            ),
+            (
+                failing_with(
+                    CliStub::new("claude")
+                        .stderr("error: unknown option --safe-mode")
+                        .exit(1),
+                    REPORT,
+                ),
+                |failure| *failure == ReadFailure::Unavailable(OUTDATED.into()),
+            ),
+            (
+                failing_with(
+                    CliStub::new("claude"),
+                    r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[]}}}"#,
+                ),
+                |failure| *failure == ReadFailure::NoUsage,
+            ),
+            (changed, |failure| *failure == ReadFailure::AccountChanged),
+            (uncleared, |failure| {
+                matches!(failure, ReadFailure::Unavailable(why)
+                    if why.starts_with("Could not clear Claude Code's usage config dir"))
+            }),
+        ],
+    );
 }

@@ -100,10 +100,7 @@ fn api_key_accounts_are_explicitly_unsupported() {
     .err()
     .unwrap();
 
-    assert!(matches!(
-        error,
-        AppServerFailure::Unsupported(message) if message.contains("API key")
-    ));
+    assert_eq!(error, ReadFailure::Unsupported(Unsupported::ApiKey));
 }
 
 #[test]
@@ -161,8 +158,9 @@ fn rejects_native_identity_changes_during_an_app_server_read() {
             ]);
             let answers = query(&script, &codex_home, false).unwrap();
             write_identity(user, workspace);
-            assert!(
-                matches!(normalize_app_server(answers, before), Err(AppServerFailure::Failed(message)) if message.contains("changed")),
+            assert_eq!(
+                normalize_app_server(answers, before).err(),
+                Some(ReadFailure::AccountChanged),
                 "{plan}: {user} / {workspace}"
             );
         }

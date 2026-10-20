@@ -19,7 +19,9 @@ fn read_all(harness: &Harness) -> (Vec<ProviderLimitsDto>, Vec<String>) {
             fetched.lock().unwrap().push(profile.id.clone());
             FetchResult {
                 login: profile.login.clone(),
-                result: Ok(weekly_reading(&profile.identity.observation_key())),
+                result: Ok(crate::limits::Accepted::for_test(weekly_reading(
+                    &profile.identity.observation_key(),
+                ))),
             }
         });
     (entries, fetched.into_inner().unwrap())
@@ -574,9 +576,7 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
     let harness = Harness::new().with_homes();
     let (_, b) = two_accounts(&harness);
     read(&harness);
-    *harness.homes().answer.lock().unwrap() = Some(crate::limits::SavedReadError::Http(
-        crate::http::HttpError::Unauthorized,
-    ));
+    *harness.homes().answer.lock().unwrap() = Some(crate::limits::ReadFailure::SignedOut);
 
     let cards = read(&harness);
 
@@ -584,11 +584,14 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
         .iter()
         .find(|card| card.account.as_ref().unwrap().id == key("b"))
         .unwrap();
-    assert_eq!(card.status, LimitsStatus::Failed);
-    assert_eq!(
-        card.message.as_deref(),
-        Some("This account's saved login has ended. Sign in again.")
+    let verdict = crate::limits::outcome::saved(
+        AgentId::Claude,
+        crate::limits::outcome::Saved::Home,
+        &crate::limits::ReadFailure::SignedOut,
+        0,
     );
+    assert_eq!(card.status, LimitsStatus::Failed);
+    assert_eq!(card.message, Some(verdict.message));
     assert_eq!(
         harness.in_home(&b),
         Some("b1".into()),
@@ -599,21 +602,23 @@ fn a_home_signed_out_of_its_login_asks_for_a_new_sign_in() {
 #[test]
 fn a_failed_read_of_a_home_holds_the_next_one_back() {
     use crate::http::{HttpError, RateLimitReset};
-    for (failure, message) in [
-        (
-            HttpError::RateLimited(RateLimitReset::RetryAfter(7200)),
-            "Usage refresh is rate limited. The last reading is retained.",
-        ),
-        (
-            HttpError::Status(503),
-            "Usage refresh is unavailable. The last reading is retained.",
-        ),
+    for failure in [
+        HttpError::RateLimited(RateLimitReset::RetryAfter(7200)),
+        HttpError::Status(503),
     ] {
+        let failure = crate::limits::ReadFailure::from(failure);
+        let message = crate::limits::outcome::saved(
+            AgentId::Claude,
+            crate::limits::outcome::Saved::Home,
+            &failure,
+            0,
+        )
+        .message;
+        let message = message.as_str();
         let harness = Harness::new().with_homes();
         two_accounts(&harness);
         read(&harness);
-        *harness.homes().answer.lock().unwrap() =
-            Some(crate::limits::SavedReadError::Http(failure));
+        *harness.homes().answer.lock().unwrap() = Some(failure);
         read(&harness);
 
         let cards = read(&harness);
@@ -636,8 +641,8 @@ fn a_home_read_claude_code_could_not_give_says_why_on_the_card() {
     let harness = Harness::new().with_homes();
     two_accounts(&harness);
     read(&harness);
-    *harness.homes().answer.lock().unwrap() = Some(crate::limits::SavedReadError::Unavailable(
-        crate::limits::claude_cli::OUTDATED,
+    *harness.homes().answer.lock().unwrap() = Some(crate::limits::ReadFailure::Unavailable(
+        crate::limits::claude_cli::OUTDATED.into(),
     ));
 
     let cards = read(&harness);

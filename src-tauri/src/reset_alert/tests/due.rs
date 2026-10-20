@@ -44,7 +44,22 @@ fn falls_due(
     alerts: &HashMap<String, ResetAlert>,
     at: DateTime<Utc>,
 ) -> Vec<Due> {
-    plan(&mut AlertMemory::default(), waiting, readings, alerts, at).due
+    falls_due_after(waiting, readings, None, alerts, at)
+}
+
+fn falls_due_after(
+    waiting: &mut Waiting,
+    readings: &[ProviderLimitsDto],
+    failure: Option<ReadFailure>,
+    alerts: &HashMap<String, ResetAlert>,
+    at: DateTime<Utc>,
+) -> Vec<Due> {
+    let read = Served {
+        provider: crate::provider_catalogue::BANKED_RESETS_PROVIDER,
+        entries: readings.to_vec(),
+        failure,
+    };
+    plan(&mut AlertMemory::default(), waiting, &[read], alerts, at).due
 }
 
 #[test]
@@ -148,23 +163,52 @@ fn the_signed_in_card_of_a_provider_that_banks_resets_decides_among_the_others()
     assert!(matches!(due.as_slice(), [Due::Spend(..)]), "{due:?}");
 }
 
+fn nobody_named(status: LimitsStatus) -> ProviderLimitsDto {
+    let mut card = live(96.0, RENEWS);
+    card.status = status;
+    card.account = None;
+    card.reading = crate::dto::Reading::default();
+    card
+}
+
 #[test]
 fn nobody_signed_in_keeps_the_reset() {
-    for status in [LimitsStatus::SignedOut, LimitsStatus::Unsupported] {
-        let mut signed_out = live(96.0, RENEWS);
-        signed_out.status = status;
-        signed_out.account = None;
+    for (status, failure) in [
+        (LimitsStatus::SignedOut, ReadFailure::SignedOut),
+        (
+            LimitsStatus::Unsupported,
+            ReadFailure::Unsupported(crate::limits::outcome::Unsupported::ApiKey),
+        ),
+    ] {
         let mut waiting = scheduled();
 
-        let due = falls_due(
+        let due = falls_due_after(
             &mut waiting,
-            &[signed_out],
+            &[nobody_named(status)],
+            Some(failure.clone()),
             &automatic(),
             minutes_after_now(10),
         );
 
         assert_eq!(due, [kept(NOT_NEEDED)], "{status:?}");
     }
+}
+
+#[test]
+fn a_spend_due_while_codex_could_not_be_asked_keeps_waiting() {
+    let mut waiting = scheduled();
+    let not_installed = nobody_named(LimitsStatus::SignedOut);
+
+    let due = falls_due_after(
+        &mut waiting,
+        &[not_installed],
+        Some(ReadFailure::NotInstalled),
+        &automatic(),
+        minutes_after_now(12),
+    );
+
+    assert!(due.is_empty(), "{due:?}");
+    assert_eq!(waiting.0.len(), 1);
 }
 
 #[test]
