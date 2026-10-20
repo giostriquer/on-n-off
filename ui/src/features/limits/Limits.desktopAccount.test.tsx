@@ -22,7 +22,7 @@ vi.mock("$lib/api", () => ({
 }));
 
 const DAY = 86_400_000;
-const TAG = "Claude Desktop is signed in to another account";
+const TAG = "Claude Desktop was last signed in to another account";
 
 function profile(overrides: Partial<SavedProfile> = {}): SavedProfile {
   return {
@@ -67,7 +67,7 @@ describe("Claude Desktop on another account", () => {
     expect(tag).toHaveTextContent("Desktop: other account");
     expect(parseFloat(tag.querySelector<HTMLElement>(".term-badge-fill")!.style.width)).toBe(0);
     fireEvent.focus(tag);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop is signed in to desk@claude.example.");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop was last signed in to desk@claude.example.");
     expect(screen.getByRole("tooltip")).toHaveTextContent("Sign in to this account in Claude Desktop to use it there.");
   });
 
@@ -76,7 +76,7 @@ describe("Claude Desktop on another account", () => {
     renderLimits();
     const tag = await within(await signedInCard()).findByRole("button", { name: TAG });
     fireEvent.focus(tag);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop is signed in to another account.");
+    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop was last signed in to another account.");
   });
 
   it("is not shown while the read carries no other Desktop account", async () => {

@@ -112,6 +112,30 @@ pub fn claude_desktop_data_for(home: &std::path::Path) -> PathBuf {
     home.join("AppData").join("Roaming").join("Claude")
 }
 
+pub fn claude_desktop_apps_for(home: &std::path::Path) -> Vec<PathBuf> {
+    claude_desktop_apps_from(home, &process_env)
+}
+
+#[cfg(not(windows))]
+fn claude_desktop_apps_from(
+    home: &std::path::Path,
+    lookup: &impl Fn(&str) -> Option<OsString>,
+) -> Vec<PathBuf> {
+    let own = home.join("Applications").join("Claude.app");
+    if lookup("ON_N_OFF_HOME").is_some() {
+        return vec![own];
+    }
+    vec![PathBuf::from("/Applications/Claude.app"), own]
+}
+
+#[cfg(windows)]
+fn claude_desktop_apps_from(
+    home: &std::path::Path,
+    _lookup: &impl Fn(&str) -> Option<OsString>,
+) -> Vec<PathBuf> {
+    vec![home.join("AppData").join("Local").join("AnthropicClaude")]
+}
+
 pub fn muse_config_root() -> Result<PathBuf, AdapterError> {
     Ok(muse_config_for(&user_home()?))
 }

@@ -142,17 +142,23 @@ impl Cache {
                 listing.ends.clone(),
             )
         };
-        let mut column = crate::limits::column(
+        crate::limits::column(
             entries,
             &roster,
             &ends,
             chrono::Utc::now().timestamp_millis(),
-        );
-        crate::limits::desktop_app::mark_other_account(
-            self.provider,
-            &mut column,
-            crate::paths::user_home().ok().as_deref(),
-        );
+        )
+    }
+
+    fn served_column(
+        &self,
+        entries: &[ProviderLimitsDto],
+        home: Option<&std::path::Path>,
+    ) -> Vec<ColumnEntryDto> {
+        let mut column = self.column(entries);
+        if let Some(home) = home {
+            crate::limits::desktop_app::mark_other_account(self.provider, &mut column, home);
+        }
         column
     }
 
@@ -223,7 +229,7 @@ pub fn read_limits(agent: AgentId, force: bool) -> Vec<ProviderLimitsDto> {
 pub fn read_column(agent: AgentId, force: bool) -> Vec<ColumnEntryDto> {
     let entries = read_served(agent, force).0.entries;
     match cache_for(agent) {
-        Some(cache) => cache.column(&entries),
+        Some(cache) => cache.served_column(&entries, crate::paths::user_home().ok().as_deref()),
         None => crate::limits::column(
             &entries,
             &Roster::default(),

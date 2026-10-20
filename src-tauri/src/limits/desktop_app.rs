@@ -14,31 +14,53 @@ struct ClaudeDesktopConfig {
     last_known_account: Option<String>,
 }
 
-pub(crate) fn mark_other_account(
-    provider: AgentId,
-    column: &mut [ColumnEntryDto],
-    home: Option<&Path>,
-) {
+pub(crate) fn mark_other_account(provider: AgentId, column: &mut [ColumnEntryDto], home: &Path) {
     let Some(app) = provider.limits_facts().desktop_app else {
         return;
     };
-    let Some(desktop) = home.and_then(|home| signed_in_user(app, home)) else {
+    if signed_in(app, column).is_none() {
+        return;
+    }
+    if let Some(desktop) = desktop_user(app, home) {
+        mark(app, column, &desktop);
+    }
+}
+
+fn mark(app: DesktopApp, column: &mut [ColumnEntryDto], desktop: &str) {
+    let Some((index, user)) = signed_in(app, column) else {
         return;
     };
-    let Some(signed_in) = column.iter().position(|entry| entry.card.current_account) else {
-        return;
-    };
-    if user_of(app, &column[signed_in]).is_none_or(|user| user == desktop) {
+    if user == desktop {
         return;
     }
     let label = column
         .iter()
-        .filter(|entry| user_of(app, entry) == Some(desktop.as_str()))
-        .find_map(label_of);
-    column[signed_in].other_desktop_account = Some(OtherDesktopAccountDto { label });
+        .filter(|entry| user_of(app, entry) == Some(desktop))
+        .find_map(|entry| entry.card.account.as_ref()?.label.clone());
+    column[index].other_desktop_account = Some(OtherDesktopAccountDto { label });
 }
 
-pub(crate) fn signed_in_user(app: DesktopApp, home: &Path) -> Option<String> {
+fn signed_in(app: DesktopApp, column: &[ColumnEntryDto]) -> Option<(usize, &str)> {
+    let index = column.iter().position(|entry| entry.card.current_account)?;
+    Some((index, user_of(app, &column[index])?))
+}
+
+fn desktop_user(app: DesktopApp, home: &Path) -> Option<String> {
+    if !installed(app, home) {
+        return None;
+    }
+    last_account(app, home)
+}
+
+fn installed(app: DesktopApp, home: &Path) -> bool {
+    match app {
+        DesktopApp::Claude => paths::claude_desktop_apps_for(home)
+            .iter()
+            .any(|app| app.exists()),
+    }
+}
+
+fn last_account(app: DesktopApp, home: &Path) -> Option<String> {
     match app {
         DesktopApp::Claude => {
             let raw =
@@ -62,10 +84,6 @@ fn user_of(app: DesktopApp, entry: &ColumnEntryDto) -> Option<&str> {
             }
         }
     }
-}
-
-fn label_of(entry: &ColumnEntryDto) -> Option<String> {
-    entry.card.account.as_ref()?.label.clone()
 }
 
 #[cfg(test)]

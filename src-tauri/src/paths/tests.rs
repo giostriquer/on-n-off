@@ -49,6 +49,29 @@ fn claude_desktop_keeps_its_data_in_the_platform_app_data_dir() {
 }
 
 #[test]
+fn claude_desktop_is_installed_where_the_platform_puts_apps_and_only_in_a_scratch_home_there() {
+    let home = std::env::temp_dir().join("scratch");
+    let own = |lookup: &dyn Fn(&str) -> Option<OsString>| claude_desktop_apps_from(&home, &lookup);
+    let expected_own = if cfg!(windows) {
+        home.join("AppData").join("Local").join("AnthropicClaude")
+    } else {
+        home.join("Applications").join("Claude.app")
+    };
+    let redirected = own(&|name| (name == "ON_N_OFF_HOME").then(|| OsString::from("scratch")));
+    assert_eq!(redirected, std::slice::from_ref(&expected_own));
+    let user = own(&|_| None);
+    if cfg!(windows) {
+        assert_eq!(user, [expected_own]);
+    } else {
+        assert_eq!(
+            user,
+            [PathBuf::from("/Applications/Claude.app"), expected_own]
+        );
+    }
+    assert_eq!(claude_desktop_apps_for(&home), redirected);
+}
+
+#[test]
 fn normalize_skill_path_unifies_slash_and_skill_md() {
     assert_eq!(
         normalize_skill_path(r"C:\Users\Me\.agents\skills\loom-feed"),

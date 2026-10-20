@@ -636,7 +636,7 @@ Ordinary Claude activation allows running clients: Claude Code handles native cr
 It still acquires the native refresh locks, preserves outgoing credentials in the protected journal,
 and verifies the incoming identity. This does not move an already in-flight request to another account
 or claim immediate uptake by IDE sessions. Claude Desktop never takes it up: it keeps its own
-sign-in, and the signed-in Limits card says when Desktop is on another account
+sign-in, and the signed-in Limits card says when Desktop was last signed in to another account
 ([PROVIDERS.md](../../PROVIDERS.md), Desktop account).
 
 Codex activation, and sign-out or explicit crash recovery for either provider, require known CLI,
