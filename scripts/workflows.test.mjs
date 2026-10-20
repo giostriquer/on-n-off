@@ -406,26 +406,59 @@ test("the layout check runs the header scenes in CI on every run, can fail, keep
   assert.equal(packageJson.scripts["ui:layout"], "bun scripts/ui-shots.mjs --layout");
 });
 
+const auditChecks = {
+  rust: { name: "Check Rust dependencies against the RustSec advisories", run: "cargo deny --locked --manifest-path src-tauri/Cargo.toml check advisories" },
+  javascript: { name: "Check JavaScript dependencies against the GitHub advisories", run: "bun audit" },
+};
+
 test("the dependency audit checks both lockfiles on every pull request, every push to main and every week", { skip }, () => {
   const audit = load("audit");
-  assert.deepEqual(audit.on.pull_request, { branches: ["main"] });
-  assert.deepEqual(audit.on.push, { branches: ["main"] });
-  assert.equal(audit.on.schedule.length, 1);
+  assert.deepEqual(audit.on, {
+    pull_request: { branches: ["main"] },
+    push: { branches: ["main"] },
+    schedule: [{ cron: "17 9 * * 1" }],
+    workflow_dispatch: null,
+  });
   assert.deepEqual(audit.permissions, { contents: "read" });
-  const runs = Object.values(audit.jobs).flatMap((job) => job.steps.map((candidate) => candidate.run ?? ""));
-  assert.ok(runs.some((run) => run.includes("cargo deny --locked --manifest-path src-tauri/Cargo.toml check advisories")));
-  assert.ok(runs.some((run) => run.trim() === "bun audit"));
+  assert.deepEqual(Object.keys(audit.jobs).sort(), Object.keys(auditChecks).sort());
+  for (const [id, { name, run }] of Object.entries(auditChecks)) {
+    const job = audit.jobs[id];
+    for (const key of ["if", "continue-on-error", "permissions"]) assert.equal(job[key], undefined, `${id} ${key}`);
+    const check = step(job, name);
+    assert.equal(check.run.trim(), run);
+    for (const key of ["if", "continue-on-error"]) assert.equal(check[key], undefined, `${name} ${key}`);
+  }
 });
 
 test("the dependency audit is never a required check, so a new advisory cannot block unrelated pull requests", { skip }, () => {
-  for (const job of Object.values(load("audit").jobs)) assert.ok(!requiredChecks.includes(job.name), job.name);
+  for (const [id, job] of Object.entries(load("audit").jobs)) assert.ok(!requiredChecks.includes(job.name ?? id), id);
 });
 
 test("cargo-deny comes from a pinned release whose checksum is verified before it runs", { skip }, () => {
   const audit = load("audit");
   assert.match(String(audit.env.CARGO_DENY_VERSION), /^\d+\.\d+\.\d+$/);
   assert.match(String(audit.env.CARGO_DENY_SHA256), /^[0-9a-f]{64}$/);
+  assert.equal(audit.defaults.run.shell, "bash", "bash -e stops the step at a failed checksum");
   const install = step(audit.jobs.rust, "Install cargo-deny");
-  assert.match(install.run, /sha256sum -c/);
-  assert.ok(install.index < step(audit.jobs.rust, "Check Rust dependencies against the RustSec advisories").index);
+  assert.match(install.run, /\/releases\/download\/\$\{CARGO_DENY_VERSION\}\//);
+  assert.match(install.run, /^echo "\$\{CARGO_DENY_SHA256\}  \S+" \| sha256sum -c -$/m);
+  assert.ok(install.index < step(audit.jobs.rust, auditChecks.rust.name).index);
+});
+
+test("deny.toml audits the shipped targets with every feature and gives each ignored advisory a reason", { skip: globalThis.Bun?.TOML ? false : "needs Bun's TOML parser" }, () => {
+  const deny = globalThis.Bun.TOML.parse(readFileSync(join(root, "src-tauri", "deny.toml"), "utf8"));
+  assert.deepEqual([...deny.graph.targets].sort(), ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"]);
+  assert.equal(deny.graph["all-features"], true);
+  assert.equal(deny.advisories.unmaintained, "workspace");
+  for (const entry of deny.advisories.ignore ?? []) {
+    assert.match(String(entry.id), /^RUSTSEC-\d{4}-\d{4}$/);
+    assert.ok(entry.reason?.trim(), entry.id);
+  }
+});
+
+test("Dependabot keeps the pins of every workflow and local action current", { skip }, () => {
+  const dependabot = globalThis.Bun.YAML.parse(readFileSync(join(root, ".github", "dependabot.yml"), "utf8"));
+  const actions = dependabot.updates.find((update) => update["package-ecosystem"] === "github-actions");
+  const local = readdirSync(join(root, ".github", "actions")).map((name) => `/.github/actions/${name}`);
+  assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });
