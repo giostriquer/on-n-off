@@ -53,9 +53,11 @@ native login and profiles already activated remain access-only until explicitly 
 
 A saved account's home (`accounts/homes.rs`) is a private store of the provider's own client, kept
 under `.on-n-off/accounts/homes/<id>`, where the account's one login waits while it is not the
-signed-in one. Only Claude has homes (`accounts/claude/home.rs`): a persistent Claude config dir.
-Claude Code renews the login there whenever Limits asks it for the account's usage
-(`limits::claude_cli`), so on-n-off sends no request with that login and sends no grant for it.
+signed-in one. Claude and Muse have homes; Codex has none. Claude's (`accounts/claude/home.rs`) is
+a persistent Claude config dir. Claude Code renews the login there whenever Limits asks it for the
+account's usage (`limits::claude_cli`), so on-n-off sends no request with that login and sends no
+grant for it. Muse's (`MuseHome`, `accounts/muse.rs`) keeps its login inline in the home's own
+`auth.json` and never renews (Provider adapters, below).
 
 Renewal never outlives the sign-in itself: Anthropic ends each one at the `refreshTokenExpiresAt`
 Claude Code stores with it, and only signing in again starts a new one. The account listing reads

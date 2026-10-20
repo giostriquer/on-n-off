@@ -114,7 +114,8 @@ _Avoid_: saved account, vault entry
 
 **Account home**:
 A private store of the provider's own client, kept for one saved profile, where its one login waits
-while it is not the signed-in one and where that client renews it. Only Claude has them.
+while it is not the signed-in one and where that client renews it, when it can. Claude and Muse have
+them; Codex has none.
 _Avoid_: shadow, isolated home (that is a sign-in's, removed once it is done)
 
 **Login state**:
