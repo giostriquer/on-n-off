@@ -85,7 +85,7 @@ export async function chooseScenes(argv, available = SCENES) {
 function policyScenes(available, files) {
   if (files.length > 0) throw new Error("--csp runs every built-in scene and takes no scene file");
   available.forEach(validateScene);
-  return available.map(({ limitsColumns, popoverHeaders, checkMuseChart, ...scene }) => scene);
+  return available.map(({ limitsColumns, popoverHeaders, ...scene }) => scene);
 }
 
 function layoutScenes(available, files) {

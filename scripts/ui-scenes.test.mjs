@@ -57,14 +57,15 @@ test("a layout run needs both a Limits card scene and a popover scene", async ()
   await assert.rejects(chooseScenes(["--layout"], limitsOnly), /popover scene/);
 });
 
-test("--csp runs every built-in scene without the layout guards, and refuses a scene file or --layout beside it", async (t) => {
+test("--csp runs every built-in scene without the font-measured layout guards, and refuses a scene file or --layout beside it", async (t) => {
   const run = await chooseScenes(["--csp"]);
   assert.equal(run.csp, true);
   assert.equal((await chooseScenes([])).csp, false);
   assert.deepEqual(names(run.scenes), names(SCENES));
   for (const scene of run.scenes) {
-    for (const guard of ["limitsColumns", "popoverHeaders", "checkMuseChart"]) assert.equal(scene[guard], undefined, `${scene.name} ${guard}`);
+    for (const guard of ["limitsColumns", "popoverHeaders"]) assert.equal(scene[guard], undefined, `${scene.name} ${guard}`);
   }
+  assert.ok(run.scenes.some((scene) => scene.checkMuseChart), "the policy run still hovers the usage chart");
   assert.ok(SCENES.some((scene) => scene.limitsColumns), "the stripped guards exist in the built-in scenes");
   await assert.rejects(chooseScenes(["--csp", sceneFile(t, [{ name: "one", url: "/limits?mock=ok" }])]), /takes no scene file/);
   await assert.rejects(chooseScenes(["--csp", "--layout"]), /separate runs/);

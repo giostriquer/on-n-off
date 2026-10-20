@@ -79,19 +79,18 @@ async function proveViolationsSurface(browser, target) {
   const context = await browser.newContext();
   for (const script of target.initScripts) await context.addInitScript(script);
   const page = await context.newPage();
-  const refused = [];
-  page.on("console", (message) => {
-    if (message.type() === "error" && message.text().startsWith("CSP refused")) refused.push(message.text());
-  });
   await page.goto(`${target.base}/?mock=ok`, { waitUntil: "networkidle" });
+  const reported = page
+    .waitForEvent("console", { predicate: (message) => message.type() === "error" && message.text().startsWith("CSP refused"), timeout: 5_000 })
+    .catch(() => null);
   await page.evaluate(() => {
     const style = document.createElement("style");
     style.textContent = "body { outline: 0 }";
     document.head.append(style);
   });
-  await page.waitForTimeout(200);
+  const violation = await reported;
   await context.close();
-  if (refused.length === 0) throw new Error("a <style> element raised no CSP violation, so the policy check would see none");
+  if (!violation) throw new Error("a <style> element raised no CSP violation, so the policy check would see none");
 }
 
 async function ensureDevServer() {

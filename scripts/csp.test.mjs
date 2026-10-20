@@ -48,6 +48,7 @@ test("no UI source renders a style element or injects raw HTML", () => {
   const files = execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "ui/src/*.tsx", "ui/src/*.ts"], { cwd: root, encoding: "utf8" })
     .split("\0")
     .filter((file) => file && !/\.test\.tsx?$/.test(file) && !file.startsWith("ui/src/dev/"));
+  assert.ok(files.includes("ui/src/main.tsx"), "the scan reaches the UI sources");
   for (const file of files) {
     const source = readFileSync(join(root, file), "utf8");
     assert.doesNotMatch(source, /<style\b/, file);

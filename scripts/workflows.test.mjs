@@ -491,7 +491,7 @@ test("the required layout job also runs every scene of the production build unde
   assert.ok(layoutCheck.index < build.index && build.index < check.index && check.index < captures.index);
   for (const bounded of [build, check]) {
     assert.ok(bounded["timeout-minutes"] <= 10, bounded.name);
-    assert.equal(bounded.if, undefined, bounded.name);
+    assert.equal(bounded.if, "${{ !cancelled() && steps.install.outcome == 'success' }}", `${bounded.name} reports even when the layout check failed`);
     assert.equal(bounded["continue-on-error"], undefined, bounded.name);
   }
   assert.ok(check.env.UI_SHOTS_DIR.startsWith(`${captures.with.path}/`), "a failed policy run keeps its captures");
