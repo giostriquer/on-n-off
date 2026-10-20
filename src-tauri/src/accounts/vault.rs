@@ -64,6 +64,10 @@ impl SessionKeys {
         };
         slot.get_or_init(read).clone()
     }
+    fn peek(&self, scope: &str) -> Option<[u8; 32]> {
+        let entries = self.0.lock().ok()?;
+        entries.get(scope)?.get()?.as_ref().ok().copied()
+    }
 }
 static SESSION_KEYS: OnceLock<SessionKeys> = OnceLock::new();
 
@@ -75,9 +79,7 @@ fn scope_of(root: &Path) -> Result<String, String> {
 }
 
 pub fn unlocked_key(root: &Path) -> Option<[u8; 32]> {
-    let scope = scope_of(root).ok()?;
-    let entries = SESSION_KEYS.get()?.0.lock().ok()?;
-    entries.get(&scope)?.get()?.as_ref().ok().copied()
+    SESSION_KEYS.get()?.peek(&scope_of(root).ok()?)
 }
 
 pub fn key(root: &Path, create: bool, retry: bool) -> KeyResult {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import { cardActionPlan, checkNowEntry, type AccountList, type CardActionPlan } from "./cardActionPlan";
 import { limitCards, type LimitCard, type NativeLogin } from "./limitCards";
@@ -11,9 +11,9 @@ const DAY = 86_400_000;
 const before = (days: number) => new Date(AT_NOW - days * DAY).toISOString();
 const BANKED = { availableCount: 1, nextExpiresAt: null };
 
-const READING: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const READING: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
-function reading(provider: LimitsProvider, overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+function reading(provider: LimitsProvider, overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return READING[provider]({ resetCredits: BANKED, ...overrides });
 }
 
@@ -35,7 +35,7 @@ const RUNNING = ["Acme Studio (codex)"];
 const SPEND = { dueAt: "2026-08-17T20:08:00Z" };
 
 type Setup = {
-  entries: ProviderLimits[];
+  entries: LimitsColumnEntry[];
   profiles?: SavedProfile[];
   nativeLogin?: NativeLogin | null;
   accounts?: AccountList<string> | null;
@@ -237,14 +237,14 @@ describe("the footer of a saved account whose subscription ended", () => {
   const PASSED = "2026-08-10T00:00:00Z";
   const AHEAD = "2026-09-10T00:00:00Z";
   const term = (willRenew: boolean, activeUntil: string) => ({ activeUntil, willRenew, checkedAt: NOW });
-  const codexSaved = (subscription: ProviderLimits["subscription"], overrides: Partial<ProviderLimits> = {}) =>
+  const codexSaved = (subscription: LimitsColumnEntry["subscription"], overrides: Partial<LimitsColumnEntry> = {}) =>
     staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
   const profileOf = (overrides: Partial<SavedProfile> = {}): SavedProfile => ({
     id: "saved", observationId: "profile:saved", legacyId: "saved", identity: { provider: "codex", userId: "saved", workspaceId: "saved" },
     email: "saved@codex.example", label: "saved@codex.example", savedAt: NOW, active: false, needsLogin: false, ...overrides,
   });
 
-  it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
+  it.each<[string, boolean, LimitsColumnEntry, SavedProfile | null]>([
     ["Codex: will not renew and its date has passed", true, codexSaved(term(false, PASSED)), profileOf()],
     ["Codex: will not renew, but its date is ahead", false, codexSaved(term(false, AHEAD)), profileOf()],
     ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf()],

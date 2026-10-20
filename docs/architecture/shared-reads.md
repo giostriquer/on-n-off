@@ -54,12 +54,18 @@ and a login changed outside on-n-off, such as `muse login` in a terminal, is rea
 cache keeps the native read's state apart from the saved accounts' (`NativeState`): a native read
 replaces it whole, and a saved-accounts refresh leaves it as it was.
 
-The Limits read serves its column ([Limits](README.md#limits)), and two things replace that column
-without reading a provider: a saved category edit (`limits_refresh::category_set`, under the cache
-lock, as archiving does) and an account list whose sign-in ends differ from the ones the column
-carries (`limits_refresh::sign_in_deadlines_listed`, which keeps them outside the cache lock so the
-account list never waits on a read). Each bumps the revision and announces only when something
-changed, and the reads that answer the announcement are served from the cache.
+The Limits read serves its column ([Limits](README.md#limits)), built from the cards the cache
+holds, the provider's roster of saved profiles and categories, and the sign-in ends the account
+list read. The roster and the sign-in ends each sit in the cache under a small lock of their own,
+never under the read lock that spans CLI and network reads, so nothing that writes them waits on a
+read in flight. The roster has two writers: the saved refresh, from the vault it already loaded
+(and only when it loaded one; a saved refresh that could not keeps the previous roster, as does one
+a reread overtook), and `limits_refresh::roster_changed`, which every vault writer outside an
+in-app account change asks for (`Notify::roster`: automatic remembering, unlock, a category edit or
+forget, archive and unarchive) and which rereads the vault with the session's key alone
+(`Store::open_unlocked`). The sign-in ends have one, the account list
+(`limits_refresh::sign_in_deadlines_listed`). Each bumps the revision and announces only when what
+it holds changed, and the reads that answer the announcement are served from the cache.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

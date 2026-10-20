@@ -1,8 +1,9 @@
-import type { AccountCategories, AccountsReading, SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
-import { hasLimits, hasSavedAccounts, isAgentId, LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
+import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
+import type { LimitsColumnEntry, ProviderLimits } from "$lib/limitsTypes";
+import { hasLimits, hasSavedAccounts, isAgentId, type LimitsProvider } from "$lib/providers";
 import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
+import { asColumn } from "./limitsColumn";
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -245,13 +246,11 @@ function accountDuplicate(): LimitsScenario {
 
 function accountDuplicateCodex(reconnected: boolean): ProviderLimits[] {
   const legacy = { ...CODEX[1], currentAccount: false, savedProfile: false, account: { id: DUPLICATE_WORKSPACE, label: "shared@example.com" } };
-  return [CODEX[0], reconnected ? {
-    ...legacy,
-    account: { id: "profile:shared", legacyId: DUPLICATE_WORKSPACE, label: "shared@example.com" },
+  return [CODEX[0], ...(reconnected ? [{ ...legacy,
+    account: { id: "profile:shared", label: "shared@example.com" },
     savedProfile: true,
     windows: CODEX[0].windows.map(window => ({ ...window, usedPercent: 42 })),
-    replaced: [legacy.account],
-  } : legacy];
+  }] : []), legacy];
 }
 
 function accountDuplicateAccounts(): AccountsReading {
@@ -388,37 +387,22 @@ export function limitsScenario(name: string) {
     const merged = new Map<string, string | null>([...saved, ...categories[which]]);
     return Object.fromEntries([...merged].flatMap(([id, category]) => category ? [[id, category]] : []));
   };
-  const asColumn = (which: LimitsProvider, read: ProviderLimits[]): ProviderLimits[] => {
-    const profiles = profilesOf(which);
-    const named = categoriesOf(which);
-    const facts = (id: string | undefined) => ({
-      ...(profiles.find(profile => profile.observationId === id) ? { profile: profiles.find(profile => profile.observationId === id) } : {}),
-      ...(id && named[id] ? { category: named[id] } : {}),
-    });
-    const unread = profiles.filter(profile => !read.some(entry => entry.account?.id === profile.observationId)).map((profile): ProviderLimits => ({
-      provider: which, status: "ok", account: { id: profile.observationId, legacyId: profile.legacyId, label: profile.email },
-      currentAccount: false, windows: [], unread: true, archived: !!profile.archived && !profile.active, ...facts(profile.observationId),
-    }));
-    return [...read.map(entry => ({ ...entry, ...facts(entry.account?.id) })), ...unread];
-  };
   return {
-    readLimits(agentId: unknown): ProviderLimits[] {
+    readLimits(agentId: unknown): LimitsColumnEntry[] {
       const which = provider(agentId);
       if (!which) return [];
-      return asColumn(which, (chosen[which] ?? OK[which])().flatMap(entry => {
+      const read = (chosen[which] ?? OK[which])().flatMap(entry => {
         const id = entry.currentAccount ? null : entry.account?.id;
         if (!id) return [entry];
         if (forgotten[which].has(id)) return [];
         return [archived[which].has(id) ? { ...entry, archived: true } : entry];
-      }));
+      });
+      return asColumn(read, profilesOf(which), categoriesOf(which));
     },
     readAccounts(agent: unknown): AccountsReading {
       const which = provider(agent);
       const reading = which ? accountsOf(which) : savedAccounts(agent as AgentId);
       return which ? { ...reading, profiles: profilesOf(which) } : reading;
-    },
-    readCategories(): AccountCategories {
-      return Object.fromEntries(LIMITS_PROVIDERS.map(which => [which, categoriesOf(which)]));
     },
     setCategory(agentId: unknown, accountId: unknown, category: unknown): string | null {
       const which = provider(agentId);

@@ -3,7 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { Limits } from "./Limits";
@@ -37,7 +37,7 @@ const codexWork = profile("codex", "work", "work@codex.example", { active: true 
 const codexShared = profile("codex", "shared", "shared@codex.example");
 const codexFresh = profile("codex", "fresh", "fresh@codex.example");
 
-const COLUMNS: Record<"claude" | "codex", ProviderLimits[]> = {
+const COLUMNS: Record<"claude" | "codex", LimitsColumnEntry[]> = {
   claude: [okClaude({ account: { id: claudeMe.observationId, label: "me@claude.example" }, profile: claudeMe })],
   codex: [
     okCodex({ account: { id: codexWork.observationId, label: "work@codex.example" }, profile: codexWork, category: "Client A" }),

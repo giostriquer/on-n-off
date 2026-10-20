@@ -32,7 +32,7 @@ pub(super) struct FetchResult {
 
 static ATTEMPTS: OnceLock<Mutex<HashMap<String, Attempt>>> = OnceLock::new();
 
-pub(crate) fn refresh(
+pub(crate) fn refresh_and_list(
     provider: AgentId,
     force: bool,
     entries: &mut Vec<ProviderLimitsDto>,
@@ -59,12 +59,11 @@ impl super::Accounts {
         let native = self
             .native(provider)
             .and_then(|native| native.subscription());
-        let current = native.clone().ok().flatten();
         let homes = self.account_homes(provider);
         if let (Some(homes), Ok(native)) = (&homes, &native) {
             super::homes::settle(home, provider, native.as_ref(), &open, homes);
         }
-        refresh_with(
+        let listed = refresh_with(
             home,
             provider,
             force,
@@ -76,7 +75,7 @@ impl super::Accounts {
         if let Some(homes) = &homes {
             refresh_homes(home, provider, force, entries, native, &open, homes);
         }
-        super::Roster::read(home, provider, current.as_ref())
+        listed
     }
 }
 
@@ -88,17 +87,16 @@ fn refresh_with(
     native: Result<Option<Identity>, String>,
     open: &(dyn Fn() -> Result<Store, String> + Sync),
     fetch: &(dyn Fn(&Profile) -> FetchResult + Sync),
-) {
+) -> Option<super::Roster> {
     let Ok(native) = native else {
-        return;
+        return None;
     };
-    let Ok(db) = open().and_then(|s| s.load()) else {
-        return;
-    };
-    let Ok(ticket) = db.ticket(Guard::SignIn) else {
-        return;
-    };
+    let db = open().and_then(|s| s.load()).ok()?;
     let archived = crate::limits::archived(home, provider);
+    let listed = super::Roster::of(&db, provider, None, &archived, &|_| None);
+    let Ok(ticket) = db.ticket(Guard::SignIn) else {
+        return Some(listed);
+    };
     let profiles: Vec<_> = db
         .profiles
         .into_iter()
@@ -127,6 +125,7 @@ fn refresh_with(
             merge(entries, profile, result);
         }
     }
+    Some(listed)
 }
 
 fn poll_with(

@@ -84,6 +84,9 @@ export type ProviderLimits = {
   subscription?: LimitsSubscription | null;
   resetCredits?: LimitsResetCredits | null;
   resetOffer?: LimitsResetOffer | null;
+};
+
+export type LimitsColumnEntry = ProviderLimits & {
   profile?: SavedProfile | null;
   category?: string | null;
   replaced?: LimitsAccount[];

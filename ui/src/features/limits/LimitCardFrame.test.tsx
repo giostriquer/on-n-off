@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { hasSavedAccounts, LIMITS_PROVIDERS, providerLabel, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
@@ -20,16 +20,16 @@ vi.mock("$lib/api", () => ({
   onSharedReadChanged: () => Promise.resolve(() => {}), readCodexSubscription: vi.fn().mockResolvedValue(null),
 }));
 
-const CURRENT: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => ProviderLimits> = { claude: okClaude, codex: okCodex, muse: okMuse };
+const CURRENT: Record<LimitsProvider, (overrides?: Partial<LimitsColumnEntry>) => LimitsColumnEntry> = { claude: okClaude, codex: okCodex, muse: okMuse };
 
 const label = (provider: LimitsProvider) => CURRENT[provider]().account!.label!;
 const oldLabel = (provider: LimitsProvider) => `old@${provider}.example`;
 
-function remembered(provider: LimitsProvider): ProviderLimits {
+function remembered(provider: LimitsProvider): LimitsColumnEntry {
   return CURRENT[provider]({ currentAccount: false, account: { id: `${provider}-old`, label: oldLabel(provider) } });
 }
 
-function answer(read: (provider: LimitsProvider) => ProviderLimits[] | Promise<ProviderLimits[]>) {
+function answer(read: (provider: LimitsProvider) => LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>) {
   readLimits.mockImplementation((provider: LimitsProvider) => Promise.resolve(read(provider)));
 }
 
@@ -99,7 +99,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
   });
 
   it("offers Check limits now while its first read is pending, disabled there and nowhere else", async () => {
-    answer(read => read === provider ? new Promise<ProviderLimits[]>(() => {}) : [CURRENT[read]()]);
+    answer(read => read === provider ? new Promise<LimitsColumnEntry[]>(() => {}) : [CURRENT[read]()]);
     renderLimits();
     const pending = await screen.findByRole("region", { name: `${name} limits` });
     expect(pending.getAttribute("data-status")).toBe("pending");
@@ -149,7 +149,7 @@ describe.each(LIMITS_PROVIDERS)("every %s card", (provider) => {
     await waitFor(() => expect(readLimits).toHaveBeenCalledTimes(LIMITS_PROVIDERS.length));
     let finish!: () => void;
     readLimits.mockImplementation((read: LimitsProvider, force: boolean) => force
-      ? new Promise<ProviderLimits[]>(resolve => { finish = () => resolve([CURRENT[read]()]); })
+      ? new Promise<LimitsColumnEntry[]>(resolve => { finish = () => resolve([CURRENT[read]()]); })
       : Promise.resolve([CURRENT[read]()]));
     openMenu(current, label(provider));
     fireEvent.click(screen.getByRole("button", { name: "Check limits now" }));
@@ -263,7 +263,7 @@ it("does not steal focus when a category save finishes after its editor was dism
 });
 
 describe("card header", () => {
-  function answerClaudeCodex(claude: ProviderLimits[], codex: ProviderLimits[]) {
+  function answerClaudeCodex(claude: LimitsColumnEntry[], codex: LimitsColumnEntry[]) {
     readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
   }
 

@@ -294,9 +294,8 @@ beside one asks first, as Codex does.
   text per provider and card account id (the observation key), so every Limits card can have one,
   for every provider, saved or not. `read_account_categories` and `set_account_category` need no
   account adapter, and the setter answers with the stored text. The Limits cards take their
-  categories from the Limits read, which reads them from the vault beside its saved profiles (the
-  Limits column, below), and a saved edit replaces that read's categories and announces it
-  (`limits_refresh::category_set`); the UI no longer reads the categories itself. `Database` keeps a saved login's
+  categories from the Limits read's roster (the Limits column, below), which a saved edit or
+  forget rereads (`Notify::roster`); the UI no longer reads the categories itself. `Database` keeps a saved login's
   profile copy in step with the map on every set and forget, and a login saved after its card was
   named takes the category, so an older app version still shows it; a profile category from an
   older version moves into the map when the vault loads. Forget drops the categories of every id
@@ -372,8 +371,8 @@ dates read from the logins, through `read_revision` once its leases are released
 remove for the provider whose card they add or remove. Use and sign out do so even when their
 native half fails, because a rollback or a failed logout may still have changed the native login;
 a sign-in does so only once published, and a change refused before it wrote anything is not
-announced. A category edit announces the account list and the provider's Limits read, whose column
-carries the category.
+announced. A category edit or forget announces the account list and rereads the provider's Limits
+roster, which announces the Limits read when the roster changed.
 
 ## Archived accounts
 
@@ -535,18 +534,29 @@ entry of its own (`unread`). The card model (`limitColumn`) therefore joins noth
 lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
 own.
 
-The saved profiles and categories come from the saved accounts' refresh the read already makes
-(`accounts::usage::refresh`, which returns a `Roster`): each profile as the account list builds it
-(`roster::listed`, shared with `Accounts::list`), signed in when the native identity that refresh
-already read names it. The read keeps the last roster through reads that do not refresh the saved
-accounts, and through one that could not open the vault. Reading it adds no credential or
-Keychain read to the Limits path: it opens the vault only with the key this session has already
-unlocked (`Store::open_unlocked`), never asking the OS store, and reads no native login and no
-home's login. A sign-in's end needs a login's credentials (a home's Keychain item on macOS), so the
-column carries the end the account list last read (`AccountsDto::sign_in_deadlines`, handed to
-`limits_refresh::sign_in_deadlines_listed`, which announces the Limits read only when they change):
-the screen, whose account manager lists the accounts, shows it as before, and the popover shows it
-whenever the account list has been read in this session.
+The saved profiles and categories are the provider's roster (`Roster`, `accounts/roster.rs`),
+which the Limits cache owns under a lock of its own and two writers replace
+([shared-reads.md](shared-reads.md#the-mechanism)). The saved refresh the read already makes
+(`accounts::usage::refresh_and_list`) lists it from the vault it loaded to poll, with no second
+decrypt; one that did not load the vault (the native login could not be read) keeps the previous
+roster. Every vault writer outside an in-app account change asks `Notify::roster`, which rereads it
+(`limits_refresh::roster_changed`): automatic remembering when it saves a login or is turned on,
+unlock, a category edit or forget, and archive and unarchive. An in-app account change already reads
+the provider again, saved accounts included. One builder lists a profile for the account list and
+the roster alike (`Roster::of`, given the sign-in-end lookup; the roster's is none). Who is signed
+in is not part of the roster: the column marks active the profile of the account the latest native
+read names, and none when that read names nobody (not installed, signed out), so a switch made in
+the CLI moves the active dot and the actions with the next native read.
+
+Building and rereading the roster add no credential or Keychain read to the Limits path: the
+reread opens the vault only with the key this session has already unlocked
+(`Store::open_unlocked`, through `SessionKeys::peek`), never asking the OS store, and neither reads
+a native login or a home's login. A sign-in's end needs a login's credentials (a home's Keychain
+item on macOS), so the column carries the end the account list last read
+(`AccountsDto::sign_in_deadlines`, handed to `limits_refresh::sign_in_deadlines_listed`, which
+announces the Limits read only when they change): the screen, whose account manager lists the
+accounts, shows it as before, and the popover shows it whenever the account list has been read in
+this session.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes
 the saved login and usage card; active Remove saved login keeps the native login and usage card.
 Operations remain busy through readback, and a sign-out confirmation is checked against the

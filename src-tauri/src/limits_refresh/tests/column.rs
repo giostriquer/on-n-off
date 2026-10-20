@@ -1,6 +1,7 @@
 use super::*;
 use crate::accounts::model::Identity;
 use crate::accounts::roster_for_test;
+use std::sync::mpsc;
 
 fn saved(user: &str) -> Identity {
     Identity {
@@ -10,7 +11,7 @@ fn saved(user: &str) -> Identity {
     }
 }
 
-fn roster_of(users: &[&str], archived: &[String]) -> Roster {
+fn roster_of(users: &[&str], categories: &[(&str, &str)]) -> Roster {
     let profiles: Vec<_> = users
         .iter()
         .map(|user| (saved(user), format!("{user}@example.com")))
@@ -19,135 +20,211 @@ fn roster_of(users: &[&str], archived: &[String]) -> Roster {
         .iter()
         .map(|(identity, email)| (identity.clone(), email.as_str()))
         .collect();
-    roster_for_test(AgentId::Codex, &named, None, archived, &[])
+    roster_for_test(AgentId::Codex, &named, &[], categories)
 }
 
-fn unread(column: &[ColumnEntryDto]) -> Vec<(String, bool)> {
-    column
-        .iter()
-        .filter(|entry| entry.unread)
-        .map(|entry| {
-            (
-                entry.card.account.as_ref().unwrap().label.clone().unwrap(),
-                entry.card.archived,
-            )
-        })
-        .collect()
-}
-
-fn signed_in() -> ProviderLimitsDto {
-    let mut card = snapshot("signed-in", true, LimitsStatus::Ok);
+fn signed_in_as(user: &str) -> ProviderLimitsDto {
+    let mut card = snapshot(&saved(user).observation_key(), true, LimitsStatus::Ok);
     card.provider = AgentId::Codex;
     card
 }
 
-fn read(cache: &Cache, force: bool, roster: Option<Roster>) -> Served {
+fn age(cache: &Cache) {
+    let mut cached = cache.read.lock().unwrap();
+    let read = cached.as_mut().unwrap();
+    read.native.refreshed_at = Instant::now() - Duration::from_secs(1800);
+}
+
+fn read(
+    cache: &Cache,
+    native: &str,
+    force: bool,
+    listed: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>) -> Option<Roster>,
+) {
     read_provider(
         cache,
         Duration::from_secs(1800),
         force,
         &Native {
-            read: &|_| native_read(vec![signed_in()]),
+            read: &|_| native_read(vec![signed_in_as(native)]),
             login: &no_login,
         },
         &|_| false,
-        &|_, _| roster.clone(),
+        listed,
         &|_| {},
-    )
-    .0
+    );
+}
+
+fn served_column(cache: &Cache) -> Vec<ColumnEntryDto> {
+    let entries = cache.served(cache.read.lock().unwrap().as_ref()).entries;
+    cache.column(&entries)
+}
+
+fn unread(column: &[ColumnEntryDto]) -> Vec<String> {
+    column
+        .iter()
+        .filter(|entry| entry.unread)
+        .map(|entry| entry.card.account.as_ref().unwrap().label.clone().unwrap())
+        .collect()
+}
+
+fn signed_in(column: &[ColumnEntryDto]) -> Vec<String> {
+    column
+        .iter()
+        .filter(|entry| entry.profile.as_ref().is_some_and(|p| p.active()))
+        .map(|entry| entry.card.account.as_ref().unwrap().id.clone())
+        .collect()
+}
+
+fn not_due(_: bool, _: &mut Vec<ProviderLimitsDto>) -> Option<Roster> {
+    panic!("saved accounts are not due")
 }
 
 #[test]
 fn the_column_lists_the_saved_profiles_the_last_saved_refresh_found_until_another_finds_others() {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
 
-    let first = read(&cache, false, Some(roster_of(&["fresh"], &[])));
-    assert_eq!(unread(&first.column), [("fresh@example.com".into(), false)]);
+    read(&cache, "me", false, &|_, _| {
+        Some(roster_of(&["fresh"], &[]))
+    });
+    assert_eq!(unread(&served_column(&cache)), ["fresh@example.com"]);
     assert_eq!(
-        first.entries.len(),
+        cache
+            .served(cache.read.lock().unwrap().as_ref())
+            .entries
+            .len(),
         1,
         "a Rust consumer still gets the cards it read"
     );
 
-    age_native(&cache, 1800);
-    let native_only = read_provider(
-        &cache,
-        Duration::from_secs(1800),
-        false,
-        &Native {
-            read: &|_| native_read(vec![signed_in()]),
-            login: &no_login,
-        },
-        &|_| false,
-        &|_, _| panic!("saved accounts are not due"),
-        &|_| {},
-    )
-    .0;
-    assert_eq!(unread(&native_only.column), unread(&first.column));
+    age(&cache);
+    read(&cache, "me", false, &not_due);
+    assert_eq!(unread(&served_column(&cache)), ["fresh@example.com"]);
 
-    let unreadable = read(&cache, true, None);
+    read(&cache, "me", true, &|_, _| None);
     assert_eq!(
-        unread(&unreadable.column),
-        unread(&first.column),
-        "a saved refresh that could not open the vault keeps the profiles it last found"
+        unread(&served_column(&cache)),
+        ["fresh@example.com"],
+        "a saved refresh that could not load the vault keeps the profiles it last found"
     );
 
-    let replaced = read(&cache, true, Some(roster_of(&["other"], &[])));
+    read(&cache, "me", true, &|_, _| Some(roster_of(&["other"], &[])));
+    assert_eq!(unread(&served_column(&cache)), ["other@example.com"]);
+}
+
+#[test]
+fn a_switch_made_in_the_cli_moves_the_signed_in_profile_with_the_next_native_read() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    read(&cache, "a", false, &|_, _| {
+        Some(roster_of(&["a", "b"], &[]))
+    });
     assert_eq!(
-        unread(&replaced.column),
-        [("other@example.com".into(), false)]
+        signed_in(&served_column(&cache)),
+        [saved("a").observation_key()]
+    );
+
+    age(&cache);
+    read(&cache, "b", false, &not_due);
+
+    assert_eq!(
+        signed_in(&served_column(&cache)),
+        [saved("b").observation_key()],
+        "no saved refresh ran, and the dot follows the native read"
     );
 }
 
 #[test]
-fn archiving_puts_away_a_saved_profile_no_read_answered_for() {
+fn a_roster_reread_reaches_the_column_without_a_saved_refresh_and_is_announced_only_when_it_changes(
+) {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
-    read(&cache, false, Some(roster_of(&["fresh"], &[])));
-    let id = saved("fresh").observation_key();
+    read(&cache, "me", false, &|_, _| Some(roster_of(&[], &[])));
+    assert!(served_column(&cache)[0].profile.is_none());
 
-    let archived = archive_through_cache(&cache, std::slice::from_ref(&id), true, || Ok(true));
+    assert_eq!(
+        reread_roster(&cache, || Some(roster_of(&["me", "fresh"], &[]))),
+        Reading::Replaced(2),
+        "a login saved by remembering, or a vault just unlocked"
+    );
+    let column = served_column(&cache);
+    assert_eq!(signed_in(&column), [saved("me").observation_key()]);
+    assert_eq!(unread(&column), ["fresh@example.com"]);
 
-    assert_eq!(archived, Ok((Reading::Replaced(2), true)));
-    let served = cache.served(cache.read.lock().unwrap().as_ref());
-    assert_eq!(unread(&served.column), [("fresh@example.com".into(), true)]);
+    assert_eq!(
+        reread_roster(&cache, || Some(roster_of(&["me", "fresh"], &[]))),
+        Reading::Unchanged(2)
+    );
+    assert_eq!(
+        reread_roster(&cache, || None),
+        Reading::Unchanged(2),
+        "a vault this session has not unlocked leaves the roster as it was"
+    );
+    assert_eq!(unread(&served_column(&cache)), ["fresh@example.com"]);
 }
 
 #[test]
-fn a_category_edit_replaces_the_column_and_is_announced_only_when_it_changes() {
+fn a_forgotten_category_leaves_the_column_with_the_reread() {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    let me = saved("me").observation_key();
+    read(&cache, "me", false, &|_, _| {
+        Some(roster_of(&["me"], &[(me.as_str(), "Client A")]))
+    });
     assert_eq!(
-        category_through_cache(&cache, "signed-in", Some("Client A")),
+        served_column(&cache)[0].category.as_deref(),
+        Some("Client A")
+    );
+
+    reread_roster(&cache, || Some(roster_of(&["me"], &[])));
+
+    assert_eq!(served_column(&cache)[0].category, None);
+}
+
+#[test]
+fn a_category_edit_completes_while_a_read_holds_the_read_lock_and_the_read_keeps_it() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    let me = saved("me").observation_key();
+    read(&cache, "me", false, &|_, _| Some(roster_of(&["me"], &[])));
+    let edited = || Some(roster_of(&["me"], &[(me.as_str(), "Client A")]));
+
+    let held = cache.read.lock().unwrap();
+    std::thread::scope(|scope| {
+        let (done, finished) = mpsc::channel();
+        let cache = &cache;
+        scope.spawn(move || {
+            reread_roster(cache, edited);
+            let _ = done.send(());
+        });
+        let answered = finished.recv_timeout(Duration::from_secs(5));
+        drop(held);
+        assert!(answered.is_ok(), "the edit waited for the read lock");
+    });
+    assert_eq!(
+        served_column(&cache)[0].category.as_deref(),
+        Some("Client A")
+    );
+
+    read(&cache, "me", true, &|_, _| {
+        reread_roster(&cache, edited);
+        Some(roster_of(&["me"], &[]))
+    });
+    assert_eq!(
+        served_column(&cache)[0].category.as_deref(),
+        Some("Client A"),
+        "a saved refresh that loaded the vault before the edit does not undo it"
+    );
+}
+
+#[test]
+fn a_roster_reread_never_reaches_the_credential_store() {
+    let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    let home = tempfile::tempdir().unwrap();
+    let vault = home.path().join(".on-n-off/accounts/vault.enc");
+    std::fs::create_dir_all(vault.parent().unwrap()).unwrap();
+    std::fs::write(&vault, b"sealed elsewhere").unwrap();
+
+    assert_eq!(
+        reread_roster(&cache, || Roster::read(home.path(), AgentId::Codex)),
         Reading::Unchanged(0),
-        "nothing to edit before the first read"
-    );
-    read(&cache, false, Some(roster_of(&["fresh"], &[])));
-    let fresh = saved("fresh").observation_key();
-
-    assert_eq!(
-        category_through_cache(&cache, "signed-in", Some("Client A")),
-        Reading::Replaced(2)
-    );
-    assert_eq!(
-        category_through_cache(&cache, &fresh, Some("Research")),
-        Reading::Replaced(3)
-    );
-    assert_eq!(
-        category_through_cache(&cache, &fresh, Some("Research")),
-        Reading::Unchanged(3)
-    );
-    let served = cache.served(cache.read.lock().unwrap().as_ref());
-    let categories: Vec<_> = served
-        .column
-        .iter()
-        .map(|entry| entry.category.as_deref())
-        .collect();
-    assert_eq!(categories, [Some("Client A"), Some("Research")]);
-    let profile = serde_json::to_value(served.column[1].profile.as_ref().unwrap()).unwrap();
-    assert_eq!(profile["category"], "Research");
-
-    assert_eq!(
-        category_through_cache(&cache, &fresh, None),
-        Reading::Replaced(4)
+        "a test build panics if the reread asks the OS for the vault key"
     );
 }
 
@@ -155,9 +232,9 @@ fn a_category_edit_replaces_the_column_and_is_announced_only_when_it_changes() {
 fn the_sign_in_ends_the_account_list_read_reach_the_column_and_are_announced_only_when_they_change()
 {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
-    read(&cache, false, Some(roster_of(&["fresh"], &[])));
-    let fresh = saved("fresh").observation_key();
-    let ends = SignInDeadlines::from([(fresh.clone(), "2026-09-30T12:00:00Z".to_string())]);
+    read(&cache, "me", false, &|_, _| Some(roster_of(&["me"], &[])));
+    let me = saved("me").observation_key();
+    let ends = SignInDeadlines::from([(me, "2026-09-30T12:00:00Z".to_string())]);
 
     assert_eq!(
         ends_through_cache(&cache, SignInDeadlines::new()),
@@ -169,7 +246,7 @@ fn the_sign_in_ends_the_account_list_read_reach_the_column_and_are_announced_onl
     );
     assert_eq!(ends_through_cache(&cache, ends), Reading::Unchanged(2));
 
-    let served = cache.served(cache.read.lock().unwrap().as_ref());
-    let profile = serde_json::to_value(served.column[1].profile.as_ref().unwrap()).unwrap();
+    let column = served_column(&cache);
+    let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
     assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
 }

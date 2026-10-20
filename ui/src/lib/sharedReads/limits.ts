@@ -1,6 +1,6 @@
 import { keepPreviousData, queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import * as api from "$lib/api";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { LimitsPollMinutes, SharedReadSource } from "$lib/types";
 import { readForced } from "./forcedRead";
@@ -35,7 +35,7 @@ export function limitsQuery(provider: LimitsProvider, pollMinutes: LimitsPollMin
   });
 }
 
-export function checkLimitsNow(client: QueryClient, provider: LimitsProvider): Promise<ProviderLimits[]> {
+export function checkLimitsNow(client: QueryClient, provider: LimitsProvider): Promise<LimitsColumnEntry[]> {
   return readForced(client, limitsKey(provider), (force) => api.readLimits(provider, force));
 }
 
@@ -67,7 +67,7 @@ export function setCategoryLocally(client: QueryClient, provider: LimitsProvider
 export function updateLimits(
   client: QueryClient,
   provider: LimitsProvider,
-  update: (entries: ProviderLimits[]) => ProviderLimits[],
+  update: (entries: LimitsColumnEntry[]) => LimitsColumnEntry[],
 ): void {
-  client.setQueryData<ProviderLimits[]>(limitsKey(provider), (entries) => entries && update(entries));
+  client.setQueryData<LimitsColumnEntry[]>(limitsKey(provider), (entries) => entries && update(entries));
 }

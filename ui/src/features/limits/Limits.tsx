@@ -6,7 +6,7 @@ import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
 import { useFocusHandoff } from "$lib/focusHandoff";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
@@ -81,7 +81,7 @@ function ProviderColumn({
   addAccount,
 }: {
   provider: LimitsProvider;
-  query: UseQueryResult<ProviderLimits[]>;
+  query: UseQueryResult<LimitsColumnEntry[]>;
   now: number;
   addAccount: RefObject<HTMLButtonElement | null>;
 }) {

@@ -5,7 +5,7 @@ import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
 import { usageFillStyle } from "$lib/limitsFormat";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
 import { useAppSettings } from "$lib/useAppSettings";
@@ -121,7 +121,7 @@ function PopoverProviderSection({
   now,
 }: {
   provider: LimitsProvider;
-  query: UseQueryResult<ProviderLimits[]>;
+  query: UseQueryResult<LimitsColumnEntry[]>;
   now: number;
 }) {
   const name = providerLabel(provider);

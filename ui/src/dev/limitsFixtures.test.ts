@@ -75,6 +75,17 @@ describe("limitsScenario", () => {
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
   });
 
+  it("carries the category a card saves and clears it on a blank, beside the saved logins' own", () => {
+    const scenario = limitsScenario("ok");
+    const category = (agent: string, id: string) => scenario.readLimits(agent).find(entry => entry.account?.id === id)?.category;
+
+    expect(scenario.setCategory("muse", "muse-1", "  Personal ")).toBe("Personal");
+    expect(category("muse", "muse-1")).toBe("Personal");
+    expect(category("codex", "codex-2")).toBe("Client A / research");
+    expect(scenario.setCategory("muse", "muse-1", " ")).toBeNull();
+    expect(category("muse", "muse-1")).toBeUndefined();
+  });
+
   it("follows archive and unarchive under any scenario, for that page alone", () => {
     const scenario = limitsScenario("ok");
     scenario.setArchived("codex", ["codex-2"], true);

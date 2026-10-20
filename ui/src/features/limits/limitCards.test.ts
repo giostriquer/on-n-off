@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
 import { formatObservedAt } from "$lib/limitsFormat";
-import type { LimitsCredits, LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsCredits, LimitsStatus, LimitsColumnEntry } from "$lib/limitsTypes";
 import { LIMITS_PROVIDERS, type LimitsProvider } from "$lib/providers";
 import type { AgentId } from "$lib/types";
+import { unreadEntry } from "@/dev/limitsColumn";
 import { cardTags } from "./cardTags";
 import { limitCards, limitColumn, type LimitCard } from "./limitCards";
 import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
@@ -14,14 +15,7 @@ function saved(provider: AgentId, id: string, observationId: string, email: stri
   return { id, observationId, legacyId: id, identity: { provider, userId: id, workspaceId: id }, email, label: email, savedAt: NOW, active: false, needsLogin: false, ...overrides };
 }
 
-function unread(profile: SavedProfile, overrides: Partial<ProviderLimits> = {}): ProviderLimits {
-  return {
-    provider: profile.identity.provider, status: "ok", account: { id: profile.observationId, legacyId: profile.legacyId, label: profile.email },
-    currentAccount: false, windows: [], unread: true, profile, ...overrides,
-  };
-}
-
-function cards(entries: ProviderLimits[] | undefined, now = AT_NOW, provider = (entries?.[0]?.provider ?? "codex") as LimitsProvider): LimitCard[] {
+function cards(entries: LimitsColumnEntry[] | undefined, now = AT_NOW, provider = (entries?.[0]?.provider ?? "codex") as LimitsProvider): LimitCard[] {
   const shown = limitCards({ provider, entries, nativeLogin: null, now });
   if (!shown) throw new Error("expected cards");
   return shown;
@@ -37,7 +31,7 @@ describe("which cards a provider shows", () => {
 
   it("gives a saved profile no read has answered for a card of its own", () => {
     const profile = saved("claude", "unread", "profile:unread", "unread@claude.example", { active: true });
-    const [card] = cards([unread(profile)], AT_NOW, "claude");
+    const [card] = cards([unreadEntry(profile)], AT_NOW, "claude");
     expect(card).toEqual({
       key: "current-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
@@ -53,7 +47,7 @@ describe("which cards a provider shows", () => {
   });
 
   it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
-    const [card] = cards([unread(saved("codex", "unread", "profile:unread", "unread@codex.example"))], AT_NOW, "codex");
+    const [card] = cards([unreadEntry(saved("codex", "unread", "profile:unread", "unread@codex.example"))], AT_NOW, "codex");
     expect(card).toMatchObject({
       provider: "codex", signedIn: "no", key: "remembered-profile:unread", account: { id: "profile:unread" }, reading: null,
       subscription: { accountId: "profile:unread", poll: false, term: null },
@@ -63,7 +57,7 @@ describe("which cards a provider shows", () => {
 
   it("keeps an unverified legacy card beside its saved login", () => {
     const shown = cards([okCodex({ account: { id: "team", label: "shared@example.com" }, currentAccount: false }),
-      unread(saved("codex", "saved", "profile:user-team", "shared@example.com", { legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" } }))]);
+      unreadEntry(saved("codex", "saved", "profile:user-team", "shared@example.com", { legacyId: "team", identity: { provider: "codex", userId: "user", workspaceId: "team" } }))]);
     expect(labels(shown)).toEqual(["shared@example.com", "shared@example.com"]);
     expect(shown.map(card => [card.account?.id, card.empty?.reason ?? null])).toEqual([["team", null], ["profile:user-team", "usageUnavailable"]]);
   });
@@ -87,8 +81,8 @@ describe("card order", () => {
   function account(
     label: string,
     windows: { session?: [number, string | null]; weekly?: [number, string | null]; model?: [number, string | null] },
-    overrides: Partial<ProviderLimits> = {},
-  ): ProviderLimits {
+    overrides: Partial<LimitsColumnEntry> = {},
+  ): LimitsColumnEntry {
     const window = (kind: "session" | "weekly" | "model", [usedPercent, resetsAt]: [number, string | null]) =>
       ({ id: kind, label: kind, kind, usedPercent, resetsAt, observedAt: "2026-09-21T11:00:00Z" });
     return {
@@ -101,7 +95,7 @@ describe("card order", () => {
       ...overrides,
     };
   }
-  const order = (entries: ProviderLimits[], provider: LimitsProvider = "claude") => labels(cards(entries, ORDER_NOW, provider));
+  const order = (entries: LimitsColumnEntry[], provider: LimitsProvider = "claude") => labels(cards(entries, ORDER_NOW, provider));
 
   it("puts the active account first even when it is out of usage", () => {
     const active = account("active", { session: [100, at(2)], weekly: [100, at(48)] }, { currentAccount: true });
@@ -172,7 +166,7 @@ describe("card order", () => {
     const spare = account("spare", { weekly: [30, at(100)] });
     const unknown = account("unknown", {});
     const profile = (id: string, active: boolean) => saved("claude", id, `profile:${id}`, `${id}@example.com`, { active });
-    expect(order([unknown, spare, current, unread(profile("idle", false)), unread(profile("ghost", true))]))
+    expect(order([unknown, spare, current, unreadEntry(profile("idle", false)), unreadEntry(profile("ghost", true))]))
       .toEqual(["current", "ghost@example.com", "spare", "unknown", "idle@example.com"]);
   });
 });
@@ -279,7 +273,7 @@ describe("a card's windows", () => {
 
 describe("a card's status and message", () => {
   const reason = "Saved usage credential is no longer accepted.";
-  const neverRead = unread(saved("claude", "unread", "profile:unread", "unread@claude.example"));
+  const neverRead = unreadEntry(saved("claude", "unread", "profile:unread", "unread@claude.example"));
   it.each([
     ["a live read", okCodex(), null, null],
     ["a remembered reading", staleCodex(), { kind: "remembered" }, null],
@@ -418,7 +412,7 @@ describe("a card's subscription badge", () => {
   });
 
   it("refreshes by the signed-in state, not by the read: the saved profile's word comes first", () => {
-    const poll = (entry: ProviderLimits, active: boolean) =>
+    const poll = (entry: LimitsColumnEntry, active: boolean) =>
       cards([{ ...entry, profile: saved("codex", "work", "acct-work", "work@codex.example", { active }) }])[0].subscription?.poll;
     expect(poll(okCodex({ currentAccount: false }), true), "the account list already names it").toBe(true);
     expect(poll(okCodex(), false), "the read names it, but its saved login is not the one in use").toBe(false);
@@ -434,13 +428,13 @@ describe("archived accounts", () => {
   const archivedSaved = staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, archived: true });
   const archivedHistory = staleCodex({ account: { id: "team", label: "history@codex.example" }, archived: true });
   const visibleSaved = staleCodex({ account: { id: "profile:kept", label: "kept@codex.example" }, savedProfile: true });
-  const column = (entries: ProviderLimits[] | undefined) => limitColumn({ provider: "codex", entries, nativeLogin: null, now: AT_NOW });
+  const column = (entries: LimitsColumnEntry[] | undefined) => limitColumn({ provider: "codex", entries, nativeLogin: null, now: AT_NOW });
 
   it("splits a provider's cards into the visible ones and the archived ones the read flags, profile-only cards included", () => {
     const shown = column([
       signedIn, { ...archivedSaved, profile: saved("codex", "saved", "profile:saved", "saved@codex.example") }, archivedHistory, visibleSaved,
-      unread(saved("codex", "unread", "profile:unread", "unread@codex.example", { archived: true }), { archived: true }),
-      unread(saved("codex", "fresh", "profile:fresh", "fresh@codex.example")),
+      unreadEntry(saved("codex", "unread", "profile:unread", "unread@codex.example", { archived: true })),
+      unreadEntry(saved("codex", "fresh", "profile:fresh", "fresh@codex.example")),
     ]);
     expect(shown && labels(shown.visible)).toEqual(["me@codex.example", "kept@codex.example", "fresh@codex.example"]);
     expect(shown && labels(shown.archived)).toEqual(["saved@codex.example", "history@codex.example", "unread@codex.example"]);
@@ -467,7 +461,7 @@ describe("a saved Claude sign-in's end", () => {
 
   it("once passed, is the card's message in red, read or not", () => {
     const profile = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended });
-    const [card] = cards([unread(profile)], AT_NOW, "claude");
+    const [card] = cards([unreadEntry(profile)], AT_NOW, "claude");
     expect(card).toMatchObject({ signIn: { state: "ended" }, empty: null, freshness: { message: endedMessage } });
 
     const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits.", profile }]);
@@ -476,7 +470,7 @@ describe("a saved Claude sign-in's end", () => {
 
   it("never applies to a Codex card", () => {
     const codex = saved("codex", "me", "acct-me", "me@codex.example", { signInEndsAt: ended });
-    expect(cards([unread(codex)], AT_NOW, "codex")[0]).toMatchObject({
+    expect(cards([unreadEntry(codex)], AT_NOW, "codex")[0]).toMatchObject({
       signIn: null, empty: { reason: "usageUnavailable" }, freshness: { message: null },
     });
   });
@@ -491,7 +485,7 @@ describe("each provider's card features", () => {
   };
 
   it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {
-    const reading: ProviderLimits = {
+    const reading: LimitsColumnEntry = {
       provider,
       status: "ok",
       account: { id: "acct-every", label: "every@example.com" },

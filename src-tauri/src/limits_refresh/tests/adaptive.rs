@@ -19,6 +19,17 @@ fn quota(used: f64, current: bool) -> ProviderLimitsDto {
     card
 }
 
+fn age_native(cache: &Cache, seconds: u64) {
+    cache
+        .read
+        .lock()
+        .unwrap()
+        .as_mut()
+        .unwrap()
+        .native
+        .refreshed_at = Instant::now() - Duration::from_secs(seconds);
+}
+
 #[test]
 fn only_the_active_account_in_the_last_ten_percent_is_read_after_five_minutes() {
     for (used, current, status, expected_reads) in [
@@ -406,7 +417,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
     });
     age_native(&cache, 300);
 
-    let (Served { column, .. }, _) = read_provider(
+    let (Served { entries, .. }, _) = read_provider(
         &cache,
         Duration::from_secs(1800),
         false,
@@ -419,6 +430,7 @@ fn an_extra_native_read_does_not_resurrect_a_superseded_legacy_card() {
         &|_| {},
     );
 
+    let column = cache.column(&entries);
     assert_eq!(
         column.iter().map(|entry| &entry.card).collect::<Vec<_>>(),
         [&scoped]

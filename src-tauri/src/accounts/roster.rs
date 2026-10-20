@@ -16,11 +16,12 @@ pub(crate) struct Roster {
 }
 
 impl Roster {
-    fn of(
+    pub(super) fn of(
         db: &Database,
         provider: AgentId,
         current: Option<&Identity>,
         archived: &BTreeSet<String>,
+        ends: &dyn Fn(&Profile) -> Option<String>,
     ) -> Self {
         let categories = db
             .categories()
@@ -31,7 +32,7 @@ impl Roster {
             .profiles
             .iter()
             .filter(|p| p.identity.provider == provider)
-            .map(|p| listed(p.clone(), current, archived, &categories, None))
+            .map(|p| listed(p.clone(), current, archived, &categories, ends(p)))
             .collect();
         Self {
             profiles,
@@ -39,7 +40,7 @@ impl Roster {
         }
     }
 
-    pub(super) fn read(home: &Path, provider: AgentId, current: Option<&Identity>) -> Option<Self> {
+    pub(crate) fn read(home: &Path, provider: AgentId) -> Option<Self> {
         if !Store::vault_exists(home) {
             return Some(Self::default());
         }
@@ -49,54 +50,28 @@ impl Roster {
         Some(Self::of(
             &db,
             provider,
-            current,
+            None,
             &crate::limits::archived(home, provider),
+            &|_| None,
         ))
+    }
+
+    pub(super) fn into_profiles(self) -> Vec<ProfileDto> {
+        self.profiles
     }
 
     pub(crate) fn profiles(&self) -> &[ProfileDto] {
         &self.profiles
     }
 
-    pub(crate) fn profile(&self, account_id: &str, ends: &SignInDeadlines) -> Option<ProfileDto> {
+    pub(crate) fn profile(&self, account_id: &str) -> Option<&ProfileDto> {
         self.profiles
             .iter()
             .find(|p| p.observation_id == account_id)
-            .map(|p| p.ending(ends))
     }
 
     pub(crate) fn category(&self, account_id: &str) -> Option<&str> {
         self.categories.get(account_id).map(String::as_str)
-    }
-
-    pub(crate) fn set_category(&mut self, account_id: &str, category: Option<&str>) -> bool {
-        let category = category.map(str::to_owned);
-        let mut changed = match &category {
-            Some(text) => self.categories.insert(account_id.to_owned(), text.clone()) != category,
-            None => self.categories.remove(account_id).is_some(),
-        };
-        for profile in self
-            .profiles
-            .iter_mut()
-            .filter(|p| p.observation_id == account_id)
-        {
-            changed |= profile.category != category;
-            profile.category.clone_from(&category);
-        }
-        changed
-    }
-
-    pub(crate) fn set_archived(&mut self, ids: &[String], archived: bool) -> bool {
-        let mut changed = false;
-        for profile in self
-            .profiles
-            .iter_mut()
-            .filter(|p| ids.contains(&p.observation_id))
-        {
-            changed |= profile.archived != archived;
-            profile.archived = archived;
-        }
-        changed
     }
 }
 
@@ -117,17 +92,19 @@ impl ProfileDto {
         self.identity.provider
     }
 
-    pub(crate) fn active(&self) -> bool {
-        self.active
-    }
-
     pub(crate) fn archived(&self) -> bool {
         self.archived
     }
 
-    fn ending(&self, ends: &SignInDeadlines) -> Self {
+    #[cfg(test)]
+    pub(crate) fn active(&self) -> bool {
+        self.active
+    }
+
+    pub(crate) fn in_column(&self, ends: &SignInDeadlines, signed_in: Option<&str>) -> Self {
         Self {
             sign_in_ends_at: ends.get(&self.observation_id).cloned(),
+            active: signed_in == Some(self.observation_id.as_str()),
             ..self.clone()
         }
     }
@@ -142,7 +119,7 @@ impl AccountsDto {
     }
 }
 
-pub(super) fn listed(
+fn listed(
     p: Profile,
     current: Option<&Identity>,
     archived: &BTreeSet<String>,
@@ -171,7 +148,6 @@ pub(super) fn listed(
 pub(crate) fn roster_for_test(
     provider: AgentId,
     profiles: &[(Identity, &str)],
-    current: Option<&Identity>,
     archived: &[String],
     categories: &[(&str, &str)],
 ) -> Roster {
@@ -195,5 +171,11 @@ pub(crate) fn roster_for_test(
         db.set_account_category(provider, account_id, category)
             .expect("a category the vault accepts");
     }
-    Roster::of(&db, provider, current, &archived.iter().cloned().collect())
+    Roster::of(
+        &db,
+        provider,
+        None,
+        &archived.iter().cloned().collect(),
+        &|_| None,
+    )
 }

@@ -2,6 +2,7 @@ import type { SavedProfile } from "$lib/accountTypes";
 import { planLabel, planMultiplier } from "$lib/limitsFormat";
 import type {
   LimitWindow,
+  LimitsColumnEntry,
   LimitsCredits,
   LimitsCreditsSpent,
   LimitsResetCredits,
@@ -82,12 +83,12 @@ export type LimitCard = {
 
 export type LimitCardsInput = {
   provider: LimitsProvider;
-  entries: ProviderLimits[] | undefined;
+  entries: LimitsColumnEntry[] | undefined;
   nativeLogin: NativeLogin | null;
   now: number;
 };
 
-type Slot = { entry: ProviderLimits; reading: ProviderLimits | null; profile: SavedProfile | null };
+type Slot = { entry: LimitsColumnEntry; reading: ProviderLimits | null; profile: SavedProfile | null };
 
 export function limitCards({ provider, entries, nativeLogin, now }: LimitCardsInput): LimitCard[] | null {
   if (!entries) return null;

@@ -1,6 +1,6 @@
 use super::*;
 use crate::accounts::model::Identity;
-use crate::accounts::roster_for_test;
+use crate::accounts::{roster_for_test, ProfileDto};
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, Reading};
 use crate::limits::window::fixture;
 
@@ -50,7 +50,7 @@ fn history(identity: &Identity, label: &str) -> ProviderLimitsDto {
 }
 
 fn roster(provider: AgentId, profiles: &[(Identity, &str)]) -> Roster {
-    roster_for_test(provider, profiles, None, &[], &[])
+    roster_for_test(provider, profiles, &[], &[])
 }
 
 fn no_ends() -> SignInDeadlines {
@@ -276,10 +276,9 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
 }
 
 #[test]
-fn an_unread_entry_is_archived_as_its_profile_is_unless_it_is_the_signed_in_login() {
+fn an_unread_entry_is_archived_as_its_profile_is() {
     let put_away = identity(AgentId::Codex, "put-away", "team");
-    let signed_in = identity(AgentId::Codex, "signed-in", "team");
-    let archived = [put_away.observation_key(), signed_in.observation_key()];
+    let kept = identity(AgentId::Codex, "kept", "team");
 
     let column = column(
         &[],
@@ -287,10 +286,9 @@ fn an_unread_entry_is_archived_as_its_profile_is_unless_it_is_the_signed_in_logi
             AgentId::Codex,
             &[
                 (put_away.clone(), "put-away@example.com"),
-                (signed_in.clone(), "signed-in@example.com"),
+                (kept.clone(), "kept@example.com"),
             ],
-            Some(&signed_in),
-            &archived,
+            &[put_away.observation_key()],
             &[],
         ),
         &no_ends(),
@@ -303,6 +301,34 @@ fn an_unread_entry_is_archived_as_its_profile_is_unless_it_is_the_signed_in_logi
             .collect::<Vec<_>>(),
         [(true, true), (true, false)]
     );
+}
+
+#[test]
+fn the_signed_in_profile_is_the_one_the_native_read_names_and_none_when_it_names_nobody() {
+    let a = identity(AgentId::Codex, "a", "team");
+    let b = identity(AgentId::Codex, "b", "team");
+    let roster = roster(
+        AgentId::Codex,
+        &[(a.clone(), "a@example.com"), (b.clone(), "b@example.com")],
+    );
+    let active = |column: &[ColumnEntryDto]| {
+        column
+            .iter()
+            .filter(|entry| entry.profile.as_ref().is_some_and(ProfileDto::active))
+            .map(|entry| entry.card.account.as_ref().unwrap().id.clone())
+            .collect::<Vec<_>>()
+    };
+    let mut signed_in = scoped(&b, "b@example.com");
+    signed_in.current_account = true;
+    let mut nobody = ProviderLimitsDto::for_test(AgentId::Codex, "unused");
+    nobody.account = None;
+    nobody.status = LimitsStatus::SignedOut;
+
+    assert_eq!(
+        active(&column(&[signed_in], &roster, &no_ends())),
+        [b.observation_key()]
+    );
+    assert!(active(&column(&[nobody], &roster, &no_ends())).is_empty());
 }
 
 #[test]
@@ -331,7 +357,6 @@ fn every_entry_carries_its_accounts_category_and_a_saved_accounts_profile() {
         &roster_for_test(
             AgentId::Codex,
             &[(saved.clone(), "saved@example.com")],
-            None,
             &[],
             &[(saved_key.as_str(), "Client A"), ("history", "Old team")],
         ),
@@ -373,7 +398,6 @@ fn the_column_reaches_the_ui_as_the_reading_with_its_account_facts_beside_it() {
         &roster_for_test(
             AgentId::Codex,
             &[(account.clone(), "you@example.com")],
-            None,
             &[],
             &[(account.observation_key().as_str(), "Client A")],
         ),

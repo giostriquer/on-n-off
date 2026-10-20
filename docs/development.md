@@ -71,7 +71,7 @@ source carries no comments (see [Code comments](#code-comments)).
   category beside each: the Limits read's column (`limits::column`, served by
   `limits_refresh::read_column`), never a join in the UI. Both Limits surfaces render it through
   `limitColumn`, which takes the entries alone; a fact a card needs about its saved profile is added
-  to the column (and to `ProfileDto` through `roster::listed`, which the account list shares), read
+  to the column (and to `ProfileDto` through `Roster::of`, which the account list shares), read
   without a credential, never joined from the account list again
   ([why](architecture/accounts.md#the-limits-column)).
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's

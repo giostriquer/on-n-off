@@ -165,6 +165,7 @@ trait Clients {
 trait Notify {
     fn changed(&self, provider: AgentId);
     fn accounts(&self);
+    fn roster(&self, provider: AgentId);
 }
 
 trait Browser {
@@ -224,6 +225,9 @@ impl Notify for Announce {
     }
     fn accounts(&self) {
         crate::read_revision::announce(crate::read_revision::Source::Accounts);
+    }
+    fn roster(&self, provider: AgentId) {
+        crate::limits_refresh::roster_changed(provider);
     }
 }
 
@@ -287,11 +291,7 @@ pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
     Ok(listed)
 }
 pub fn unlock() -> Result<(), String> {
-    let home = home()?;
-    if !store::Store::vault_exists(&home) {
-        return Ok(());
-    }
-    store::Store::open(&home, false)?.load().map(|_| ())
+    Accounts::live()?.unlock()
 }
 pub fn save_current(provider: AgentId) -> Result<(), String> {
     Accounts::live()?.save_current(provider)
@@ -304,9 +304,7 @@ pub fn set_account_category(
     account_id: &str,
     category: &str,
 ) -> Result<Option<String>, String> {
-    let stored = Accounts::live()?.set_account_category(provider, account_id, category)?;
-    crate::limits_refresh::category_set(provider, account_id, stored.as_deref());
-    Ok(stored)
+    Accounts::live()?.set_account_category(provider, account_id, category)
 }
 pub fn forget_categories(provider: AgentId, account_ids: &[String]) -> Result<(), String> {
     Accounts::live()?.forget_categories(provider, account_ids)
@@ -363,24 +361,17 @@ impl Accounts {
         let recovery_required = db
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
-        let archived = crate::limits::archived(home, provider);
-        let categories = db
-            .categories()
-            .get(provider.key())
-            .cloned()
-            .unwrap_or_default();
         let native_deadline = native.sign_in_deadline();
         let homes = self.account_homes(provider);
+        let roster = Roster::of(
+            &db,
+            provider,
+            current.as_ref(),
+            &crate::limits::archived(home, provider),
+            &|p| sign_in_ends_at(p, native_deadline.as_ref(), homes.as_ref()),
+        );
         Ok(AccountsDto {
-            profiles: db
-                .profiles
-                .into_iter()
-                .filter(|p| p.identity.provider == provider)
-                .map(|p| {
-                    let ends = sign_in_ends_at(&p, native_deadline.as_ref(), homes.as_ref());
-                    roster::listed(p, current.as_ref(), &archived, &categories, ends)
-                })
-                .collect(),
+            profiles: roster.into_profiles(),
             remember_accounts: discovery::enabled(home).unwrap_or(false),
             native_observation_id: current.as_ref().map(model::Identity::observation_key),
             native_account: current,
@@ -430,6 +421,17 @@ impl Accounts {
         Ok(())
     }
 
+    fn unlock(&self) -> Result<(), String> {
+        if !store::Store::vault_exists(&self.home) {
+            return Ok(());
+        }
+        store::Store::open(&self.home, false)?.load()?;
+        for provider in PROVIDERS {
+            self.notify.roster(provider);
+        }
+        Ok(())
+    }
+
     fn categories(&self) -> Result<CategoriesDto, String> {
         if !store::Store::vault_exists(&self.home) {
             return Ok(CategoriesDto::default());
@@ -449,6 +451,7 @@ impl Accounts {
                 db.set_account_category(provider, account_id, category)
             })?;
         self.notify.accounts();
+        self.notify.roster(provider);
         Ok(stored)
     }
 
@@ -462,6 +465,7 @@ impl Accounts {
             })?;
         if changed {
             self.notify.accounts();
+            self.notify.roster(provider);
         }
         Ok(())
     }

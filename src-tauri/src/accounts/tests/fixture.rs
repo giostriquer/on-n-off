@@ -364,6 +364,7 @@ impl Browser for FakeBrowser {
 pub(super) enum Heard {
     Changed(AgentId),
     Accounts,
+    Roster(AgentId),
 }
 pub(super) struct Recorder {
     home: PathBuf,
@@ -386,6 +387,9 @@ impl Notify for Listener {
     }
     fn accounts(&self) {
         self.record(Heard::Accounts);
+    }
+    fn roster(&self, provider: AgentId) {
+        self.record(Heard::Roster(provider));
     }
 }
 

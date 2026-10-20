@@ -1,10 +1,11 @@
 import type { SavedProfile } from "$lib/accountTypes";
-import type { LimitsStatus, ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry, LimitsStatus } from "$lib/limitsTypes";
+import { unreadEntry } from "@/dev/limitsColumn";
 import type { AgentId } from "$lib/types";
 
 export const NOW = "2026-08-17T20:00:00Z";
 
-export function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+export function okClaude(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return {
     provider: "claude",
     status: "ok",
@@ -20,7 +21,7 @@ export function okClaude(overrides: Partial<ProviderLimits> = {}): ProviderLimit
   };
 }
 
-export function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+export function okCodex(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return {
     provider: "codex",
     status: "ok",
@@ -36,7 +37,7 @@ export function okCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits
   };
 }
 
-export function okMuse(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+export function okMuse(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return {
     provider: "muse",
     status: "ok",
@@ -51,7 +52,7 @@ export function okMuse(overrides: Partial<ProviderLimits> = {}): ProviderLimits 
   };
 }
 
-export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLimits {
+export function staleCodex(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
   return {
     provider: "codex",
     status: "ok",
@@ -66,18 +67,15 @@ export function staleCodex(overrides: Partial<ProviderLimits> = {}): ProviderLim
   };
 }
 
-export function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): ProviderLimits {
+export function statusOnly(provider: AgentId, status: LimitsStatus, message: string | null): LimitsColumnEntry {
   return { provider, status, message, currentAccount: true, windows: [] };
 }
 
-export function withSavedProfiles(entries: ProviderLimits[], profiles: SavedProfile[]): ProviderLimits[] {
+export function withSavedProfiles(entries: LimitsColumnEntry[], profiles: SavedProfile[]): LimitsColumnEntry[] {
   const attached = entries.map(entry => {
     const saved = profiles.find(candidate => candidate.observationId === entry.account?.id);
     return saved ? { ...entry, profile: saved } : entry;
   });
-  const unread = profiles.filter(saved => !entries.some(entry => entry.account?.id === saved.observationId)).map((saved): ProviderLimits => ({
-    provider: saved.identity.provider, status: "ok", account: { id: saved.observationId, legacyId: saved.legacyId, label: saved.email },
-    currentAccount: false, windows: [], unread: true, archived: !!saved.archived && !saved.active, profile: saved,
-  }));
+  const unread = profiles.filter(saved => !entries.some(entry => entry.account?.id === saved.observationId)).map(unreadEntry);
   return [...attached, ...unread];
 }

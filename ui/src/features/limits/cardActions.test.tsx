@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SavedProfile } from "$lib/accountTypes";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import type { AgentId } from "$lib/types";
 import { Limits } from "./Limits";
 import { NOW, okClaude, okCodex, okMuse, staleCodex, withSavedProfiles } from "./readingFixtures";
@@ -38,7 +38,7 @@ function personal(): SavedProfile {
   };
 }
 
-function answer(codex: ProviderLimits[], profiles: SavedProfile[] = []) {
+function answer(codex: LimitsColumnEntry[], profiles: SavedProfile[] = []) {
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(provider === "claude" ? [okClaude()] : provider === "codex" ? withSavedProfiles(codex, profiles) : [okMuse()]));
   readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
     profiles: provider === "codex" ? profiles : [], nativeObservationId: provider === "codex" ? "acct-work" : null,

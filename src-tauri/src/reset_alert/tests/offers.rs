@@ -12,7 +12,6 @@ fn poll(
     let read = Served {
         provider: AgentId::Codex,
         entries: cards.to_vec(),
-        column: Vec::new(),
         failure: None,
     };
     plan(memory, &mut Waiting::default(), &[read], alerts, now())

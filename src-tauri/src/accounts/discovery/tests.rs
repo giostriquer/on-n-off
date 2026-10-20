@@ -182,6 +182,9 @@ fn untouched(home: &Path) -> super::super::Accounts {
         fn accounts(&self) {
             panic!("announced a change")
         }
+        fn roster(&self, _: AgentId) {
+            panic!("announced a change")
+        }
     }
     impl super::super::Browser for Untouched {
         fn open(&self, _: &str) -> Result<(), String> {

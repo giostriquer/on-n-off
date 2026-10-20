@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProviderLimits } from "$lib/limitsTypes";
+import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { refreshLimits } from "$lib/sharedReads/limits";
@@ -41,8 +41,8 @@ function deferred<T>(): Deferred<T> {
 }
 
 function answer(
-  claude: ProviderLimits[] | Promise<ProviderLimits[]>,
-  codex: ProviderLimits[] | Promise<ProviderLimits[]>,
+  claude: LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>,
+  codex: LimitsColumnEntry[] | Promise<LimitsColumnEntry[]>,
 ) {
   readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "claude" ? claude : agentId === "codex" ? codex : []));
 }
@@ -356,7 +356,7 @@ describe("Limits", () => {
   });
 
   it("shows a checking state until the first answer arrives", async () => {
-    const pending = deferred<ProviderLimits[]>();
+    const pending = deferred<LimitsColumnEntry[]>();
     answer(pending.promise, [okCodex()]);
     renderLimits();
     await waitFor(() => expect(within(card("Codex limits · work@codex.example")).getByText("Pro ×20")).toBeTruthy());
@@ -546,7 +546,7 @@ it.each(["claude", "codex", "muse"])("adds only the %s account selected in the s
 });
 
 it("queues an explicit reload behind an in-flight background check", async () => {
-  const pending = deferred<ProviderLimits[]>();
+  const pending = deferred<LimitsColumnEntry[]>();
   readLimits.mockImplementation((provider: AgentId, force: boolean) => provider === "claude" && !force ? pending.promise : Promise.resolve(provider === "claude" ? [okClaude({windows: []})] : provider === "codex" ? [okCodex()] : []));
   const view = renderLimits();
   await waitFor(() => expect(readLimits).toHaveBeenCalledWith("claude", false));
@@ -556,7 +556,7 @@ it("queues an explicit reload behind an in-flight background check", async () =>
     await refreshed;
   });
   expect(readLimits).toHaveBeenCalledWith("claude", true);
-  expect(view.client.getQueryData<ProviderLimits[]>(["limits", "claude"])?.[0].windows).toEqual([]);
+  expect(view.client.getQueryData<LimitsColumnEntry[]>(["limits", "claude"])?.[0].windows).toEqual([]);
 });
 
 it("removes reconciled legacy history with the saved card so refresh cannot resurrect it", async () => {
@@ -715,7 +715,7 @@ describe("archiving", () => {
     answer([okClaude()], withSavedProfiles([okCodex()], [unread]));
     readAccounts.mockImplementation(async (provider: AgentId) => ({ profiles: provider === "codex" ? [unread] : [], nativeAccount: null, recoveryRequired: false, notice: null }));
     const { client } = renderLimits();
-    const archivedFlag = () => client.getQueryData<ProviderLimits[]>(["limits", "codex"])?.find(entry => entry.unread)?.archived;
+    const archivedFlag = () => client.getQueryData<LimitsColumnEntry[]>(["limits", "codex"])?.find(entry => entry.unread)?.archived;
     fireEvent.click(await screen.findByRole("button", { name: "More actions for unread@codex.example" }));
     fireEvent.click(screen.getByRole("button", { name: "Archive account" }));
 
@@ -781,7 +781,7 @@ describe("archiving", () => {
   it("unarchives an account in the Muse column, which has no account manager, and hands focus to the next archived row", async () => {
     const weekly = { id: "weekly", label: "Weekly · all models", kind: "weekly" as const, usedPercent: 30, resetsAt: "2026-08-24T20:00:00Z", observedAt: NOW };
     const archived = new Set(["muse-old", "muse-spare"]);
-    const muse = (id: string, label: string, currentAccount = false): ProviderLimits =>
+    const muse = (id: string, label: string, currentAccount = false): LimitsColumnEntry =>
       ({ provider: "muse", status: "ok", account: { id, label }, currentAccount, plan: "wonder", windows: [weekly], archived: archived.has(id) });
     readLimits.mockImplementation(async (provider: AgentId) => provider === "muse"
       ? [muse("muse-now", "now@muse.example", true), muse("muse-old", "old@muse.example"), muse("muse-spare", "spare@muse.example")]
@@ -835,7 +835,7 @@ describe("archiving", () => {
     expect(screen.getByRole("button", { name: "Remove account personal@codex.example" })).toBeDisabled();
   });
 
-  function answerLapsed(others: ProviderLimits[] = []) {
+  function answerLapsed(others: LimitsColumnEntry[] = []) {
     const profile = { id: "lapsed", observationId: "acct-personal", legacyId: "team", identity: { provider: "codex" as const, userId: "lapsed", workspaceId: "team" }, email: "personal@codex.example", label: "personal@codex.example", savedAt: NOW, active: false, needsLogin: false };
     const lapsed = staleCodex({ savedProfile: true, subscription: { activeUntil: "2026-08-10T00:00:00Z", willRenew: false, checkedAt: NOW } });
     answer([okClaude()], withSavedProfiles([okCodex(), lapsed, ...others], [profile]));
