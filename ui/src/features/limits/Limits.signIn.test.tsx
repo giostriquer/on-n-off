@@ -7,7 +7,7 @@ import type { AgentId } from "$lib/types";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { Limits } from "./Limits";
-import { NOW, okClaude, okCodex, staleCodex, withSavedProfiles } from "./readingFixtures";
+import { NOW, lastObserved, okClaude, okCodex, staleCodex, unavailable, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -91,7 +91,7 @@ describe("a Claude sign-in's end", () => {
 
   it("once passed, replaces the signed-in card's sign-in hint and offers to sign in again", async () => {
     answer(
-      [{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits." }],
+      [{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }],
       [profile({ active: false, ...ended(at(-1)) })],
     );
     renderLimits();
@@ -107,7 +107,7 @@ describe("a Claude sign-in's end", () => {
     answer(
       [
         okClaude({ account: { id: "uuid-2", label: "now@claude.example" } }),
-        { ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", message: "This account's saved login has ended. Sign in again." },
+        { ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") },
       ],
       [profile({ active: false, ...ended(at(-2)) })],
     );
@@ -120,7 +120,7 @@ describe("a Claude sign-in's end", () => {
 
   it("while signing in again, offers to cancel that sign-in instead", async () => {
     addAccount.mockReturnValue(new Promise(() => {}));
-    answer([{ ...okClaude({ windows: [] }), status: "signedOut", message: null }], [profile({ active: false, ...ended(at(-1)) })]);
+    answer([{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted") }], [profile({ active: false, ...ended(at(-1)) })]);
     renderLimits();
     const card = await signedInCard();
     fireEvent.click(await within(card).findByRole("button", { name: "Sign in again" }));
@@ -130,7 +130,7 @@ describe("a Claude sign-in's end", () => {
 
   it("asks an account added but never used to sign in again, not to use a login that has ended", async () => {
     answer(
-      [{ ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", message: "This account's saved login has ended. Sign in again." }],
+      [{ ...okClaude(), currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "This account's saved login has ended. Sign in again.", "error") }],
       [profile({ active: false, pendingActivation: true, ...ended(at(-1)) })],
     );
     renderLimits();
@@ -212,7 +212,7 @@ describe("a saved login its provider refused", () => {
   };
 
   beforeEach(() => {
-    const saved = staleCodex({ savedProfile: true, status: "failed", message: "Usage refresh needs sign-in again or renewal by the client that owns this login." });
+    const saved = staleCodex({ savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "Usage refresh needs sign-in again or renewal by the client that owns this login.", "error") });
     readLimits.mockImplementation((agentId: AgentId) => Promise.resolve(agentId === "codex" ? withSavedProfiles([okCodex(), saved], [refused]) : []));
     readAccounts.mockImplementation((provider: AgentId) => Promise.resolve({
       profiles: provider === "codex" ? [refused] : [], nativeAccount: null, recoveryRequired: false, notice: null,

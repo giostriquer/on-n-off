@@ -47,7 +47,7 @@
         "kind": "provider",
         "provider": "claude",
         "notice": {
-          "text": "Checking usage…",
+          "text": "Checking limits…",
           "tone": "muted"
         },
         "sessions": []
@@ -56,7 +56,7 @@
         "kind": "provider",
         "provider": "codex",
         "notice": {
-          "text": "Checking usage…",
+          "text": "Checking limits…",
           "tone": "muted"
         },
         "sessions": []
@@ -65,7 +65,7 @@
         "kind": "provider",
         "provider": "muse",
         "notice": {
-          "text": "Checking usage…",
+          "text": "Checking limits…",
           "tone": "muted"
         },
         "sessions": []
@@ -207,7 +207,7 @@
         },
         "notice": {
           "text": "Codex did not answer.",
-          "tone": "muted"
+          "tone": "red"
         },
         "paused": {
           "text": "Refresh paused. Last observed values below.",
@@ -219,7 +219,7 @@
         "kind": "provider",
         "provider": "muse",
         "notice": {
-          "text": "Checking usage…",
+          "text": "Checking limits…",
           "tone": "muted"
         },
         "sessions": [

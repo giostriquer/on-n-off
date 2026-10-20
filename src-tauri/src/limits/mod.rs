@@ -16,6 +16,7 @@ mod plan;
 mod reading;
 mod renewal;
 mod snapshots;
+mod standing;
 mod window;
 pub(crate) mod window_at;
 
@@ -28,6 +29,8 @@ pub(crate) use muse::mint::{read_saved as read_saved_muse, verify as verify_save
 pub(crate) use outcome::{Accepted, NativeOutcome, ReadFailure};
 pub(crate) use reading::keep_remembered;
 pub(crate) use snapshots::Remembered;
+#[cfg(test)]
+pub(crate) use standing::cases as standing_cases;
 pub(crate) use window::{cycle_turned_over, Observation, ResetInstant};
 
 use std::collections::BTreeSet;

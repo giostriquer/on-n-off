@@ -1,5 +1,5 @@
 use super::*;
-use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, LimitsStatus, Reading};
+use crate::dto::{CiState, LimitWindowDto, LimitWindowKind, Reading};
 use crate::side_notch::model::{layout, Display, Edge, RAIL_ORDER};
 use crate::side_notch::sessions::SessionStatus;
 
@@ -528,13 +528,6 @@ fn provider_cell_of(reading: Option<NotchProvider>) -> ProviderCell {
     }
 }
 
-fn reported(status: LimitsStatus, message: Option<&str>, reading: Reading) -> NotchProvider {
-    let mut card = crate::limits::signed_in_card(AgentId::Claude, "acct", reading);
-    card.status = status;
-    card.message = message.map(str::to_owned);
-    NotchProvider::current(vec![card]).expect("a signed-in account")
-}
-
 type Said<'a> = Option<(&'a str, Tone)>;
 
 fn said(notice: &Option<Notice>) -> Said<'_> {
@@ -543,62 +536,40 @@ fn said(notice: &Option<Notice>) -> Said<'_> {
         .map(|notice| (notice.text.as_str(), notice.tone))
 }
 
-fn notices(cell: &ProviderCell) -> (Said<'_>, Said<'_>) {
-    (said(&cell.notice), said(&cell.paused))
-}
-
 #[test]
-fn a_provider_says_it_is_checking_until_read_and_when_its_refresh_paused() {
-    let windows = claude().windows;
-    let paused = Some(("Refresh paused. Last observed values below.", Tone::Amber));
+fn a_provider_cell_says_what_its_read_standing_says_and_is_checking_until_read() {
+    let standings = crate::limits::standing_cases::fixture();
+    let checking = provider_cell_of(None);
     assert_eq!(
-        notices(&provider_cell_of(None)),
-        (Some(("Checking usage…", Tone::Muted)), None)
+        (said(&checking.notice), said(&checking.paused)),
+        (Some((standings.checking.as_str(), Tone::Muted)), None)
     );
-    assert_eq!(
-        notices(&provider_cell_of(Some(claude()))),
-        (None, None),
-        "a reading that is fine says nothing above its windows"
-    );
-    let failed = provider_cell_of(Some(reported(
-        LimitsStatus::Failed,
-        Some("Claude Code reported no usage."),
-        Reading {
-            windows: windows.clone(),
-            ..Reading::default()
-        },
-    )));
-    assert_eq!(
-        notices(&failed),
-        (
-            Some(("Claude Code reported no usage.", Tone::Muted)),
-            paused
-        )
-    );
-    assert_eq!(
-        notices(&provider_cell_of(Some(reported(
-            LimitsStatus::SignedOut,
-            None,
-            Reading::default()
-        )))),
-        (Some(("Usage unavailable.", Tone::Muted)), None),
-        "nothing observed, so nothing is last observed"
-    );
-    let share_only = reported(
-        LimitsStatus::Failed,
-        Some("Refresh failed."),
-        Reading {
-            workspace_credits: Some(crate::dto::LimitsWorkspaceCreditsDto {
-                limit: "25000".into(),
-                used: "8000".into(),
-                used_percent: 32.0,
-                resets_at: None,
-                reached: false,
+    for case in standings.cases {
+        let reading = NotchProvider::current(vec![case.card()]);
+        if case.notch.is_null() {
+            assert_eq!(
+                reading, None,
+                "{}: only the signed-in account's card",
+                case.name
+            );
+            continue;
+        }
+        let cell = provider_cell_of(reading);
+        assert_eq!(
+            serde_json::json!({
+                "notice": cell.notice,
+                "paused": cell.paused.as_ref().map(|paused| &paused.text),
             }),
-            ..Reading::default()
-        },
-    );
-    assert_eq!(notices(&provider_cell_of(Some(share_only))).1, paused);
+            case.notch,
+            "{}",
+            case.name
+        );
+        assert!(
+            cell.paused.iter().all(|paused| paused.tone == Tone::Amber),
+            "{}",
+            case.name
+        );
+    }
 }
 
 fn pr_cell_of(dto: Option<&GithubPrsDto>) -> PrCell {
@@ -679,16 +650,6 @@ fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_read
         .notice,
         None,
         "a read that is fine keeps its hint to itself"
-    );
-}
-
-#[test]
-fn a_provider_that_was_read_is_not_checking_even_without_windows() {
-    let empty = reported(LimitsStatus::Ok, None, Reading::default());
-    assert_eq!(
-        notices(&provider_cell_of(Some(empty))),
-        (None, None),
-        "the read answered; it just reported no windows"
     );
 }
 

@@ -1,0 +1,165 @@
+{
+  "checking": "Checking limits…",
+  "cases": [
+    {
+      "name": "a read that answered",
+      "provider": "claude", "account": "current", "status": "ok", "observes": "windows",
+      "message": null,
+      "standing": { "kind": "live" },
+      "card": { "status": null, "message": null },
+      "notch": { "notice": null, "paused": null }
+    },
+    {
+      "name": "a read that answered with nothing to show",
+      "provider": "codex", "account": "current", "status": "ok", "observes": "nothing",
+      "message": null,
+      "standing": { "kind": "live" },
+      "card": { "status": null, "message": null },
+      "notch": { "notice": null, "paused": null }
+    },
+    {
+      "name": "a saved profile read live",
+      "provider": "codex", "account": "saved", "status": "ok", "observes": "windows",
+      "message": null,
+      "standing": { "kind": "live" },
+      "card": { "status": null, "message": null },
+      "notch": null
+    },
+    {
+      "name": "a remembered account that is not signed in",
+      "provider": "codex", "account": "remembered", "status": "ok", "observes": "windows",
+      "message": null,
+      "standing": { "kind": "lastObserved", "why": "remembered" },
+      "card": { "status": { "kind": "remembered" }, "message": null },
+      "notch": null
+    },
+    {
+      "name": "a remembered account whose last read failed",
+      "provider": "codex", "account": "remembered", "status": "failed", "observes": "windows",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "remembered" },
+      "card": { "status": { "kind": "remembered" }, "message": null },
+      "notch": null
+    },
+    {
+      "name": "a failed read keeping its windows",
+      "provider": "claude", "account": "current", "status": "failed", "observes": "windows",
+      "message": "Claude Code reported no usage.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "notch": { "notice": { "text": "Claude Code reported no usage.", "tone": "red" }, "paused": "Refresh paused. Last observed values below." }
+    },
+    {
+      "name": "a failed read keeping only a credit balance",
+      "provider": "codex", "account": "current", "status": "failed", "observes": "credits",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "notch": { "notice": { "text": "Codex did not answer.", "tone": "red" }, "paused": "Refresh paused." }
+    },
+    {
+      "name": "a failed read keeping only a workspace-credit share",
+      "provider": "codex", "account": "current", "status": "failed", "observes": "workspaceShare",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "notch": { "notice": { "text": "Codex did not answer.", "tone": "red" }, "paused": "Refresh paused. Last observed values below." }
+    },
+    {
+      "name": "a failed read keeping only credits spent",
+      "provider": "codex", "account": "current", "status": "failed", "observes": "creditsSpent",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "notch": { "notice": { "text": "Codex did not answer.", "tone": "red" }, "paused": "Refresh paused." }
+    },
+    {
+      "name": "a failed read keeping only banked resets",
+      "provider": "codex", "account": "current", "status": "failed", "observes": "bankedResets",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "notch": { "notice": { "text": "Codex did not answer.", "tone": "red" }, "paused": "Refresh paused." }
+    },
+    {
+      "name": "a signed-out read keeping its windows",
+      "provider": "claude", "account": "current", "status": "signedOut", "observes": "windows",
+      "message": "Sign in with `claude` to see subscription limits.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Sign in with `claude` to see subscription limits.", "tone": "muted" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Sign in with `claude` to see subscription limits.", "tone": "muted" } },
+      "notch": { "notice": { "text": "Sign in with `claude` to see subscription limits.", "tone": "muted" }, "paused": "Refresh paused. Last observed values below." }
+    },
+    {
+      "name": "a refused login keeping its windows",
+      "provider": "claude", "account": "current", "status": "failed", "observes": "windows",
+      "message": "Claude's login has ended. Sign in with `claude` again to see subscription limits.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "error" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "error" } },
+      "notch": { "notice": { "text": "Claude's login has ended. Sign in with `claude` again to see subscription limits.", "tone": "red" }, "paused": "Refresh paused. Last observed values below." }
+    },
+    {
+      "name": "a login without subscription limits keeping its windows",
+      "provider": "codex", "account": "current", "status": "unsupported", "observes": "windows",
+      "message": "Codex is signed in with an API key, which has no subscription limits.",
+      "standing": { "kind": "lastObserved", "why": "readPaused", "message": { "text": "Codex is signed in with an API key, which has no subscription limits.", "tone": "muted" } },
+      "card": { "status": { "kind": "paused" }, "message": { "text": "Codex is signed in with an API key, which has no subscription limits.", "tone": "muted" } },
+      "notch": { "notice": { "text": "Codex is signed in with an API key, which has no subscription limits.", "tone": "muted" }, "paused": "Refresh paused. Last observed values below." }
+    },
+    {
+      "name": "a saved profile whose refresh failed, keeping its windows",
+      "provider": "claude", "account": "saved", "status": "failed", "observes": "windows",
+      "message": "This account's saved login has ended. Sign in again.",
+      "standing": { "kind": "lastObserved", "why": "savedRefreshPaused", "message": { "text": "This account's saved login has ended. Sign in again.", "tone": "error" } },
+      "card": { "status": { "kind": "savedRefresh", "detail": "This account's saved login has ended. Sign in again." }, "message": null },
+      "notch": null
+    },
+    {
+      "name": "a saved profile whose refresh failed, keeping only banked resets",
+      "provider": "codex", "account": "saved", "status": "failed", "observes": "bankedResets",
+      "message": "Usage refresh is unavailable. The last reading is retained.",
+      "standing": { "kind": "lastObserved", "why": "savedRefreshPaused", "message": { "text": "Usage refresh is unavailable. The last reading is retained.", "tone": "error" } },
+      "card": { "status": { "kind": "savedRefresh", "detail": "Usage refresh is unavailable. The last reading is retained." }, "message": null },
+      "notch": null
+    },
+    {
+      "name": "a saved profile whose refresh failed with nothing kept",
+      "provider": "codex", "account": "saved", "status": "failed", "observes": "nothing",
+      "message": "Usage refresh is unavailable. The last reading is retained.",
+      "standing": { "kind": "unavailable", "message": { "text": "Usage refresh is unavailable. The last reading is retained.", "tone": "error" } },
+      "card": { "status": null, "message": { "text": "Usage refresh is unavailable. The last reading is retained.", "tone": "error" } },
+      "notch": null
+    },
+    {
+      "name": "a read that reported no usage, with nothing kept",
+      "provider": "claude", "account": "current", "status": "failed", "observes": "nothing",
+      "message": "Claude Code reported no usage.",
+      "standing": { "kind": "unavailable", "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "card": { "status": null, "message": { "text": "Claude Code reported no usage.", "tone": "error" } },
+      "notch": { "notice": { "text": "Claude Code reported no usage.", "tone": "red" }, "paused": null }
+    },
+    {
+      "name": "a signed-out read with nothing kept",
+      "provider": "codex", "account": "current", "status": "signedOut", "observes": "nothing",
+      "message": "Sign in with `codex` to see subscription limits.",
+      "standing": { "kind": "unavailable", "message": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" } },
+      "card": { "status": null, "message": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" } },
+      "notch": { "notice": { "text": "Sign in with `codex` to see subscription limits.", "tone": "muted" }, "paused": null }
+    },
+    {
+      "name": "a login without subscription limits",
+      "provider": "muse", "account": "current", "status": "unsupported", "observes": "nothing",
+      "message": "Muse is signed in with an API key, which has no subscription limits.",
+      "standing": { "kind": "unavailable", "message": { "text": "Muse is signed in with an API key, which has no subscription limits.", "tone": "muted" } },
+      "card": { "status": null, "message": { "text": "Muse is signed in with an API key, which has no subscription limits.", "tone": "muted" } },
+      "notch": { "notice": { "text": "Muse is signed in with an API key, which has no subscription limits.", "tone": "muted" }, "paused": null }
+    },
+    {
+      "name": "a failed read whose banked resets are all spent",
+      "provider": "codex", "account": "current", "status": "failed", "observes": "noBankedResets",
+      "message": "Codex did not answer.",
+      "standing": { "kind": "unavailable", "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "card": { "status": null, "message": { "text": "Codex did not answer.", "tone": "error" } },
+      "notch": { "notice": { "text": "Codex did not answer.", "tone": "red" }, "paused": null }
+    }
+  ]
+}

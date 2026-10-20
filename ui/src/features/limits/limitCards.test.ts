@@ -7,7 +7,7 @@ import type { AgentId } from "$lib/types";
 import { unreadEntry } from "@/dev/limitsColumn";
 import { cardTags } from "./cardTags";
 import { limitCards, limitColumn, type LimitCard } from "./limitCards";
-import { NOW, okClaude, okCodex, staleCodex, statusOnly } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, staleCodex, statusOnly, unavailable } from "./readingFixtures";
 
 const AT_NOW = Date.parse(NOW);
 
@@ -39,7 +39,7 @@ describe("which cards a provider shows", () => {
       reading: null, plan: null, status: null, signedIn: "no", leads: false, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
-      freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
+      freshness: { updatedAt: null, message: null, readStatus: "ok" },
       subscription: null,
       login: { state: "usable" },
       signIn: null,
@@ -214,7 +214,7 @@ describe("a card's identity", () => {
 
   it("marks only the accounts in use as signed in, never one without an account, which still leads its column", () => {
     expect(cards([okCodex(), staleCodex()]).map(card => [card.key, card.signedIn])).toEqual([["current-acct-work", "confirmed"], ["remembered-acct-personal", "no"]]);
-    expect(cards([staleCodex(), statusOnly("codex", "signedOut", null)]).map(card => [card.key, card.signedIn])).toEqual([["current-0", "no"], ["remembered-acct-personal", "no"]]);
+    expect(cards([staleCodex(), statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted")]).map(card => [card.key, card.signedIn])).toEqual([["current-0", "no"], ["remembered-acct-personal", "no"]]);
   });
 
   it("tells same-email accounts apart by plan, never by their workspace ids", () => {
@@ -282,29 +282,17 @@ describe("a card's windows", () => {
 });
 
 describe("a card's status and message", () => {
-  const reason = "Saved usage credential is no longer accepted.";
-  const neverRead = unreadEntry(saved("claude", "unread", "profile:unread", "unread@claude.example"));
-  it.each([
-    ["a live read", okCodex(), null, null],
-    ["a remembered reading", staleCodex(), { kind: "remembered" }, null],
-    ["a saved profile's reading, polled live", staleCodex({ savedProfile: true }), null, null],
-    ["a signed-in read whose login expired, keeping its numbers", okClaude({ status: "unauthenticated", message: "Access token expired." }), { kind: "paused" }, { text: "Access token expired.", tone: "muted" }],
-    ["a signed-in read that failed, keeping its numbers", okClaude({ status: "failed", message: "Usage service unavailable." }), { kind: "paused" }, { text: "Usage service unavailable.", tone: "error" }],
-    ["a saved Claude read that failed, keeping its numbers", okClaude({ currentAccount: false, savedProfile: true, status: "failed", message: reason }), { kind: "savedRefresh", detail: reason }, null],
-    ["a saved Codex read whose login expired, keeping its numbers", okCodex({ currentAccount: false, savedProfile: true, status: "unauthenticated", message: reason }), { kind: "savedRefresh", detail: reason }, null],
-    ["a saved read that failed with nothing kept", okClaude({ currentAccount: false, savedProfile: true, status: "failed", windows: [], message: "Usage request failed." }), null, { text: "Usage request failed.", tone: "error" }],
-    ["a saved profile no read answered for", neverRead, null, null],
-  ] as const)("gives %s one status, and a message only with its tone", (_case, reading, status, message) => {
-    const [card] = cards([reading], AT_NOW, "claude");
-    expect(card.status).toEqual(status);
-    expect(card.freshness.message).toEqual(message);
+  it("leaves a saved profile no read answered for without a status or a message", () => {
+    const [card] = cards([unreadEntry(saved("claude", "unread", "profile:unread", "unread@claude.example"))], AT_NOW, "claude");
+    expect([card.status, card.freshness.message]).toEqual([null, null]);
   });
 
   it("keeps one source-neutral card for the signed-in Claude account when its refresh is paused", () => {
     const observedAt = "2026-08-16T21:40:00.000Z";
+    const message = "Access token expired — send a prompt with `claude` to renew it, then refresh here.";
     const shown = cards([okClaude({
       status: "unauthenticated",
-      message: "Access token expired — send a prompt with `claude` to renew it, then refresh here.",
+      standing: lastObserved("readPaused", message, "muted"),
       windows: [
         { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 12, resetsAt: "2026-08-24T13:59:59Z", observedAt },
         { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 7, resetsAt: "2026-08-17T04:59:59Z", observedAt },
@@ -315,29 +303,20 @@ describe("a card's status and message", () => {
       status: { kind: "paused" },
       headline: { usedNow: 12 },
       rows: [{ id: "session", usedNow: 0, note: expect.stringMatching(/^reset 15h ago · \w{3} \d\d:\d\d$/) }],
-      freshness: { message: { text: expect.stringMatching(/^Access token expired/), tone: "muted" }, lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
+      freshness: { message: { text: message, tone: "muted" }, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
       empty: null,
     });
   });
 
-  it.each<[LimitsStatus, string, "error" | "muted"]>([
-    ["signedOut", "Sign in with `claude` to see subscription limits.", "muted"],
-    ["unauthenticated", "Login expired — run `claude` and sign in again.", "muted"],
-    ["unsupported", "Claude is signed in with an API key.", "muted"],
-    ["failed", "Could not reach the Claude usage service (HTTP 503).", "error"],
-  ])("carries the provider's message for %s in its tone, with no windows and no empty copy", (status, text, tone) => {
-    expect(cards([statusOnly("claude", status, text)])[0]).toMatchObject({
-      headline: null, rows: [], empty: null, freshness: { message: { text, tone }, readStatus: status },
+  it("draws a read that did not answer with its standing's message and no empty copy", () => {
+    const text = "Could not reach the Claude usage service (HTTP 503).";
+    expect(cards([statusOnly("claude", "failed", text, "error")])[0]).toMatchObject({
+      headline: null, rows: [], empty: null, freshness: { message: { text, tone: "error" }, readStatus: "failed" },
     });
   });
 
-  it("falls back to generic copy when a non-ok status carries no message", () => {
-    expect(cards([statusOnly("claude", "failed", null)])[0].freshness.message).toEqual({ text: "Claude limits are unavailable.", tone: "error" });
-    expect(cards([statusOnly("codex", "signedOut", null)])[0].freshness.message).toEqual({ text: "Codex limits are unavailable.", tone: "muted" });
-  });
-
   it("keeps remembered accounts, each dated once, when the current login is signed out", () => {
-    const [current, remembered] = cards([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits."), staleCodex()]);
+    const [current, remembered] = cards([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted"), staleCodex()]);
     expect(current).toMatchObject({
       identity: { label: "Codex" },
       freshness: { message: { text: "Sign in with `codex` to see subscription limits.", tone: "muted" }, readStatus: "signedOut", updatedAt: null },
@@ -354,12 +333,12 @@ describe("a card's empty copy", () => {
     expect(cards([okClaude({ windows: [], plan: null, planLabel: null, planCapacity: null, account: null })])[0]).toMatchObject({
       plan: null, empty: { reason: "noWindows", copy: "Claude reported no rate-limit windows." },
     });
-    expect(cards([okCodex({ windows: [], currentAccount: false })])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
+    expect(cards([okCodex({ windows: [], currentAccount: false, standing: REMEMBERED })])[0].empty).toEqual({ reason: "noWindows", copy: "Codex reported no rate-limit windows." });
   });
 
   it("gives a saved read that failed but kept only figures its status, not an empty copy", () => {
     const reason = "Saved usage credential is no longer accepted.";
-    const [card] = cards([okCodex({ currentAccount: false, savedProfile: true, status: "failed", message: reason, windows: [] })]);
+    const [card] = cards([okCodex({ currentAccount: false, savedProfile: true, status: "failed", windows: [], standing: lastObserved("savedRefreshPaused", reason, "error") })]);
     expect(card.status).toEqual({ kind: "savedRefresh", detail: reason });
     expect(card.empty).toBeNull();
   });
@@ -418,7 +397,7 @@ describe("a card's subscription badge", () => {
       { accountId: "acct-work", poll: true, term },
       { accountId: "acct-personal", poll: false, term: null },
     ]);
-    expect(cards([statusOnly("codex", "signedOut", null)])[0].subscription).toBeNull();
+    expect(cards([statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted")])[0].subscription).toBeNull();
   });
 
   it("refreshes the term of the signed-in account's card only", () => {
@@ -474,7 +453,7 @@ describe("a saved sign-in's end", () => {
     const [card] = cards([unreadEntry(profile)], AT_NOW, "claude");
     expect(card).toMatchObject({ signIn: { label: "Sign-in ended", tone: "expired" }, empty: null, freshness: { message: endedMessage } });
 
-    const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits.", profile }]);
+    const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", standing: unavailable("Sign in with `claude` to see subscription limits.", "muted"), profile }]);
     expect(signedOut).toMatchObject({ signIn: { label: "Sign-in ended", tone: "expired" }, freshness: { message: endedMessage } });
   });
 
@@ -511,7 +490,7 @@ describe("each provider's card features", () => {
 });
 
 describe("a card's header tags", () => {
-  const savedRefreshPaused = { currentAccount: false, savedProfile: true, status: "unauthenticated" as LimitsStatus, message: "Sign in again." };
+  const savedRefreshPaused = { currentAccount: false, savedProfile: true, status: "unauthenticated" as LimitsStatus, standing: lastObserved("savedRefreshPaused", "Sign in again.", "muted") };
   const renews = { activeUntil: "2026-10-10T12:00:00Z", willRenew: true, checkedAt: NOW };
   const kinds = (card: LimitCard) => cardTags(card).map(tag => tag.kind);
 
