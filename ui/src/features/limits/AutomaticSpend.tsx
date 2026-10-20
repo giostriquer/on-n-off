@@ -4,14 +4,18 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatClock, formatResetIn } from "$lib/limitsFormat";
 import { pendingResetSpendsQuery, rereadPendingResetSpends } from "$lib/sharedReads/resetSpends";
+import type { PendingResetSpend } from "$lib/types";
 import { actionButton } from "@/components/actionButton";
 
-export function AutomaticSpend({ accountId, now }: { accountId: string; now: number }) {
+export function usePendingResetSpend(accountId: string | null): PendingResetSpend | null {
+  const spends = useQuery({ ...pendingResetSpendsQuery(), enabled: accountId !== null });
+  return spends.data?.find(waiting => waiting.accountId === accountId) ?? null;
+}
+
+export function AutomaticSpend({ accountId, dueAt, now }: { accountId: string; dueAt: string | null; now: number }) {
   const client = useQueryClient();
-  const spends = useQuery(pendingResetSpendsQuery());
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const spend = spends.data?.find(waiting => waiting.accountId === accountId);
 
   async function cancel() {
     setBusy(true);
@@ -26,13 +30,13 @@ export function AutomaticSpend({ accountId, now }: { accountId: string; now: num
     }
   }
 
-  const within = spend ? formatResetIn(spend.dueAt, now) : "";
+  const within = dueAt ? formatResetIn(dueAt, now) : "";
   return (
     <>
-      {spend ? (
+      {dueAt ? (
         <>
           <span className="text-[11px] text-[var(--mute)]">
-            Using a banked reset at {formatClock(spend.dueAt)}{within ? ` · in ${within}` : ""}
+            Using a banked reset at {formatClock(dueAt)}{within ? ` · in ${within}` : ""}
           </span>
           <button type="button" className={actionButton} disabled={busy} aria-label="Cancel the automatic banked reset" onClick={() => void cancel()}>
             Cancel

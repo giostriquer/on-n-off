@@ -6,7 +6,7 @@ import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOu
 import { actionButton } from "@/components/actionButton";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
-import { latestObservedAt, unexpiredBankedResets, usageLeft } from "./limitPresentation";
+import { latestObservedAt, usageLeft } from "./limitPresentation";
 import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
 
@@ -46,10 +46,10 @@ function expiry(at: string | null | undefined, now: number): string | null {
 
 type AttemptResult = { role: "status" | "alert"; message: string; answeredAt: number };
 
-export function UseBankedReset({ entry, label, current, now, disabled = false }: {
+export function UseBankedReset({ entry, label, offered, now, disabled = false }: {
   entry: ProviderLimits;
   label: string;
-  current: boolean;
+  offered: boolean;
   now: number;
   disabled?: boolean;
 }) {
@@ -59,7 +59,6 @@ export function UseBankedReset({ entry, label, current, now, disabled = false }:
   const attempt = useRef<string | null>(null);
   const accountId = entry.account?.id;
   const limit = useResetSpendLimit(accountId ?? "");
-  const offered = current && entry.currentAccount && entry.status === "ok" && unexpiredBankedResets(entry.resetCredits, now) !== null;
   const observed = latestObservedAt(entry);
   const shown = result && (observed === null || observed <= result.answeredAt) ? result : null;
   if (!accountId || (!offered && !shown)) return null;
