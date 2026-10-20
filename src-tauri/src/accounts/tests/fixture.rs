@@ -367,6 +367,7 @@ pub(super) enum Heard {
     Changed(AgentId),
     Accounts,
     Roster(AgentId),
+    Listed(AgentId, crate::accounts::SignInDeadlines),
 }
 pub(super) struct Recorder {
     home: PathBuf,
@@ -392,6 +393,9 @@ impl Notify for Listener {
     }
     fn roster(&self, provider: AgentId) {
         self.record(Heard::Roster(provider));
+    }
+    fn listed(&self, provider: AgentId, ends: crate::accounts::SignInDeadlines) {
+        self.record(Heard::Listed(provider, ends));
     }
 }
 

@@ -1,5 +1,7 @@
 use super::super::supersedes;
-use crate::dto::{AgentId, LimitsAccountDto, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{
+    AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, ProviderLimitsDto, Reading,
+};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -11,6 +13,7 @@ struct Side {
     id: String,
     legacy_id: Option<String>,
     label: Option<String>,
+    observed: bool,
 }
 
 #[derive(Deserialize)]
@@ -22,7 +25,22 @@ struct Case {
 }
 
 fn card(side: Side) -> ProviderLimitsDto {
+    let windows = if side.observed {
+        vec![crate::limits::window::fixture(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            40.0,
+            None,
+        )]
+    } else {
+        Vec::new()
+    };
     ProviderLimitsDto {
+        reading: Reading {
+            windows,
+            ..Reading::default()
+        },
         status: side.status,
         current_account: side.current,
         account: Some(LimitsAccountDto {

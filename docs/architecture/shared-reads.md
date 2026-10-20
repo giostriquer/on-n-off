@@ -63,11 +63,11 @@ could not poll (the provider's login could not be read), rereads it with the ses
 it writes it unless a reread happened while it ran. `limits_refresh::roster_changed` rereads it with
 the session's key alone (`Store::open_unlocked`) after every vault write: an account change
 (`account_changed`, before the provider is read again), automatic remembering, unlock, a category
-edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and after the account
-list has read the vault. With the vault locked this session either keeps the roster it has. The
-sign-in ends have one writer, the account list (`limits_refresh::sign_in_deadlines_listed`). Each
-bumps the revision and announces only when what it holds changed, and the reads that answer the
-announcement are served from the cache.
+edit or forget, archive and unarchive (`Notify::roster` and `set_archived`), and the account list
+(`Notify::listed`). With the vault locked this session either keeps the roster it has. The sign-in
+ends have one writer, the account list, which hands them over with that reread
+(`limits_refresh::accounts_listed`), under one bump. Each bumps the revision and announces only when
+what it holds changed, and the reads that answer the announcement are served from the cache.
 
 Two directions, because the Rust consumers can poll a counter and the WebViews cannot. The
 notch's Rust consumer is its host (`side_notch/host.rs`), on macOS and on Windows alike: one poll

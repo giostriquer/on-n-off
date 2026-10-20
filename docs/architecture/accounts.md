@@ -544,7 +544,7 @@ config, a denied Keychain probe, a login that names no account) rereads it with 
 (`limits_refresh::roster_changed`): an account change (`account_changed`, before the provider is
 read again), automatic remembering when it saves a login or is turned on, unlock, a category edit or
 forget (all through `Notify::roster`), archive and unarchive, and the account list once it has read
-the vault, which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
+the vault (`Notify::listed`), which is what unlocks it at startup when nothing else has. One builder lists a profile for the account list and
 the roster alike (`Roster::of`, given the sign-in-end lookup; the roster's is none). Who is signed
 in is not part of the roster: the column marks active the profile of the account the latest native
 read names, and none when that read names nobody (not installed, signed out), so a switch made in
@@ -555,8 +555,9 @@ reread opens the vault only with the key this session has already unlocked
 (`Store::open_unlocked`, through `SessionKeys::peek`), never asking the OS store, and neither reads
 a native login or a home's login. A sign-in's end needs a login's credentials (a home's Keychain
 item on macOS), so the column carries the end the account list last read
-(`AccountsDto::sign_in_deadlines`, handed to `limits_refresh::sign_in_deadlines_listed`, which
-announces the Limits read only when they change): the screen, whose account manager lists the
+(`AccountsDto::sign_in_deadlines`, which `Accounts::list` hands over through `Notify::listed` to
+`limits_refresh::accounts_listed`, with the roster reread, announcing the Limits read once and only
+when either changed): the screen, whose account manager lists the
 accounts, shows it as before, and the popover shows it whenever the account list has been read in
 this session.
 The picker and Settings share the global automatic-saving opt-in preference. Inactive Remove account removes

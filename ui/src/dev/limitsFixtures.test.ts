@@ -75,6 +75,24 @@ describe("limitsScenario", () => {
     expect(limitsScenario("archivedAccounts").readLimits("codex").filter(entry => entry.archived).map(entry => entry.account?.id)).toEqual(["codex-history"]);
   });
 
+  it("answers the column Rust would: the signed-in card's profile active, read cards with their profile and legacy id, unread profiles never active", () => {
+    const ok = limitsScenario("ok");
+    const facts = (agent: string) => ok.readLimits(agent).map(entry => ({
+      id: entry.account?.id, legacyId: entry.account?.legacyId, unread: !!entry.unread, profile: entry.profile?.id ?? null, active: entry.profile?.active ?? null,
+    }));
+
+    expect(facts("codex")).toEqual([
+      { id: "codex-1", legacyId: "Personal workspace", unread: false, profile: "personal", active: true },
+      { id: "codex-2", legacyId: "Acme workspace", unread: false, profile: "work", active: false },
+    ]);
+    expect(facts("claude")).toEqual([
+      { id: "claude-1", legacyId: "user-personal", unread: false, profile: "personal", active: true },
+      { id: "claude-2", legacyId: "user-work", unread: true, profile: "work", active: false },
+    ]);
+    const band = limitsScenario("limitsBand").readLimits("claude").filter(entry => entry.unread);
+    expect(band.map(entry => [entry.profile?.id, entry.profile?.active])).toEqual([["personal", false], ["work", false]]);
+  });
+
   it("carries the category a card saves and clears it on a blank, beside the saved logins' own", () => {
     const scenario = limitsScenario("ok");
     const category = (agent: string, id: string) => scenario.readLimits(agent).find(entry => entry.account?.id === id)?.category;

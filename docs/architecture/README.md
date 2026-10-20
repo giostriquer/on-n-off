@@ -353,9 +353,9 @@ the account is `confirmed` once the account list names it as the native login
 and `no` otherwise. Save account, Sign out and Use banked reset wait for `confirmed`. Without an
 account list the read's word stands as confirmed; the backend still checks the native login before
 a spend. A card's place in its column is not that state: it follows the provider's own read
-(`LimitCard.leads`: the read's `currentAccount`, or an unread saved profile's `active`), which
-leads the column even signed out or naming no account, so a signed-out Claude card with a saved
-profile leads its column without the active dot. The plan reads `leads` for two decisions only:
+(`LimitCard.leads`: the read's `currentAccount`), which leads the column even signed out or naming
+no account; a saved profile no read answered for never leads, since the column marks active only
+the profile of the account the native read names. The plan reads `leads` for two decisions only:
 Use banked reset is offered only on the provider's own live read, whose numbers a spend acts on,
 and Archive account never takes Use account's place on it.
 

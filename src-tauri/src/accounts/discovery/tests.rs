@@ -185,6 +185,9 @@ fn untouched(home: &Path) -> super::super::Accounts {
         fn roster(&self, _: AgentId) {
             panic!("announced a change")
         }
+        fn listed(&self, _: AgentId, _: crate::accounts::SignInDeadlines) {
+            panic!("announced a change")
+        }
     }
     impl super::super::Browser for Untouched {
         fn open(&self, _: &str) -> Result<(), String> {

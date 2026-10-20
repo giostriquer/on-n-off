@@ -30,13 +30,13 @@ describe("which cards a provider shows", () => {
   });
 
   it("gives a saved profile no read has answered for a card of its own", () => {
-    const profile = saved("claude", "unread", "profile:unread", "unread@claude.example", { active: true });
+    const profile = saved("claude", "unread", "profile:unread", "unread@claude.example");
     const [card] = cards([unreadEntry(profile)], AT_NOW, "claude");
     expect(card).toEqual({
-      key: "current-profile:unread", provider: "claude",
+      key: "remembered-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
       account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }] },
-      reading: null, plan: null, status: null, signedIn: "confirmed", leads: true, headline: null, rows: [],
+      reading: null, plan: null, status: null, signedIn: "no", leads: false, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
@@ -173,13 +173,13 @@ describe("card order", () => {
     expect(order([neverB, neverA, out])).toEqual(["out", "never b", "never a"]);
   });
 
-  it("orders a saved profile no read answered like the rest: first as the active login, with the unknown ones otherwise", () => {
+  it("orders a saved profile no read answered with the accounts whose usage is unknown", () => {
     const current = account("current", { weekly: [90, at(100)] }, { currentAccount: true });
     const spare = account("spare", { weekly: [30, at(100)] });
     const unknown = account("unknown", {});
-    const profile = (id: string, active: boolean) => saved("claude", id, `profile:${id}`, `${id}@example.com`, { active });
-    expect(order([unknown, spare, current, unreadEntry(profile("idle", false)), unreadEntry(profile("ghost", true))]))
-      .toEqual(["current", "ghost@example.com", "spare", "unknown", "idle@example.com"]);
+    const profile = (id: string) => saved("claude", id, `profile:${id}`, `${id}@example.com`);
+    expect(order([unknown, spare, current, unreadEntry(profile("idle")), unreadEntry(profile("ghost"))]))
+      .toEqual(["current", "spare", "unknown", "idle@example.com", "ghost@example.com"]);
   });
 });
 
@@ -189,15 +189,15 @@ describe("a card's identity", () => {
       provider: "codex",
       entries: [
         okCodex({ account: { id: "acct-work", label: "old-label@codex.example" }, category: "Client A",
-          profile: saved("codex", "work", "acct-work", "work@codex.example", { category: "Stale copy" }) }),
-        staleCodex({ profile: saved("codex", "personal", "acct-personal", "personal@codex.example", { active: true, category: "Cleared since" }) }),
+          profile: saved("codex", "work", "acct-work", "work@codex.example", { active: true, category: "Stale copy" }) }),
+        staleCodex({ profile: saved("codex", "personal", "acct-personal", "personal@codex.example", { category: "Cleared since" }) }),
       ],
       nativeLogin: null,
       now: AT_NOW,
     })!;
     expect(shown.map(({ identity, account, signedIn }) => ({ ...identity, name: account?.name, signedIn }))).toEqual([
-      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", signedIn: "no" },
-      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", signedIn: "confirmed" },
+      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", signedIn: "confirmed" },
+      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", signedIn: "no" },
     ]);
   });
 
@@ -424,11 +424,11 @@ describe("a card's subscription badge", () => {
     expect(cards([statusOnly("codex", "signedOut", null)])[0].subscription).toBeNull();
   });
 
-  it("refreshes by the signed-in state, not by the read: the saved profile's word comes first", () => {
+  it("refreshes the term of the signed-in account's card only", () => {
     const poll = (entry: LimitsColumnEntry, active: boolean) =>
       cards([{ ...entry, profile: saved("codex", "work", "acct-work", "work@codex.example", { active }) }])[0].subscription?.poll;
-    expect(poll(okCodex({ currentAccount: false }), true), "the account list already names it").toBe(true);
-    expect(poll(okCodex(), false), "the read names it, but its saved login is not the one in use").toBe(false);
+    expect(poll(okCodex(), true)).toBe(true);
+    expect(poll(okCodex({ currentAccount: false }), false)).toBe(false);
   });
 
   it("is never on a Claude card: Claude Code reports no subscription term", () => {

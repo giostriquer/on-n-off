@@ -186,9 +186,8 @@ describe("a card's one signed-in state", () => {
     expect(signedIn(STATES["current confirmed"]("codex"))).toBe("confirmed");
     expect(signedIn({ ...STATES["current confirmed"]("codex"), nativeLogin: { observationId: accountId("codex"), settled: false } })).toBe("unconfirmed");
     expect(signedIn(STATES["current unconfirmed"]("codex"))).toBe("unconfirmed");
-    expect(signedIn({ entries: [reading("codex")], profiles: [profile("codex")] }), "a signed-out read still names its account").toBe("no");
-    expect(signedIn({ entries: [reading("codex", { currentAccount: false })], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
-    expect(signedIn({ entries: [], profiles: [profile("codex", { active: true })], nativeLogin: { observationId: accountId("codex"), settled: true } })).toBe("confirmed");
+    expect(signedIn(STATES.saved("codex"))).toBe("no");
+    expect(signedIn({ entries: [], profiles: [profile("codex")], nativeLogin: { observationId: accountId("codex"), settled: true } }), "a saved login no read answered for").toBe("no");
     expect(signedIn(STATES.remembered("codex"))).toBe("no");
   });
 
@@ -210,7 +209,6 @@ describe("Use banked reset", () => {
       [reading("codex", { resetCredits: null })],
       [reading("codex", { resetCredits: { availableCount: 1, nextExpiresAt: before(0.001) } })],
     ]) expect(offered({ ...live, entries })).toBeNull();
-    expect(offered({ ...live, profiles: [profile("codex")] }), "not the signed-in account").toBeNull();
   });
 
   it("gives way to a Switch anyway confirmation on its card, which a waiting automatic reset's Cancel does not", () => {

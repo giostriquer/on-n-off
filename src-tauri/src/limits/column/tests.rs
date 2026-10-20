@@ -234,17 +234,20 @@ fn a_scoped_card_without_a_saved_profile_still_replaces_the_history_it_names() {
 fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
     let read = identity(AgentId::Claude, "read", "team");
     let unread = identity(AgentId::Claude, "unread", "team");
+    let unread_key = unread.observation_key();
 
     let column = column(
         &[scoped(&read, "read@example.com")],
-        &roster(
+        &roster_for_test(
             AgentId::Claude,
             &[
                 (read.clone(), "read@example.com"),
                 (unread.clone(), "unread@example.com"),
             ],
+            &[],
+            &[(unread_key.as_str(), "Client B")],
         ),
-        &no_ends(),
+        &SignInDeadlines::from([(unread_key.clone(), "2026-09-30T12:00:00Z".into())]),
     );
 
     assert_eq!(
@@ -273,6 +276,10 @@ fn a_saved_profile_no_read_answered_for_is_an_unread_entry_of_its_own() {
         entry.profile.as_ref().map(|p| p.observation_id()),
         Some(unread.observation_key().as_str())
     );
+    assert_eq!(entry.category.as_deref(), Some("Client B"));
+    let profile = serde_json::to_value(entry.profile.as_ref().unwrap()).unwrap();
+    assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
+    assert_eq!(profile["active"], false);
 }
 
 #[test]

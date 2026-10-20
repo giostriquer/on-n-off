@@ -341,31 +341,41 @@ pub(crate) fn roster_changed(agent: AgentId) {
 }
 
 fn reread_roster(cache: &Cache, read: impl FnOnce() -> Option<Roster>) -> Reading {
-    let Some(roster) = read() else {
-        return Reading::Unchanged(cache.revision.current());
+    relist(cache, None, read)
+}
+
+pub(crate) fn accounts_listed(agent: AgentId, ends: SignInDeadlines) {
+    let (Some(cache), Ok(home)) = (cache_for(agent), crate::paths::user_home()) else {
+        return;
     };
-    let mut listing = cache.listing();
-    listing.rereads += 1;
-    if listing.roster.as_ref() == Some(&roster) {
-        return Reading::Unchanged(cache.revision.current());
-    }
-    listing.roster = Some(roster);
-    Reading::Replaced(cache.revision.bump())
+    announce(
+        cache,
+        relist(cache, Some(ends), || Roster::read(&home, agent)),
+    );
 }
 
-pub(crate) fn sign_in_deadlines_listed(agent: AgentId, ends: SignInDeadlines) {
-    if let Some(cache) = cache_for(agent) {
-        announce(cache, ends_through_cache(cache, ends));
-    }
-}
-
-fn ends_through_cache(cache: &Cache, ends: SignInDeadlines) -> Reading {
+fn relist(
+    cache: &Cache,
+    ends: Option<SignInDeadlines>,
+    read: impl FnOnce() -> Option<Roster>,
+) -> Reading {
+    let roster = read();
     let mut listing = cache.listing();
-    if listing.ends == ends {
-        return Reading::Unchanged(cache.revision.current());
+    let mut changed = false;
+    if let Some(ends) = ends {
+        changed |= listing.ends != ends;
+        listing.ends = ends;
     }
-    listing.ends = ends;
-    Reading::Replaced(cache.revision.bump())
+    if let Some(roster) = roster {
+        listing.rereads += 1;
+        changed |= listing.roster.as_ref() != Some(&roster);
+        listing.roster = Some(roster);
+    }
+    if changed {
+        Reading::Replaced(cache.revision.bump())
+    } else {
+        Reading::Unchanged(cache.revision.current())
+    }
 }
 
 fn set_archived_with(

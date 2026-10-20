@@ -166,6 +166,7 @@ trait Notify {
     fn changed(&self, provider: AgentId);
     fn accounts(&self);
     fn roster(&self, provider: AgentId);
+    fn listed(&self, provider: AgentId, ends: SignInDeadlines);
 }
 
 trait Browser {
@@ -229,6 +230,9 @@ impl Notify for Announce {
     fn roster(&self, provider: AgentId) {
         crate::limits_refresh::roster_changed(provider);
     }
+    fn listed(&self, provider: AgentId, ends: SignInDeadlines) {
+        crate::limits_refresh::accounts_listed(provider, ends);
+    }
 }
 
 impl Accounts {
@@ -286,10 +290,7 @@ fn sign_in_ends_at(
 }
 
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {
-    let listed = Accounts::live()?.list(provider)?;
-    crate::limits_refresh::sign_in_deadlines_listed(provider, listed.sign_in_deadlines());
-    crate::limits_refresh::roster_changed(provider);
-    Ok(listed)
+    Accounts::live()?.list(provider)
 }
 pub fn unlock() -> Result<(), String> {
     Accounts::live()?.unlock()
@@ -342,6 +343,12 @@ impl Activation {
 
 impl Accounts {
     fn list(&self, provider: AgentId) -> Result<AccountsDto, String> {
+        let listed = self.listing(provider)?;
+        self.notify.listed(provider, listed.sign_in_deadlines());
+        Ok(listed)
+    }
+
+    fn listing(&self, provider: AgentId) -> Result<AccountsDto, String> {
         let _read = activity::read(provider)
             .ok_or("An account change is running. Retry when it finishes.")?;
         let home = &self.home;

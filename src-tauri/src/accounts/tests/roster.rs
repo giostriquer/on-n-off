@@ -53,6 +53,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in
     });
 
     let roster = answered(&harness, AgentId::Claude).unwrap();
+    harness.heard();
     let listed = harness.accounts().list(AgentId::Claude).unwrap();
 
     let read: Vec<_> = roster.profiles().iter().map(as_listed).collect();
@@ -75,12 +76,18 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_but_its_sign_in
     assert_eq!(roster.category(&b.observation_key()), Some("Client A"));
     assert_eq!(roster.category("history"), Some("Old team"));
     assert_eq!(
-        listed.sign_in_deadlines(),
-        crate::accounts::SignInDeadlines::from([(
-            a.observation_key(),
-            "2026-10-15T16:31:40Z".to_string()
-        )]),
-        "the account list hands Limits the sign-in ends it read"
+        harness.heard(),
+        [(
+            Heard::Listed(
+                AgentId::Claude,
+                crate::accounts::SignInDeadlines::from([(
+                    a.observation_key(),
+                    "2026-10-15T16:31:40Z".to_string()
+                )])
+            ),
+            true
+        )],
+        "the account list hands Limits the sign-in ends it read, and Limits rereads its roster"
     );
 }
 

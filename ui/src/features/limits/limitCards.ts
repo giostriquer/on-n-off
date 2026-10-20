@@ -107,7 +107,7 @@ export function limitColumn(input: LimitCardsInput): LimitColumn | null {
 }
 
 function leadsColumn(slot: Slot): boolean {
-  return slot.reading ? slot.reading.currentAccount : !!slot.profile?.active;
+  return !!slot.reading?.currentAccount;
 }
 
 function signedInState(slot: Slot, accountId: string | undefined, nativeLogin: NativeLogin | null): SignedIn {

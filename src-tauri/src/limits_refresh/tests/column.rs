@@ -234,48 +234,68 @@ fn a_roster_reread_never_reaches_the_credential_store() {
 }
 
 #[test]
-fn the_sign_in_ends_the_account_list_read_reach_the_column_and_are_announced_only_when_they_change()
-{
+fn an_account_list_hands_its_sign_in_ends_and_a_roster_reread_over_in_one_replacement() {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     read(&cache, "me", false, &|_, _| Some(roster_of(&["me"], &[])));
     let me = saved("me").observation_key();
-    let ends = SignInDeadlines::from([(me, "2026-09-30T12:00:00Z".to_string())]);
+    let ends = SignInDeadlines::from([(me.clone(), "2026-09-30T12:00:00Z".to_string())]);
+    let listed = || Some(roster_of(&["me"], &[(me.as_str(), "Client A")]));
 
     assert_eq!(
-        ends_through_cache(&cache, SignInDeadlines::new()),
+        relist(&cache, Some(SignInDeadlines::new()), || Some(roster_of(
+            &["me"],
+            &[]
+        ))),
         Reading::Unchanged(1)
     );
     assert_eq!(
-        ends_through_cache(&cache, ends.clone()),
-        Reading::Replaced(2)
+        relist(&cache, Some(ends.clone()), listed),
+        Reading::Replaced(2),
+        "a new end and a changed roster bump the revision once"
     );
-    assert_eq!(ends_through_cache(&cache, ends), Reading::Unchanged(2));
+    assert_eq!(
+        relist(&cache, Some(ends.clone()), listed),
+        Reading::Unchanged(2)
+    );
+    assert_eq!(
+        relist(&cache, Some(ends), || None),
+        Reading::Unchanged(2),
+        "a vault this session has not unlocked keeps the roster"
+    );
 
     let column = served_column(&cache);
     let profile = serde_json::to_value(column[0].profile.as_ref().unwrap()).unwrap();
     assert_eq!(profile["signInEndsAt"], "2026-09-30T12:00:00Z");
+    assert_eq!(column[0].category.as_deref(), Some("Client A"));
 }
 
 #[test]
-fn an_account_change_relists_the_saved_profiles_even_when_the_native_read_cannot() {
+fn an_account_change_reads_the_provider_afresh_and_relists_the_saved_profiles_even_when_it_cannot()
+{
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     read(&cache, "me", false, &|_, _| {
-        Some(roster_of(&["kept", "removed"], &[]))
+        Some(roster_of(&["me", "kept", "removed"], &[]))
     });
     assert_eq!(
-        unread(&served_column(&cache)),
-        ["kept@example.com", "removed@example.com"]
+        signed_in(&served_column(&cache)),
+        [saved("me").observation_key()]
     );
 
     account_changed_in(
         &cache,
-        || Some(roster_of(&["kept"], &[])),
-        || read(&cache, "me", false, &|_, _| None),
+        || Some(roster_of(&["me", "kept"], &[])),
+        || read(&cache, "kept", false, &|_, _| None),
     );
 
+    let column = served_column(&cache);
     assert_eq!(
-        unread(&served_column(&cache)),
-        ["kept@example.com"],
+        signed_in(&column),
+        [saved("kept").observation_key()],
+        "the change cleared the cached read, so the switch is read at once"
+    );
+    assert_eq!(
+        unread(&column),
+        ["me@example.com"],
         "the removed profile does not linger although the saved refresh listed nothing"
     );
 }

@@ -1,5 +1,5 @@
 use super::super::model::SignInDeadline;
-use super::fixture::{claude, codex, identity, Harness};
+use super::fixture::{claude, codex, identity, Harness, Heard};
 use crate::dto::AgentId;
 
 #[test]
@@ -30,7 +30,14 @@ fn listing_shows_this_providers_profiles_and_which_one_the_cli_uses() {
     );
     assert!(!listed.recovery_required);
     assert_eq!(harness.sealed(), sealed, "listing never writes the vault");
-    assert!(harness.heard().is_empty());
+    assert_eq!(
+        harness.heard(),
+        [(
+            Heard::Listed(AgentId::Claude, crate::accounts::SignInDeadlines::new()),
+            true
+        )],
+        "Limits is handed what the list read, once, with every lease released"
+    );
 }
 
 #[test]

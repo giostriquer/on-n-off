@@ -1,92 +1,104 @@
 [
   {
     "case": "a scoped reading replaces the history its legacy id names, under the same email",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": true
   },
   {
     "case": "the signed-in scoped reading replaces it too",
-    "scoped": { "provider": "codex", "status": "ok", "current": true, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": true, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": true
   },
   {
+    "case": "a scoped reading that observed nothing still replaces history; readers never send one, since a read that observes nothing is a failed card",
+    "scoped": { "provider": "codex", "status": "ok", "current": true, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": false },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
+    "supersedes": true
+  },
+  {
+    "case": "the failed card a read that observed nothing becomes replaces nothing",
+    "scoped": { "provider": "codex", "status": "failed", "current": true, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": false },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
+    "supersedes": false
+  },
+  {
     "case": "the email is compared trimmed and ignoring ASCII case",
-    "scoped": { "provider": "claude", "status": "ok", "current": false, "id": "profile:you", "legacyId": "user-you", "label": " You@Example.com " },
-    "legacy": { "provider": "claude", "status": "ok", "current": false, "id": "user-you", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "claude", "status": "ok", "current": false, "id": "profile:you", "legacyId": "user-you", "label": " You@Example.com ", "observed": true },
+    "legacy": { "provider": "claude", "status": "ok", "current": false, "id": "user-you", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": true
   },
   {
     "case": "a non-ASCII letter's case is not folded",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:jose", "legacyId": "team", "label": "josé@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "JOSÉ@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:jose", "legacyId": "team", "label": "josé@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "JOSÉ@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "a scoped read that failed replaces nothing",
-    "scoped": { "provider": "codex", "status": "failed", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "failed", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "the signed-in legacy read is never replaced",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": true, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": true, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "history under another email stays",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "someone@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "someone@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "history the legacy id does not name stays",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "other-team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "other-team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "a scoped card without a legacy id replaces nothing",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": null, "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": null, "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "only a scoped account replaces history",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "workspace-you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "workspace-you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "a scoped account is never history",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "profile:older", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "profile:older", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "profile:older", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "profile:older", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "no email on the scoped card",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": null },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": null, "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   },
   {
     "case": "no email on the history",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com" },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": null },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": null, "observed": true },
     "supersedes": false
   },
   {
     "case": "blank emails are no match",
-    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "  " },
-    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "  " },
+    "scoped": { "provider": "codex", "status": "ok", "current": false, "id": "profile:you", "legacyId": "team", "label": "  ", "observed": true },
+    "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "  ", "observed": true },
     "supersedes": false
   },
   {
     "case": "another provider's history stays",
-    "scoped": { "provider": "muse", "status": "ok", "current": false, "id": "profile:you", "legacyId": "email:you@example.com", "label": "you@example.com" },
-    "legacy": { "provider": "claude", "status": "ok", "current": false, "id": "email:you@example.com", "legacyId": null, "label": "you@example.com" },
+    "scoped": { "provider": "muse", "status": "ok", "current": false, "id": "profile:you", "legacyId": "email:you@example.com", "label": "you@example.com", "observed": true },
+    "legacy": { "provider": "claude", "status": "ok", "current": false, "id": "email:you@example.com", "legacyId": null, "label": "you@example.com", "observed": true },
     "supersedes": false
   }
 ]
