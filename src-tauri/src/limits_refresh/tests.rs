@@ -315,6 +315,44 @@ fn a_retry_after_holds_only_the_login_it_was_answered_for() {
 }
 
 #[test]
+fn a_provider_read_holds_a_forced_read_for_the_rate_limited_login_and_reads_another() {
+    use std::cell::{Cell, RefCell};
+    let cache = Cache::new(AgentId::Muse, Source::LimitsMuse);
+    let login = RefCell::new("login-a");
+    let reads = Cell::new(0);
+    let native = |_| {
+        reads.set(reads.get() + 1);
+        NativeRead {
+            cards: vec![snapshot("current", true, LimitsStatus::Failed)],
+            outcome: rate_limited("login-a"),
+        }
+    };
+    let current_login = || Some(login.borrow().to_string());
+    let read = |force| {
+        let native = Native {
+            read: &native,
+            login: &current_login,
+        };
+        read_provider(
+            &cache,
+            Duration::from_secs(300),
+            force,
+            &native,
+            &|_| false,
+            &|_, _| None,
+            &|_| {},
+        )
+    };
+
+    read(false);
+    read(true);
+    assert_eq!(reads.get(), 1, "a forced read waits for the same login");
+    *login.borrow_mut() = "login-b";
+    read(true);
+    assert_eq!(reads.get(), 2, "another login is read at once");
+}
+
+#[test]
 fn the_native_failure_is_served_with_the_cards_it_was_read_with() {
     let cache = Cache::new(AgentId::Codex, Source::LimitsCodex);
     let interval = Duration::from_secs(300);
@@ -654,6 +692,10 @@ fn a_replacing_read_unarchives_polls_the_saved_accounts_then_flags_under_the_loc
     };
     let interval = Duration::from_secs(300);
     let read = |force| {
+        let native = Native {
+            read: &native,
+            login: &no_login,
+        };
         read_provider(&cache, interval, force, &native, &unarchive, &saved, &flag)
             .0
             .entries

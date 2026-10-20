@@ -284,7 +284,9 @@ fn a_usage_dir_that_cannot_be_cleared_fails_the_read_without_asking_claude_code(
 
 #[test]
 fn every_failure_after_the_config_dir_names_the_account_keeps_it() {
-    use crate::limits::outcome::tests::every_failure_keeps_the_account_its_answer_names;
+    use crate::limits::outcome::tests::{
+        every_failure_keeps_the_account_its_answer_names, Expected,
+    };
     let account = config("user", "team");
     let failing_with = |stub: CliStub, stdout: &str| {
         let (dir, cli) = home(&account, stdout, stub);
@@ -317,19 +319,31 @@ fn every_failure_after_the_config_dir_names_the_account_keeps_it() {
         AgentId::Claude,
         answered,
         vec![
-            failing_with(CliStub::new("claude").exit(1), REPORT),
-            failing_with(
-                CliStub::new("claude")
-                    .stderr("error: unknown option --safe-mode")
-                    .exit(1),
-                REPORT,
+            (
+                failing_with(CliStub::new("claude").exit(1), REPORT),
+                (|failure| *failure == ReadFailure::Unavailable(UNREPORTED.into())) as Expected,
             ),
-            failing_with(
-                CliStub::new("claude"),
-                r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[]}}}"#,
+            (
+                failing_with(
+                    CliStub::new("claude")
+                        .stderr("error: unknown option --safe-mode")
+                        .exit(1),
+                    REPORT,
+                ),
+                |failure| *failure == ReadFailure::Unavailable(OUTDATED.into()),
             ),
-            changed,
-            uncleared,
+            (
+                failing_with(
+                    CliStub::new("claude"),
+                    r#"{"type":"assistant","usage_report":{"rate_limits":{"limits":[]}}}"#,
+                ),
+                |failure| *failure == ReadFailure::NoUsage,
+            ),
+            (changed, |failure| *failure == ReadFailure::AccountChanged),
+            (uncleared, |failure| {
+                matches!(failure, ReadFailure::Unavailable(why)
+                    if why.starts_with("Could not clear Claude Code's usage config dir"))
+            }),
         ],
     );
 }

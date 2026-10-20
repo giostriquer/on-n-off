@@ -145,10 +145,14 @@ fn native_login_at(agent: AgentId, home: &Path) -> Option<String> {
 
 pub(crate) fn verify_signed_in(agent: AgentId, force: bool) -> Result<(), String> {
     let home = paths::user_home().map_err(|error| error.message)?;
+    verify_signed_in_at(agent, force, &home)
+}
+
+fn verify_signed_in_at(agent: AgentId, force: bool, home: &Path) -> Result<(), String> {
     let failure = match limits_reader(agent) {
         Some(reader) => {
             let _provider_guard = provider_read_guard(agent);
-            (reader.read)(&home, force).answer.err()
+            (reader.read)(home, force).answer.err()
         }
         None => Some(ReadFailure::Unsupported(outcome::Unsupported::NoLimits)),
     };

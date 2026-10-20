@@ -46,7 +46,10 @@ fn read(cache: &Cache, force: bool, roster: Option<Roster>) -> Served {
         cache,
         Duration::from_secs(1800),
         force,
-        &|_| native_read(vec![signed_in()]),
+        &Native {
+            read: &|_| native_read(vec![signed_in()]),
+            login: &no_login,
+        },
         &|_| false,
         &|_, _| roster.clone(),
         &|_| {},
@@ -71,7 +74,10 @@ fn the_column_lists_the_saved_profiles_the_last_saved_refresh_found_until_anothe
         &cache,
         Duration::from_secs(1800),
         false,
-        &|_| native_read(vec![signed_in()]),
+        &Native {
+            read: &|_| native_read(vec![signed_in()]),
+            login: &no_login,
+        },
         &|_| false,
         &|_, _| panic!("saved accounts are not due"),
         &|_| {},
