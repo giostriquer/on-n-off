@@ -44,12 +44,6 @@ fn recorded_in(dir: &Path) -> Option<String> {
     std::fs::read_to_string(dir.join("provider.json")).ok()
 }
 
-fn deleted_by(harness: &Harness) -> Vec<(PathBuf, AgentId)> {
-    let mut deleted = harness.homes().deleted_by.lock().unwrap().clone();
-    deleted.sort_by(|a, b| a.0.cmp(&b.0));
-    deleted
-}
-
 fn sorted(mut homes: Vec<(PathBuf, AgentId)>) -> Vec<(PathBuf, AgentId)> {
     homes.sort_by(|a, b| a.0.cmp(&b.0));
     homes
@@ -87,10 +81,10 @@ fn a_muse_read_never_tears_down_a_claude_home() {
         laid_out.exists() && recorded.exists(),
         "a Muse read removed a Claude home"
     );
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
     read(&harness, AgentId::Claude);
     assert_eq!(
-        deleted_by(&harness),
+        sorted(harness.homes().deleted_by.lock().unwrap().clone()),
         sorted(vec![
             (laid_out.clone(), AgentId::Claude),
             (recorded.clone(), AgentId::Claude)
@@ -116,11 +110,18 @@ fn a_claude_read_never_tears_down_a_muse_home_and_muse_takes_back_the_one_it_for
         forgotten.exists() && recorded.exists(),
         "a Claude read removed a Muse home"
     );
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(
+        !forgotten.join(".claude").exists(),
+        "a Claude read laid its config dir into a Muse home"
+    );
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
     read(&harness, AgentId::Muse);
     assert_eq!(harness.home_of(&id), Some(forgotten.clone()));
     assert_eq!(recorded_in(&forgotten).as_deref(), Some("\"muse\""));
-    assert_eq!(deleted_by(&harness), [(recorded, AgentId::Muse)]);
+    assert_eq!(
+        *harness.homes().deleted_by.lock().unwrap(),
+        [(recorded, AgentId::Muse)]
+    );
 }
 
 #[test]
@@ -140,7 +141,7 @@ fn a_home_no_provider_can_claim_is_left_and_its_login_never_read() {
     for dir in [&bare, &both, &unknown] {
         assert!(dir.exists(), "{} was removed", dir.display());
     }
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -164,31 +165,58 @@ fn a_login_moves_into_a_home_only_once_the_home_names_its_provider() {
     assert_eq!(harness.in_vault(&b), None);
 }
 
-#[test]
-fn a_home_another_provider_owns_is_never_moved_into_or_out_of() {
-    let harness = Harness::new().with_homes();
-    let b = claude_accounts(&harness);
-    let dir = named_home(&harness, 1);
+fn foreign_home(harness: &Harness) -> PathBuf {
+    let dir = named_home(harness, 1);
     marked(&dir, "muse");
-
-    read(&harness, AgentId::Claude);
-
-    assert_eq!(harness.in_vault(&b), Some("b1".into()));
-    assert_eq!(harness.in_home(&b), None, "moved a login into Muse's home");
     harness
         .homes()
         .logins
         .lock()
         .unwrap()
         .insert(dir.clone(), claude("b", "b0"));
+    dir
+}
+
+#[test]
+fn a_home_another_provider_owns_is_never_moved_into_and_a_switch_uses_the_vault_login() {
+    let harness = Harness::new().with_homes();
+    let b = claude_accounts(&harness);
+    let dir = foreign_home(&harness);
+
+    read(&harness, AgentId::Claude);
+
+    assert_eq!(harness.in_vault(&b), Some("b1".into()));
+    assert_eq!(
+        harness.in_home(&b),
+        Some("b0".into()),
+        "moved a login into Muse's home"
+    );
+    harness
+        .accounts()
+        .activate(AgentId::Claude, &b, Activation::Ordinary)
+        .unwrap();
+    assert_eq!(harness.live(), Some("b1".into()));
+    assert_eq!(harness.in_home(&b), Some("b0".into()));
+    assert!(harness.homes().emptied.lock().unwrap().is_empty());
+    assert_eq!(recorded_in(&dir).as_deref(), Some("\"muse\""));
+}
+
+#[test]
+fn a_switch_never_takes_a_login_out_of_a_home_another_provider_owns() {
+    let harness = Harness::new().with_homes();
+    let b = claude_accounts(&harness);
+    let dir = foreign_home(&harness);
     harness.seed(|db| db.profiles[1].login = None);
+
     let error = harness
         .accounts()
         .activate(AgentId::Claude, &b, Activation::Ordinary)
         .unwrap_err();
+
     assert!(error.contains("another provider"), "{error}");
     assert_eq!(harness.live(), Some("a2".into()));
     assert_eq!(harness.in_home(&b), Some("b0".into()));
+    assert_eq!(harness.in_vault(&b), None);
     assert!(harness.homes().emptied.lock().unwrap().is_empty());
     assert_eq!(recorded_in(&dir).as_deref(), Some("\"muse\""));
 }

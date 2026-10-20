@@ -266,11 +266,6 @@ impl Accounts {
         let at = self.stores.homes(provider)?;
         Some(move |id: &str| Ok(at(&homes::dir(&self.home, id)?)))
     }
-    fn laid_out(&self, provider: AgentId, dir: &Path) -> bool {
-        self.stores
-            .homes(provider)
-            .is_some_and(|at| at(dir).recognizes())
-    }
 }
 
 pub fn list(provider: AgentId) -> Result<AccountsDto, String> {

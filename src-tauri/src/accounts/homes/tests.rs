@@ -16,25 +16,23 @@ fn a_home_id_on_n_off_did_not_make_is_refused() {
     }
 }
 
-fn laid_out(found: &'static [AgentId]) -> impl Fn(AgentId, &Path) -> bool {
-    move |provider, _| found.contains(&provider)
-}
-
 fn written(dir: &Path, record: &[u8]) {
     std::fs::write(dir.join("provider.json"), record).unwrap();
+}
+
+fn with_layouts(dir: &Path, layouts: &[&str]) {
+    for layout in layouts {
+        std::fs::create_dir_all(dir.join(layout)).unwrap();
+    }
 }
 
 #[test]
 fn a_home_that_records_its_provider_is_that_providers_whatever_its_layout_or_profile() {
     let home = tempfile::tempdir().unwrap();
     written(home.path(), b"\"muse\"");
+    with_layouts(home.path(), &[".claude"]);
 
-    let claude = laid_out(&[AgentId::Claude]);
-
-    assert_eq!(
-        owner(home.path(), Claim::Unnamed(&claude)),
-        Some(AgentId::Muse)
-    );
+    assert_eq!(owner(home.path(), Claim::Unnamed), Some(AgentId::Muse));
     assert_eq!(
         owner(home.path(), Claim::Named(AgentId::Claude)),
         Some(AgentId::Muse)
@@ -44,6 +42,7 @@ fn a_home_that_records_its_provider_is_that_providers_whatever_its_layout_or_pro
 #[test]
 fn a_home_with_no_record_is_the_provider_whose_profile_names_it() {
     let home = tempfile::tempdir().unwrap();
+    with_layouts(home.path(), &["config/muse"]);
 
     assert_eq!(
         owner(home.path(), Claim::Named(AgentId::Claude)),
@@ -57,28 +56,30 @@ fn a_home_with_no_record_is_the_provider_whose_profile_names_it() {
 
 #[test]
 fn an_unnamed_home_with_no_record_is_the_one_provider_whose_layout_it_holds() {
-    let home = tempfile::tempdir().unwrap();
-    let owned = |found: &'static [AgentId]| owner(home.path(), Claim::Unnamed(&laid_out(found)));
+    let owned = |layouts: &[&str]| {
+        let home = tempfile::tempdir().unwrap();
+        with_layouts(home.path(), layouts);
+        owner(home.path(), Claim::Unnamed)
+    };
 
-    assert_eq!(owned(&[AgentId::Claude]), Some(AgentId::Claude));
-    assert_eq!(owned(&[AgentId::Muse]), Some(AgentId::Muse));
+    assert_eq!(owned(&[".claude"]), Some(AgentId::Claude));
+    assert_eq!(owned(&["config/muse"]), Some(AgentId::Muse));
     assert_eq!(owned(&[]), None, "no layout");
-    assert_eq!(
-        owned(&[AgentId::Claude, AgentId::Muse]),
-        None,
-        "two layouts"
-    );
+    assert_eq!(owned(&["config"]), None, "half a layout");
+    assert_eq!(owned(&[".claude", "config/muse"]), None, "two layouts");
 }
 
 #[test]
 fn a_home_whose_record_cannot_be_read_is_no_providers() {
-    let claude = laid_out(&[AgentId::Claude]);
-    for record in [&b"\"acme\""[..], b"{", &[b' '; 200]] {
+    let mut at_the_cap = b"\"claude\"".to_vec();
+    at_the_cap.resize(100, b' ');
+    for record in [&b"\"acme\""[..], b"{", &[b' '; 200], &at_the_cap] {
         let home = tempfile::tempdir().unwrap();
         written(home.path(), record);
+        with_layouts(home.path(), &[".claude"]);
 
         assert_eq!(owner(home.path(), Claim::Named(AgentId::Claude)), None);
-        assert_eq!(owner(home.path(), Claim::Unnamed(&claude)), None);
+        assert_eq!(owner(home.path(), Claim::Unnamed), None);
     }
     let home = tempfile::tempdir().unwrap();
     std::fs::create_dir(home.path().join("provider.json")).unwrap();

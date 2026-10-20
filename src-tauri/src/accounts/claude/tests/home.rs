@@ -110,8 +110,7 @@ fn settle(root: &Path, provider: AgentId) {
     let accounts = crate::accounts::Accounts::at(root.to_path_buf());
     let homes = accounts.account_homes(provider).unwrap();
     let open = || crate::accounts::store::Store::open_existing(root);
-    let laid_out = |provider, dir: &Path| accounts.laid_out(provider, dir);
-    crate::accounts::homes::settle(root, provider, None, &open, &homes, &laid_out);
+    crate::accounts::homes::settle(root, provider, None, &open, &homes);
 }
 
 #[test]
@@ -577,4 +576,27 @@ fn a_linked_claude_config_dir_is_not_a_homes_layout() {
     std::os::unix::fs::symlink(elsewhere.path(), root.path().join(".claude")).unwrap();
 
     assert!(!ClaudeHome::at(root.path()).recognizes());
+}
+
+#[test]
+fn a_claude_read_leaves_an_unnamed_muse_home_to_muse() {
+    let root = accounts_root();
+    let (dir, claude) = unnamed_home(root.path());
+    let muse = crate::accounts::muse::MuseHome::at(&dir);
+    let login = Login {
+        auth: json!({"access_token": "t1", "api_key": "key-1"}),
+        account: json!({"mechanism": "oauth", "user_email": "you@example.com"}),
+    };
+    muse.put(&login, &()).unwrap();
+
+    let ((), sent) = keychain(|| settle(root.path(), AgentId::Claude));
+
+    assert!(sent.is_empty(), "{sent:?}");
+    assert!(
+        !dir.join(".claude").exists(),
+        "a Claude read laid its config dir into a Muse home"
+    );
+    assert!(muse.recognizes() && !claude.recognizes());
+    settle(root.path(), AgentId::Muse);
+    assert!(!dir.exists(), "its owner, Muse, did not tear it down");
 }

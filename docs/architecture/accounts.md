@@ -149,25 +149,29 @@ A home records its provider in its own `provider.json`, the provider's name and 
 the file and format a sign-in's isolated home records its provider in. Check-in writes it under the
 home's locks before the first login goes in, and a home taken back gets it too. One rule decides a
 home's owner (`homes::owner`), asked by check-in, check-out, the take-back and teardown of an
-unnamed home, and Remove account's retire, each before it takes the home's locks:
+unnamed home, and Remove account's retire through the one call that takes a home's locks only once
+the home is its provider's (`homes::lock_owned`):
 
 - The provider its record names, whatever else the home holds.
 - With no record, the provider whose profile names the home (for Remove account, the profile it
   just removed).
 - With no record and no profile naming it, a home from a version before records, the one provider
-  whose layout it holds, found by looking at directories alone (`Home::recognizes`): a Claude home
-  is the directory with a `.claude` config dir in it, which Claude Code's locks create before
-  anything is written there, and a Muse home the one with a `config/muse` dir. Neither reads a
-  login, a file's contents or a Keychain item, and a linked directory does not count.
+  whose layout it holds, asked of each provider's own home type and found by looking at
+  directories alone (`Home::recognizes`): a Claude home is the directory with a `.claude` config
+  dir in it, which Claude Code's locks create before anything is written there, and a Muse home
+  the one with a `config/muse` dir. Neither reads a login, a file's contents or a Keychain item,
+  and a linked directory does not count.
 
-A home whose record cannot be read (malformed, or naming a provider this version does not know),
-with no layout, or with both layouts belongs to no provider. No read takes its locks, reads its
-login or deletes it, and it stays on disk until it is removed by hand: a home whose owner cannot be
-told may hold an account's only login, and the wrong provider's teardown would leave a Keychain
-entry behind. A check-in or a switch refuses a home another provider owns ("This account's home
-belongs to another provider, so it was left alone."), and the account's login stays in the vault.
-Keychain entries an earlier version left behind this way are not found: on-n-off never lists the
-Keychain, and the path each one hashes is gone.
+A home whose record cannot be read (malformed, 100 bytes or longer, or naming a provider this
+version does not know), with no layout, or with both layouts belongs to no provider. No read takes
+its locks, reads its login or deletes it, and it stays on disk until it is removed by hand: a home
+whose owner cannot be told may hold an account's only login, and the wrong provider's teardown
+would leave a Keychain entry behind. A check-in leaves a home its provider does not own as it is,
+and the account's login stays in the vault. A switch to an account whose login is in the vault
+leaves such a home alone and publishes the vault login; only a switch whose login would have to
+come out of that home is refused ("This account's home belongs to another provider, or its owner
+cannot be read, so it was left alone."). Keychain entries an earlier version left behind this way
+are not found: on-n-off never lists the Keychain, and the path each one hashes is gone.
 
 The account vault is XChaCha20-Poly1305 authenticated ciphertext, atomically replaced using private
 staging files. A fresh random nonce protects each write. A 32-byte key is stored with the OS:

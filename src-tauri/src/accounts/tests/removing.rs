@@ -215,7 +215,7 @@ fn a_home_another_provider_owns_is_left_by_remove_account_and_says_why() {
     let why = forgot.home_left.expect("the home was left");
     assert!(why.contains("another provider"), "{why}");
     assert!(dir.exists(), "Claude's teardown removed Muse's home");
-    assert!(harness.homes().deleted.lock().unwrap().is_empty());
+    assert!(harness.homes().deleted_by.lock().unwrap().is_empty());
     assert!(harness.vault().profiles.is_empty());
 }
 
