@@ -232,17 +232,17 @@ describe("a card's identity", () => {
 describe("a card's windows", () => {
   it("leads with the weekly window and presents the rest as rows, a passed reset back at zero", () => {
     const [current, remembered] = cards([okCodex(), staleCodex()]);
-    expect(current.headline).toMatchObject({ id: "primary", label: "Weekly · all models", percent: 74, text: "74%", color: undefined });
-    expect(current.rows).toMatchObject([{ id: "extra:gpt-5.6-luna", percent: 0, text: "0%", color: undefined, note: expect.stringMatching(/^reset 1m ago · \w{3} \d\d:\d\d$/) }]);
-    expect(remembered.headline).toMatchObject({ percent: 88, text: "88%", color: undefined, note: expect.stringMatching(/^resets in 2d 14h/) });
-    expect(remembered.rows).toMatchObject([{ id: "secondary", percent: 0, text: "0%", color: undefined, note: expect.stringMatching(/^reset 22h ago · \w{3} \d\d:\d\d$/) }]);
+    expect(current.headline).toMatchObject({ id: "primary", label: "Weekly · all models", usedNow: 74, text: "74%", meter: { level: "blend" } });
+    expect(current.rows).toMatchObject([{ id: "extra:gpt-5.6-luna", usedNow: 0, text: "0%", meter: { level: "base" }, note: expect.stringMatching(/^reset 1m ago · \w{3} \d\d:\d\d$/) }]);
+    expect(remembered.headline).toMatchObject({ usedNow: 88, text: "88%", meter: { level: "blend" }, note: expect.stringMatching(/^resets in 2d 14h/) });
+    expect(remembered.rows).toMatchObject([{ id: "secondary", usedNow: 0, text: "0%", meter: { level: "base" }, note: expect.stringMatching(/^reset 22h ago · \w{3} \d\d:\d\d$/) }]);
   });
 
   it("presents an elapsed headline window as reset, never as its old 97%", () => {
     const renewed = staleCodex();
     renewed.windows[0] = { ...renewed.windows[0], usedPercent: 97, resetsAt: "2026-08-17T18:35:00Z" };
     expect(cards([renewed])[0].headline).toEqual({
-      id: "primary", label: "Weekly · all models", percent: 0, text: "0%", color: undefined, note: expect.stringMatching(/^reset 1h ago · \w{3} \d\d:\d\d$/),
+      id: "primary", label: "Weekly · all models", usedNow: 0, usedFigure: 0, meter: { level: "base" }, text: "0%", note: expect.stringMatching(/^reset 1h ago · \w{3} \d\d:\d\d$/),
     });
   });
 
@@ -255,18 +255,19 @@ describe("a card's windows", () => {
     expect(card.empty).toBeNull();
   });
 
-  it.each([
-    [0, null, true, "Starts with your first message"],
-    [0, null, false, "Reset time unavailable"],
-    [0, null, undefined, "Reset time unavailable"],
-    [17, null, false, "Reset time unavailable"],
-    [0, "invalid", false, "Reset time unavailable"],
-  ] as const)("says why a remembered session at %s percent with reset %s and first-message flag %s shows no reset", (usedPercent, resetsAt, startsOnFirstMessage, note) => {
+  it("gives the headline and every row the note its window reads now, a missing reset included", () => {
     const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent, resetsAt, startsOnFirstMessage };
-    expect(cards([remembered])[0].rows[0]).toEqual({
-      id: "session", label: "5 hour · all models", percent: usedPercent, text: `${usedPercent}%`, color: undefined, note,
-    });
+    remembered.windows = [
+      { ...remembered.windows[0], resetsAt: null },
+      { ...remembered.windows[1], usedPercent: 0, resetsAt: null, startsOnFirstMessage: true },
+      { ...remembered.windows[2], resetsAt: "invalid" },
+    ];
+    const [card] = cards([remembered]);
+    expect([card.headline, ...card.rows].map(window => [window?.id, window?.note])).toEqual([
+      ["weekly_all", "Reset time unavailable"],
+      ["session", "Starts with your first message"],
+      ["weekly_opus", "Reset time unavailable"],
+    ]);
   });
 
   it.each(LIMITS_PROVIDERS)("gives a %s window its first-message note from the window alone, whatever its kind", (provider) => {
@@ -279,11 +280,6 @@ describe("a card's windows", () => {
     ]);
   });
 
-  it("keeps a reported countdown even when a remembered session has zero usage", () => {
-    const remembered = okClaude({ currentAccount: false });
-    remembered.windows[1] = { ...remembered.windows[1], usedPercent: 0, resetsAt: "2026-08-17T23:00:00Z", startsOnFirstMessage: true };
-    expect(cards([remembered])[0].rows[0]).toMatchObject({ text: "0%", note: expect.stringMatching(/^resets in 3h 0m/) });
-  });
 });
 
 describe("a card's status and message", () => {
@@ -318,8 +314,8 @@ describe("a card's status and message", () => {
     expect(shown).toHaveLength(1);
     expect(shown[0]).toMatchObject({
       status: { kind: "paused" },
-      headline: { percent: 12 },
-      rows: [{ id: "session", percent: 0, note: expect.stringMatching(/^reset 15h ago · \w{3} \d\d:\d\d$/) }],
+      headline: { usedNow: 12 },
+      rows: [{ id: "session", usedNow: 0, note: expect.stringMatching(/^reset 15h ago · \w{3} \d\d:\d\d$/) }],
       freshness: { message: { text: expect.stringMatching(/^Access token expired/), tone: "muted" }, lastKnown: true, updatedAt: formatObservedAt(observedAt), readStatus: "unauthenticated" },
       empty: null,
     });

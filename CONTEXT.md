@@ -28,6 +28,12 @@ When a quota window renews, as its provider reported it. Two within two seconds 
 the same instant, and one names the window's current cycle.
 _Avoid_: reset string, reset timestamp
 
+**Window at an instant**:
+What a quota window reads at a given moment, alike on every surface: 0% used once its reset instant
+has passed, reached only at 100% used, unreadable outside 0–100%, and idle while it is unused, has
+no reset and starts with the first message.
+_Avoid_: live percent, current window
+
 **Reading**:
 Everything one read reported about one provider account: its quota windows, its figures and its
 account details.

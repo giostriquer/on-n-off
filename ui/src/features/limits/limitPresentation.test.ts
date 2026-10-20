@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatResetAt } from "$lib/limitsFormat";
+import { windowAt } from "$lib/windowAt";
 import type { LimitWindow, ProviderLimits } from "$lib/limitsTypes";
 import { hasObservations, latestObservedAt, presentCreditsSpent, presentLimitAccount, presentLimitWindow, usableAgainAt, usageLeft } from "./limitPresentation";
 
@@ -15,43 +15,25 @@ const window: LimitWindow = {
 };
 
 describe("presentLimitWindow", () => {
-  it("reads an elapsed window as 0%, not as a dash and not as its old figure", () => {
-    const presented = presentLimitWindow(window, NOW);
-    expect(presented).toEqual({
-      percent: 0,
-      text: "0%",
-      color: undefined,
-      note: `reset 1h ago · ${formatResetAt(window.resetsAt)}`,
-    });
-    expect(presented.note).not.toContain("93");
-    expect(presented.note).not.toContain(formatResetAt(window.observedAt));
-  });
-
-  it("keeps a live window's number, colour and countdown", () => {
-    const resetsAt = "2026-08-17T23:00:00Z";
-    expect(presentLimitWindow({ ...window, resetsAt }, NOW)).toEqual({
-      percent: 93,
+  it("draws a window as it reads now: its meter's fill, figure and level, its text and note", () => {
+    const live = { ...window, resetsAt: "2026-08-17T23:00:00Z" };
+    expect(presentLimitWindow(live, NOW)).toEqual({
+      usedNow: 93,
+      usedFigure: 93,
+      meter: { level: "trip" },
       text: "93%",
-      color: "var(--trip)",
-      note: `resets in 3h 0m · ${formatResetAt(resetsAt)}`,
+      note: windowAt(live, NOW).note.text,
     });
   });
 
-  it("counts down the last minute as '<1m', never 'in now'", () => {
-    const resetsAt = new Date(NOW + 30_000).toISOString();
-    expect(presentLimitWindow({ ...window, resetsAt }, NOW).note).toBe(`resets in <1m · ${formatResetAt(resetsAt)}`);
-  });
-
-  it("treats the reset instant itself as already elapsed", () => {
-    const presented = presentLimitWindow({ ...window, resetsAt: new Date(NOW).toISOString() }, NOW);
-    expect(presented.note).toMatch(/^reset just now · \w{3} \d\d:\d\d$/);
-  });
-
-  it("shows a window without a known reset as live, with no note", () => {
-    const presented = presentLimitWindow({ ...window, usedPercent: 12, resetsAt: null }, NOW);
-    expect(presented.text).toBe("12%");
-    expect(presented.note).toBe("");
-    expect(presentLimitWindow({ ...window, resetsAt: "soon" }, NOW).text).toBe("93%");
+  it("keeps an unreadable window unreadable: no fill, no figure, a dash", () => {
+    expect(presentLimitWindow({ ...window, usedPercent: 101, resetsAt: null }, NOW)).toEqual({
+      usedNow: null,
+      usedFigure: null,
+      meter: { level: "unreadable" },
+      text: "—",
+      note: "Reset time unavailable",
+    });
   });
 });
 

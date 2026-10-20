@@ -1,22 +1,10 @@
-import {
-  formatObservedAt,
-  formatResetAt,
-  formatResetIn,
-  formatShortDate,
-  formatUsedPercent,
-  hasElapsed,
-  parseInstant,
-  usageTextColor,
-} from "$lib/limitsFormat";
+import { formatObservedAt, hasElapsed, parseInstant } from "$lib/limitsFormat";
 import type { LimitWindow, LimitsCreditsSpent, LimitsResetCredits, LimitsWorkspaceCredits, ProviderLimits } from "$lib/limitsTypes";
-import { formatAgo } from "$lib/timeFormat";
+import { shareAt, windowAt, type WindowAt } from "$lib/windowAt";
 
-export type LimitWindowPresentation = {
-  percent: number;
-  text: string;
-  color: string | undefined;
-  note: string;
-};
+export type Gauge = Pick<WindowAt, "usedNow" | "usedFigure" | "meter">;
+
+export type LimitWindowPresentation = Gauge & { text: string; note: string };
 
 export type CardStatus = { kind: "savedRefresh"; detail: string } | { kind: "remembered" } | { kind: "paused" };
 
@@ -32,24 +20,13 @@ export function headlineWindow(entry: ProviderLimits): { headline: LimitWindow |
   return { headline, rest: entry.windows.filter((window) => window !== headline) };
 }
 
+function present(at: WindowAt, note: string): LimitWindowPresentation {
+  return { usedNow: at.usedNow, usedFigure: at.usedFigure, meter: at.meter, text: at.usedText, note };
+}
+
 export function presentLimitWindow(window: LimitWindow, now: number): LimitWindowPresentation {
-  const resetAt = formatResetAt(window.resetsAt);
-  const elapsed = hasElapsed(window.resetsAt, now);
-  const usedPercent = elapsed ? 0 : window.usedPercent;
-  return {
-    percent: usedPercent,
-    text: formatUsedPercent(usedPercent),
-    color: usageTextColor(usedPercent),
-    note: elapsed ? elapsedNote(window, now, resetAt) : pendingNote(formatResetIn(window.resetsAt, now), resetAt),
-  };
-}
-
-function elapsedNote(window: LimitWindow, now: number, resetAt: string): string {
-  return `reset ${formatAgo(window.resetsAt, now)} · ${resetAt}`;
-}
-
-function pendingNote(resetIn: string, resetAt: string): string {
-  return resetIn ? `resets in ${resetIn}${resetAt ? ` · ${resetAt}` : ""}` : "";
+  const at = windowAt(window, now);
+  return present(at, at.note.text);
 }
 
 function mainWindows(entry: ProviderLimits): LimitWindow[] {
@@ -57,14 +34,19 @@ function mainWindows(entry: ProviderLimits): LimitWindow[] {
 }
 
 export function usageLeft(entry: ProviderLimits, now: number): number | null {
-  const used = mainWindows(entry).map((window) => presentLimitWindow(window, now).percent);
+  const used = mainWindows(entry).flatMap((window) => windowAt(window, now).usedNow ?? []);
   return used.length ? 100 - Math.max(...used) : null;
+}
+
+export function usageLeftFigure(entry: ProviderLimits, now: number): number | null {
+  const figures = mainWindows(entry).flatMap((window) => windowAt(window, now).usedFigure ?? []);
+  return figures.length ? 100 - Math.max(...figures) : null;
 }
 
 export function usableAgainAt(entry: ProviderLimits, now: number): number {
   return Math.max(
     ...mainWindows(entry)
-      .filter((window) => presentLimitWindow(window, now).percent >= 100)
+      .filter((window) => windowAt(window, now).reached)
       .map((window) => parseInstant(window.resetsAt) ?? Infinity),
   );
 }
@@ -77,25 +59,17 @@ export function unexpiredBankedResets(resetCredits: LimitsResetCredits | null | 
 const AMOUNT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
 
 export function presentWorkspaceShare(share: LimitsWorkspaceCredits, now: number): LimitWindowPresentation {
-  const renewed = hasElapsed(share.resetsAt, now);
-  const percent = renewed ? 0 : share.usedPercent;
+  const at = shareAt(share, now);
   const limit = Number(share.limit);
   const used = Number(share.used);
-  const amounts = renewed
+  const amounts = at.note.kind === "renewed"
     ? `${AMOUNT.format(limit)} of ${AMOUNT.format(limit)} left`
     : !share.reached
       ? `${AMOUNT.format(Math.max(limit - used, 0))} of ${AMOUNT.format(limit)} left`
       : used >= limit
         ? `all ${AMOUNT.format(limit)} used`
         : "limit reached";
-  const resetDate = formatShortDate(share.resetsAt);
-  const reset = renewed ? `reset ${formatAgo(share.resetsAt, now)} · ${resetDate}` : resetDate ? `resets ${resetDate}` : undefined;
-  return {
-    percent,
-    text: formatUsedPercent(percent),
-    color: usageTextColor(percent),
-    note: [amounts, reset].filter(Boolean).join(" · "),
-  };
+  return present(at, [amounts, at.note.text].filter(Boolean).join(" · "));
 }
 
 const SPENT = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });

@@ -1,5 +1,3 @@
-import { providerColor } from "./providers";
-import type { AgentId } from "./types";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
@@ -89,33 +87,6 @@ export function formatClock(iso: string | null | undefined, timeZone?: string): 
     hourCycle: "h23",
     timeZone,
   }).format(at);
-}
-
-const HARDENS_FROM = 70;
-const SPENT = 90;
-
-export function usageMeterColor(base: string, usedPercent: number): string {
-  if (usedPercent >= SPENT) return "var(--trip)";
-  if (!(usedPercent > HARDENS_FROM)) return base;
-  const travelled = Math.sqrt((usedPercent - HARDENS_FROM) / (SPENT - HARDENS_FROM));
-  return `color-mix(in srgb, ${base}, var(--trip) ${(travelled * 100).toFixed(1)}%)`;
-}
-
-export function usageFillColor(provider: AgentId, usedPercent: number): string {
-  return usageMeterColor(providerColor(provider), usedPercent);
-}
-
-export function usageFillStyle(provider: AgentId, usedPercent: number) {
-  return { background: providerColor(provider), backgroundColor: usageFillColor(provider, usedPercent) };
-}
-
-export function usageTextColor(usedPercent: number): string | undefined {
-  return usedPercent >= SPENT ? "var(--trip)" : undefined;
-}
-
-export function formatUsedPercent(usedPercent: number): string {
-  if (usedPercent > 0 && usedPercent < 1) return "<1%";
-  return `${Math.round(usedPercent)}%`;
 }
 
 export function formatPrice({ amountMinorUnits, currency }: { amountMinorUnits: number; currency: string }): string {

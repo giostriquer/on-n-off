@@ -4,7 +4,7 @@ import { UsageStatusBadge } from "./UsageStatusBadge";
 import { RefreshCw } from "lucide-react";
 import * as api from "$lib/api";
 import { displayError, parseInvokeError } from "$lib/error";
-import { usageFillStyle } from "$lib/limitsFormat";
+import { usageTextColor } from "$lib/windowAt";
 import type { ProviderLimits } from "$lib/limitsTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { applyStoredTheme } from "$lib/theme";
@@ -14,6 +14,7 @@ import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { refetchStaleLimits, refreshLimits } from "$lib/sharedReads/limits";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
 import { limitColumn, type CardWindow, type LimitCard } from "./limitCards";
+import { Meter } from "./Meter";
 import { useLimitsProviders } from "./useLimitsProviders";
 
 export function LimitsPopover() {
@@ -217,7 +218,7 @@ function PopoverTag({ tag }: { tag: CardTag }) {
 }
 
 function PopoverWindow({ window, provider }: { window: CardWindow; provider: AgentId }) {
-  const { label, percent, note, text, color } = window;
+  const { label, note, text } = window;
 
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
@@ -227,22 +228,10 @@ function PopoverWindow({ window, provider }: { window: CardWindow; provider: Age
         </span>
         {note ? <span className="mt-0.5 block text-[10px] leading-tight text-[var(--mute)] tabular-nums">{note}</span> : null}
       </div>
-      <span className="text-[13px] font-semibold tabular-nums" style={{ color }}>
+      <span className="text-[13px] font-semibold tabular-nums" style={{ color: usageTextColor(window.meter) }}>
         {text}
       </span>
-      <div
-        className="col-span-2 h-1 overflow-hidden rounded-full bg-[var(--popover-track)]"
-        role="meter"
-        aria-label={label}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={Math.round(percent)}
-      >
-        <div
-          className="h-full rounded-full transition-[width]"
-          style={{ width: `${percent}%`, ...usageFillStyle(provider, percent) }}
-        />
-      </div>
+      <Meter label={label} gauge={window} provider={provider} className="col-span-2 h-1" track="popover" />
     </div>
   );
 }

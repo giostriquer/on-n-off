@@ -107,8 +107,9 @@ adapter assumes today (change the adapter and this file together).
   reader, whose tests pin the payload, decides it, never the label. `startsOnFirstMessage` says a
   window has not started and starts with the user's first message: a reader marks the windows
   whose cycle starts that way (Claude's and Muse's sessions, and `QuotaWindow::idle`), and the
-  module sets the flag only while such a window is unused and has no reset. The card shows "Starts
-  with your first message" under a row from that flag alone. Both fields are left out when unset.
+  module sets the flag only while such a window is unused and has no reset. Every surface words
+  such a window from that flag alone, the card "Starts with your first message" and both notches
+  "Starts with first message" (`limits/window_at.rs`). Both fields are left out when unset.
   A reading remembered before they existed gets the flag as its file loads, on every unused session
   without a reset, where its provider's sessions start that way (Limits facts, below); it has no
   role until its account is read again.
@@ -116,7 +117,7 @@ adapter assumes today (change the adapter and this file together).
   built ones by `QuotaWindow::into_dto`, the Codex sessions merge's included, remembered ones as
   their file loads (`StoredSnapshot::into_dto`), and every read again in `pipeline::finish`; the
   workspace-credit share is clamped at those last two points, since both notches draw it as a window
-  and the macOS helper refuses a whole message that holds one meter outside 0–100. Readings written
+  and a meter outside 0–100 draws on every surface as unreadable, a dash. Readings written
   before this rule keep the spelling and label they were written with and are read as they are:
   every reset is compared through `ResetInstant`, which reads any RFC 3339 spelling.
 

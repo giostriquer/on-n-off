@@ -38,12 +38,31 @@ public func providerInk(_ id: ProviderId) -> Ink {
   }
 }
 
+public enum MeterLevel: Equatable, Sendable {
+  case unreadable, base, blend(Double), trip
+}
+
+private let hardensFrom = 70.0
+private let tripped = 90.0
+
+public func meterLevel(_ quota: Quota?, at now: Date) -> MeterLevel {
+  guard let percent = quota?.percent(at: now) else { return .unreadable }
+  if percent >= tripped { return .trip }
+  if percent <= hardensFrom { return .base }
+  return .blend(((percent - hardensFrom) / (tripped - hardensFrom)).squareRoot())
+}
+
+public func meterInk(_ level: MeterLevel, base: Ink) -> Ink {
+  switch level {
+  case .unreadable: return unreadableInk
+  case .base: return base
+  case .blend(let fraction): return base.mixed(toward: tripInk, fraction)
+  case .trip: return tripInk
+  }
+}
+
 public func meterInk(_ quota: Quota?, base: Ink, at now: Date) -> Ink {
-  guard let percent = quota?.percent(at: now) else { return unreadableInk }
-  if percent >= 90 { return tripInk }
-  if percent <= 70 { return base }
-  let travelled = (percent - 70) / 20
-  return base.mixed(toward: tripInk, travelled.squareRoot())
+  meterInk(meterLevel(quota, at: now), base: base)
 }
 
 public func meterInk(_ quota: Quota?, provider: ProviderId, at now: Date) -> Ink {

@@ -5,6 +5,10 @@ use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
 use crate::side_notch::sessions::LiveSession;
 
+fn now() -> DateTime<Utc> {
+    "2026-09-03T10:30:00Z".parse().unwrap()
+}
+
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
     Display {
         id: id.into(),
@@ -204,7 +208,7 @@ fn visual_dump() {
         active: Some(0),
         ..Hover::default()
     };
-    let planned = plan(&s2, &scale2, &d2, hover2).expect("scale2 popover");
+    let planned = plan(&s2, &scale2, &d2, hover2, now()).expect("scale2 popover");
     std::fs::write(
         format!("{out}/scale2-popover.png"),
         render(&planned).encode_png().unwrap(),
@@ -216,7 +220,7 @@ fn visual_dump() {
             active: Some(cell),
             ..Hover::default()
         };
-        let Some(planned) = plan(&settings, &displays, &data, hover) else {
+        let Some(planned) = plan(&settings, &displays, &data, hover, now()) else {
             panic!("cell {cell} should plan");
         };
         let pix = render(&planned);
@@ -228,7 +232,7 @@ fn visual_dump() {
         let _ = cell;
     }
 
-    let planned = plan(&settings, &displays, &data, Hover::default()).expect("rail");
+    let planned = plan(&settings, &displays, &data, Hover::default(), now()).expect("rail");
     std::fs::write(
         format!("{out}/rail.png"),
         render(&planned).encode_png().unwrap(),
@@ -251,6 +255,7 @@ fn visual_dump() {
                 cap_hovered: true,
                 ..Hover::default()
             },
+            now(),
         )
         .expect("cap");
         std::fs::write(
@@ -262,7 +267,7 @@ fn visual_dump() {
 
     let mut hover_settings = settings.clone();
     hover_settings.show = ShowMode::OnHover;
-    let planned = plan(&hover_settings, &displays, &data, Hover::default()).expect("pill");
+    let planned = plan(&hover_settings, &displays, &data, Hover::default(), now()).expect("pill");
     std::fs::write(
         format!("{out}/pill.png"),
         render(&planned).encode_png().unwrap(),
@@ -284,6 +289,7 @@ fn visual_dump() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("top rail");
     std::fs::write(

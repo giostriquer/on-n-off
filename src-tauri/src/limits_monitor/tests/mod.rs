@@ -126,8 +126,12 @@ fn a_usage_correction_does_not_rearm_an_exhausted_limit() {
         1
     );
 
-    assert!(observe(&mut state, &[below_limit]).is_empty());
-    assert!(observe(&mut state, &[at_limit]).is_empty());
+    assert!(observe(
+        &mut state,
+        &[observed_at(below_limit, "2026-08-19T14:00:00Z")]
+    )
+    .is_empty());
+    assert!(observe(&mut state, &[observed_at(at_limit, "2026-08-19T15:00:00Z")]).is_empty());
 }
 
 #[test]
@@ -148,6 +152,22 @@ fn an_exhausted_limit_notification_is_not_described_as_a_reset() {
     assert!(body.contains("Weekly · Fable"));
     assert!(body.contains("100%"));
     assert!(body.contains("me@example.com"));
+}
+
+#[test]
+fn a_notification_words_its_percents_as_the_cards_and_the_notch_do() {
+    let reset = LimitEvent {
+        kind: LimitEventKind::Reset,
+        provider: AgentId::Codex,
+        account_label: None,
+        window_label: "Weekly · all models".into(),
+        previous_used_percent: 99.6,
+        used_percent: 0.4,
+    };
+
+    let (_, body) = notification_copy(&reset);
+
+    assert_eq!(body, "Weekly · all models reset from 99% to <1% used");
 }
 
 #[test]

@@ -12,6 +12,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{
     AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
 };
+use crate::limits::window_at::{reached, used_text};
 use crate::limits::{cycle_turned_over, Observation, ResetInstant};
 use crate::limits_refresh::Served;
 use crate::monitor::{self, wait_for_wake_or_deadline};
@@ -363,15 +364,20 @@ fn notification_copy(event: &LimitEvent) -> Notice {
         LimitEventKind::Reset => (
             format!("{} limit reset", event.provider.display_name()),
             format!(
-                "{} reset from {:.0}% to {:.0}% used{}",
-                event.window_label, event.previous_used_percent, event.used_percent, account
+                "{} reset from {} to {} used{}",
+                event.window_label,
+                used_text(event.previous_used_percent),
+                used_text(event.used_percent),
+                account
             ),
         ),
         LimitEventKind::Exhausted => (
             format!("{} limit reached", event.provider.display_name()),
             format!(
-                "{} reached {:.0}% usage{}",
-                event.window_label, event.used_percent, account
+                "{} reached {} usage{}",
+                event.window_label,
+                used_text(event.used_percent),
+                account
             ),
         ),
     }
@@ -452,20 +458,20 @@ fn observe_window(
         )
     });
     let was_exhausted =
-        before.is_some_and(|before| before.exhausted || before.used_percent >= 100.0);
+        before.is_some_and(|before| before.exhausted || reached(before.used_percent));
     let kind = if before.is_none() {
         None
     } else if reset {
         Some(LimitEventKind::Reset)
-    } else if !was_exhausted && used_percent >= 100.0 {
+    } else if !was_exhausted && reached(used_percent) {
         Some(LimitEventKind::Exhausted)
     } else {
         None
     };
     let exhausted = if reset {
-        used_percent >= 100.0
+        reached(used_percent)
     } else {
-        was_exhausted || used_percent >= 100.0
+        was_exhausted || reached(used_percent)
     };
 
     Some((

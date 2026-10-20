@@ -35,6 +35,7 @@ fn a_compact_popover_on_the_top_edge_is_a_scaled_card_with_its_tail_below() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
@@ -80,6 +81,7 @@ fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
         &displays,
         &data(cells.clone()),
         Hover::default(),
+        now(),
     )
     .expect("fits");
     assert_eq!(planned.cells.len(), 1);
@@ -87,7 +89,14 @@ fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
     assert!(planned.pill.is_none());
     assert!(planned.popover.is_none());
     assert!(
-        plan(&settings(), &displays, &data(Vec::new()), Hover::default()).is_none(),
+        plan(
+            &settings(),
+            &displays,
+            &data(Vec::new()),
+            Hover::default(),
+            now()
+        )
+        .is_none(),
         "a frame without cells has no rail"
     );
 
@@ -98,12 +107,20 @@ fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
         &settings(),
         &mirrored,
         &data(cells.clone()),
-        Hover::default()
+        Hover::default(),
+        now()
     )
     .is_none());
 
     let off_screen = vec![display("other", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    assert!(plan(&settings(), &off_screen, &data(cells), Hover::default()).is_none());
+    assert!(plan(
+        &settings(),
+        &off_screen,
+        &data(cells),
+        Hover::default(),
+        now()
+    )
+    .is_none());
 }
 #[test]
 fn the_popover_unions_with_the_rail_and_places_zones() {
@@ -117,6 +134,7 @@ fn the_popover_unions_with_the_rail_and_places_zones() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("popover planned");
@@ -173,6 +191,7 @@ fn pull_request_popovers_carry_open_copy_and_footer_zones() {
             active: Some(0),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("popover planned");
@@ -230,6 +249,7 @@ fn the_popover_tail_points_at_its_own_cell() {
             active: Some(last),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
@@ -269,6 +289,7 @@ fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
             active: Some(last),
             ..Hover::default()
         },
+        now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");

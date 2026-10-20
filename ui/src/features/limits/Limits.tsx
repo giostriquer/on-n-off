@@ -19,6 +19,7 @@ import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
 import { ResetAlertsContext } from "./resetAlerts";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
+import { usageTextColor } from "$lib/windowAt";
 
 export function Limits({ pollMinutes = 5, resetAlerts, onResetAlertsChange }: {
   pollMinutes?: LimitsPollMinutes;
@@ -242,7 +243,7 @@ function HeadlineWindow({
   window: CardWindow;
   provider: AgentId;
 }) {
-  const { label, percent, note, text, color } = window;
+  const { label, note, text } = window;
   return (
     <div className="flex flex-col gap-2 p-3.5">
       <div className="flex items-center justify-between gap-2">
@@ -252,7 +253,7 @@ function HeadlineWindow({
       <div className="flex items-baseline gap-2">
         <span
           className="inline-block shrink-0 px-1 py-0.5 text-[34px] leading-[1.2] font-semibold tabular-nums"
-          style={{ color }}
+          style={{ color: usageTextColor(window.meter) }}
         >
           {text}
         </span>
@@ -260,11 +261,11 @@ function HeadlineWindow({
           <span className="min-w-0 flex-1 pb-0.5 font-mono text-[12px] leading-snug text-[var(--mute)]">{note}</span>
         ) : null}
       </div>
-      <Meter label={label} percent={percent} provider={provider} className="h-1.5" />
+      <Meter label={label} gauge={window} provider={provider} className="h-1.5" />
     </div>
   );
 }
 
 function WindowRow({ row, provider }: { row: CardWindow; provider: AgentId }) {
-  return <MeterRow label={row.label} note={row.note} percent={row.percent} text={row.text} color={row.color} provider={provider} />;
+  return <MeterRow label={row.label} window={row} provider={provider} />;
 }
