@@ -11,6 +11,23 @@ function at(offsetMinutes: number): string {
 }
 
 const OBSERVED = at(0);
+
+const PLANS = {
+  "max ×20": { planLabel: "Max ×20", planCapacity: 20 },
+  "max ×5": { planLabel: "Max ×5", planCapacity: 5 },
+  pro: { planLabel: "Pro ×20", planCapacity: 20 },
+  prolite: { planLabel: "Pro ×5", planCapacity: 5 },
+  plus: { planLabel: "Plus", planCapacity: null },
+  wonder: { planLabel: "Wonder", planCapacity: null },
+  "Muse Code Power Usage": { planLabel: "Muse Code Power Usage", planCapacity: null },
+  self_serve_business_prolite: { planLabel: "Self serve business prolite", planCapacity: null },
+} as const;
+
+type MockPlan = keyof typeof PLANS;
+
+function reported(plan: MockPlan) {
+  return { plan, ...PLANS[plan] };
+}
 const REMEMBERED_OBSERVED = at(-4 * 24 * 60 - 12 * 60);
 
 const CLAUDE: ProviderLimits[] = [
@@ -19,11 +36,11 @@ const CLAUDE: ProviderLimits[] = [
     status: "ok",
     account: { id: "claude-1", label: "you@example.com" },
     currentAccount: true,
-    plan: "max ×20",
+    ...reported("max ×20"),
     windows: [
       { id: "weekly_all", label: "Weekly · all models", kind: "weekly", usedPercent: 9, resetsAt: at(6 * 24 * 60 + 12 * 60), observedAt: OBSERVED },
       { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 10, resetsAt: at(3 * 60 + 20), observedAt: OBSERVED },
-      { id: "weekly_fable", label: "Weekly · Fable", kind: "model", usedPercent: 16, resetsAt: at(6 * 24 * 60 + 12 * 60), observedAt: OBSERVED },
+      { id: "weekly_fable", label: "Weekly · Fable", kind: "model", usedPercent: 16, resetsAt: at(6 * 24 * 60 + 12 * 60), observedAt: OBSERVED, role: "innerRing" },
     ],
   },
 ];
@@ -34,7 +51,7 @@ const CODEX: ProviderLimits[] = [
     status: "ok",
     account: { id: "codex-1", label: "you@example.com" },
     currentAccount: true,
-    plan: "pro",
+    ...reported("pro"),
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 48, resetsAt: at(5 * 24 * 60 + 23 * 60), windowSeconds: 604_800, observedAt: OBSERVED },
     ],
@@ -47,7 +64,7 @@ const CODEX: ProviderLimits[] = [
     account: { id: "codex-2", label: "other@example.com" },
     currentAccount: false,
     savedProfile: true,
-    plan: "pro",
+    ...reported("pro"),
     windows: [
       { id: "primary", label: "Weekly · all models", kind: "weekly", usedPercent: 97, resetsAt: at(-85), windowSeconds: 604_800, observedAt: REMEMBERED_OBSERVED },
     ],
@@ -61,7 +78,7 @@ const MUSE: ProviderLimits[] = [
     status: "ok",
     account: { id: "muse-1", label: "you@example.com" },
     currentAccount: true,
-    plan: "wonder",
+    ...reported("wonder"),
     windows: [
       { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 22, resetsAt: at(6 * 24 * 60 + 4 * 60), observedAt: OBSERVED },
       { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 41, resetsAt: at(2 * 60 + 15), windowSeconds: 18_000, observedAt: OBSERVED },
@@ -72,10 +89,10 @@ const MUSE: ProviderLimits[] = [
 function museIdle(): ProviderLimits[] {
   return [{
     ...MUSE[0],
-    plan: "Muse Code Power Usage",
+    ...reported("Muse Code Power Usage"),
     windows: [
       { id: "weekly", label: "Weekly · all models", kind: "weekly", usedPercent: 30, resetsAt: at(17 * 60 + 24), observedAt: at(-33 * 60) },
-      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, windowSeconds: 18_000, observedAt: OBSERVED },
+      { id: "session", label: "5 hour · all models", kind: "session", usedPercent: 0, resetsAt: null, windowSeconds: 18_000, observedAt: OBSERVED, startsOnFirstMessage: true },
     ],
   }];
 }
@@ -108,7 +125,7 @@ function claudeWithoutReset(): ProviderLimits[] {
     currentAccount: false,
     savedProfile: true,
     windows: CLAUDE[0].windows.map(window => window.kind === "session"
-      ? { ...window, usedPercent: 0, resetsAt: null }
+      ? { ...window, usedPercent: 0, resetsAt: null, startsOnFirstMessage: true }
       : window),
   }];
 }
@@ -139,11 +156,11 @@ function band(source: ProviderLimits): ProviderLimits[] {
 
 function limitsOrderClaude(): ProviderLimits[] {
   const source = CLAUDE[0];
-  const rung = (id: string, label: string, plan: string, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ProviderLimits => ({
+  const rung = (id: string, label: string, plan: MockPlan, weekly: number, session: number, weeklyResetsIn: number, sessionResetsIn: number, currentAccount = false): ProviderLimits => ({
     ...source,
     account: { id: `order-${id}`, label },
     currentAccount,
-    plan,
+    ...reported(plan),
     windows: source.windows.slice(0, 2).map((window) => window.kind === "weekly"
       ? { ...window, usedPercent: weekly, resetsAt: at(weeklyResetsIn) }
       : { ...window, usedPercent: session, resetsAt: at(sessionResetsIn) }),
@@ -186,7 +203,7 @@ function bankedResetsCodex(): ProviderLimits[] {
 function workspaceCreditsCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
-    plan: "self_serve_business_prolite",
+    ...reported("self_serve_business_prolite"),
     credits: { balance: "0", unlimited: false },
     workspaceCredits: entry.currentAccount
       ? { limit: "25000", used: "8000", usedPercent: 32, resetsAt: at(6 * 24 * 60 + 11 * 60), reached: false }
@@ -197,7 +214,7 @@ function workspaceCreditsCodex(): ProviderLimits[] {
 function creditsSpentCodex(): ProviderLimits[] {
   return CODEX.map((entry) => ({
     ...entry,
-    plan: "self_serve_business_prolite",
+    ...reported("self_serve_business_prolite"),
     credits: { balance: "0", unlimited: false },
     creditsSpent: entry.currentAccount
       ? { last7Days: 18303.4, last30Days: 20299.7, updatedAt: at(-3 * 60) }
@@ -206,12 +223,12 @@ function creditsSpentCodex(): ProviderLimits[] {
 }
 
 function sameEmailWorkspacesCodex(): ProviderLimits[] {
-  return [["personal", "prolite"], ["business", "self_serve_business_prolite"]].map(([id, plan], index) => ({
+  return ([["personal", "prolite"], ["business", "self_serve_business_prolite"]] as const).map(([id, plan], index) => ({
     ...CODEX[0],
     account: { id: `profile:${id}`, label: "shared@example.com" },
     currentAccount: index === 0,
     savedProfile: index !== 0,
-    plan,
+    ...reported(plan),
   }));
 }
 
@@ -267,13 +284,13 @@ const ARCHIVED_UNREAD: SavedProfile = {
 function archivedAccounts(): LimitsScenario {
   return {
     claude: () => [CLAUDE[0], {
-      ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, plan: "max ×5",
+      ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, ...reported("max ×5"),
       windows: CLAUDE[0].windows.map(window => ({ ...window, usedPercent: window.usedPercent + 30 })),
     }],
     codex: () => [
       CODEX[0],
       { ...CODEX[1], subscription: { activeUntil: at(-2 * 24 * 60), willRenew: false, note: "cancelled", checkedAt: at(-30) } },
-      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, plan: "plus", subscription: null },
+      { ...CODEX[1], account: { id: "codex-history", label: "old-team@example.com" }, savedProfile: false, ...reported("plus"), subscription: null },
     ],
     accounts: {
       claude: () => {
@@ -319,7 +336,7 @@ function claudeSignInAccounts(): AccountsReading {
 
 function claudeSignIn(): ProviderLimits[] {
   return [CLAUDE[0], {
-    ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, plan: "max ×5",
+    ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, ...reported("max ×5"),
     status: "failed", message: "This account's saved login has ended. Sign in again.",
   }];
 }

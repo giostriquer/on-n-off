@@ -372,7 +372,10 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
             LimitWindowKind::Weekly,
             7.0,
         ),
-        window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0),
+        LimitWindowDto {
+            role: Some(crate::dto::WindowRole::InnerRing),
+            ..window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0)
+        },
     ]);
     let (ring, quota, colors) = inner_ring(claude).expect("an inner ring");
     assert_eq!(

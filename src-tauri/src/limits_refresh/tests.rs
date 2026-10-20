@@ -19,7 +19,11 @@ fn snapshot(account_id: &str, current_account: bool, status: LimitsStatus) -> Pr
 #[test]
 fn every_provider_with_a_limits_reader_has_its_own_cache_and_no_other_has_one() {
     for id in AgentId::ALL {
-        assert_eq!(cache_for(id).is_some(), id.facts().limits_reader, "{id:?}");
+        assert_eq!(
+            cache_for(id).is_some(),
+            id.facts().limits.is_some(),
+            "{id:?}"
+        );
     }
     let sources: Vec<Source> = crate::provider_catalogue::WITH_LIMITS
         .into_iter()

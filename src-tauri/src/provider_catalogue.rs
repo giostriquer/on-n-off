@@ -8,9 +8,40 @@ pub struct ProviderFacts {
     pub display_name: &'static str,
     pub binary: &'static str,
     pub binary_aliases: &'static [&'static str],
-    pub limits_reader: bool,
+    pub limits: Option<LimitsFacts>,
     pub usage: Option<UsageProvider>,
     pub saved_accounts: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LimitsFacts {
+    pub inherits_legacy_reading: bool,
+    pub load_cleanup: Option<LoadCleanup>,
+    pub backend_figures: bool,
+    pub session_rollouts: bool,
+    pub banked_resets: Option<AgentId>,
+    pub sign_in_deadline: Option<AgentId>,
+    pub subscription_term: Option<AgentId>,
+    pub paid_reset_offer: Option<AgentId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoadCleanup {
+    HiddenWindows,
+    ResetCredits,
+}
+
+impl LimitsFacts {
+    pub const NONE: Self = Self {
+        inherits_legacy_reading: false,
+        load_cleanup: None,
+        backend_figures: false,
+        session_rollouts: false,
+        banked_resets: None,
+        sign_in_deadline: None,
+        subscription_term: None,
+        paid_reset_offer: None,
+    };
 }
 
 impl AgentId {
@@ -29,7 +60,11 @@ impl AgentId {
                 display_name: "Claude",
                 binary: "claude",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    load_cleanup: Some(LoadCleanup::ResetCredits),
+                    sign_in_deadline: Some(Self::Claude),
+                    ..LimitsFacts::NONE
+                }),
                 usage: Some(UsageProvider::Claude),
                 saved_accounts: true,
             },
@@ -38,7 +73,15 @@ impl AgentId {
                 display_name: "Codex",
                 binary: "codex",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    load_cleanup: Some(LoadCleanup::HiddenWindows),
+                    backend_figures: true,
+                    session_rollouts: true,
+                    banked_resets: Some(Self::Codex),
+                    subscription_term: Some(Self::Codex),
+                    paid_reset_offer: Some(Self::Codex),
+                    ..LimitsFacts::NONE
+                }),
                 usage: Some(UsageProvider::Codex),
                 saved_accounts: true,
             },
@@ -47,7 +90,7 @@ impl AgentId {
                 display_name: "Antigravity",
                 binary: "agy",
                 binary_aliases: &[],
-                limits_reader: false,
+                limits: None,
                 usage: None,
                 saved_accounts: false,
             },
@@ -56,7 +99,7 @@ impl AgentId {
                 display_name: "Cursor",
                 binary: "agent",
                 binary_aliases: &["cursor-agent"],
-                limits_reader: false,
+                limits: None,
                 usage: None,
                 saved_accounts: false,
             },
@@ -65,7 +108,10 @@ impl AgentId {
                 display_name: "Muse",
                 binary: "muse",
                 binary_aliases: &[],
-                limits_reader: true,
+                limits: Some(LimitsFacts {
+                    inherits_legacy_reading: true,
+                    ..LimitsFacts::NONE
+                }),
                 usage: Some(UsageProvider::Muse),
                 saved_accounts: true,
             },
@@ -74,6 +120,13 @@ impl AgentId {
 
     pub const fn key(self) -> &'static str {
         self.facts().key
+    }
+
+    pub const fn limits_facts(self) -> LimitsFacts {
+        match self.facts().limits {
+            Some(facts) => facts,
+            None => LimitsFacts::NONE,
+        }
     }
 
     pub const fn display_name(self) -> &'static str {
@@ -151,6 +204,9 @@ pub const WITH_LIMITS: [AgentId; Fact::LimitsReader.count()] = Fact::LimitsReade
 pub const WITH_SAVED_ACCOUNTS: [AgentId; Fact::SavedAccounts.count()] =
     Fact::SavedAccounts.providers();
 
+pub const WITH_BANKED_RESETS: [AgentId; Fact::BankedResets.count()] =
+    Fact::BankedResets.providers();
+
 const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
     let mut i = 0;
     while i < AgentId::ALL.len() {
@@ -172,14 +228,16 @@ const fn lists_every_provider(order: &[AgentId; AgentId::ALL.len()]) -> bool {
 enum Fact {
     LimitsReader,
     SavedAccounts,
+    BankedResets,
 }
 
 impl Fact {
     const fn holds_for(self, id: AgentId) -> bool {
         let facts = id.facts();
         match self {
-            Self::LimitsReader => facts.limits_reader,
+            Self::LimitsReader => facts.limits.is_some(),
             Self::SavedAccounts => facts.saved_accounts,
+            Self::BankedResets => id.limits_facts().banked_resets.is_some(),
         }
     }
 

@@ -165,6 +165,37 @@ fn a_paused_refresh_keeps_banked_resets_remembered_without_any_windows() {
 }
 
 #[test]
+fn a_failed_read_that_reported_its_plan_keeps_that_plans_capacity_never_the_remembered_one() {
+    let remembered = Reading {
+        plan: Some("pro".to_string()),
+        plan_label: Some("Pro ×20".to_string()),
+        plan_capacity: Some(20),
+        windows: vec![observed(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            40.0,
+            None,
+            "2026-08-17T10:00:00.000Z",
+        )],
+        ..Reading::default()
+    };
+    let own = Reading {
+        plan: Some("plus".to_string()),
+        plan_label: Some("Plus".to_string()),
+        ..Reading::default()
+    };
+
+    let merged = own.keeping(remembered, Outcome::Failed);
+
+    assert_eq!(merged.windows.len(), 1, "the remembered reading stands in");
+    assert_eq!(
+        (merged.plan, merged.plan_label, merged.plan_capacity),
+        (Some("plus".to_string()), Some("Plus".to_string()), None)
+    );
+}
+
+#[test]
 fn a_count_lapses_at_its_expiry_itself() {
     let expires_at = "2026-09-22T12:00:00+00:00";
     let resets = crate::dto::LimitsResetCreditsDto {
@@ -182,6 +213,8 @@ fn a_count_lapses_at_its_expiry_itself() {
 fn every_field(tag: &str, used: f64) -> Value {
     json!({
         "plan": tag,
+        "planLabel": tag,
+        "planCapacity": used as u32,
         "windows": [{"id": tag, "label": tag, "kind": "weekly", "usedPercent": used,
                      "observedAt": "2026-08-17T10:00:00.000Z"},
                     {"id": format!("{tag}-session"), "label": tag, "kind": "session",
@@ -249,12 +282,19 @@ fn the_remember_policy_field_by_field() {
     ];
     let (own, remembered) = (every_field("own", 1.0), every_field("remembered", 2.0));
     for (field, cells) in table {
+        let described: &[&str] = if field == "plan" {
+            &["plan", "planLabel", "planCapacity"]
+        } else {
+            &[field]
+        };
         for (outcome, cell) in outcomes.into_iter().zip(cells) {
             let mut unreported = own.clone();
             if field == "windows" {
                 unreported[field] = json!([own[field][1]]);
             } else {
-                unreported.as_object_mut().unwrap().remove(field);
+                for key in described {
+                    unreported.as_object_mut().unwrap().remove(*key);
+                }
             }
             let kept = serde_json::to_value(
                 reading(unreported).keeping(reading(remembered.clone()), outcome),
@@ -278,6 +318,14 @@ fn the_remember_policy_field_by_field() {
                 expected,
                 "{field} not reported, {outcome:?}"
             );
+            for key in &described[1..] {
+                let expected = matches!(cell, Remembered).then(|| remembered[*key].clone());
+                assert_eq!(
+                    kept.get(*key).cloned(),
+                    expected,
+                    "{key} with {field} not reported, {outcome:?}"
+                );
+            }
 
             let kept = serde_json::to_value(
                 reading(own.clone()).keeping(reading(remembered.clone()), outcome),
@@ -293,6 +341,9 @@ fn the_remember_policy_field_by_field() {
                 _ => own[field].clone(),
             };
             assert_eq!(kept[field], expected, "{field} reported, {outcome:?}");
+            for key in &described[1..] {
+                assert_eq!(kept[*key], own[*key], "{key} reported, {outcome:?}");
+            }
         }
     }
 }

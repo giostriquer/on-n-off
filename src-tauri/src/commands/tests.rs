@@ -27,6 +27,6 @@ fn a_category_is_offered_exactly_to_providers_with_limits_accounts() {
         let answer =
             tauri::async_runtime::block_on(set_account_category(id, "acct".into(), "Work".into()));
         let refused = answer.as_ref().err().map(|error| error.message.as_str()) == Some(refusal);
-        assert_eq!(refused, !id.facts().limits_reader, "{id:?}");
+        assert_eq!(refused, !id.facts().limits.is_some(), "{id:?}");
     }
 }

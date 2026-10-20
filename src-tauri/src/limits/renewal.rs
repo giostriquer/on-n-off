@@ -6,7 +6,7 @@ use serde_json::Value;
 use super::backend_memo::PerAccount;
 use crate::accounts::codex_store::CodexAccess;
 use crate::accounts::model::AccessToken;
-use crate::dto::{AgentId, LimitsSubscriptionDto, ProviderLimitsDto, SubscriptionNote};
+use crate::dto::{LimitsSubscriptionDto, ProviderLimitsDto, SubscriptionNote};
 
 pub(super) const CODEX_SUBSCRIPTIONS_URL: &str = "https://chatgpt.com/backend-api/subscriptions";
 
@@ -26,7 +26,7 @@ fn query_url(base: &str, workspace_id: &str) -> String {
 }
 
 pub(super) fn asks_about_renewal(card: &ProviderLimitsDto) -> bool {
-    card.provider == AgentId::Codex && card.account.is_some()
+    card.provider.limits_facts().backend_figures && card.account.is_some()
 }
 
 fn instant(value: Option<&Value>) -> Option<DateTime<Utc>> {

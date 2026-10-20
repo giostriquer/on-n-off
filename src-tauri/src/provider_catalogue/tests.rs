@@ -23,7 +23,11 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Claude",
                     binary: "claude",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        load_cleanup: Some(LoadCleanup::ResetCredits),
+                        sign_in_deadline: Some(AgentId::Claude),
+                        ..LimitsFacts::NONE
+                    }),
                     usage: Some(UsageProvider::Claude),
                     saved_accounts: true,
                 },
@@ -35,7 +39,15 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Codex",
                     binary: "codex",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        load_cleanup: Some(LoadCleanup::HiddenWindows),
+                        backend_figures: true,
+                        session_rollouts: true,
+                        banked_resets: Some(AgentId::Codex),
+                        subscription_term: Some(AgentId::Codex),
+                        paid_reset_offer: Some(AgentId::Codex),
+                        ..LimitsFacts::NONE
+                    }),
                     usage: Some(UsageProvider::Codex),
                     saved_accounts: true,
                 },
@@ -47,7 +59,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Antigravity",
                     binary: "agy",
                     binary_aliases: &[],
-                    limits_reader: false,
+                    limits: None,
                     usage: None,
                     saved_accounts: false,
                 },
@@ -59,7 +71,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Cursor",
                     binary: "agent",
                     binary_aliases: &["cursor-agent"],
-                    limits_reader: false,
+                    limits: None,
                     usage: None,
                     saved_accounts: false,
                 },
@@ -71,7 +83,10 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     display_name: "Muse",
                     binary: "muse",
                     binary_aliases: &[],
-                    limits_reader: true,
+                    limits: Some(LimitsFacts {
+                        inherits_legacy_reading: true,
+                        ..LimitsFacts::NONE
+                    }),
                     usage: Some(UsageProvider::Muse),
                     saved_accounts: true,
                 },
@@ -196,10 +211,39 @@ fn each_fact_list_holds_exactly_the_providers_with_that_fact_in_tab_order() {
             .filter(|id| fact(&id.facts()))
             .collect()
     };
-    assert_eq!(WITH_LIMITS.to_vec(), with(|facts| facts.limits_reader));
+    assert_eq!(WITH_LIMITS.to_vec(), with(|facts| facts.limits.is_some()));
+    assert_eq!(
+        WITH_BANKED_RESETS.to_vec(),
+        with(|facts| facts
+            .limits
+            .is_some_and(|limits| limits.banked_resets.is_some()))
+    );
     assert_eq!(
         WITH_SAVED_ACCOUNTS.to_vec(),
         with(|facts| facts.saved_accounts)
+    );
+}
+
+#[test]
+fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() {
+    for id in AgentId::ALL {
+        match id.facts().limits {
+            Some(facts) => assert_eq!(id.limits_facts(), facts, "{id:?}"),
+            None => assert_eq!(id.limits_facts(), LimitsFacts::NONE, "{id:?}"),
+        }
+    }
+    assert_eq!(
+        LimitsFacts::NONE,
+        LimitsFacts {
+            inherits_legacy_reading: false,
+            load_cleanup: None,
+            backend_figures: false,
+            session_rollouts: false,
+            banked_resets: None,
+            sign_in_deadline: None,
+            subscription_term: None,
+            paid_reset_offer: None,
+        }
     );
 }
 
@@ -249,7 +293,7 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
                     "displayName": facts.display_name,
                     "binary": facts.binary,
                     "binaryAliases": facts.binary_aliases,
-                    "limitsReader": facts.limits_reader,
+                    "limitsReader": facts.limits.is_some(),
                     "usage": facts.usage,
                     "savedAccounts": facts.saved_accounts,
                 }),
@@ -261,12 +305,29 @@ fn the_catalogue_the_ui_derives_its_providers_from_is_the_one_rust_keeps() {
         AgentId::ALL.len(),
         "two providers sharing a key would be one provider to the UI"
     );
+    let implementation = |id: Option<AgentId>| id.map(AgentId::key);
+    let limits_features: serde_json::Map<String, serde_json::Value> = WITH_LIMITS
+        .into_iter()
+        .map(|id| {
+            let facts = id.limits_facts();
+            (
+                id.key().to_string(),
+                serde_json::json!({
+                    "signInDeadline": implementation(facts.sign_in_deadline),
+                    "subscriptionTerm": implementation(facts.subscription_term),
+                    "bankedResets": implementation(facts.banked_resets),
+                    "paidResetOffer": implementation(facts.paid_reset_offer),
+                }),
+            )
+        })
+        .collect();
     let written = serde_json::json!({
         "tabOrder": keys(&AgentId::ALL),
         "railOrder": keys(&RAIL_ORDER),
         "notchDefault": keys(&crate::side_notch::model::NotchSettings::default().providers),
         "withLimits": keyed(&WITH_LIMITS),
         "withSavedAccounts": keyed(&WITH_SAVED_ACCOUNTS),
+        "limitsFeatures": limits_features,
         "providers": providers,
     });
     assert_eq!(

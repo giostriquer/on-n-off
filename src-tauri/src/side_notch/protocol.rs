@@ -103,7 +103,7 @@ struct NativeWorkspaceCredits {
 impl From<&NotchProvider> for NativeReading {
     fn from(reading: &NotchProvider) -> Self {
         Self {
-            windows: reading.windows.clone(),
+            windows: reading.windows.iter().map(helper_window).collect(),
             headline_window_id: reading.headline_window_id().map(str::to_owned),
             inner_ring: reading.inner_ring().cloned(),
             workspace_credits: reading.workspace_credits.as_ref().map(|share| {
@@ -116,6 +116,14 @@ impl From<&NotchProvider> for NativeReading {
                 }
             }),
         }
+    }
+}
+
+fn helper_window(window: &LimitWindowDto) -> LimitWindowDto {
+    LimitWindowDto {
+        role: None,
+        starts_on_first_message: false,
+        ..window.clone()
     }
 }
 

@@ -22,6 +22,8 @@ fn fact(scope: Scope, length: Option<Duration>, used_percent: f64) -> QuotaWindo
         length,
         used_percent,
         reset: None,
+        role: None,
+        starts_on_first_message: false,
     }
 }
 
@@ -160,12 +162,54 @@ fn every_fact_becomes_one_window_kind_label_meter_and_length() {
 }
 
 #[test]
-fn an_idle_window_is_unused_has_no_reset_and_counts_for_all_models() {
+fn an_idle_window_is_unused_has_no_reset_counts_for_all_models_and_starts_with_the_first_message() {
     let idle = QuotaWindow::idle("session", FIVE_HOURS);
     assert_eq!(idle.scope, Scope::AllModels);
     assert_eq!(idle.used_percent, 0.0);
     assert_eq!(idle.reset, None);
-    assert_eq!(idle.into_dto().resets_at, None);
+    assert_eq!(idle.role, None);
+    let dto = idle.into_dto();
+    assert_eq!(dto.resets_at, None);
+    assert!(dto.starts_on_first_message);
+}
+
+#[test]
+fn a_window_says_it_starts_with_the_first_message_only_while_it_has_not_started() {
+    let starting = || QuotaWindow {
+        starts_on_first_message: true,
+        ..fact(Scope::AllModels, Some(FIVE_HOURS), 0.0)
+    };
+    assert!(starting().into_dto().starts_on_first_message);
+    let used = QuotaWindow {
+        used_percent: 0.4,
+        ..starting()
+    };
+    assert!(!used.into_dto().starts_on_first_message);
+    let unreadable = QuotaWindow {
+        used_percent: f64::NAN,
+        ..starting()
+    };
+    assert!(unreadable.into_dto().starts_on_first_message);
+    let reset = QuotaWindow {
+        reset: Some(at("2026-08-18T04:59:59Z")),
+        ..starting()
+    };
+    assert!(!reset.into_dto().starts_on_first_message);
+    let rolling = fact(Scope::AllModels, Some(FIVE_HOURS), 0.0);
+    assert!(!rolling.into_dto().starts_on_first_message);
+}
+
+#[test]
+fn a_window_keeps_the_role_its_reader_gave_it() {
+    let ring = QuotaWindow {
+        role: Some(WindowRole::InnerRing),
+        ..fact(model("Fable"), Some(ONE_WEEK), 13.0)
+    };
+    assert_eq!(ring.into_dto().role, Some(WindowRole::InnerRing));
+    assert_eq!(
+        fact(model("Fable"), Some(ONE_WEEK), 13.0).into_dto().role,
+        None
+    );
 }
 
 #[test]

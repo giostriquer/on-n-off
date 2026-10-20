@@ -79,6 +79,41 @@ fn a_snapshot_file_holds_the_whole_reading_under_its_wire_names() {
 }
 
 #[test]
+fn a_plans_label_and_capacity_are_worked_out_as_a_file_loads_and_never_filed() {
+    let home = scratch_dir("limits-snap-file-plan");
+    let store = SnapshotStore::for_home(&home);
+    let mut card = every_figure();
+    card.reading.plan = Some("prolite".to_string());
+    card.reading.plan_label = Some("Stale label".to_string());
+    card.reading.plan_capacity = Some(99);
+    card.reading.windows[0].role = Some(crate::dto::WindowRole::InnerRing);
+    card.reading.windows[1].starts_on_first_message = true;
+
+    store.save(&card).unwrap();
+
+    let file = the_file(&store);
+    assert_eq!(file["plan"], "prolite");
+    assert!(file.get("planLabel").is_none(), "{file}");
+    assert!(file.get("planCapacity").is_none(), "{file}");
+    assert_eq!(file["windows"][0]["role"], "innerRing");
+    assert_eq!(file["windows"][1]["startsOnFirstMessage"], true);
+    let loaded = store.load(AgentId::Codex).remove(0);
+    assert_eq!(
+        (
+            loaded.reading.plan_label.as_deref(),
+            loaded.reading.plan_capacity
+        ),
+        (Some("Pro ×5"), Some(5))
+    );
+    assert_eq!(
+        loaded.reading.windows[0].role,
+        Some(crate::dto::WindowRole::InnerRing)
+    );
+    assert!(loaded.reading.windows[1].starts_on_first_message);
+    let _ = fs::remove_dir_all(&home);
+}
+
+#[test]
 fn a_saved_profiles_card_is_filed_without_saying_so() {
     let home = scratch_dir("limits-snap-file-shape-saved-profile");
     let store = SnapshotStore::for_home(&home);

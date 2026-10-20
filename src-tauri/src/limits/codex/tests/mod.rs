@@ -49,6 +49,8 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
             length: Some(Duration::from_secs(604_800)),
             used_percent: 14.0,
             reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0),
+            role: None,
+            starts_on_first_message: false,
         }]
     );
     assert_eq!(parse_codex(&payload).credits, None);
@@ -159,6 +161,8 @@ fn a_bucket_without_a_name_or_a_length_is_an_extra_limit_of_unknown_length() {
             length: None,
             used_percent: 3.0,
             reset: None,
+            role: None,
+            starts_on_first_message: false,
         }]
     );
 }
@@ -185,6 +189,8 @@ fn uses_the_single_bucket_fallback_and_maps_credits() {
             length: Some(Duration::from_secs(1_800)),
             used_percent: 140.0,
             reset: None,
+            role: None,
+            starts_on_first_message: false,
         }]
     );
     assert_eq!(

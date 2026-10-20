@@ -50,6 +50,8 @@ impl Reading {
         };
         let Self {
             plan,
+            plan_label,
+            plan_capacity,
             windows,
             credits,
             workspace_credits,
@@ -60,6 +62,8 @@ impl Reading {
         } = self;
         let Self {
             plan: remembered_plan,
+            plan_label: remembered_plan_label,
+            plan_capacity: remembered_plan_capacity,
             windows: remembered_windows,
             credits: remembered_credits,
             workspace_credits: remembered_share,
@@ -68,8 +72,11 @@ impl Reading {
             reset_credits: remembered_resets,
             reset_offer: _,
         } = remembered;
+        let keeps_plan = failed && plan.is_none();
         Self {
             plan: kept(plan, remembered_plan, failed),
+            plan_label: kept(plan_label, remembered_plan_label, keeps_plan),
+            plan_capacity: kept(plan_capacity, remembered_plan_capacity, keeps_plan),
             windows: if failed {
                 merged(windows, remembered_windows)
             } else {

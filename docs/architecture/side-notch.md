@@ -103,8 +103,11 @@ the current account's card:
   whatever the card's status, as its Limits card does: an account whose refresh is paused keeps
   its last reading, which the macOS cell's label and both popovers call last observed. An account
   without a weekly window shows a dash, never its session.
-- **The inner ring**: Claude's Fable weekly window, by id, or a Codex business member's
-  workspace-credit share, chosen the same way. The share's meter is the
+- **The inner ring**: the window its reader gave the inner-ring role (`role: "innerRing"`,
+  Claude's Fable week), by id, or else a Codex business member's workspace-credit share, chosen the
+  same way. The model asks the role, never the provider or the label. The helper is told the ring
+  by id, so the windows its message carries leave the role and the first-message flag out, and the
+  protocol's messages are unchanged. The share's meter is the
   limits reader's `used_percent`; its amounts are worded once in `model.rs`
   (`workspace_share_wording`) for both notches, and each draws it as a window so it renews at its
   reset.

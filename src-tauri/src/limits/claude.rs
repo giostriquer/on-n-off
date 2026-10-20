@@ -10,7 +10,12 @@ use super::pipeline::finish;
 use super::window::{QuotaWindow, ResetInstant, Scope, FIVE_HOURS, ONE_WEEK};
 use super::Parsed;
 use crate::accounts::claude::SignedIn;
-use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
+use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto, WindowRole};
+
+const SESSION: &str = "session";
+const WEEKLY_PREFIX: &str = "weekly_";
+const SCOPED_WEEKLY: &str = "weekly_scoped";
+const INNER_RING_MODEL: &str = "fable";
 
 pub(super) fn claude_current(home: &Path) -> ProviderLimitsDto {
     match SignedIn::resolve(home) {
@@ -49,18 +54,22 @@ fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
     let group = optional_string(entry.get("group"))?;
     let used_percent = entry.get("percent").and_then(Value::as_f64)?;
     let named = scope_name(entry.get("scope"));
-    let (scope, length) = match (group.as_str(), kind.as_str()) {
-        ("session", _) => (Scope::AllModels, FIVE_HOURS),
-        ("weekly", "weekly_all") => (Scope::AllModels, ONE_WEEK),
+    let (scope, length, role) = match (group.as_str(), kind.as_str()) {
+        (SESSION, _) => (Scope::AllModels, FIVE_HOURS, None),
+        ("weekly", "weekly_all") => (Scope::AllModels, ONE_WEEK, None),
         ("weekly", other) => {
             let name = match &named {
                 Some(name) => name.clone(),
-                None => humanize(other.strip_prefix("weekly_").unwrap_or(other)),
+                None => humanize(other.strip_prefix(WEEKLY_PREFIX).unwrap_or(other)),
             };
-            (Scope::Model(name), ONE_WEEK)
+            let role = model_key(other, entry.get("scope"))
+                .is_some_and(|model| model.eq_ignore_ascii_case(INNER_RING_MODEL))
+                .then_some(WindowRole::InnerRing);
+            (Scope::Model(name), ONE_WEEK, role)
         }
         _ => return None,
     };
+    let starts_on_first_message = group == SESSION;
     let id = match &named {
         Some(name) => format!("{kind}:{name}"),
         None => kind,
@@ -71,7 +80,20 @@ fn normalized_window(entry: &Value) -> Option<QuotaWindow> {
         length: Some(length),
         used_percent,
         reset: reset(entry),
+        role,
+        starts_on_first_message,
     })
+}
+
+fn model_key(kind: &str, scope: Option<&Value>) -> Option<String> {
+    if kind == SCOPED_WEEKLY {
+        return optional_string(
+            scope?
+                .get("model")
+                .and_then(|model| model.get("display_name")),
+        );
+    }
+    kind.strip_prefix(WEEKLY_PREFIX).map(str::to_string)
 }
 
 fn reset(entry: &Value) -> Option<DateTime<Utc>> {
@@ -92,7 +114,7 @@ fn scope_name(scope: Option<&Value>) -> Option<String> {
 
 fn legacy_windows(payload: &Value) -> Vec<QuotaWindow> {
     const LEGACY: [(&str, &str, Option<&str>, Duration); 4] = [
-        ("five_hour", "session", None, FIVE_HOURS),
+        ("five_hour", SESSION, None, FIVE_HOURS),
         ("seven_day", "weekly_all", None, ONE_WEEK),
         ("seven_day_opus", "weekly_opus", Some("Opus"), ONE_WEEK),
         (
@@ -112,6 +134,8 @@ fn legacy_windows(payload: &Value) -> Vec<QuotaWindow> {
                 length: Some(*length),
                 used_percent: entry.get("utilization").and_then(Value::as_f64)?,
                 reset: reset(entry),
+                role: None,
+                starts_on_first_message: *id == SESSION,
             })
         })
         .collect()

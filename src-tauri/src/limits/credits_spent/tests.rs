@@ -117,41 +117,25 @@ fn asks_for_the_30_utc_days_ending_today_by_day() {
 }
 
 #[test]
-fn workspace_plans_are_the_ones_codex_counts_as_workspace_accounts() {
-    for plan in [
-        "team",
-        "self_serve_business_prolite",
-        "self_serve_business_usage_based",
-        "business",
-        "ent26",
-        "enterprise_cbp_automation",
-        "enterprise_cbp_usage_based",
-        "enterprise",
-        "edu",
-        "edu_plus",
-        "edu_pro",
-    ] {
-        assert!(is_codex_workspace_plan(plan), "{plan}");
+fn only_a_workspace_card_of_a_provider_with_backend_figures_is_asked_what_it_spent() {
+    for provider in crate::provider_catalogue::WITH_LIMITS {
+        let figures = provider.limits_facts().backend_figures;
+        let mut card = ProviderLimitsDto::for_test(provider, "acct-a");
+        for (plan, workspace) in [
+            ("self_serve_business_prolite", true),
+            ("team", true),
+            ("pro", false),
+        ] {
+            card.reading.plan = Some(plan.to_string());
+            assert_eq!(
+                asks_what_was_spent(&card),
+                figures && workspace,
+                "{provider:?} {plan}"
+            );
+        }
+        card.reading.plan = None;
+        assert!(!asks_what_was_spent(&card), "{provider:?}");
     }
-    for plan in [
-        "free", "go", "plus", "pro", "prolite", "guest", "", "unknown",
-    ] {
-        assert!(!is_codex_workspace_plan(plan), "{plan}");
-    }
-}
-
-#[test]
-fn only_a_codex_workspace_card_is_asked_what_it_spent() {
-    let mut card = ProviderLimitsDto::for_test(AgentId::Codex, "acct-a");
-    card.reading.plan = Some("self_serve_business_prolite".to_string());
-    assert!(asks_what_was_spent(&card));
-
-    card.reading.plan = Some("pro".to_string());
-    assert!(!asks_what_was_spent(&card));
-
-    card.provider = AgentId::Claude;
-    card.reading.plan = Some("team".to_string());
-    assert!(!asks_what_was_spent(&card));
 }
 
 fn account(name: &str) -> String {

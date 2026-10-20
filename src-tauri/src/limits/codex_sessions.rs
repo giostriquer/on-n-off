@@ -237,6 +237,8 @@ fn parse_window(
             length: Some(std::time::Duration::from_secs(window_seconds)),
             used_percent: value.used_percent?,
             reset: Some(reset),
+            role: None,
+            starts_on_first_message: false,
         },
         observed_at,
     })

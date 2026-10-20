@@ -1,5 +1,4 @@
 import type { SavedProfile } from "$lib/accountTypes";
-import { planLabel, planMultiplier } from "$lib/limitsFormat";
 import type {
   LimitWindow,
   LimitsCredits,
@@ -100,7 +99,7 @@ export function limitCards({ provider, entries, profiles, categories = {}, now }
   for (const profile of profiles) {
     if (!slots.some(slot => accountOf(slot)?.id === profile.observationId)) slots.push({ reading: null, profile });
   }
-  return orderSlots(slots, provider, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, now));
+  return orderSlots(slots, now).map((slot, index) => presentCard(slot, provider, index, legacyAccounts, categories, now));
 }
 
 export type LimitColumn = { visible: LimitCard[]; archived: LimitCard[] };
@@ -118,20 +117,20 @@ function isCurrent(slot: Slot): boolean {
   return slot.reading ? slot.reading.currentAccount : slot.profile.active;
 }
 
-function orderSlots(slots: Slot[], provider: LimitsProvider, now: number): Slot[] {
-  const ranked = slots.map(slot => ({ slot, rank: cardRank(slot, provider, now) }));
+function orderSlots(slots: Slot[], now: number): Slot[] {
+  const ranked = slots.map(slot => ({ slot, rank: cardRank(slot, now) }));
   ranked.sort((a, b) => compare(a.rank[0], b.rank[0]) || compare(a.rank[1], b.rank[1]));
   return ranked.map(({ slot }) => slot);
 }
 
 type CardRank = [group: number, within: number];
 
-function cardRank(slot: Slot, provider: LimitsProvider, now: number): CardRank {
+function cardRank(slot: Slot, now: number): CardRank {
   if (isCurrent(slot)) return [0, 0];
   const entry = slot.reading;
   const left = entry ? usageLeft(entry, now) : null;
   if (!entry || left === null) return [3, 0];
-  if (left > 0) return [1, -left * planMultiplier(entry.plan, provider)];
+  if (left > 0) return [1, -left * (entry.planCapacity ?? 1)];
   return [2, usableAgainAt(entry, now)];
 }
 
@@ -176,11 +175,11 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, legacy
       resetActions: features.bankedResets === "codex" ? reading : null,
       resetAlert: features.bankedResets === "codex",
     },
-    plan: planLabel(reading?.plan, provider) || null,
+    plan: reading?.planLabel || null,
     status: presentation.status,
     active,
     headline: headline ? presentWindow(headline, now) : null,
-    rows: rest.map(window => presentRow(window, features.firstMessageSession === "claude", now)),
+    rows: rest.map(window => presentRow(window, now)),
     figures: reading ? figures(reading, provider, now) : NO_FIGURES,
     empty: hasWindows || readStatus !== "ok" || message ? null
       : profile ? { reason: "usageUnavailable", copy: "Usage unavailable." }
@@ -217,11 +216,9 @@ function presentWindow(window: LimitWindow, now: number): CardWindow {
   return { id: window.id, label: window.label, ...presentLimitWindow(window, now) };
 }
 
-function presentRow(window: LimitWindow, firstMessageSession: boolean, now: number): CardWindow {
+function presentRow(window: LimitWindow, now: number): CardWindow {
   const presented = presentWindow(window, now);
-  const awaitingFirstMessage = firstMessageSession && window.kind === "session"
-    && window.usedPercent === 0 && window.resetsAt == null;
-  return { ...presented, note: presented.note || (awaitingFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
+  return { ...presented, note: presented.note || (window.startsOnFirstMessage ? "Starts with your first message" : "Reset time unavailable") };
 }
 
 const NO_FIGURES: CardFigures = { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null };

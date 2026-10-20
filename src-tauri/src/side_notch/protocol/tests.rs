@@ -110,7 +110,8 @@ fn the_headline_and_the_inner_ring_travel_as_window_ids() {
     let reading = sent_reading(AgentId::Claude, serde_json::json!([
         {"provider":"claude","status":"ok","currentAccount":true,"windows":[
             {"id":"weekly_all","label":"Weekly · all models","kind":"weekly","usedPercent":7.0,"observedAt":"2026-09-01T10:00:00Z"},
-            {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13.0,"observedAt":"2026-09-01T10:00:00Z"}
+            {"id":"weekly_scoped:Fable","label":"Weekly · Fable","kind":"model","usedPercent":13.0,"observedAt":"2026-09-01T10:00:00Z","role":"innerRing"},
+            {"id":"session","label":"5 hour · all models","kind":"session","usedPercent":0.0,"observedAt":"2026-09-01T10:00:00Z","startsOnFirstMessage":true}
         ]}
     ]))["reading"]
         .clone();
@@ -119,6 +120,10 @@ fn the_headline_and_the_inner_ring_travel_as_window_ids() {
         reading["innerRing"],
         serde_json::json!({"kind":"fable","windowId":"weekly_scoped:Fable"})
     );
+    for window in reading["windows"].as_array().expect("the windows") {
+        assert!(window.get("role").is_none(), "{window}");
+        assert!(window.get("startsOnFirstMessage").is_none(), "{window}");
+    }
 }
 
 #[test]
@@ -180,6 +185,8 @@ fn a_remembered_reading_out_of_range_still_reaches_the_helper_in_range() {
             resets_at: Some("2026-10-05T12:00:00.000Z".into()),
             window_seconds: Some(604_800),
             observed_at: "2026-10-01T10:00:00.000Z".into(),
+            role: None,
+            starts_on_first_message: false,
         }],
         workspace_credits: Some(LimitsWorkspaceCreditsDto {
             limit: "100".into(),

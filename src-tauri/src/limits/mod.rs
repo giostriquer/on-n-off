@@ -10,6 +10,7 @@ pub(crate) mod json;
 pub(crate) mod login;
 mod muse;
 mod pipeline;
+mod plan;
 mod reading;
 mod renewal;
 mod snapshots;
@@ -161,7 +162,7 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> Vec<Prov
     let current = read(home, force);
     let store = SnapshotStore::for_home(home);
     let mut accounts = aggregate_accounts(&store, current);
-    if agent == AgentId::Codex {
+    if agent.limits_facts().session_rollouts {
         let before = accounts.clone();
         if codex_sessions::merge_recent(home, observed_at, &mut accounts) > 0 {
             store.save_changed(&before, &accounts);

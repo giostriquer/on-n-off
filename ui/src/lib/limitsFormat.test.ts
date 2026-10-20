@@ -8,8 +8,6 @@ import {
   formatResetIn,
   hasElapsed,
   formatUsedPercent,
-  planLabel,
-  planMultiplier,
   usageFillColor,
   usageMeterColor,
   usageTextColor,
@@ -142,48 +140,6 @@ describe("formatUsedPercent", () => {
     expect(formatUsedPercent(0)).toBe("0%");
     expect(formatUsedPercent(100)).toBe("100%");
   });
-});
-
-describe("planLabel", () => {
-  it("capitalises known plan ids and passes others through", () => {
-    expect(planLabel("max")).toBe("Max");
-    expect(planLabel("pro")).toBe("Pro");
-    expect(planLabel("team")).toBe("Team");
-    expect(planLabel("plus")).toBe("Plus");
-    expect(planLabel("enterprise_x")).toBe("Enterprise x");
-    expect(planLabel(null)).toBe("");
-    expect(planLabel(undefined)).toBe("");
-  });
-});
-
-describe("planMultiplier", () => {
-  it("reads the tier's ×N, gives a bare Max Claude's five, and everything else one", () => {
-    expect(planMultiplier("max ×20", "claude")).toBe(20);
-    expect(planMultiplier("max ×5", "claude")).toBe(5);
-    expect(planMultiplier("Max x20")).toBe(20);
-    expect(planMultiplier("Max × 20")).toBe(20);
-    expect(planMultiplier("max", "claude")).toBe(5);
-    expect(planMultiplier("pro", "claude")).toBe(1);
-    expect(planMultiplier("plus", "codex")).toBe(1);
-    expect(planMultiplier(null)).toBe(1);
-    expect(planMultiplier(undefined, "codex")).toBe(1);
-  });
-
-  it("weighs Codex Pro tiers exactly as the badge names them", () => {
-    expect(planMultiplier("pro", "codex")).toBe(20);
-    for (const value of ["prolite", "pro_lite", "pro-lite", " Pro Lite "]) {
-      expect(planMultiplier(value, "codex")).toBe(5);
-    }
-  });
-});
-
-it("distinguishes Codex Pro tiers without relabeling another provider's Pro", () => {
-  expect(planLabel("pro", "codex")).toBe("Pro ×20");
-  for (const value of ["prolite", "pro_lite", "pro-lite", " Pro Lite "]) {
-    expect(planLabel(value, "codex")).toBe("Pro ×5");
-  }
-  expect(planLabel("pro", "claude")).toBe("Pro");
-  expect(planLabel("future_plan", "codex")).toBe("Future plan");
 });
 
 describe("formatShortDate", () => {

@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 
-use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
+use crate::dto::{LimitWindowDto, LimitWindowKind, Reading, WindowRole};
 
 pub(crate) const FIVE_HOURS: Duration = Duration::from_secs(5 * 60 * 60);
 pub(crate) const ONE_WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -26,6 +26,8 @@ pub(crate) enum Scope {
 pub(crate) struct QuotaWindow {
     pub(crate) id: String,
     pub(crate) scope: Scope,
+    pub(crate) role: Option<WindowRole>,
+    pub(crate) starts_on_first_message: bool,
     pub(crate) length: Option<Duration>,
     pub(crate) used_percent: f64,
     pub(crate) reset: Option<DateTime<Utc>>,
@@ -36,6 +38,8 @@ impl QuotaWindow {
         Self {
             id: id.into(),
             scope: Scope::AllModels,
+            role: None,
+            starts_on_first_message: true,
             length: Some(length),
             used_percent: 0.0,
             reset: None,
@@ -43,13 +47,18 @@ impl QuotaWindow {
     }
 
     pub(crate) fn into_dto(self) -> LimitWindowDto {
+        let used_percent = in_range(self.used_percent);
         LimitWindowDto {
             kind: self.kind(),
             label: self.label(),
-            used_percent: in_range(self.used_percent),
+            used_percent,
             resets_at: self.reset.map(|at| ResetInstant(at).to_string()),
             window_seconds: self.length.map(|length| length.as_secs()),
             observed_at: String::new(),
+            role: self.role,
+            starts_on_first_message: self.starts_on_first_message
+                && used_percent == 0.0
+                && self.reset.is_none(),
             id: self.id,
         }
     }
@@ -197,6 +206,8 @@ pub(crate) fn fixture(
         resets_at,
         window_seconds: None,
         observed_at: String::new(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 

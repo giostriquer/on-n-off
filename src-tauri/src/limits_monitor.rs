@@ -284,7 +284,7 @@ fn watched_providers(settings: &crate::settings::AppSettings) -> &'static [Agent
     if settings.limit_notifications {
         &crate::provider_catalogue::WITH_LIMITS
     } else if !settings.reset_alerts.is_empty() {
-        &[AgentId::Codex]
+        &crate::provider_catalogue::WITH_BANKED_RESETS
     } else {
         &[]
     }

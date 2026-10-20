@@ -13,6 +13,8 @@ fn reading(key: &str) -> ProviderLimitsDto {
             window_seconds: Some(604800),
             resets_at: None,
             observed_at: "2026-09-19T00:00:00Z".into(),
+            role: None,
+            starts_on_first_message: false,
         }],
         ..Default::default()
     })

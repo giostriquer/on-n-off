@@ -2,7 +2,7 @@ use crate::dto::AgentId;
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 use crate::dto::{
     GithubPrDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto,
+    ProviderLimitsDto, WindowRole,
 };
 use serde::{Deserialize, Serialize};
 
@@ -432,7 +432,7 @@ impl NotchProvider {
             .iter()
             .find(|window| window.kind == LimitWindowKind::Weekly)
             .map(|window| window.id.clone());
-        let inner_ring = inner_ring(card.provider, &windows, workspace_credits.as_ref());
+        let inner_ring = inner_ring(&windows, workspace_credits.as_ref());
         Some(Self {
             status: card.status,
             message: card.message,
@@ -480,26 +480,16 @@ impl NotchProvider {
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn inner_ring(
-    provider: AgentId,
     windows: &[LimitWindowDto],
     share: Option<&LimitsWorkspaceCreditsDto>,
 ) -> Option<InnerRing> {
-    fable_window(provider, windows)
+    windows
+        .iter()
+        .find(|window| window.role == Some(WindowRole::InnerRing))
         .map(|window| InnerRing::Fable {
             window_id: window.id.clone(),
         })
         .or_else(|| share.map(|_| InnerRing::WorkspaceShare))
-}
-
-#[cfg(any(target_os = "macos", target_os = "windows", test))]
-fn fable_window(provider: AgentId, windows: &[LimitWindowDto]) -> Option<&LimitWindowDto> {
-    if provider != AgentId::Claude {
-        return None;
-    }
-    windows.iter().find(|window| {
-        window.kind == LimitWindowKind::Model
-            && window.label.trim().to_lowercase() == "weekly · fable"
-    })
 }
 
 #[cfg(any(target_os = "windows", test))]
@@ -593,6 +583,8 @@ pub fn workspace_share_window(share: &LimitsWorkspaceCreditsDto) -> LimitWindowD
         resets_at: share.resets_at.clone(),
         window_seconds: None,
         observed_at: String::new(),
+        role: None,
+        starts_on_first_message: false,
     }
 }
 
