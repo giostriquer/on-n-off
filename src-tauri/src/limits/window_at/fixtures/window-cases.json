@@ -3,10 +3,10 @@
   "timeZone": "Europe/Berlin",
   "windows": [
     {
-      "name": "a live window keeps its percent and counts down to its reset",
+      "name": "a live window keeps its percent and counts down to its reset, spelled to the millisecond",
       "window": {
         "usedPercent": 41.5,
-        "resetsAt": "2026-10-21T15:00:00Z"
+        "resetsAt": "2026-10-21T15:00:00.000Z"
       },
       "usedNow": 41.5,
       "usedFigure": 42,
@@ -215,6 +215,27 @@
       "usedFigure": 1,
       "reached": false,
       "usedText": "<1%",
+      "meter": {
+        "level": "base"
+      },
+      "note": {
+        "kind": "pending",
+        "when": "Wed 17:00",
+        "relative": "2d 3h",
+        "card": "resets in 2d 3h · Wed 17:00",
+        "notch": "Resets Wed 17:00"
+      }
+    },
+    {
+      "name": "exactly 1% is one percent, not a sliver",
+      "window": {
+        "usedPercent": 1,
+        "resetsAt": "2026-10-21T15:00:00Z"
+      },
+      "usedNow": 1,
+      "usedFigure": 1,
+      "reached": false,
+      "usedText": "1%",
       "meter": {
         "level": "base"
       },

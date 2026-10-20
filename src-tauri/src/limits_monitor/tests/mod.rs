@@ -126,8 +126,12 @@ fn a_usage_correction_does_not_rearm_an_exhausted_limit() {
         1
     );
 
-    assert!(observe(&mut state, &[below_limit]).is_empty());
-    assert!(observe(&mut state, &[at_limit]).is_empty());
+    assert!(observe(
+        &mut state,
+        &[observed_at(below_limit, "2026-08-19T14:00:00Z")]
+    )
+    .is_empty());
+    assert!(observe(&mut state, &[observed_at(at_limit, "2026-08-19T15:00:00Z")]).is_empty());
 }
 
 #[test]

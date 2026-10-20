@@ -98,6 +98,13 @@ fn a_long_session_name_is_ellipsized_not_chopped() {
         })
         .expect("the session name is planned");
     assert!(name.ends_with('…'), "a cut name says it was cut: {name:?}");
+    assert!(
+        popover
+            .entries
+            .iter()
+            .any(|(item, _)| matches!(item, PopItem::Text { text, .. } if text == "30 min")),
+        "the session's age is read against the clock the plan was given"
+    );
 }
 #[test]
 fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
