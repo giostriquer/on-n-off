@@ -61,12 +61,16 @@ source carries no comments (see [Code comments](#code-comments)).
   `src-tauri/src/limits_refresh/fixtures/cadence.json` by `limitsCadence.test.ts`, and a Rust test
   keeps the fixture equal to `check_interval`.
 - A Limits card: `LimitCardFrame` (`ui/src/features/limits/LimitCardFrame.tsx`) draws every card's
-  shell, header, tags, ⋯ menu and footer from the card model; a card adds only menu items, its
-  destructive items and footer content. The menu (`ActionMenu`, `ui/src/components/`) always
-  starts with Check limits now and ends with the destructive items. Edit category on every
-  card with an account, and Archive account and Remove account on a remembered card, come from
-  `useCardActions` (`cardActions.tsx`) for every provider; the saved-login items come from
-  `useAccountCardActions`, which has none without an account manager. The card model reads each
+  shell, header, tags, ⋯ menu and footer from the card model; a card adds only its body. Which
+  actions a card offers, in what order and whether each is enabled, is the card action plan's
+  alone (`cardActionPlan`, `cardActionPlan.ts`), for every provider and card state: the menu
+  (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
+  the destructive items, and the footer: its main button, the Switch anyway confirmation and the
+  banked reset controls. An archived row asks the same module (`archivedRowPlan`).
+  `useCardActions` (`cardActions.tsx`) only binds a label and a handler to each entry; nothing else
+  adds, removes or enables an action. Whether a card's account is the signed-in one is its one
+  signed-in state (`signedIn`), which every action decision reads ([why](architecture/README.md#limits)).
+  The card model reads each
   per-provider feature from `LIMITS_FEATURES` (`limitFeatures.ts`), whose values name the
   implementation they turn on (`"claude"`, `"codex"`) or are `null`: the table is keyed by the
   catalogue's Limits providers, so a new provider fails the typecheck until its row exists, and
@@ -82,8 +86,9 @@ source carries no comments (see [Code comments](#code-comments)).
   order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
   in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual
   verification).
-  `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider, and
-  `limitCards.test.ts` pins each provider's features.
+  `LimitCardFrame.test.tsx` runs the card contract once for every Limits provider,
+  `limitCards.test.ts` pins each provider's features, and `cardActionPlan.test.ts` is the table of
+  every provider's actions in every card state.
 - A meter that shows a quota filling up: `usageMeterColor` (`ui/src/lib/limitsFormat.ts`), which the
   side notch mirrors in `NotchCore/Meter.swift` and `side_notch/model.rs`. One ramp, one set of
   endpoints, every surface. `--warn` is for *pending*, never for a meter: it is lighter than the

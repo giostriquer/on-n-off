@@ -71,7 +71,8 @@ function useController(provider: AccountProvider) {
     }
   }
   const blocked = !!busy || query.isPending || !!query.error || !!query.data?.recoveryRequired;
-  return { provider, query, busy, blocked, error, action, removeAccount, use, add, cancel, loginTarget };
+  const nativeLogin = { observationId: query.data?.nativeObservationId ?? null, settled: !query.isFetching };
+  return { provider, query, busy, blocked, nativeLogin, error, action, removeAccount, use, add, cancel, loginTarget };
 }
 const Controllers = createContext<Record<AccountProvider, ReturnType<typeof useController>> | null>(null);
 export function AccountControllers({ children }: { children: ReactNode }) {

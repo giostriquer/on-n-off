@@ -1,66 +1,133 @@
-import { useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { confirmItem, type ActionMenuItem } from "@/components/ActionMenu";
 import { actionButton as button } from "@/components/actionButton";
+import { useAccountManagement } from "@/features/accounts/AccountManager";
+import { SwitchAlongsideConfirmation } from "@/features/accounts/SwitchAlongsideConfirmation";
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
-import { setCategoryLocally } from "$lib/sharedReads/accounts";
+import { providerLabel, type LimitsProvider } from "$lib/providers";
+import { cachedAccountList, setCategoryLocally } from "$lib/sharedReads/accounts";
+import { checkLimitsNow } from "$lib/sharedReads/limits";
+import { AutomaticSpend, usePendingResetSpend } from "./AutomaticSpend";
+import { UseBankedReset } from "./BankedResets";
+import { cardActionPlan, hasResetControls, type MainAction, type MenuAction, type PlanEntry } from "./cardActionPlan";
 import type { CardAccount, LimitCard } from "./limitCards";
+import { ResetAlertForm } from "./resetAlerts";
 
 export function removeAccountQuestion(label: string): string {
   return `Remove ${label} from on-n-off? You will need to sign in to add it again.`;
 }
 
-export type CardActions = {
-  category: ActionMenuItem[];
-  items: ActionMenuItem[];
-  danger: ActionMenuItem[];
-  archive: { run: () => void; busy: boolean };
-  removing: boolean;
-};
-
-export function useCardActions(card: LimitCard, { blocked, onArchive, onRemove }: {
-  blocked: boolean;
+export type CardHandlers = {
   onArchive: (account: CardAccount) => Promise<void>;
   onRemove: (account: CardAccount) => Promise<void>;
-}): CardActions {
+};
+
+export type CardActionsInput = { provider: LimitsProvider; now: number; checking: boolean }
+  & ({ card: null } | ({ card: LimitCard } & CardHandlers));
+
+export type CardActions = { menu: ActionMenuItem[]; footer: ReactNode };
+
+export function useCardActions(input: CardActionsInput): CardActions {
+  const { provider, now, checking, card } = input;
   const client = useQueryClient();
+  const manager = useAccountManagement();
   const [archiving, setArchiving] = useState(false);
   const [removing, setRemoving] = useState(false);
-  const { account } = card;
-  const disabled = blocked || removing;
+  const [clients, setClients] = useState<string[] | null>(null);
+  const mainButton = useRef<HTMLButtonElement>(null);
+  const account = card?.account ?? null;
+  const spend = usePendingResetSpend(account && hasResetControls(card) ? account.id : null);
+  const profile = account?.profile ?? null;
+  const signingIn = manager && account && manager.loginTarget === account.id
+    ? manager.busy === "cancelLogin" ? "canceling" as const : manager.busy === "login" ? "running" as const : null
+    : null;
+  const plan = cardActionPlan({
+    card, now, checking, archiving, removing, pendingSpend: spend !== null,
+    accounts: manager && { blocked: manager.blocked, signingIn, runningClients: clients !== null },
+  });
+  const checkNow = (enabled: boolean): ActionMenuItem => ({ id: "checkNow", label: "Check limits now", disabled: !enabled, run: () => void checkLimitsNow(client, provider).catch(() => {}) });
+  if (!input.card || !account) return { menu: plan.menu.map(entry => checkNow(entry.enabled)), footer: null };
+  const { onArchive, onRemove } = input;
+  const shown = input.card;
+  const own: CardAccount = account;
+  const name = own.name;
+
   function archive() {
-    if (archiving || !account) return;
+    if (archiving) return;
     setArchiving(true);
-    void onArchive(account).finally(() => setArchiving(false));
+    void onArchive(own).finally(() => setArchiving(false));
   }
-  const offered = card.active ? null : account;
+
+  function startSwitch(profileId: string) {
+    if (!manager) return;
+    setClients(null);
+    void manager.use(profileId).then(running => setClients(running.length ? running : null)).catch(() => {});
+  }
+
+  function menuItem({ action, enabled, busy }: PlanEntry<MenuAction>): ActionMenuItem {
+    const disabled = !enabled;
+    switch (action) {
+      case "checkNow": return checkNow(enabled);
+      case "category": return {
+        id: action, label: "Edit category", disabled,
+        panel: done => <CategoryPanel initial={shown.identity.category ?? ""} disabled={disabled} done={done} onSave={async category => {
+          const stored = await api.setAccountCategory(provider, own.id, category);
+          setCategoryLocally(client, provider, own.id, stored);
+        }} />,
+      };
+      case "signInAgain": return { id: action, label: "Sign in again", disabled, run: () => void manager?.add(profile?.id, own.id) };
+      case "removeLogin": return confirmItem({
+        id: action, label: "Remove saved login", question: `Remove the saved login for ${name}? This account stays signed in.`, confirmLabel: "Confirm removal", disabled,
+        onConfirm: async done => { if (manager && profile) await manager.action("remove", profile.id); done(); },
+      });
+      case "archive": return { id: action, label: "Archive account", disabled, busy, run: archive };
+      case "resetAlert": return { id: action, label: "Banked reset alert", disabled, panel: done => <ResetAlertForm accountId={own.id} label={name} onDone={done} /> };
+      case "signOut": return confirmItem({
+        id: action, label: "Sign out", question: "Sign out of this account? The provider may also revoke its saved sign-ins.", confirmLabel: "Confirm sign out", disabled,
+        onConfirm: async done => {
+          if (manager && shown.signedIn === "confirmed" && cachedAccountList(client, manager.provider)?.nativeObservationId === own.id) await manager.action("signOut");
+          done();
+        },
+      });
+      case "remove": return confirmItem({
+        id: action, label: "Remove account", question: removeAccountQuestion(name), confirmLabel: "Confirm removal", disabled,
+        onConfirm: async done => {
+          setRemoving(true);
+          try { await onRemove(own); }
+          finally { setRemoving(false); }
+          done();
+        },
+      });
+    }
+  }
+
+  function mainButtonFor({ action, enabled, busy }: PlanEntry<MainAction>): ReactNode {
+    const props = { ref: mainButton, className: button, disabled: !enabled };
+    switch (action) {
+      case "cancelSignIn": return <button {...props} onClick={() => void manager?.cancel()}>{busy ? "Canceling…" : "Cancel sign-in"}</button>;
+      case "signInAgain": return <button {...props} onClick={() => void manager?.add(profile?.id, own.id)}>Sign in again</button>;
+      case "archive": return <button {...props} aria-disabled={busy || undefined} aria-busy={busy || undefined} onClick={archive}>Archive account</button>;
+      case "saveAccount": return <button {...props} onClick={() => void manager?.action("save").catch(() => {})}>Save account</button>;
+      case "signIn": return <button {...props} onClick={() => void manager?.add(profile?.id, own.id)}>Sign in</button>;
+      case "useAccount": return <button {...props} onClick={() => profile && startSwitch(profile.id)}>Use account</button>;
+    }
+  }
+
+  const { main, switchAlongside, resets } = plan.footer;
   return {
-    category: account ? [{
-      id: "category",
-      label: "Edit category",
-      disabled,
-      panel: done => <CategoryPanel initial={card.identity.category ?? ""} disabled={disabled} done={done} onSave={async category => {
-        const stored = await api.setAccountCategory(card.provider, account.id, category);
-        setCategoryLocally(client, card.provider, account.id, stored);
-      }} />,
-    }] : [],
-    items: offered ? [{ id: "archive", label: "Archive account", disabled, busy: archiving, run: archive }] : [],
-    danger: offered ? [confirmItem({
-      id: "remove",
-      label: "Remove account",
-      question: removeAccountQuestion(offered.name),
-      confirmLabel: "Confirm removal",
-      disabled,
-      onConfirm: async done => {
-        setRemoving(true);
-        try { await onRemove(offered); }
-        finally { setRemoving(false); }
-        done();
-      },
-    })] : [],
-    archive: { run: archive, busy: archiving },
-    removing,
+    menu: plan.menu.map(menuItem),
+    footer: <>
+      {main && mainButtonFor(main)}
+      {switchAlongside && clients && profile && <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={clients} disabled={!switchAlongside.enabled}
+        onSwitch={() => { setClients(null); void manager?.action("useAlongsideClients", profile.id).catch(() => {}); }}
+        onCancel={() => { setClients(null); mainButton.current?.focus(); }} />}
+      {resets && shown.reading && <>
+        <UseBankedReset entry={shown.reading} label={name} now={now} offered={resets.useBankedReset !== null} disabled={!resets.useBankedReset?.enabled} />
+        <AutomaticSpend accountId={own.id} dueAt={resets.cancelAutomaticSpend && spend ? spend.dueAt : null} now={now} />
+      </>}
+    </>,
   };
 }
 

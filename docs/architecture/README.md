@@ -233,6 +233,29 @@ with its last observation time rather than vanishing. What a later read keeps of
 reading, after it answers and after it fails, is one policy, in `limits/reading.rs`, which a read
 applies once, keeping from its account's file as it writes over it (`SnapshotStore::remember`).
 
+On screen, what a card offers is decided in one place: the card action plan
+(`ui/src/features/limits/cardActionPlan.ts`), a pure function of the card model, the account list's
+state (or none, for a provider without an account manager), the card's own archive and removal in
+flight and whether an automatic banked reset is waiting for its account. It returns the ⋯ menu in
+order and the footer: the main button (Cancel sign-in, Sign in again, Archive account, Save
+account, Sign in or Use account), the Switch anyway confirmation, and the banked reset controls.
+`useCardActions` binds a handler to each entry and `LimitCardFrame` draws them. The banked reset
+controls depend only on the provider's feature and the card's reading, never on an account
+manager, and a waiting automatic reset keeps its countdown and Cancel while Switch anyway is
+asked on the same card; Use banked reset gives way to that confirmation. Archive account is one
+action wherever it shows: in the menu of a card that is not signed in, and also as the footer's
+main button once a saved Codex subscription has ended without renewing.
+
+Every action decision reads the card's one signed-in state (`LimitCard.signedIn`). The card model
+takes the account's saved profile's word (`active`), or, with none, the read's (`currentAccount`);
+the account is `confirmed` once the account list names it as the native login
+(`nativeObservationId`) and is not being read again, `unconfirmed` until then, as after a switch,
+and `no` otherwise. Save account, Sign out and Use banked reset wait for `confirmed`. Without an
+account list the read's word stands as confirmed; the backend still checks the native login before
+a spend. A card's place in its column is not that state: it follows the provider's own read, which
+leads the column even signed out or naming no account, so a signed-out Claude card with a saved
+profile leads its column without the active dot.
+
 ### Pull requests
 
 One GraphQL request per refresh reads authored (scoped), review-requested and assigned PRs with
@@ -537,6 +560,8 @@ the code today; a change that moves one updates its row.
 | Account details | `plan` on `Reading`; a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |
 | Remembered reading | `SnapshotStore` (`limits/snapshots.rs`); a read keeps from it once, as it writes over it (`SnapshotStore::remember`), by the remember policy, `Reading::keeping` (`limits/reading.rs`); a card shows one as remembered when it is neither `currentAccount` nor `savedProfile` (`presentLimitAccount`, `ui/src/features/limits/limitPresentation.ts`), and an archived one is listed apart |
 | Archived account | `archived.json` beside the snapshots, owned by `SnapshotStore` (`limits/snapshots/archive.rs`); a provider read (`limits_refresh::read_provider`) unarchives its signed-in account, then flags the cards through `limits::mark_archived`, and profiles are flagged by `accounts::list`; set by `limits_refresh::set_archived` (the `set_limits_archived` command), skipped by saved polls (`accounts/usage.rs`), and cleared by Forget and the explicit re-adds; split from the other cards by `limitColumn` (`ui/src/features/limits/limitCards.ts`) into `ArchivedAccounts` |
+| Signed-in state | `signedIn` on `LimitCard` (`ui/src/features/limits/limitCards.ts`), from the saved profile's `active` or the read's `currentAccount`, confirmed against the account list's `nativeObservationId` (`nativeLogin` on the account controller, `ui/src/features/accounts/AccountManager.tsx`); read by the card action plan and the active dot |
+| Card action plan | `cardActionPlan` and `archivedRowPlan` (`ui/src/features/limits/cardActionPlan.ts`), bound to handlers by `useCardActions` (`cardActions.tsx`) and drawn by `LimitCardFrame` and `ArchivedAccounts` |
 | Banked reset alert | `ResetAlert` in `AppSettings.reset_alerts`, by account id; the rule (its bounds, offers once a weekly cycle, waiting spends and the share a spend is held to) is `reset_alert.rs`, whose `plan` `limits_monitor.rs` performs; edited by `ResetAlertForm` (`ui/src/features/limits/resetAlerts.tsx`) and listed by `ResetAlertsCard` (`ui/src/features/settings/Settings.tsx`); the numbers the UI restates (`ui/src/lib/appSettings.ts`, `resetSpendLimit` among them) are checked against `src-tauri/src/reset_alert/fixtures/rule.json` |
 | Failure backoff | `limits_refresh::failure_backoff`, asked with each read's own failure count and interval by the shared cache for the native read (`cache_is_fresh`), by a saved profile's poll (`hold_back` in `accounts/usage.rs`, with the Retry-After floor) and by the Codex backend figures' per-account memo (`PerAccount::read_backed_off`, `limits/backend_memo.rs`), which asks with the failures before its latest one, so it starts one doubling behind |
 | Native store | as the account switch uses it, `ClaudeNative` (`accounts/claude.rs`) and `CodexNative` (`accounts/codex.rs`), each resolved through its provider's `Adapter` (`accounts/mod.rs`); where the login lives, how it is read and written and any locks around it are `accounts/claude_store.rs` (Claude Code's dirs, Keychain item, credentials file and locks) and `accounts/codex_store.rs` (the file, keyring or auto backend Codex's config selects); `accounts/muse_store.rs` reads Muse Code's device login for its Limits read only |

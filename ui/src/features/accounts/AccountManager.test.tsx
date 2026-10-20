@@ -7,14 +7,18 @@ import type { AccountsReading, SavedProfile } from "$lib/accountTypes";
 import { accountListQuery } from "$lib/sharedReads/accounts";
 import { AccountControllers, AccountManager, useAccountManagement } from "./AccountManager";
 import { ActionMenu } from "@/components/ActionMenu";
-import { useAccountCardActions } from "./AccountCardActions";
+import { useCardActions } from "@/features/limits/cardActions";
+import { limitCards } from "@/features/limits/limitCards";
 import { AccountPreferences } from "./AccountPreferences";
 vi.mock("$lib/api", () => ({ readAccounts: vi.fn(), readAccountPreferences: vi.fn(), accountAction: vi.fn(), readAccountActivationBlockers: vi.fn(), addAccount: vi.fn(), cancelAccountLogin: vi.fn() }));
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 const identity = { provider: "codex" as const, userId: "user-a", workspaceId: "team" };
+const NOW = Date.parse("2026-09-12T12:00:00Z");
 function AccountCard({ profile }: { profile: SavedProfile }) {
-  const actions = useAccountCardActions({ accountId: profile.observationId, label: profile.email!, current: profile.active, profile, archive: { run: () => {}, busy: false } });
-  return <><header><ActionMenu label={profile.email!} items={[...actions.items, ...actions.danger]} /></header><footer>{actions.footer}</footer></>;
+  const manager = useAccountManagement();
+  const [card] = limitCards({ provider: "codex", entries: undefined, profiles: [profile], nativeLogin: manager?.nativeLogin, now: NOW })!;
+  const actions = useCardActions({ provider: "codex", card, now: NOW, checking: false, onArchive: async () => {}, onRemove: async () => {} });
+  return <><header><ActionMenu label={profile.email!} items={actions.menu} /></header><footer>{actions.footer}</footer></>;
 }
 function Cards() {
   const manager = useAccountManagement();
@@ -99,15 +103,6 @@ it("asks before removing the signed-in account's saved login, which leaves it si
   fireEvent.click(within(confirm).getByRole("button", { name: "Confirm removal" }));
   await waitFor(() => expect(api.accountAction).toHaveBeenCalledWith("codex", "remove", "profile-a"));
   await waitFor(() => expect(screen.queryByRole("group", { name: "Confirm account action" })).toBeNull());
-});
-it.each([
-  [false, ["Sign in again"]],
-  [true, ["Sign in again", "Remove saved login", "Sign out"]],
-])("offers a saved login (signed in: %s) exactly its own items, with Remove saved login and Sign out only when signed in", async (signedIn, items) => {
-  setup({ signedIn });
-  const card = await screen.findByRole("region", { name: "person@example.com" });
-  fireEvent.click(within(card).getByRole("button", { name: "More actions for person@example.com" }));
-  expect(within(within(card).getByRole("group", { name: "Actions for person@example.com" })).getAllByRole("button").map(item => item.textContent)).toEqual(items);
 });
 it("keeps email as the account name", async () => {
   setup(); await screen.findByText("person@example.com");

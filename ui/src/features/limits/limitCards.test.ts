@@ -34,21 +34,21 @@ describe("which cards a provider shows", () => {
     expect(card).toEqual({
       key: "current-profile:unread", provider: "claude",
       identity: { label: "unread@claude.example", ariaLabel: "Claude limits · unread@claude.example", category: null },
-      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }], resetActions: null, resetAlert: false },
-      plan: null, status: null, active: true, headline: null, rows: [],
+      account: { id: "profile:unread", name: "unread@claude.example", profile, forget: [{ accountId: "profile:unread" }] },
+      reading: null, plan: null, status: null, signedIn: "confirmed", headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
       freshness: { updatedAt: null, lastKnown: false, message: null, readStatus: "ok" },
       subscription: null,
-      signIn: null, signInAgain: false,
-      archived: false, archiveInsteadOfUse: false,
+      signIn: null,
+      archived: false,
     });
   });
 
   it("gives a saved Codex profile no read answered for its own subscription read, and no reset to spend", () => {
     const [card] = cards(undefined, [saved("codex", "unread", "profile:unread", "unread@codex.example")], AT_NOW, "codex");
     expect(card).toMatchObject({
-      provider: "codex", active: false, key: "remembered-profile:unread", account: { id: "profile:unread", resetActions: null, resetAlert: true },
+      provider: "codex", signedIn: "no", key: "remembered-profile:unread", account: { id: "profile:unread" }, reading: null,
       subscription: { accountId: "profile:unread", current: false, term: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
     });
@@ -183,9 +183,9 @@ describe("a card's identity", () => {
       categories: { "acct-work": "Client A", "acct-other": "Someone else" },
       now: AT_NOW,
     })!;
-    expect(shown.map(({ identity, account, active }) => ({ ...identity, name: account?.name, active }))).toEqual([
-      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", active: false },
-      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", active: true },
+    expect(shown.map(({ identity, account, signedIn }) => ({ ...identity, name: account?.name, signedIn }))).toEqual([
+      { label: "work@codex.example", ariaLabel: "Codex limits · work@codex.example", category: "Client A", name: "work@codex.example", signedIn: "no" },
+      { label: "personal@codex.example", ariaLabel: "Codex limits · personal@codex.example", category: null, name: "personal@codex.example", signedIn: "confirmed" },
     ]);
   });
 
@@ -199,9 +199,9 @@ describe("a card's identity", () => {
     expect(card.account?.name ?? null).toBe(name);
   });
 
-  it("marks only the accounts in use as active, never one without an account", () => {
-    expect(cards([okCodex(), staleCodex()]).map(card => [card.key, card.active])).toEqual([["current-acct-work", true], ["remembered-acct-personal", false]]);
-    expect(cards([statusOnly("codex", "signedOut", null)])[0]).toMatchObject({ key: "current-0", active: false });
+  it("marks only the accounts in use as signed in, never one without an account, which still leads its column", () => {
+    expect(cards([okCodex(), staleCodex()]).map(card => [card.key, card.signedIn])).toEqual([["current-acct-work", "confirmed"], ["remembered-acct-personal", "no"]]);
+    expect(cards([staleCodex(), statusOnly("codex", "signedOut", null)]).map(card => [card.key, card.signedIn])).toEqual([["current-0", "no"], ["remembered-acct-personal", "no"]]);
   });
 
   it("tells same-email accounts apart by plan, never by their workspace ids", () => {
@@ -375,13 +375,13 @@ describe("a card's figures", () => {
     expect(figures).toMatchObject({ ownBalance, workspaceShare: workspaceCredits, creditsSpent });
   });
 
-  it("shows each Codex card's banked resets, and offers to spend one", () => {
+  it("shows each Codex card's banked resets", () => {
     const one = { availableCount: 1, nextExpiresAt: null };
     const two = { availableCount: 2, nextExpiresAt: null };
     const codex = cards([okCodex({ resetCredits: two }), staleCodex({ resetCredits: one })]);
-    expect(codex.map(card => [card.identity.label, card.figures.bankedResets, card.account?.resetActions != null])).toEqual([
-      ["work@codex.example", two, true],
-      ["personal@codex.example", one, true],
+    expect(codex.map(card => [card.identity.label, card.figures.bankedResets])).toEqual([
+      ["work@codex.example", two],
+      ["personal@codex.example", one],
     ]);
   });
 
@@ -462,64 +462,33 @@ describe("archived accounts", () => {
   });
 });
 
-describe("the footer of a saved account whose subscription ended", () => {
-  const PASSED = "2026-08-10T00:00:00Z";
-  const AHEAD = "2026-09-10T00:00:00Z";
-  const term = (willRenew: boolean, activeUntil: string) => ({ activeUntil, willRenew, checkedAt: NOW });
-  const codexSaved = (subscription: ProviderLimits["subscription"], overrides: Partial<ProviderLimits> = {}) =>
-    staleCodex({ account: { id: "profile:saved", label: "saved@codex.example" }, savedProfile: true, subscription, ...overrides });
-  const profileOf = (provider: AgentId, overrides: Partial<SavedProfile> = {}) =>
-    saved(provider, "saved", "profile:saved", `saved@${provider}.example`, overrides);
-
-  it.each<[string, boolean, ProviderLimits, SavedProfile | null]>([
-    ["Codex: will not renew and its date has passed", true, codexSaved(term(false, PASSED)), profileOf("codex")],
-    ["Codex: will not renew, but its date is ahead", false, codexSaved(term(false, AHEAD)), profileOf("codex")],
-    ["Codex: renews, though its date has passed", false, codexSaved(term(true, PASSED)), profileOf("codex")],
-    ["Codex: no term read", false, codexSaved(null), profileOf("codex")],
-    ["Codex: a term whose date cannot be read", false, codexSaved(term(false, "not a date")), profileOf("codex")],
-    ["the signed-in account", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex", { active: true })],
-    ["signed in by the read, before the account list marks it active", false, codexSaved(term(false, PASSED), { currentAccount: true }), profileOf("codex")],
-    ["the account the CLI uses by the account list, before the read catches up", false, codexSaved(term(false, PASSED)), profileOf("codex", { active: true })],
-    ["history with no saved login, whose footer offers Sign in", false, codexSaved(term(false, PASSED), { savedProfile: false }), null],
-    ["a saved login that needs sign-in again", false, codexSaved(term(false, PASSED)), profileOf("codex", { needsLogin: true })],
-  ])("%s → Archive account in place of Use account: %s", (_case, expected, entry, profile) => {
-    const shown = cards([entry], profile ? [profile] : [], AT_NOW);
-    expect(shown.find(card => card.account?.id === "profile:saved")?.archiveInsteadOfUse).toBe(expected);
-  });
-});
-
 describe("a saved Claude sign-in's end", () => {
   const ended = new Date(AT_NOW - 86_400_000).toISOString();
   const endedMessage = { text: "Claude ended this sign-in on Aug 16. Sign in again to use this account.", tone: "error" };
 
-  it("once passed, is the card's message in red and makes signing in again its action, read or not", () => {
+  it("once passed, is the card's message in red, read or not", () => {
     const unread = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended });
     const [card] = cards(undefined, [unread], AT_NOW, "claude");
-    expect(card).toMatchObject({ signIn: { state: "ended" }, signInAgain: true, empty: null, freshness: { message: endedMessage } });
+    expect(card).toMatchObject({ signIn: { state: "ended" }, empty: null, freshness: { message: endedMessage } });
 
     const [signedOut] = cards([{ ...okClaude({ windows: [] }), status: "signedOut", message: "Sign in with `claude` to see subscription limits." }], [unread]);
-    expect(signedOut).toMatchObject({ signInAgain: true, freshness: { message: endedMessage } });
-  });
-
-  it("asks an account added but never used to sign in again once its own sign-in has ended", () => {
-    const pending = saved("claude", "me", "uuid-1", "me@claude.example", { signInEndsAt: ended, pendingActivation: true });
-    expect(cards(undefined, [pending], AT_NOW, "claude")[0]).toMatchObject({ signIn: { state: "ended" }, signInAgain: true });
+    expect(signedOut).toMatchObject({ signIn: { state: "ended" }, freshness: { message: endedMessage } });
   });
 
   it("never applies to a Codex card", () => {
     const codex = saved("codex", "me", "acct-me", "me@codex.example", { signInEndsAt: ended });
     expect(cards(undefined, [codex], AT_NOW, "codex")[0]).toMatchObject({
-      signIn: null, signInAgain: false, empty: { reason: "usageUnavailable" }, freshness: { message: null },
+      signIn: null, empty: { reason: "usageUnavailable" }, freshness: { message: null },
     });
   });
 });
 
 describe("each provider's card features", () => {
-  type Features = { signIn: boolean; term: boolean; paidOffer: boolean; resetActions: boolean; resetAlert: boolean; sessionNote: string };
+  type Features = { signIn: boolean; term: boolean; paidOffer: boolean; sessionNote: string };
   const EXPECTED: Record<LimitsProvider, Features> = {
-    claude: { signIn: true, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Starts with your first message" },
-    codex: { signIn: false, term: true, paidOffer: true, resetActions: true, resetAlert: true, sessionNote: "Reset time unavailable" },
-    muse: { signIn: false, term: false, paidOffer: false, resetActions: false, resetAlert: false, sessionNote: "Starts with your first message" },
+    claude: { signIn: true, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
+    codex: { signIn: false, term: true, paidOffer: true, sessionNote: "Reset time unavailable" },
+    muse: { signIn: false, term: false, paidOffer: false, sessionNote: "Starts with your first message" },
   };
 
   it.each(LIMITS_PROVIDERS)("gives a %s card only the features its row turns on, from a reading that carries every one", (provider) => {
@@ -541,8 +510,6 @@ describe("each provider's card features", () => {
       signIn: card.signIn !== null,
       term: card.subscription !== null,
       paidOffer: card.figures.paidOffer !== null,
-      resetActions: card.account?.resetActions != null,
-      resetAlert: card.account?.resetAlert,
       sessionNote: card.rows.find(row => row.id === "session")?.note,
     }).toEqual(EXPECTED[provider]);
   });

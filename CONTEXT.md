@@ -49,6 +49,20 @@ profile Limits is polling, nor an archived account: one the user switched away f
 it, or a saved profile Limits cannot poll now.
 _Avoid_: cache, snapshot (the file that stores it)
 
+**Signed-in state**:
+Whether a card's account is the one the provider's CLI uses: confirmed when its saved profile, or
+without one its read, says so and the account list names it; unconfirmed while the account list has
+yet to name it, as just after a switch; no otherwise. Every action that acts on the signed-in login
+waits for confirmed. A card's place in its column follows the read instead, so a signed-out read
+still leads.
+_Avoid_: active, current
+
+**Card action plan**:
+Which actions a Limits card offers, in order, and whether each can be used now: its menu, its
+footer's main button, the Switch anyway confirmation and its banked reset controls. Decided once,
+for every provider and card state.
+_Avoid_: card menu (only part of it)
+
 **Archived account**:
 An account the user has put away: hidden from Limits and not polled, its saved login and last
 reading kept so it can be brought back without signing in again. Only the user archives or

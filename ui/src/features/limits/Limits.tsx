@@ -1,9 +1,7 @@
-import { useAccountCardActions } from "@/features/accounts/AccountCardActions";
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
 import { useMemo, useRef, useState, type RefCallback, type RefObject } from "react";
 import { useQuery, useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
-import type { ActionMenuItem } from "@/components/ActionMenu";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
 import { displayError, parseInvokeError } from "$lib/error";
@@ -14,13 +12,11 @@ import { updateLimits } from "$lib/sharedReads/limits";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
 import { ArchivedAccounts } from "./ArchivedAccounts";
-import { useCardActions } from "./cardActions";
 import { ActiveAccountDot, LimitCardFrame } from "./LimitCardFrame";
 import { limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { useLimitsProviders } from "./useLimitsProviders";
 import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
-import { CodexAccountActions } from "./CodexAccountActions";
-import { ResetAlertForm, ResetAlertsContext } from "./resetAlerts";
+import { ResetAlertsContext } from "./resetAlerts";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
 
@@ -94,7 +90,7 @@ function ProviderColumn({
   const name = providerLabel(provider);
   const manager = useAccountManagement();
   const categories = useQuery(accountCategoriesQuery()).data?.[provider];
-  const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], categories, now });
+  const column = limitColumn({ provider, entries: query.data, profiles: manager?.query.data?.profiles ?? [], categories, nativeLogin: manager?.nativeLogin ?? null, now });
   const [forgetError, setForgetError] = useState<string | null>(null);
   const archivedDisclosure = useRef<HTMLButtonElement | null>(null);
   const menus = useRef(new Map<string, HTMLButtonElement>());
@@ -171,7 +167,6 @@ function ProviderColumn({
           now={now}
           error={index === 0 ? error : null}
           checking={query.isFetching}
-          blocked={blocked}
           onArchive={(account) => archive(card.key, account)}
           onRemove={(account) => remove(account, () => forgetCard(card.key, account))}
           menuButtonRef={(node) => {
@@ -192,7 +187,6 @@ function AccountCard({
   now,
   error,
   checking,
-  blocked,
   onArchive,
   onRemove,
   menuButtonRef,
@@ -201,33 +195,13 @@ function AccountCard({
   now: number;
   error: string | null;
   checking: boolean;
-  blocked: boolean;
   onArchive: (account: CardAccount) => Promise<void>;
   onRemove: (account: CardAccount) => Promise<void>;
   menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
-  const { provider, freshness, figures, account } = card;
-  const own = useCardActions(card, { blocked, onArchive, onRemove });
-  const resetActions = account?.resetActions ?? null;
-  const actions = useAccountCardActions(account && {
-    accountId: account.id,
-    label: account.name,
-    current: card.active,
-    profile: account.profile ?? undefined,
-    archive: own.archive,
-    blocked: own.removing,
-    archiveInsteadOfUse: card.archiveInsteadOfUse,
-    signInAgain: card.signInAgain,
-    footer: resetActions ? state => <CodexAccountActions entry={resetActions} label={account.name} now={now} state={state} /> : undefined,
-  });
-  const resetAlert: ActionMenuItem[] = account?.resetAlert ? [{
-    id: "resetAlert",
-    label: "Banked reset alert",
-    panel: done => <ResetAlertForm accountId={account.id} label={account.name} onDone={done} />,
-  }] : [];
+  const { provider, freshness, figures } = card;
   return (
-    <LimitCardFrame provider={provider} card={card} now={now} checking={checking} menuButtonRef={menuButtonRef} footer={actions.footer}
-      items={[...own.category, ...actions.items, ...own.items, ...resetAlert]} danger={[...actions.danger, ...own.danger]}>
+    <LimitCardFrame provider={provider} card={card} now={now} checking={checking} menuButtonRef={menuButtonRef} onArchive={onArchive} onRemove={onRemove}>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
 
       {card.status?.kind === "paused" ? (
@@ -244,7 +218,7 @@ function AccountCard({
         </p>
       ) : null}
 
-      {card.headline ? <HeadlineWindow active={card.active} window={card.headline} provider={provider} /> : null}
+      {card.headline ? <HeadlineWindow active={card.signedIn !== "no"} window={card.headline} provider={provider} /> : null}
       {card.rows.map((row) => (
         <WindowRow key={row.id} row={row} provider={provider} />
       ))}

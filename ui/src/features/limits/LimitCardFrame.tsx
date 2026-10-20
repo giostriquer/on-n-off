@@ -1,9 +1,8 @@
 import type { ReactNode, RefCallback } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { ActionMenu, type ActionMenuItem } from "@/components/ActionMenu";
+import { ActionMenu } from "@/components/ActionMenu";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { providerLabel, type LimitsProvider } from "$lib/providers";
-import { checkLimitsNow } from "$lib/sharedReads/limits";
+import { useCardActions, type CardActionsInput } from "./cardActions";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
 import type { LimitCard } from "./limitCards";
 import { SignInBadge } from "./SignInBadge";
@@ -11,27 +10,20 @@ import { AccountSubscriptionBadge } from "./SubscriptionBadge";
 import { UsageStatusBadge } from "./UsageStatusBadge";
 import { useTagsBeside } from "./useTagsBeside";
 
-export function LimitCardFrame({ provider, card, now, checking, items = [], danger = [], menuButtonRef, footer, children }: {
-  provider: LimitsProvider;
-  card: LimitCard | null;
-  now: number;
-  checking: boolean;
-  items?: ActionMenuItem[];
-  danger?: ActionMenuItem[];
+export function LimitCardFrame({ menuButtonRef, children, ...input }: CardActionsInput & {
   menuButtonRef?: RefCallback<HTMLButtonElement>;
-  footer?: ReactNode;
   children?: ReactNode;
 }) {
-  const client = useQueryClient();
+  const { provider, card, now } = input;
+  const actions = useCardActions(input);
   const name = providerLabel(provider);
   const title = card?.identity.label ?? name;
-  const checkNow: ActionMenuItem = { id: "checkNow", label: "Check limits now", disabled: checking, run: () => void checkLimitsNow(client, provider).catch(() => {}) };
   return (
     <section className="rounded-[11px] border border-[var(--hair)] bg-[var(--plate)]" aria-label={card?.identity.ariaLabel ?? `${name} limits`} data-status={card?.freshness.readStatus ?? "pending"}>
       <CardHeader card={card} provider={provider} title={title} now={now}
-        menu={<ActionMenu label={card?.account?.name ?? title} items={[checkNow, ...items, ...danger]} buttonRef={menuButtonRef} />} />
+        menu={<ActionMenu label={card?.account?.name ?? title} items={actions.menu} buttonRef={menuButtonRef} />} />
       {children}
-      <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">{footer}</footer>
+      <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--hair)] px-3.5 py-2.5 empty:hidden">{actions.footer}</footer>
     </section>
   );
 }
@@ -52,7 +44,7 @@ function CardHeader({ card, provider, title, now, menu }: { card: LimitCard | nu
         {beside && tags}
       </div>
       <div className="flex items-center gap-2.5">
-        {card?.active && !card.headline && <ActiveAccountDot />}
+        {card && card.signedIn !== "no" && !card.headline && <ActiveAccountDot />}
         {menu}
       </div>
       {!beside && tags}
