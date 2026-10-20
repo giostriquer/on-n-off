@@ -54,7 +54,7 @@ fn an_account_found_low_on_two_polls_in_a_row_is_offered_its_reset_once() {
             account_id: "acct".into(),
             account_label: Some("you@example.com".into()),
             left_percent: 4.0,
-            renews_at: at(RENEWS),
+            cycle: at(RENEWS).into(),
             automatic,
         };
         let offered = if automatic {
@@ -278,7 +278,7 @@ fn the_notification_names_the_account_what_is_left_and_when_it_renews() {
         account_id: "acct".into(),
         account_label: Some("you@example.com".into()),
         left_percent: 6.0,
-        renews_at: at("2026-10-05T15:00:00Z"),
+        cycle: at("2026-10-05T15:00:00Z").into(),
         automatic: false,
     };
 
@@ -377,7 +377,7 @@ fn the_notification_counts_hours_under_a_day_and_days_from_a_full_day() {
         account_id: "acct".into(),
         account_label: None,
         left_percent: 2.0,
-        renews_at: now() + chrono::Duration::hours(hours) + chrono::Duration::minutes(minutes),
+        cycle: (now() + chrono::Duration::hours(hours) + chrono::Duration::minutes(minutes)).into(),
         automatic: false,
     };
 

@@ -12,7 +12,7 @@ use tauri::{async_runtime, AppHandle};
 use crate::dto::{
     AgentId, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto, ResetCreditOutcome,
 };
-use crate::limits::window::{cycle_turned_over, Observation, ResetInstant};
+use crate::limits::{cycle_turned_over, Observation, ResetInstant};
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
 use crate::read_revision::{announce, Source};

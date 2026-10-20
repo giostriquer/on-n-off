@@ -92,6 +92,42 @@ fn a_merged_window_is_the_one_the_window_module_builds_for_the_observation() {
 }
 
 #[test]
+fn a_session_observation_advances_the_window_the_reader_built_for_its_slot() {
+    let home = scratch_dir("limits-codex-session-secondary");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":12.0,"window_minutes":300},"secondary":{"used_percent":91.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+    )
+    .unwrap();
+    let read = crate::limits::codex_card(
+        serde_json::json!({"rateLimits": {"limitId": "codex",
+            "primary": {"usedPercent": 10, "windowDurationMins": 300, "resetsAt": 1787300000},
+            "secondary": {"usedPercent": 86, "windowDurationMins": 10080, "resetsAt": 1787614473}}}),
+        "acct-old",
+        "2026-08-20T02:39:06.754Z",
+    );
+    let mut accounts = vec![ProviderLimitsDto {
+        current_account: false,
+        ..read
+    }];
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(merge_recent(&home, now, &mut accounts), 1);
+
+    let used: Vec<(&str, f64)> = accounts[0]
+        .reading
+        .windows
+        .iter()
+        .map(|window| (window.id.as_str(), window.used_percent))
+        .collect();
+    assert_eq!(used, [("secondary", 91.0), ("primary", 10.0)]);
+}
+
+#[test]
 fn a_session_observation_three_seconds_off_the_remembered_reset_is_another_window() {
     let home = scratch_dir("limits-codex-session-another-reset");
     let sessions = home.join(".codex/sessions/2026/08/20");
@@ -99,6 +135,25 @@ fn a_session_observation_three_seconds_off_the_remembered_reset_is_another_windo
     fs::write(
         sessions.join("rollout.jsonl"),
         r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614476}}}}"#,
+    )
+    .unwrap();
+    let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(merge_recent(&home, now, &mut accounts), 0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
+}
+
+#[test]
+fn a_session_observation_from_the_remembered_instant_is_not_newer() {
+    let home = scratch_dir("limits-codex-session-same-instant");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T02:39:06.754Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
@@ -251,6 +306,26 @@ fn a_session_observation_does_not_match_a_window_without_an_exact_duration() {
     fs::write(
         sessions.join("rollout.jsonl"),
         r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"window_minutes":10080,"resets_at":1787614473}}}}"#,
+    )
+    .unwrap();
+    let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];
+    accounts[0].reading.windows[0].window_seconds = None;
+    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+
+    assert_eq!(merge_recent(&home, now, &mut accounts), 0);
+    assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
+}
+
+#[test]
+fn a_session_slot_without_a_duration_never_advances_a_window_without_one() {
+    let home = scratch_dir("limits-codex-session-slot-without-duration");
+    let sessions = home.join(".codex/sessions/2026/08/20");
+    fs::create_dir_all(&sessions).unwrap();
+    fs::write(
+        sessions.join("rollout.jsonl"),
+        r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":100.0,"resets_at":1787614473}}}}"#,
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];

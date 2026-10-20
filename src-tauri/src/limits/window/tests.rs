@@ -34,13 +34,27 @@ fn model(name: &str) -> Scope {
 #[test]
 fn every_fact_becomes_one_window_kind_label_meter_and_length() {
     let all = || Scope::AllModels;
-    let rows: [(QuotaWindow, LimitWindowKind, &str, f64, Option<u64>); 16] = [
+    let rows: [(QuotaWindow, LimitWindowKind, &str, f64, Option<u64>); 18] = [
         (
             fact(all(), Some(FIVE_HOURS), 41.0),
             LimitWindowKind::Session,
             "5 hour · all models",
             41.0,
             Some(18_000),
+        ),
+        (
+            fact(all(), Some(minutes(60)), 7.0),
+            LimitWindowKind::Session,
+            "1 hour · all models",
+            7.0,
+            Some(3_600),
+        ),
+        (
+            fact(all(), Some(minutes(0)), 7.0),
+            LimitWindowKind::Session,
+            "0 minute · all models",
+            7.0,
+            Some(0),
         ),
         (
             fact(all(), Some(minutes(120)), 7.0),
@@ -191,7 +205,7 @@ fn a_window_says_it_starts_with_the_first_message_only_while_it_has_not_started(
     };
     assert!(unreadable.into_dto().starts_on_first_message);
     let reset = QuotaWindow {
-        reset: Some(at("2026-08-18T04:59:59Z")),
+        reset: Some(reset("2026-08-18T04:59:59Z")),
         ..starting()
     };
     assert!(!reset.into_dto().starts_on_first_message);
@@ -231,22 +245,25 @@ fn every_reset_is_spelled_once_in_utc_to_the_millisecond() {
         ),
     ] {
         let window = QuotaWindow {
-            reset: Some(reset_at),
+            reset: Some(reset_at.into()),
             ..fact(Scope::AllModels, Some(ONE_WEEK), 1.0)
         };
         assert_eq!(window.into_dto().resets_at.as_deref(), Some(spelled));
         assert_eq!(ResetInstant::from(reset_at).to_string(), spelled);
+        assert_eq!(
+            ResetInstant::parse(spelled).map(|reset| reset.to_string()),
+            Some(spelled.to_string())
+        );
     }
 }
 
 #[test]
-fn a_reset_instant_reads_any_spelling_of_one_instant_as_the_same() {
+fn a_reset_instant_reads_any_spelling_of_one_instant_as_that_instant() {
     let spellings = [
         "2026-10-05T12:00:00Z",
         "2026-10-05T12:00:00+00:00",
         "2026-10-05T12:00:00.000Z",
         "2026-10-05T09:00:00-03:00",
-        "2026-10-05T12:00:00.692639+00:00",
     ];
     for one in spellings {
         for other in spellings {
@@ -259,9 +276,20 @@ fn a_reset_instant_reads_any_spelling_of_one_instant_as_the_same() {
 }
 
 #[test]
-fn reset_instants_two_seconds_apart_are_one_and_three_seconds_apart_are_ordered() {
+fn a_reset_instant_equals_and_orders_only_by_its_exact_instant() {
+    let noon = reset("2026-10-05T12:00:00Z");
+    let a_moment_later = reset("2026-10-05T12:00:00.692639+00:00");
+    assert_ne!(noon, a_moment_later);
+    assert!(noon < a_moment_later);
+    assert_ne!(noon, reset("2026-10-05T12:00:01Z"));
+    assert_eq!(noon.max(a_moment_later), a_moment_later);
+}
+
+#[test]
+fn reset_instants_two_seconds_apart_are_one_cycle_and_three_seconds_apart_are_later() {
     let noon = reset("2026-10-05T12:00:00Z");
     for (other, same, later) in [
+        ("2026-10-05T12:00:00.692639+00:00", true, false),
         ("2026-10-05T12:00:01Z", true, false),
         ("2026-10-05T12:00:02Z", true, false),
         ("2026-10-05T11:59:58Z", true, false),
@@ -271,9 +299,13 @@ fn reset_instants_two_seconds_apart_are_one_and_three_seconds_apart_are_ordered(
         ("2026-10-12T12:00:00Z", false, true),
     ] {
         let other = reset(other);
-        assert_eq!(other == noon, same, "{other} == {noon}");
-        assert_eq!(other > noon, later, "{other} > {noon}");
-        assert_eq!(noon < other, later, "{noon} < {other}");
+        assert_eq!(other.same_cycle_as(noon), same, "{other} same as {noon}");
+        assert_eq!(noon.same_cycle_as(other), same, "{noon} same as {other}");
+        assert_eq!(other.later_than(noon), later, "{other} later than {noon}");
+        assert!(
+            !(later && noon.later_than(other)),
+            "{noon} later than {other}"
+        );
     }
 }
 

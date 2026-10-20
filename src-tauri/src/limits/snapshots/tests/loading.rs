@@ -282,6 +282,7 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
             ("extra:base_model_inference:secondary", "Weekly · Inference"),
             ("extra:reserve", "Weekly · GPT-Reserve"),
             ("extra:gpt_luna", "Weekly · GPT-5.6-Luna"),
+            ("extra:team_split", "Weekly · Team · GPT-Reserve"),
         ],
     );
 
@@ -293,7 +294,10 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
             .map(|window| window.id.clone())
             .collect()
     };
-    assert_eq!(ids(&remembered), ["primary", "extra:gpt_luna"]);
+    assert_eq!(
+        ids(&remembered),
+        ["primary", "extra:gpt_luna", "extra:team_split"]
+    );
 
     let mut paused = ProviderLimitsDto {
         status: LimitsStatus::Failed,
@@ -301,7 +305,10 @@ fn a_remembered_codex_file_loses_its_hidden_windows_on_load() {
         ..ProviderLimitsDto::for_test(AgentId::Codex, "acct-1")
     };
     crate::limits::keep_remembered(&mut paused, remembered.reading);
-    assert_eq!(ids(&paused), ["primary", "extra:gpt_luna"]);
+    assert_eq!(
+        ids(&paused),
+        ["primary", "extra:gpt_luna", "extra:team_split"]
+    );
     assert!(fs::read_to_string(path)
         .unwrap()
         .contains("codex_bengalfox"));

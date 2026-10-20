@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 use super::pipeline::finish;
-use super::window::{scope_of_label, QuotaWindow, Scope};
+use super::window::{scope_of_label, QuotaWindow, ResetInstant, Scope};
 use super::{codex_app_server, credits_spent, renewal, saved_card, Parsed};
 use super::{SavedReadError, SavedReadUrls};
 use crate::accounts::codex_store::CodexAccess;
@@ -59,11 +59,12 @@ struct RateLimitBucket {
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct RateLimitWindow {
+pub(super) struct RateLimitWindow {
+    #[serde(alias = "used_percent")]
     used_percent: f64,
-    #[serde(default)]
+    #[serde(default, alias = "window_minutes")]
     window_duration_mins: Option<u64>,
-    #[serde(default)]
+    #[serde(default, alias = "resets_at")]
     resets_at: Option<i64>,
 }
 
@@ -98,10 +99,10 @@ struct RateLimitCredits {
 }
 
 pub(super) fn parse_codex(payload: &RateLimitsResponse) -> Reading {
-    let main = main_bucket(payload).1;
+    let (main_id, main) = main_bucket(payload);
     Reading {
         plan: main.plan_type.clone(),
-        windows: quota_windows(payload)
+        windows: quota_windows(payload, &main_id, main)
             .into_iter()
             .map(QuotaWindow::into_dto)
             .collect(),
@@ -135,12 +136,15 @@ fn main_bucket(payload: &RateLimitsResponse) -> (String, &RateLimitBucket) {
     (main_id, main)
 }
 
-pub(super) fn quota_windows(payload: &RateLimitsResponse) -> Vec<QuotaWindow> {
-    let (main_id, main) = main_bucket(payload);
-    let mut windows = bucket_windows(&main_id, main, true);
+fn quota_windows(
+    payload: &RateLimitsResponse,
+    main_id: &str,
+    main: &RateLimitBucket,
+) -> Vec<QuotaWindow> {
+    let mut windows = main_windows(main.primary.as_ref(), main.secondary.as_ref());
     for (id, bucket) in payload.rate_limits_by_limit_id.iter().flatten() {
-        if id != &main_id {
-            windows.extend(bucket_windows(id, bucket, false));
+        if id != main_id {
+            windows.extend(extra_windows(id, bucket));
         }
     }
     windows.retain(|window| !hidden(&window.id, &window.scope));
@@ -169,54 +173,61 @@ fn hidden(id: &str, scope: &Scope) -> bool {
         })
 }
 
-fn bucket_windows(id: &str, bucket: &RateLimitBucket, main: bool) -> Vec<QuotaWindow> {
+const PRIMARY: &str = "primary";
+const SECONDARY: &str = "secondary";
+
+pub(super) fn main_windows(
+    primary: Option<&RateLimitWindow>,
+    secondary: Option<&RateLimitWindow>,
+) -> Vec<QuotaWindow> {
+    [(PRIMARY, primary), (SECONDARY, secondary)]
+        .into_iter()
+        .filter_map(|(slot, entry)| Some(quota_window(slot.to_string(), Scope::AllModels, entry?)))
+        .collect()
+}
+
+fn extra_windows(id: &str, bucket: &RateLimitBucket) -> Vec<QuotaWindow> {
+    let scope = Scope::Model(
+        bucket
+            .limit_name
+            .clone()
+            .unwrap_or_else(|| "extra limit".to_string()),
+    );
     [
-        ("primary", bucket.primary.as_ref()),
-        ("secondary", bucket.secondary.as_ref()),
+        (PRIMARY, bucket.primary.as_ref()),
+        (SECONDARY, bucket.secondary.as_ref()),
     ]
     .into_iter()
-    .filter_map(|(slot, entry)| Some(rate_limit_window(id, bucket, slot, entry?, main)))
+    .filter_map(|(slot, entry)| {
+        let window_id = if slot == PRIMARY {
+            format!("extra:{id}")
+        } else {
+            format!("extra:{id}:{slot}")
+        };
+        Some(quota_window(window_id, scope.clone(), entry?))
+    })
     .collect()
 }
 
-fn rate_limit_window(
-    id: &str,
-    bucket: &RateLimitBucket,
-    slot: &str,
-    entry: &RateLimitWindow,
-    main: bool,
-) -> QuotaWindow {
-    let scope = if main {
-        Scope::AllModels
-    } else {
-        Scope::Model(
-            bucket
-                .limit_name
-                .clone()
-                .unwrap_or_else(|| "extra limit".to_string()),
-        )
-    };
-    let window_id = if main {
-        slot.to_string()
-    } else if slot == "primary" {
-        format!("extra:{id}")
-    } else {
-        format!("extra:{id}:{slot}")
-    };
+fn quota_window(id: String, scope: Scope, entry: &RateLimitWindow) -> QuotaWindow {
     QuotaWindow {
-        id: window_id,
+        id,
         scope,
         length: entry
             .window_duration_mins
             .and_then(|minutes| minutes.checked_mul(60))
             .map(Duration::from_secs),
         used_percent: entry.used_percent,
-        reset: entry
-            .resets_at
-            .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0)),
+        reset: reset_at_epoch(entry.resets_at),
         role: None,
         starts_on_first_message: false,
     }
+}
+
+fn reset_at_epoch(epoch: Option<i64>) -> Option<ResetInstant> {
+    epoch
+        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+        .map(ResetInstant::from)
 }
 
 fn credits(value: Option<&RateLimitCredits>) -> Option<LimitsCreditsDto> {
@@ -261,16 +272,10 @@ fn workspace_credits(
         limit,
         used,
         used_percent,
-        resets_at: share
-            .get("resetsAt")
-            .and_then(serde_json::Value::as_i64)
-            .and_then(rfc3339_from_epoch),
+        resets_at: reset_at_epoch(share.get("resetsAt").and_then(serde_json::Value::as_i64))
+            .map(|reset| reset.to_string()),
         reached,
     })
-}
-
-fn rfc3339_from_epoch(epoch: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
 }
 
 const BUY_RESET: &str = "buy_reset";

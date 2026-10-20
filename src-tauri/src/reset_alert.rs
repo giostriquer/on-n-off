@@ -7,7 +7,7 @@ use crate::dto::{
     LimitWindowKind, LimitsAccountDto, LimitsStatus, PendingResetSpendDto, ProviderLimitsDto,
     Reading, ResetCreditOutcome,
 };
-use crate::limits::window::ResetInstant;
+use crate::limits::ResetInstant;
 
 const SPEND_CAP_PERCENT: u8 = 5;
 const LOWEST_SHARE_PERCENT: u8 = 1;
@@ -128,7 +128,7 @@ struct Offer {
     account_id: String,
     account_label: Option<String>,
     left_percent: f64,
-    renews_at: DateTime<Utc>,
+    cycle: ResetInstant,
     automatic: bool,
 }
 
@@ -222,13 +222,13 @@ impl AlertMemory {
                 None => entry.low = None,
                 Some((reading, offer)) => {
                     let confirmed = entry.low.as_ref().is_some_and(|low| {
-                        saved_cycle_is(&low.cycle, offer.cycle())
+                        saved_cycle_is(&low.cycle, offer.cycle)
                             && is_newer(&reading.observed_at, &low.observed_at)
                     });
                     let offered = entry
                         .offered_cycle
                         .as_deref()
-                        .is_some_and(|offered| saved_cycle_is(offered, offer.cycle()));
+                        .is_some_and(|offered| saved_cycle_is(offered, offer.cycle));
                     if confirmed && !offered {
                         entry.offered_cycle = Some(reading.cycle.clone());
                         offers.push(offer);
@@ -267,8 +267,8 @@ fn low_reading(
         .iter()
         .find(|window| window.kind == LimitWindowKind::Weekly)?;
     let cycle = weekly.resets_at.as_deref()?;
-    let renews_at = ResetInstant::parse(cycle)?.at();
-    if renews_at - now < chrono::Duration::hours(i64::from(alert.min_hours_to_renewal)) {
+    let renews_at = ResetInstant::parse(cycle)?;
+    if renews_at.at() - now < chrono::Duration::hours(i64::from(alert.min_hours_to_renewal)) {
         return None;
     }
     let banked = card.reading.reset_credits.as_ref()?;
@@ -289,7 +289,7 @@ fn low_reading(
             account_id: account.id.clone(),
             account_label: account.label.clone(),
             left_percent: left,
-            renews_at,
+            cycle: renews_at,
             automatic: alert.automatic,
         },
     ))
@@ -302,13 +302,7 @@ fn instant(value: &str) -> Option<DateTime<Utc>> {
 }
 
 fn saved_cycle_is(saved: &str, cycle: ResetInstant) -> bool {
-    ResetInstant::parse(saved).is_some_and(|saved| saved == cycle)
-}
-
-impl Offer {
-    fn cycle(&self) -> ResetInstant {
-        self.renews_at.into()
-    }
+    ResetInstant::parse(saved).is_some_and(|saved| saved.same_cycle_as(cycle))
 }
 
 fn is_newer(later: &str, earlier: &str) -> bool {
@@ -357,7 +351,7 @@ impl Waiting {
                 let deciding_alert = match codex {
                     CodexNow::Live(card) => alerts.get(&account).filter(|alert| {
                         low_reading(card, alert, now).is_some_and(|(_, offer)| {
-                            offer.account_id == account && offer.cycle() == spend.cycle
+                            offer.account_id == account && offer.cycle.same_cycle_as(spend.cycle)
                         })
                     }),
                     CodexNow::NobodySignedIn | CodexNow::Unknown => None,
@@ -375,7 +369,7 @@ impl Waiting {
             let spend = WaitingSpend {
                 account_id: offer.account_id.clone(),
                 account_label: offer.account_label.clone(),
-                cycle: offer.cycle(),
+                cycle: offer.cycle,
                 due_at: now + chrono::Duration::minutes(SPEND_DELAY_MINUTES),
                 idempotency_key: uuid::Uuid::new_v4().to_string(),
             };

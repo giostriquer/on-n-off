@@ -20,10 +20,6 @@ const CAPTURED: &str = r#"{
       "member_dashboard_available": false
     }"#;
 
-fn reset_at(text: &str) -> Option<DateTime<Utc>> {
-    ResetInstant::parse(text).map(ResetInstant::at)
-}
-
 fn model(name: &str) -> Scope {
     Scope::Model(name.to_string())
 }
@@ -39,7 +35,7 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 scope: Scope::AllModels,
                 length: Some(FIVE_HOURS),
                 used_percent: 7.0,
-                reset: reset_at("2026-08-18T04:59:59.692639+00:00"),
+                reset: ResetInstant::parse("2026-08-18T04:59:59.692639+00:00"),
                 role: None,
                 starts_on_first_message: true,
             },
@@ -48,7 +44,7 @@ fn prefers_the_normalized_limits_array_over_legacy_fields() {
                 scope: Scope::AllModels,
                 length: Some(ONE_WEEK),
                 used_percent: 12.0,
-                reset: reset_at("2026-08-24T13:59:59.692659+00:00"),
+                reset: ResetInstant::parse("2026-08-24T13:59:59.692659+00:00"),
                 role: None,
                 starts_on_first_message: false,
             },
@@ -255,7 +251,7 @@ fn falls_back_to_legacy_fields_when_limits_array_is_absent() {
     );
     assert_eq!(
         parse_claude(&payload)[0].reset,
-        reset_at("2026-08-18T04:59:59Z")
+        ResetInstant::parse("2026-08-18T04:59:59Z")
     );
 }
 

@@ -1,4 +1,3 @@
-use std::cmp::Ordering;
 use std::fmt;
 use std::time::Duration;
 
@@ -6,8 +5,8 @@ use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading, WindowRole};
 
-pub(crate) const FIVE_HOURS: Duration = Duration::from_secs(5 * 60 * 60);
-pub(crate) const ONE_WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+pub(super) const FIVE_HOURS: Duration = Duration::from_secs(5 * 60 * 60);
+pub(super) const ONE_WEEK: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 const WEEKLY_FROM: Duration = Duration::from_secs(24 * 60 * 60);
 const SEPARATOR: &str = " · ";
@@ -17,24 +16,24 @@ const RESET_TOLERANCE_SECONDS: i64 = 2;
 const RESET_DROP_POINTS: f64 = 0.5;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Scope {
+pub(super) enum Scope {
     AllModels,
     Model(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct QuotaWindow {
-    pub(crate) id: String,
-    pub(crate) scope: Scope,
-    pub(crate) role: Option<WindowRole>,
-    pub(crate) starts_on_first_message: bool,
-    pub(crate) length: Option<Duration>,
-    pub(crate) used_percent: f64,
-    pub(crate) reset: Option<DateTime<Utc>>,
+pub(super) struct QuotaWindow {
+    pub(super) id: String,
+    pub(super) scope: Scope,
+    pub(super) role: Option<WindowRole>,
+    pub(super) starts_on_first_message: bool,
+    pub(super) length: Option<Duration>,
+    pub(super) used_percent: f64,
+    pub(super) reset: Option<ResetInstant>,
 }
 
 impl QuotaWindow {
-    pub(crate) fn idle(id: impl Into<String>, length: Duration) -> Self {
+    pub(super) fn idle(id: impl Into<String>, length: Duration) -> Self {
         Self {
             id: id.into(),
             scope: Scope::AllModels,
@@ -46,13 +45,13 @@ impl QuotaWindow {
         }
     }
 
-    pub(crate) fn into_dto(self) -> LimitWindowDto {
+    pub(super) fn into_dto(self) -> LimitWindowDto {
         let used_percent = in_range(self.used_percent);
         LimitWindowDto {
             kind: self.kind(),
             label: self.label(),
             used_percent,
-            resets_at: self.reset.map(|at| ResetInstant(at).to_string()),
+            resets_at: self.reset.map(|reset| reset.to_string()),
             window_seconds: self.length.map(|length| length.as_secs()),
             observed_at: String::new(),
             role: self.role,
@@ -94,7 +93,7 @@ fn length_name(length: Option<Duration>) -> String {
     }
 }
 
-pub(crate) fn scope_of_label(label: &str) -> Option<Scope> {
+pub(super) fn scope_of_label(label: &str) -> Option<Scope> {
     let (_, scope) = label.split_once(SEPARATOR)?;
     Some(if scope == ALL_MODELS {
         Scope::AllModels
@@ -111,7 +110,7 @@ fn in_range(used_percent: f64) -> f64 {
     }
 }
 
-pub(crate) fn keep_in_range(reading: &mut Reading) {
+pub(super) fn keep_in_range(reading: &mut Reading) {
     for window in &mut reading.windows {
         window.used_percent = in_range(window.used_percent);
     }
@@ -120,7 +119,7 @@ pub(crate) fn keep_in_range(reading: &mut Reading) {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ResetInstant(DateTime<Utc>);
 
 impl ResetInstant {
@@ -141,27 +140,19 @@ impl ResetInstant {
     pub(crate) fn passed_by(self, at: DateTime<Utc>) -> bool {
         self.0 <= at
     }
+
+    pub(crate) fn same_cycle_as(self, other: Self) -> bool {
+        (self.0 - other.0).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
+    }
+
+    pub(crate) fn later_than(self, other: Self) -> bool {
+        self > other && !self.same_cycle_as(other)
+    }
 }
 
 impl From<DateTime<Utc>> for ResetInstant {
     fn from(at: DateTime<Utc>) -> Self {
         Self(at)
-    }
-}
-
-impl PartialEq for ResetInstant {
-    fn eq(&self, other: &Self) -> bool {
-        (self.0 - other.0).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
-    }
-}
-
-impl PartialOrd for ResetInstant {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(if self == other {
-            Ordering::Equal
-        } else {
-            self.0.cmp(&other.0)
-        })
     }
 }
 
@@ -185,13 +176,13 @@ pub(crate) fn cycle_turned_over(
     let Some(saved) = before.reset else {
         return false;
     };
-    let later = after.reset.is_some_and(|reset| reset > saved);
+    let later = after.reset.is_some_and(|reset| reset.later_than(saved));
     (later || saved.passed_by(observed_at))
         && before.used_percent - after.used_percent > RESET_DROP_POINTS
 }
 
 #[cfg(test)]
-pub(crate) fn fixture(
+pub(super) fn fixture(
     id: &str,
     label: &str,
     kind: LimitWindowKind,

@@ -162,7 +162,7 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 scope: Scope::AllModels,
                 length: Some(ONE_WEEK),
                 used_percent: 22.0,
-                reset: DateTime::from_timestamp(1_760_500_000, 0),
+                reset: DateTime::from_timestamp(1_760_500_000, 0).map(ResetInstant::from),
                 role: None,
                 starts_on_first_message: false,
             },
@@ -171,7 +171,7 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 scope: Scope::AllModels,
                 length: Some(FIVE_HOURS),
                 used_percent: 41.0,
-                reset: DateTime::from_timestamp(1_760_000_000, 0),
+                reset: DateTime::from_timestamp(1_760_000_000, 0).map(ResetInstant::from),
                 role: None,
                 starts_on_first_message: true,
             },
@@ -191,7 +191,7 @@ fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
     assert_eq!(used, [140.0, -3.0]);
     assert_eq!(
         session(&facts).reset,
-        DateTime::from_timestamp_millis(1_760_000_000_500)
+        DateTime::from_timestamp_millis(1_760_000_000_500).map(ResetInstant::from)
     );
     assert_eq!(facts[0].reset, None);
 }
@@ -220,6 +220,18 @@ fn an_unused_session_without_a_reset_starts_with_the_first_message_and_the_week_
         .map(|window| window.starts_on_first_message)
         .collect();
     assert_eq!(started, [false, false]);
+}
+
+#[test]
+fn a_reset_at_or_before_the_epoch_is_no_reset() {
+    for stamp in [json!(0), json!(0.0), json!(-1)] {
+        let mut body = mint_body();
+        body["subs_usage"]["weekly"]["resets_at"] = stamp.clone();
+        body["subs_usage"]["window"]["resets_at"] = stamp.clone();
+        let resets: Vec<Option<ResetInstant>> =
+            facts(body).iter().map(|window| window.reset).collect();
+        assert_eq!(resets, [None, None], "{stamp}");
+    }
 }
 
 #[test]
