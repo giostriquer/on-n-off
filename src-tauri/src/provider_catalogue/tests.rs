@@ -24,6 +24,8 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary: "claude",
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
+                        client: "Claude Code",
+                        vendor: "Anthropic",
                         on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
                         sign_in_deadline: Some(SignInDeadline::Claude),
                         ..LimitsFacts::NONE
@@ -40,6 +42,8 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary: "codex",
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
+                        client: "Codex CLI",
+                        vendor: "OpenAI",
                         on_load: &[OnLoad::DropHiddenWindows],
                         credits_spent: Some(CreditsSpent::Codex),
                         session_rollouts: Some(SessionRollouts::Codex),
@@ -84,6 +88,8 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                     binary: "muse",
                     binary_aliases: &[],
                     limits: Some(LimitsFacts {
+                        client: "Muse Code",
+                        vendor: "Meta",
                         inherits_legacy_reading: true,
                         on_load: &[OnLoad::MarkFirstMessageSessions],
                         ..LimitsFacts::NONE
@@ -236,6 +242,8 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
     assert_eq!(
         LimitsFacts::NONE,
         LimitsFacts {
+            client: "",
+            vendor: "",
             inherits_legacy_reading: false,
             on_load: &[],
             credits_spent: None,
@@ -246,6 +254,26 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
             paid_reset_offer: None,
         }
     );
+}
+
+#[test]
+fn a_named_row_names_its_client_and_vendor_and_holds_no_other_fact() {
+    assert_eq!(
+        LimitsFacts::named("Acme CLI", "Acme"),
+        LimitsFacts {
+            client: "Acme CLI",
+            vendor: "Acme",
+            ..LimitsFacts::NONE
+        }
+    );
+    for id in WITH_LIMITS {
+        let facts = id.limits_facts();
+        assert!(
+            !facts.client.is_empty() && !facts.vendor.is_empty(),
+            "{id:?}"
+        );
+    }
+    assert!(every_limits_row_is_named());
 }
 
 #[test]

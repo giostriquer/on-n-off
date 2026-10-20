@@ -47,8 +47,6 @@ fn a_read_merges_session_rollouts_only_for_a_provider_whose_facts_name_them() {
         fs::write(sessions.join("rollout.jsonl"), ROLLOUT).unwrap();
         let store = SnapshotStore::for_home(&home);
         store.save(&remembered(provider)).unwrap();
-        let signed_in = signed_in_card(provider, "acct-now", Reading::default());
-
         let cards = read_accounts(
             provider,
             Sources {
@@ -57,9 +55,10 @@ fn a_read_merges_session_rollouts_only_for_a_provider_whose_facts_name_them() {
             },
             |read_home| {
                 assert_eq!(read_home, home.as_path());
-                signed_in
+                Read::anonymous(ReadFailure::NotInstalled)
             },
-        );
+        )
+        .cards;
 
         let merged = provider.limits_facts().session_rollouts.is_some();
         let expected = if merged { 96.0 } else { 86.0 };

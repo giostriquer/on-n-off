@@ -35,7 +35,9 @@ fn a_usage_refresh_reads_every_saved_account_but_the_signed_in_one() {
             fetched.lock().unwrap().push(profile.id.clone());
             FetchResult {
                 login: profile.login.clone(),
-                result: Ok(reading(&profile.identity.observation_key())),
+                result: Ok(crate::limits::Accepted::for_test(reading(
+                    &profile.identity.observation_key(),
+                ))),
             }
         });
 
@@ -88,7 +90,9 @@ fn a_usage_refresh_leaves_archived_accounts_alone() {
             fetched.lock().unwrap().push(profile.id.clone());
             FetchResult {
                 login: profile.login.clone(),
-                result: Ok(reading(&profile.identity.observation_key())),
+                result: Ok(crate::limits::Accepted::for_test(reading(
+                    &profile.identity.observation_key(),
+                ))),
             }
         });
 

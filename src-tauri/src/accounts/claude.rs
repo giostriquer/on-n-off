@@ -10,7 +10,7 @@ use super::{
     transaction::{Native, NativeGuard, ReadBack},
     Home, IsolatedSignIn, NativeAccount,
 };
-use crate::dto::{AgentId, ProviderLimitsDto};
+use crate::dto::AgentId;
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -55,9 +55,9 @@ impl super::Adapter for Claude {
         _: &Login,
         _: i64,
         _: &crate::limits::SavedReadUrls<'_>,
-    ) -> Result<ProviderLimitsDto, crate::limits::SavedReadError> {
-        Err(crate::limits::SavedReadError::Unavailable(
-            "This account's login has not moved into its home yet; the next read tries again.",
+    ) -> Result<crate::limits::Accepted, crate::limits::ReadFailure> {
+        Err(crate::limits::ReadFailure::Unavailable(
+            NOT_MOVED.to_string(),
         ))
     }
 
@@ -70,6 +70,9 @@ impl super::Adapter for Claude {
         }
     }
 }
+
+pub(crate) const NOT_MOVED: &str =
+    "This account's login has not moved into its home yet; the next read tries again.";
 
 const BUSY: &str = "Claude is updating its login or configuration. Retry after it finishes.";
 
@@ -431,7 +434,7 @@ impl IsolatedSignIn for ClaudeNative {
         command
     }
 
-    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<ProviderLimitsDto> {
+    fn first_usage(&self, _dir: &Path, identity: &Identity) -> Option<crate::limits::Accepted> {
         crate::limits::claude_cli::read_usage(&|| self.command(), &self.config_file, identity).ok()
     }
 
