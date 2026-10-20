@@ -25,9 +25,11 @@ function present(at: WindowAt, note: string): LimitWindowPresentation {
   return { usedNow: at.usedNow, usedFigure: at.usedFigure, meter: at.meter, text: at.usedText, note };
 }
 
-export function presentLimitWindow(window: LimitWindow, now: number): LimitWindowPresentation {
+export type QuotaWindowPresentation = LimitWindowPresentation & { resetsIn: string | null };
+
+export function presentLimitWindow(window: LimitWindow, now: number): QuotaWindowPresentation {
   const at = windowAt(window, now);
-  return present(at, at.note.text);
+  return { ...present(at, at.note.text), resetsIn: at.note.kind === "pending" ? at.note.relative ?? null : null };
 }
 
 function mainWindows(entry: ProviderLimits): LimitWindow[] {

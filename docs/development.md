@@ -89,7 +89,7 @@ source carries no comments (see [Code comments](#code-comments)).
   (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
   the destructive items, and the footer: its main button, the Switch anyway confirmation and the
   banked reset controls. Each entry carries what its handler needs (the account controls, the saved
-  login, the clients still running, the reading, the waiting spend), and `useCardActions`
+  login, the clients still running, the reading and when its headline window resets by itself, the waiting spend), and `useCardActions`
   (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
   else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
   Check limits now (`checkNowEntry`). The plan reads two facts from the card for who is signed in:
@@ -112,6 +112,8 @@ source carries no comments (see [Code comments](#code-comments)).
   and ending before the actions; otherwise they all move to their own row, starting under the
   name in the same order. The category starts under the name and its tags and runs to the
   header's right edge. The tray popover's header puts its tags at the right, in the same order.
+  A remembered or paused card's status is a tag in the clock's place on the popover only: the
+  Limits screen draws it in the card's body, above its windows, so its header renders no tag for it.
   `scripts/ui-shots.mjs` checks these rules, and that tags on one line sit one gap apart in their
   order: `accountHeaderIssues` in every scene that sets `limitsColumns`, and `popoverHeaderIssues`
   in every scene that sets `popoverHeaders`; `bun run ui:layout` runs only those scenes (Visual

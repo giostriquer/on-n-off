@@ -606,7 +606,9 @@ A vault that cannot be read right now is a retryable IPC error for the subscript
 absent date.
 
 Account management is embedded in Limits cards. The Limits header contains one Add account picker for Claude, Codex and Muse;
-each card owns its usage, subscription date, primary action and optional category. A saved
+each provider in it waits by the rule its cards' account actions wait by (`blocked`, `AccountManager.tsx`):
+while that provider's account list is loading, cannot be read or needs recovery, and while one of
+its account changes runs. Each card owns its usage, subscription date, primary action and optional category. A saved
 profile's login state decides, for every provider, whether its card asks for a new sign-in: ended,
 refused or another account make Sign in again the primary action, with the state's sign-in tag and
 its message in place of the read's, and a refused login or another account keeps Use account in

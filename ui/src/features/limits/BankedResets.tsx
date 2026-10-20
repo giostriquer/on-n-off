@@ -3,11 +3,10 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
-import { windowAt } from "$lib/windowAt";
 import { actionButton } from "@/components/actionButton";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
 import type { CardFigures } from "./limitCards";
-import { headlineWindow, latestObservedAt, usageLeftFigure } from "./limitPresentation";
+import { latestObservedAt, usageLeftFigure } from "./limitPresentation";
 import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
 
@@ -47,8 +46,9 @@ function expiry(at: string | null | undefined, now: number): string | null {
 
 type AttemptResult = { role: "status" | "alert"; message: string; answeredAt: number };
 
-export function UseBankedReset({ entry, label, offered, now, disabled = false }: {
+export function UseBankedReset({ entry, resetsIn, label, offered, now, disabled = false }: {
   entry: ProviderLimits;
+  resetsIn: string | null;
   label: string;
   offered: boolean;
   now: number;
@@ -81,13 +81,10 @@ export function UseBankedReset({ entry, label, offered, now, disabled = false }:
     }
   }
 
-  const { headline } = headlineWindow(entry);
-  const note = headline ? windowAt(headline, now).note : null;
-  const renewsIn = note?.kind === "pending" ? note.relative : undefined;
   const effect = "A banked reset puts its usage back to 0% and moves its weekly reset date. It can't be undone.";
   const body = left === null
-    ? `on-n-off can't read how much of ${label}'s Codex limit is left.${renewsIn ? ` It renews by itself in ${renewsIn}.` : ""} ${effect}`
-    : `${label} has ${left}% of its Codex limit left${renewsIn ? ` and renews by itself in ${renewsIn}` : ""}. ${effect}`;
+    ? `on-n-off can't read how much of ${label}'s Codex limit is left.${resetsIn ? ` It renews by itself in ${resetsIn}.` : ""} ${effect}`
+    : `${label} has ${left}% of its Codex limit left${resetsIn ? ` and renews by itself in ${resetsIn}` : ""}. ${effect}`;
   return (
     <>
       {offered ? (

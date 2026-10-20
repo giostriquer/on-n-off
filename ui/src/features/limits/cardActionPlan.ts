@@ -51,6 +51,7 @@ export type SwitchAlongside<C> = { enabled: boolean; clients: string[] } & Saved
 
 export type ResetControls = {
   reading: ProviderLimits;
+  resetsIn: string | null;
   useBankedReset: { enabled: boolean } | null;
   automaticSpend: { dueAt: string } | null;
 };
@@ -149,6 +150,7 @@ function resetsOf<C>({ card, can, signedIn, confirmed }: Shown<C>, switching: bo
   const live = card.leads && card.freshness.readStatus === "ok" && card.figures.bankedResets !== null;
   return {
     reading: card.reading,
+    resetsIn: card.headline?.resetsIn ?? null,
     useBankedReset: signedIn && live && !switching ? { enabled: can && confirmed } : null,
     automaticSpend: pendingSpend && { dueAt: pendingSpend.dueAt },
   };

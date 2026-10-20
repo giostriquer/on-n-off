@@ -241,8 +241,17 @@ describe("a card's windows", () => {
     const renewed = staleCodex();
     renewed.windows[0] = { ...renewed.windows[0], usedPercent: 97, resetsAt: "2026-08-17T18:35:00Z" };
     expect(cards([renewed])[0].headline).toEqual({
-      id: "primary", label: "Weekly · all models", usedNow: 0, usedFigure: 0, meter: { level: "base" }, text: "0%", note: expect.stringMatching(/^reset 1h ago · \w{3} \d\d:\d\d$/),
+      id: "primary", label: "Weekly · all models", usedNow: 0, usedFigure: 0, meter: { level: "base" }, text: "0%", note: expect.stringMatching(/^reset 1h ago · \w{3} \d\d:\d\d$/), resetsIn: null,
     });
+  });
+
+  it("tells how long each window has until it resets by itself, and nothing once it has reset or without a reset time", () => {
+    const [current, remembered] = cards([okCodex(), staleCodex()]);
+    expect(remembered.headline?.resetsIn).toBe("2d 14h");
+    expect(current.rows.map(row => row.resetsIn)).toEqual([null]);
+    const unknown = okCodex();
+    unknown.windows[0] = { ...unknown.windows[0], resetsAt: null };
+    expect(cards([unknown])[0].headline?.resetsIn).toBeNull();
   });
 
   it("leads a card with no weekly window with nothing: its session and model windows are ordinary rows", () => {
