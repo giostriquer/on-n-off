@@ -140,14 +140,16 @@ adapter assumes today (change the adapter and this file together).
   changes as it loads (`on_load`: Codex drops its hidden windows, Claude its banked resets, and
   Claude and Muse mark an unused session without a reset as starting with the first message); and
   which implementation, if any, gives the provider each of these: credits spent (Codex), session
-  rollouts as extra observations (Codex), banked resets (Codex), a saved sign-in's deadline
-  (Claude), the subscription term (Codex: asked by the read and shown by the card, one fact) and
-  the paid reset offer (Codex). Each of those is a closed enum naming the implementations it has
-  (`BankedResets::Codex`, `SignInDeadline::Claude`, …), so a row can only name one that exists,
+  rollouts as extra observations (Codex), banked resets (Codex), the subscription term (Codex:
+  asked by the read and shown by the card, one fact) and the paid reset offer (Codex). Each of
+  those is a closed enum naming the implementations it has (`BankedResets::Codex`,
+  `SubscriptionTerm::Codex`, …), so a row can only name one that exists,
   and the code that runs it matches on it. Exactly one provider banks resets: a compile-time check
   holds `WITH_BANKED_RESETS` to one entry, `BANKED_RESETS_PROVIDER`, whose card the banked reset
   alert judges and whose read the limits monitor watches and repeats before a spend, because the
-  alert, its spend and its re-read are Codex's. The four card features are written into the
+  alert, its spend and its re-read are Codex's. A saved sign-in's end is no Limits fact: the
+  accounts adapters read it and every card reads it as the profile's login state (Saved
+  subscription profiles, below). The three card features are written into the
   catalogue fixture as `limitsFeatures`, each the key of the implementation it names, and the
   UI's `LIMITS_FEATURES` is that map, read through `LIMITS_IMPLEMENTATIONS`, the one list of the
   implementations the card model has.

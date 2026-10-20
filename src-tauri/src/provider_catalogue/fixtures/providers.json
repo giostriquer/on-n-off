@@ -30,19 +30,16 @@
   },
   "limitsFeatures": {
     "claude": {
-      "signInDeadline": "claude",
       "subscriptionTerm": null,
       "bankedResets": null,
       "paidResetOffer": null
     },
     "codex": {
-      "signInDeadline": null,
       "subscriptionTerm": "codex",
       "bankedResets": "codex",
       "paidResetOffer": "codex"
     },
     "muse": {
-      "signInDeadline": null,
       "subscriptionTerm": null,
       "bankedResets": null,
       "paidResetOffer": null

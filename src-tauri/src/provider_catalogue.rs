@@ -22,7 +22,6 @@ pub struct LimitsFacts {
     pub credits_spent: Option<CreditsSpent>,
     pub session_rollouts: Option<SessionRollouts>,
     pub banked_resets: Option<BankedResets>,
-    pub sign_in_deadline: Option<SignInDeadline>,
     pub subscription_term: Option<SubscriptionTerm>,
     pub paid_reset_offer: Option<PaidResetOffer>,
 }
@@ -54,12 +53,6 @@ pub enum BankedResets {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
-pub enum SignInDeadline {
-    Claude,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum SubscriptionTerm {
     Codex,
 }
@@ -79,7 +72,6 @@ impl LimitsFacts {
         credits_spent: None,
         session_rollouts: None,
         banked_resets: None,
-        sign_in_deadline: None,
         subscription_term: None,
         paid_reset_offer: None,
     };
@@ -111,7 +103,6 @@ impl AgentId {
                 binary_aliases: &[],
                 limits: Some(LimitsFacts {
                     on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
-                    sign_in_deadline: Some(SignInDeadline::Claude),
                     ..LimitsFacts::named("Claude Code", "Anthropic")
                 }),
                 usage: Some(UsageProvider::Claude),
