@@ -147,3 +147,54 @@ fn a_home_whose_one_read_fails_records_no_end_and_is_not_read_again() {
     assert_eq!(reads() - before, 1, "the failed read is not made again");
     assert_eq!(recorded(&harness, &you_id), json!("unknown"));
 }
+
+#[test]
+fn a_read_end_is_recorded_only_on_the_same_home_and_only_where_none_is_recorded() {
+    let harness = Harness::new();
+    let ids: Vec<String> = ["a", "b", "c"]
+        .into_iter()
+        .map(|user| harness.saved(identity(AgentId::Claude, user, "team"), claude(user, "1")))
+        .collect();
+    let homes: Vec<String> = ids
+        .iter()
+        .map(|_| uuid::Uuid::new_v4().to_string())
+        .collect();
+    harness.seed(|db| {
+        for (profile, home) in db.profiles.iter_mut().zip(&homes) {
+            profile.login = None;
+            profile.home = Some(home.clone());
+            profile.sign_in_end = SignInEnd::Unread;
+        }
+        db.profiles[2].sign_in_end = SignInEnd::At(1);
+    });
+
+    super::super::login_state::remember_ends(
+        harness.path(),
+        &[
+            (
+                ids[0].clone(),
+                Some(homes[0].clone()),
+                SignInEnd::At(AHEAD_MS),
+            ),
+            (
+                ids[1].clone(),
+                Some(uuid::Uuid::new_v4().to_string()),
+                SignInEnd::At(AHEAD_MS),
+            ),
+            (ids[2].clone(), Some(homes[2].clone()), SignInEnd::Unknown),
+        ],
+    )
+    .unwrap();
+
+    assert_eq!(recorded(&harness, &ids[0]), json!({"at": AHEAD_MS}));
+    assert_eq!(
+        recorded(&harness, &ids[1]),
+        Value::Null,
+        "read in a home it no longer has"
+    );
+    assert_eq!(
+        recorded(&harness, &ids[2]),
+        json!({"at": 1}),
+        "already recorded"
+    );
+}

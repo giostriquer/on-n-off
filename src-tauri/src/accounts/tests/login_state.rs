@@ -1,6 +1,6 @@
 use super::super::{model::SignInDeadline, store::Login, usage::FetchResult};
 use super::fixture::{claude, codex, identity, muse, provider_reading, Harness};
-use crate::dto::AgentId;
+use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use crate::http::RateLimitReset;
 use crate::limits::ReadFailure;
 use serde_json::{json, Value};
@@ -84,23 +84,46 @@ impl Saved {
     }
 
     fn poll(&self, force: bool) -> bool {
+        self.polled(force).0
+    }
+
+    fn polled(&self, force: bool) -> (bool, Vec<ProviderLimitsDto>) {
         let mut entries = Vec::new();
         let (fetched, answer, provider) = (&self.fetched, &self.answer, self.provider);
-        self.harness
-            .accounts()
-            .refresh_usage(provider, force, &mut entries, &|profile, _| {
-                *fetched.lock().unwrap() += 1;
-                FetchResult {
-                    login: profile.login.clone(),
-                    result: match answer.lock().unwrap().clone() {
-                        Some(failure) => Err(failure),
-                        None => Ok(crate::limits::Accepted::for_test(provider_reading(
-                            provider,
-                            &profile.identity.observation_key(),
-                        ))),
-                    },
-                }
-            })
+        let changed =
+            self.harness
+                .accounts()
+                .refresh_usage(provider, force, &mut entries, &|profile, _| {
+                    *fetched.lock().unwrap() += 1;
+                    FetchResult {
+                        login: profile.login.clone(),
+                        result: match answer.lock().unwrap().clone() {
+                            Some(failure) => Err(failure),
+                            None => Ok(crate::limits::Accepted::for_test(provider_reading(
+                                provider,
+                                &profile.identity.observation_key(),
+                            ))),
+                        },
+                    }
+                });
+        (changed, entries)
+    }
+
+    fn card(&self, force: bool) -> Option<ProviderLimitsDto> {
+        let (identity, _) = you(self.provider, "g1");
+        let key = identity.observation_key();
+        self.polled(force).1.into_iter().find(|card| {
+            card.account
+                .as_ref()
+                .is_some_and(|account| account.id == key)
+        })
+    }
+
+    fn context(&self) -> crate::limits::outcome::Saved {
+        match self.kept {
+            Kept::Vault => crate::limits::outcome::Saved::Login,
+            Kept::Home => crate::limits::outcome::Saved::Home,
+        }
     }
 
     fn reads(&self) -> usize {
@@ -193,11 +216,21 @@ fn every_saved_poll_honours_a_retry_after_and_backs_off_the_same_way() {
             let start = Instant::now();
             saved.poll(false);
             let end = Instant::now();
-            saved.poll(true);
+            let held = saved.card(true).expect("a held poll keeps its card");
             assert_eq!(
                 saved.reads(),
                 1,
                 "{failure:?}: {provider:?} in {kept:?} forced past its hold"
+            );
+            assert_eq!(
+                held.status,
+                LimitsStatus::Failed,
+                "{provider:?} in {kept:?}"
+            );
+            assert_eq!(
+                held.message,
+                Some(crate::limits::outcome::saved(provider, saved.context(), &failure, 0).message),
+                "{failure:?}: {provider:?} in {kept:?} replays why it is held"
             );
             let [(next, failures)] = super::super::usage::tests::holds(saved.harness.path())[..]
             else {

@@ -17,7 +17,7 @@ const READING: Record<LimitsProvider, (overrides?: Partial<ProviderLimits>) => P
 type Shown = {
   main: string | null;
   useInMenu: boolean;
-  tag: { label: string; tone: string } | null;
+  tag: { label: string; tone: string; name: string; headline: string } | null;
   message: string | null;
 };
 
@@ -38,31 +38,39 @@ function shown(provider: LimitsProvider, loginState: LoginState): Shown {
   return {
     main: plan.footer?.main?.action ?? null,
     useInMenu: plan.menu.some(entry => entry.action === "useAccount"),
-    tag: tag?.kind === "signIn" ? { label: tag.signIn.label, tone: tag.signIn.tone } : null,
+    tag: tag?.kind === "signIn" ? { label: tag.signIn.label, tone: tag.signIn.tone, name: tag.signIn.name, headline: tag.signIn.headline } : null,
     message: card.freshness.message?.text ?? null,
   };
 }
 
 const AGAIN = "Sign in again to use this account.";
+const exactly = (text: string) => expect.stringMatching(new RegExp(`^${text}, \\d{1,2}:\\d{2}`));
 
 const TABLE: [string, LoginState, (name: string) => Shown][] = [
   ["usable", { state: "usable" }, () => ({ main: "useAccount", useInMenu: false, tag: null, message: null })],
   ["ending in more than a week", { state: "ending", endsAt: at(20) }, () => ({ main: "useAccount", useInMenu: false, tag: null, message: null })],
-  ["ending within the week", { state: "ending", endsAt: at(3) }, () => ({
-    main: "useAccount", useInMenu: false, tag: { label: "Sign-in ends Aug 20", tone: "warning" }, message: null,
+  ["ending within the week", { state: "ending", endsAt: at(3) }, name => ({
+    main: "useAccount", useInMenu: false, message: null,
+    tag: { label: "Sign-in ends Aug 20", tone: "warning", name: `${name} sign-in ends Aug 20`, headline: exactly(`${name} ends this sign-in Aug 20, 2026`) },
   })],
-  ["ending, its date passed since the account list said so", { state: "ending", endsAt: at(-0.01) }, () => ({
-    main: "useAccount", useInMenu: false, tag: { label: "Sign-in ends Aug 17", tone: "warning" }, message: null,
+  ["ending, its date passed since the account list said so", { state: "ending", endsAt: at(-0.01) }, name => ({
+    main: "useAccount", useInMenu: false, message: null,
+    tag: { label: "Sign-in ends Aug 17", tone: "warning", name: `${name} sign-in ends Aug 17`, headline: exactly(`${name} ends this sign-in Aug 17, 2026`) },
   })],
   ["ended", { state: "ended", endsAt: at(-2) }, name => ({
-    main: "signInAgain", useInMenu: false, tag: { label: "Sign-in ended", tone: "expired" }, message: `${name} ended this sign-in on Aug 15. ${AGAIN}`,
+    main: "signInAgain", useInMenu: false, message: `${name} ended this sign-in on Aug 15. ${AGAIN}`,
+    tag: { label: "Sign-in ended", tone: "expired", name: `${name} sign-in ended Aug 15`, headline: exactly(`${name} ended this sign-in Aug 15, 2026`) },
   })],
   ["refused", { state: "refused" }, name => ({
-    main: "signInAgain", useInMenu: true, tag: { label: "Sign-in refused", tone: "expired" }, message: `${name} no longer accepts this saved login. ${AGAIN}`,
+    main: "signInAgain", useInMenu: true, message: `${name} no longer accepts this saved login. ${AGAIN}`,
+    tag: { label: "Sign-in refused", tone: "expired", name: `${name} sign-in refused`, headline: `${name} no longer accepts this saved login` },
   })],
   ["another account", { state: "otherAccount" }, name => ({
-    main: "signInAgain", useInMenu: true, tag: { label: "Other account", tone: "expired" },
-    message: `This saved login now signs in as a different ${name} account. ${AGAIN}`,
+    main: "signInAgain", useInMenu: true, message: `This saved login now signs in as a different ${name} account. ${AGAIN}`,
+    tag: {
+      label: "Other account", tone: "expired", name: `${name} sign-in is another account`,
+      headline: `This saved login now signs in as a different ${name} account`,
+    },
   })],
   ["missing", { state: "missing" }, () => ({ main: "signIn", useInMenu: false, tag: null, message: null })],
 ];

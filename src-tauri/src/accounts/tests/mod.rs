@@ -37,6 +37,7 @@ mod categories;
 mod fixture;
 mod homes;
 mod listing;
+mod login_precedence;
 mod login_state;
 mod profiles;
 mod remembering;
