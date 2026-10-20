@@ -219,7 +219,7 @@ Run from the repository root, in PowerShell on Windows or bash/zsh on macOS.
 bun install
 bun run test
 bun run check
-bun test scripts/                          # release verifier, workflow and IPC contracts
+bun test scripts/                          # release verifier, workflow, IPC and CSP contracts
 bun run build
 bun run tauri dev
 
@@ -250,6 +250,29 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 ./scripts/prune-rust-toolchains.test.ps1
 ./scripts/write-checksums.test.ps1
 ```
+
+## Content security policy
+
+The webview runs under the policy in `src-tauri/tauri.conf.json` (`app.security.csp`): scripts,
+stylesheets, images and fonts come only from the app bundle, the page talks only to the Tauri IPC
+bridge (`ipc:` on macOS, `http://ipc.localhost` on Windows), and plugins, `<base>`, form posts and
+framing are refused. Tauri adds its own nonces and hashes when it builds; `tauri dev` loads the page
+from Vite and applies none of it. Inline style attributes are the one exception
+(`style-src-attr 'unsafe-inline'`): TanStack Charts writes `style` on the root `<svg>` of every
+chart; WebKit before Safari 15.4 ignores that directive and drops the chart's `display:block`,
+which is cosmetic. Keep the app's own styling in classes and stylesheets: no `<style>` element, no
+`style` attribute in markup (React's `style` prop is fine, since it sets properties, not the
+attribute), no `dangerouslySetInnerHTML`, no remote URL. `vite.config.ts` keeps the build inside the
+policy: `assetsInlineLimit: 0`, because `img-src` and `font-src` refuse `data:` URIs, and no
+module-preload polyfill, whose `fetch` of the app's own chunks `connect-src` refuses on WebKit
+before Safari 17.
+
+`scripts/csp.test.mjs` pins the whole policy and keeps `<style>` and `dangerouslySetInnerHTML` out
+of `ui/src`. `bun run build && bun run ui:csp` serves `ui/dist` on `127.0.0.1` with the policy as a
+header, injects the dev mock as an init script, first proves that an injected `<style>` raises a
+violation, then runs every scene without the layout guards and fails on any violation or on a page
+served without the header. CI runs it in the required `layout` job; a scene only covers what it
+renders, so a new dialog or state needs a scene to be checked.
 
 ## Visual verification
 

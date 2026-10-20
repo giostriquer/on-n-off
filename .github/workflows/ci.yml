@@ -68,12 +68,12 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: bun test scripts/
 
-  # The card and popover header layout rules, measured in headless Chromium; a required check
-  # (docs/development.md, Visual verification).
+  # The card and popover header layout rules, then every scene under the content security policy,
+  # measured in headless Chromium; a required check (docs/development.md, Visual verification).
   layout:
     name: layout
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - *checkout
       - *setup-bun
@@ -88,6 +88,21 @@ jobs:
         env:
           UI_SHOTS_DIR: .tmp/ui-shots
         run: bun run ui:layout
+
+      # Every scene again, from the production build, under the content security policy in
+      # tauri.conf.json (docs/development.md, Content security policy). It runs even when the
+      # layout check failed, so one push shows both results.
+      - name: Build frontend
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 5
+        run: bun run build
+
+      - name: Check every scene under the content security policy
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        timeout-minutes: 10
+        env:
+          UI_SHOTS_DIR: .tmp/ui-shots/csp
+        run: bun run ui:csp
 
       - name: Keep the layout captures
         if: failure()
