@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, statSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { appPolicy, cspHeader } from "./csp.mjs";
 import { chooseScenes } from "./ui-scenes.mjs";
 
+const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.UI_PORT ?? 1425);
-const BASE = process.env.UI_BASE ?? `http://localhost:${PORT}`;
+const CSP_PORT = Number(process.env.UI_CSP_PORT ?? 1426);
+const DIST = path.join(ROOT, "ui", "dist");
 const OUT = process.env.UI_SHOTS_DIR ?? ".tmp/ui-shots";
 const VIEWPORT = { width: 1120, height: 760 };
 const FIXTURE_CLOCK = "2026-08-24T20:00:00Z";
@@ -34,6 +38,59 @@ function stopDevServer(child) {
   if (!child) return;
   if (process.platform === "win32") child.kill();
   else process.kill(-child.pid);
+}
+
+function reportViolations() {
+  document.addEventListener("securitypolicyviolation", (event) => {
+    console.error(`CSP refused ${event.effectiveDirective}: ${event.blockedURI || "inline"} at ${event.sourceFile}:${event.lineNumber}`);
+  });
+}
+
+async function mockIpcScript() {
+  const build = await globalThis.Bun.build({ entrypoints: [path.join(ROOT, "ui", "src", "dev", "mockIpc.ts")], target: "browser", format: "iife" });
+  if (!build.success) throw new Error(`the mock IPC did not bundle:\n${build.logs.join("\n")}`);
+  return build.outputs[0].text();
+}
+
+async function builtAppUnderPolicy() {
+  if (!existsSync(path.join(DIST, "index.html"))) throw new Error("ui/dist is missing; run `bun run build` first");
+  const policy = appPolicy(ROOT);
+  if (!policy) throw new Error("tauri.conf.json sets no content security policy to check");
+  const header = cspHeader(policy);
+  const initScripts = [reportViolations, { content: await mockIpcScript() }];
+  const server = globalThis.Bun.serve({
+    hostname: "127.0.0.1",
+    port: CSP_PORT,
+    async fetch(request) {
+      const file = path.join(DIST, decodeURIComponent(new URL(request.url).pathname));
+      const asset = file.startsWith(`${DIST}${path.sep}`) && statSync(file, { throwIfNoEntry: false })?.isFile() ? file : path.join(DIST, "index.html");
+      return new Response(globalThis.Bun.file(asset), { headers: { "Content-Security-Policy": header } });
+    },
+  });
+  return { base: `http://127.0.0.1:${server.port}`, header, initScripts, stop: () => server.stop(true) };
+}
+
+async function devServer() {
+  const child = await ensureDevServer();
+  return { base: process.env.UI_BASE ?? `http://localhost:${PORT}`, header: null, initScripts: [], stop: () => stopDevServer(child) };
+}
+
+async function proveViolationsSurface(browser, target) {
+  const context = await browser.newContext();
+  for (const script of target.initScripts) await context.addInitScript(script);
+  const page = await context.newPage();
+  await page.goto(`${target.base}/?mock=ok`, { waitUntil: "networkidle" });
+  const reported = page
+    .waitForEvent("console", { predicate: (message) => message.type() === "error" && message.text().startsWith("CSP refused"), timeout: 5_000 })
+    .catch(() => null);
+  await page.evaluate(() => {
+    const style = document.createElement("style");
+    style.textContent = "body { outline: 0 }";
+    document.head.append(style);
+  });
+  const violation = await reported;
+  await context.close();
+  if (!violation) throw new Error("a <style> element raised no CSP violation, so the policy check would see none");
 }
 
 async function ensureDevServer() {
@@ -142,8 +199,9 @@ function packedInOrder({ rects, gap }) {
   });
 }
 
-async function runScene(browser, scene) {
+async function runScene(browser, scene, target) {
   const context = await browser.newContext({ viewport: scene.viewport ?? VIEWPORT, deviceScaleFactor: 2 });
+  for (const script of target.initScripts) await context.addInitScript(script);
   await context.addInitScript(
     ({ theme, themeKey, screenKey }) => {
       localStorage.setItem(themeKey, theme);
@@ -158,7 +216,10 @@ async function runScene(browser, scene) {
   page.on("console", (message) => {
     if (message.type() === "error") problems.push(`console.error: ${message.text()}`);
   });
-  await page.goto(`${BASE}${scene.url}`, { waitUntil: "networkidle" });
+  const response = await page.goto(`${target.base}${scene.url}`, { waitUntil: "networkidle" });
+  if (target.header && response?.headers()["content-security-policy"] !== target.header) {
+    problems.push("the page was not served under the content security policy");
+  }
   if (problems.some((problem) => problem.includes("Outdated Optimize Dep"))) {
     problems.length = 0;
     await page.reload({ waitUntil: "networkidle" });
@@ -243,23 +304,25 @@ async function scrollTo(page, selector) {
 }
 
 async function main() {
-  const scenes = await chooseScenes(process.argv.slice(2));
+  const { csp, scenes } = await chooseScenes(process.argv.slice(2));
   mkdirSync(OUT, { recursive: true });
-  const dev = await ensureDevServer();
-  const browser = await chromium.launch();
+  const target = csp ? await builtAppUnderPolicy() : await devServer();
+  let browser;
   let failed = false;
   try {
+    browser = await chromium.launch();
+    if (csp) await proveViolationsSurface(browser, target);
     for (const scene of scenes) {
       console.log(`scene ${scene.name}`);
-      const problems = await runScene(browser, scene).catch((error) => [`scene failed: ${error.message}`]);
+      const problems = await runScene(browser, scene, target).catch((error) => [`scene failed: ${error.message}`]);
       for (const problem of problems) {
         console.log(`  ! ${problem}`);
         failed = true;
       }
     }
   } finally {
-    await browser.close();
-    stopDevServer(dev);
+    await browser?.close();
+    target.stop();
   }
   process.exit(failed ? 1 : 0);
 }

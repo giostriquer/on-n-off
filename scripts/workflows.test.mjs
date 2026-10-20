@@ -479,6 +479,37 @@ test("both release checksum files come from the tested LF writer", { skip }, () 
   assert.doesNotMatch(readFileSync(join(directory, "release.yml"), "utf8"), /WriteAllLines/);
 });
 
+test("the required layout job also runs every scene of the production build under the content security policy", { skip }, () => {
+  const layout = load("ci").jobs.layout;
+  assert.ok(requiredChecks.includes(layout.name));
+  const layoutCheck = step(layout, "Check the Limits card and popover header layout");
+  const build = step(layout, "Build frontend");
+  const check = step(layout, "Check every scene under the content security policy");
+  const captures = step(layout, "Keep the layout captures");
+  assert.equal(build.run, "bun run build");
+  assert.equal(check.run, "bun run ui:csp");
+  assert.ok(layoutCheck.index < build.index && build.index < check.index && check.index < captures.index);
+  for (const bounded of [build, check]) {
+    assert.ok(bounded["timeout-minutes"] <= 10, bounded.name);
+    assert.equal(bounded.if, "${{ !cancelled() && steps.install.outcome == 'success' }}", `${bounded.name} reports even when the layout check failed`);
+    assert.equal(bounded["continue-on-error"], undefined, bounded.name);
+  }
+  assert.ok(check.env.UI_SHOTS_DIR.startsWith(`${captures.with.path}/`), "a failed policy run keeps its captures");
+  const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  assert.equal(packageJson.scripts["ui:csp"], "bun scripts/ui-shots.mjs --csp");
+});
+
+test("every step a CI job's conditions wait on exists in that job, so no check is skipped by a missing id", { skip }, () => {
+  for (const [name, job] of Object.entries(load("ci").jobs)) {
+    const ids = new Set((job.steps ?? []).map((candidate) => candidate.id).filter(Boolean));
+    for (const candidate of job.steps ?? []) {
+      for (const [, id] of String(candidate.if ?? "").matchAll(/steps\.([\w-]+)\./g)) {
+        assert.ok(ids.has(id), `${name} › ${candidate.name} waits on steps.${id}, which the job does not have`);
+      }
+    }
+  }
+});
+
 test("every installer build installs the pinned cargo-about first, for the bundled license notice", { skip }, () => {
   for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
     const install = step(job, "Install cargo-about");

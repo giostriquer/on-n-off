@@ -173,7 +173,11 @@ Rust and Swift cache generations; the workflows and scripts own current keys.
   uncached: the notch package has no remote dependencies, so there is nothing in it to keep.
 - `ci.yml`'s `layout` job runs `bun run ui:layout` on the pinned Linux image after
   `bunx playwright install --with-deps chromium`, which takes the browser of the lockfile's
-  Playwright. It is a required check (docs/development.md, Visual verification).
+  Playwright. It is a required check (docs/development.md, Visual verification). The same job then
+  builds the frontend and runs `bun run ui:csp`, every scene of the production build under the
+  content security policy (docs/development.md, Content security policy). It shares the job because
+  the job already holds Chromium and is required, and a policy break, unlike an advisory, comes from
+  the pull request's own code.
 - `audit.yml` checks both lockfiles against published advisories on every pull request, every
   push to main and each Monday: `cargo deny check advisories` and `bun audit`. It is not a
   required check: an advisory lands without a change here, and must not block unrelated pull
