@@ -31,14 +31,13 @@ function commentLines(file) {
 
 test("the scan reaches nested sources in every language and skips build output", () => {
   const scanned = sources();
-  for (const pattern of SOURCE_PATTERNS) {
-    const extension = pattern.slice(1);
+  for (const extension of [".rs", ".ts", ".tsx", ".swift", ".mjs"]) {
     assert.ok(
       scanned.some((file) => extname(file) === extension && file.includes("/")),
       `no nested ${extension} source was scanned`,
     );
   }
-  assert.ok(!scanned.some((file) => file.includes("/.build/") || file.includes("/node_modules/")));
+  assert.ok(!scanned.some((file) => /(^|\/)(node_modules|\.build)\//.test(file)));
 });
 
 test("sources carry no code comments", () => {
