@@ -8,6 +8,7 @@ const skip = globalThis.Bun?.YAML ? false : "needs Bun's YAML parser";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const directory = join(root, ".github", "workflows");
 const load = (name) => globalThis.Bun.YAML.parse(readFileSync(join(directory, `${name}.yml`), "utf8"));
+const workflows = () => readdirSync(directory).filter((file) => file.endsWith(".yml")).map((file) => file.slice(0, -4)).sort();
 
 function step(job, name) {
   const index = job.steps.findIndex((candidate) => candidate.name === name);
@@ -38,7 +39,8 @@ function runnerLegs(job) {
 }
 
 test("every job runs on its OS's pinned runner image", { skip }, () => {
-  for (const name of ["ci", "verify", "bundle", "release", "cache-prune"]) {
+  assert.deepEqual(readdirSync(directory).filter((file) => !file.endsWith(".yml")), [], "every workflow is a .yml file the tests read");
+  for (const name of workflows()) {
     for (const [id, job] of Object.entries(load(name).jobs)) {
       for (const { label } of runnerLegs(job)) {
         const os = String(label).split("-")[0];
@@ -73,11 +75,13 @@ test("rustfmt fails the lint job before the cache restore and the slower setup",
 });
 
 test("only pull request runs cancel an in-progress run", { skip }, () => {
-  assert.equal(load("ci").concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}");
-  assert.equal(load("verify").concurrency, undefined, "verify.yml runs under ci.yml's group");
-  for (const name of ["bundle", "release", "cache-prune"]) {
-    assert.equal(load(name).concurrency["cancel-in-progress"], false, `${name}.yml has no pull request run to cancel`);
+  const pullRequestsOnly = "${{ github.event_name == 'pull_request' }}";
+  const cancels = { ci: pullRequestsOnly, audit: pullRequestsOnly, verify: undefined, bundle: false, release: false, "cache-prune": false };
+  assert.deepEqual(workflows(), Object.keys(cancels).sort(), "every workflow declares whether it cancels a run in progress");
+  for (const [name, cancel] of Object.entries(cancels)) {
+    assert.equal(load(name).concurrency?.["cancel-in-progress"], cancel, name);
   }
+  assert.equal(load("verify").concurrency, undefined, "verify.yml runs under ci.yml's group");
 });
 
 test("a failing frontend check does not hide the result of the next one", { skip }, () => {
@@ -402,4 +406,62 @@ test("the layout check runs the header scenes in CI on every run, can fail, keep
   assert.equal(captures.with.path, check.env.UI_SHOTS_DIR);
   const packageJson = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
   assert.equal(packageJson.scripts["ui:layout"], "bun scripts/ui-shots.mjs --layout");
+});
+
+const auditChecks = {
+  rust: { name: "Check Rust dependencies against the RustSec advisories", run: "cargo deny --locked --manifest-path src-tauri/Cargo.toml check advisories" },
+  javascript: { name: "Check JavaScript dependencies against the GitHub advisories", run: "bun audit" },
+};
+
+test("the dependency audit checks both lockfiles on every pull request, every push to main and every week", { skip }, () => {
+  const audit = load("audit");
+  assert.deepEqual(audit.on, {
+    pull_request: { branches: ["main"] },
+    push: { branches: ["main"] },
+    schedule: [{ cron: "17 9 * * 1" }],
+    workflow_dispatch: null,
+  });
+  assert.deepEqual(audit.permissions, { contents: "read" });
+  assert.deepEqual(Object.keys(audit.jobs).sort(), Object.keys(auditChecks).sort());
+  for (const [id, { name, run }] of Object.entries(auditChecks)) {
+    const job = audit.jobs[id];
+    for (const key of ["if", "continue-on-error", "permissions"]) assert.equal(job[key], undefined, `${id} ${key}`);
+    const check = step(job, name);
+    assert.equal(check.run.trim(), run);
+    for (const key of ["if", "continue-on-error"]) assert.equal(check[key], undefined, `${name} ${key}`);
+  }
+});
+
+test("the dependency audit is never a required check, so a new advisory cannot block unrelated pull requests", { skip }, () => {
+  for (const [id, job] of Object.entries(load("audit").jobs)) assert.ok(!requiredChecks.includes(job.name ?? id), id);
+});
+
+test("cargo-deny comes from a pinned release whose checksum is verified before it runs", { skip }, () => {
+  const audit = load("audit");
+  assert.match(String(audit.env.CARGO_DENY_VERSION), /^\d+\.\d+\.\d+$/);
+  assert.match(String(audit.env.CARGO_DENY_SHA256), /^[0-9a-f]{64}$/);
+  const install = step(audit.jobs.rust, "Install cargo-deny");
+  assert.equal(install.shell ?? audit.jobs.rust.defaults?.run?.shell ?? audit.defaults.run.shell, "bash", "bash -e stops the step at a failed checksum");
+  assert.match(install.run, /\/releases\/download\/\$\{CARGO_DENY_VERSION\}\//);
+  assert.match(install.run, /^echo "\$\{CARGO_DENY_SHA256\}  \S+" \| sha256sum -c -$/m);
+  assert.ok(install.index < step(audit.jobs.rust, auditChecks.rust.name).index);
+});
+
+test("deny.toml audits the shipped targets with every feature and gives each ignored advisory a reason", { skip: globalThis.Bun?.TOML ? false : "needs Bun's TOML parser" }, () => {
+  const deny = globalThis.Bun.TOML.parse(readFileSync(join(root, "src-tauri", "deny.toml"), "utf8"));
+  assert.deepEqual(deny.graph, { targets: ["aarch64-apple-darwin", "x86_64-pc-windows-msvc"], "all-features": true });
+  assert.equal(deny.advisories.unmaintained, "workspace");
+  for (const entry of deny.advisories.ignore ?? []) {
+    assert.match(String(entry.id), /^RUSTSEC-\d{4}-\d{4}$/);
+    assert.ok(entry.reason?.trim(), entry.id);
+  }
+});
+
+test("Dependabot keeps the pins of every workflow and local action current", { skip }, () => {
+  const dependabot = globalThis.Bun.YAML.parse(readFileSync(join(root, ".github", "dependabot.yml"), "utf8"));
+  const actions = dependabot.updates.find((update) => update["package-ecosystem"] === "github-actions");
+  const local = readdirSync(join(root, ".github", "actions"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `/.github/actions/${entry.name}`);
+  assert.deepEqual([...actions.directories].sort(), ["/", ...local].sort());
 });

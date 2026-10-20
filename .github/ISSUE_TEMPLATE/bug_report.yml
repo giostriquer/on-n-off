@@ -1,0 +1,80 @@
+name: Bug report
+description: Something in on-n-off does not work as expected.
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Before you paste logs or screenshots, replace emails, account ids,
+        tokens and home-directory paths with placeholders such as `you@example.com` and `/Users/me`.
+        Security problems go through [SECURITY.md](https://github.com/giostriquer/on-n-off/blob/main/SECURITY.md), not here.
+
+  - type: input
+    id: version
+    attributes:
+      label: on-n-off version
+      description: Settings → Application updates shows it.
+      placeholder: "0.35.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows 11
+        - Windows 10
+        - macOS (Apple Silicon)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Provider or area
+      multiple: true
+      options:
+        - Claude Code
+        - Codex
+        - Antigravity
+        - Cursor
+        - Muse
+        - Pull requests (GitHub)
+        - Side notch
+        - Settings or updates
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Limits
+        2. Click …
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include error text and screenshots if you have them.
+    validations:
+      required: true
+
+  - type: input
+    id: cli-versions
+    attributes:
+      label: Agent CLI versions
+      description: For example the output of `claude --version` or `codex --version`, if relevant.

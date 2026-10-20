@@ -175,6 +175,10 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
   you cannot reproduce locally.
 - Preserve Tauri command names and serialized shapes unless a migration is approved. Snapshots
   written by older versions must still load: give new fields defaults.
+- The README's Privacy section names every host the app itself contacts, and
+  `scripts/privacy-hosts.test.mjs` finds them as `https://` literals in non-test Rust. Write each
+  request URL with its full `https://host` literal, never a host assembled at runtime, and add a
+  new host to that section in the same change.
 - On restricted Windows sandboxes Vite/esbuild can fail with `spawn EPERM`. Record it and rerun
   the same command elsewhere; do not change code for a sandbox fault.
 
@@ -182,7 +186,7 @@ For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
 
 on-n-off source carries no code comments: rationale lives in the guide or PROVIDERS.md row that
 owns the subject. `scripts/no-code-comments.test.mjs` (run by `bun test scripts/` in CI) rejects a
-comment line in the Rust, TypeScript and Swift sources; compiler directives (`/// <reference …>`,
+comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler directives (`/// <reference …>`,
 `// @ts-expect-error`, Swift's tools-version line) are exempt.
 
 ## Test structure
@@ -222,6 +226,8 @@ bun run tauri dev
 cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml --all-targets --all-features
+cargo deny --manifest-path src-tauri/Cargo.toml check advisories   # needs cargo-deny
+bun audit
 
 bun run tauri build                        # Windows: NSIS
 bun run tauri build --bundles app,dmg      # macOS: .app + .dmg

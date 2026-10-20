@@ -1,0 +1,52 @@
+version: 2
+
+updates:
+  # windows, winreg and tao are held at the versions the tauri tree resolves; see src-tauri/Cargo.toml.
+  - package-ecosystem: cargo
+    directory: /src-tauri
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: windows
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: winreg
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: tao
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
+    groups:
+      cargo:
+        patterns:
+          - "*"
+
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    groups:
+      bun:
+        patterns:
+          - "*"
+
+  # dtolnay/rust-toolchain is pinned to a commit of its `stable` branch, which has no release tags
+  # for Dependabot to follow; it is bumped by hand.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/restore-swift-build
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: chore
+      include: scope
+    ignore:
+      - dependency-name: dtolnay/rust-toolchain
+    groups:
+      actions:
+        patterns:
+          - "*"

@@ -1,19 +1,12 @@
 # Prerelease smoke test (Windows and macOS)
 
-Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity / Cursor plugins, skills, MCP, and local usage estimates.
+Early prerelease build of **on-n-off**: desktop switchboard for Claude / Codex / Antigravity / Cursor / Muse plugins, skills, MCP, accounts, limits, and local usage estimates.
 
 The Windows notes come first; macOS-specific notes are in [macOS](#macos) below. The smoke order and safety notes apply to both.
 
-## What’s new (Studio v2 chrome)
-
-- App mark / window icons refreshed (rocker-style circular glyph)
-- Theme control moved from the top strip into left-rail **Appearance** (Dark / Light)
-- Left rail icons + hover well; Usage kept as a dedicated screen and Overview summary
-- Overview gauges link to Plugins / Skills / MCP; Usage card links to full Usage
-
 ## What you get
 
-- Windows installer: `on-n-off_0.1.0_x64-setup.exe` (NSIS)
+- Windows installer: `on-n-off_<version>_x64-setup.exe` (NSIS)
 - Not Authenticode-signed → Windows SmartScreen may warn; choose “More info” → “Run anyway” if you trust the sender
 - Stable releases include mandatory Tauri updater signatures for in-app update integrity
 
@@ -24,10 +17,11 @@ The Windows notes come first; macOS-specific notes are in [macOS](#macos) below.
    - `claude`
    - `codex`
    - `agy` (Antigravity; optional)
+   - `muse` (Muse; optional)
    - `gh` (GitHub CLI, signed in with `gh auth login`; optional, needed only by **Pull requests**)
 3. Optional: Node/`npx` if you will install skills via `npx skills add …`
 
-This is a **Windows desktop** app. It reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, and `.on-n-off`.  
+On Windows the app reads `%USERPROFILE%\.claude`, `.codex`, `.gemini`, `.cursor`, and `.on-n-off`, plus Muse's `%APPDATA%\muse` and `%LOCALAPPDATA%\muse`.  
 CLIs or transcripts that exist **only inside WSL** will look missing unless the same tools/data also exist on the Windows side.
 
 If a CLI works in a terminal but the app says **os error 193** / “not a valid Win32 application”, open **Settings**, click **Diagnose**, and point **Binary** at the `.cmd` or `.exe` next to the nvm/npm shim (the extensionless `claude` file is not a Windows program).
@@ -114,7 +108,7 @@ signed. Do not publish its draft until the installer, its `.sig` file,
 2. Agent CLIs installed any usual way (`claude` native installer, `npm`/`nvm`/`volta`/`bun` for `codex`, Homebrew…). Finder launches apps with a minimal `PATH`; the app asks your login shell (`$SHELL -i -l`) for its `PATH` once at startup and also checks well-known folders (`~/.local/bin`, `/opt/homebrew/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.bun/bin`, …). If a CLI still shows missing, run `which <cli>` in Terminal and paste that path into **Settings → Binary**.
 3. Optional: Node/`npx` for `npx skills add …`, and the GitHub CLI (`brew install gh`, then `gh auth login`) for **Pull requests**. `gh auth token` reads `gh`'s own Keychain item, so no Keychain prompt appears for it.
 
-The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-off`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
+The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.on-n-off`, and Muse's `~/.config/muse` and `~/.local/share/muse`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
 
 ### Side notch
 
@@ -123,7 +117,7 @@ The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, and `~/.on-n-of
 ### From source on macOS
 
 ```sh
-xcode-select --install          # once
+# once: install Xcode from the App Store; the notch helper needs full Xcode (OS.md)
 curl https://sh.rustup.rs -sSf | sh   # once
 bun install
 bun run test

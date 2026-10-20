@@ -18,7 +18,7 @@ app for Windows and macOS.
 
 Support varies by provider; Cursor currently supports browsing installed items.
 Codex account switching requires its running clients to be closed; Claude Code can stay open.
-Browser-connected subscription renewal details are available for Codex on macOS.
+Codex cards also show how long the subscription is paid for and whether it renews.
 
 ## Install
 
@@ -62,16 +62,40 @@ Built with Tauri, Rust, React, and TypeScript.
 - [Architecture](docs/architecture/README.md)
 - [Provider support](PROVIDERS.md)
 - [Platform and packaging notes](OS.md)
-- [Build checks and contribution conventions](AGENTS.md)
+- [Contributing](CONTRIBUTING.md)
 - [Manual testing](HANDOFF.md)
+
+## Privacy
+
+on-n-off has no telemetry, analytics or crash reporting, and no server of its own. Your
+configuration, transcripts and saved logins stay on your machine. The app itself connects only to:
+
+- `chatgpt.com` and `auth.openai.com`, for Codex limits and subscription details and to renew saved
+  Codex logins;
+- `api.meta.ai`, for Muse limits;
+- `api.github.com`, for pull requests and to resolve skills and agents installed from GitHub;
+- `codeload.github.com`, to download those installs;
+- `raw.githubusercontent.com`, for plugin details and LiteLLM's public model price list behind
+  usage estimates;
+- `github.com`, for the update feed and update downloads on GitHub Releases, which GitHub serves
+  from its release download host (currently `release-assets.githubusercontent.com`).
+
+Claude limits come from Claude Code's own usage report: on-n-off sends nothing to Anthropic itself.
+The tools it starts (`claude`, `codex`, `agy`, `muse`, `gh` and `npx`) make their own requests as
+usual, including installs from sources you enter.
 
 ## Contributing
 
-Bug reports and pull requests are welcome. For bugs, include your operating system,
-app version, affected provider, and steps to reproduce the issue.
+Bug reports and pull requests are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md) and the
+[Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## License
 
 [MIT](LICENSE). Usage analytics include work derived from
 [T3 Code](https://github.com/pingdotgg/t3code). See
 [third-party notices](THIRD_PARTY_NOTICES.md) for credits and license details.
+
+on-n-off is an independent project, not affiliated with, endorsed by or sponsored by Anthropic,
+OpenAI, Google, Anysphere or Meta. Claude Code, Codex, Antigravity, Cursor and Muse are trademarks
+of their respective owners.
