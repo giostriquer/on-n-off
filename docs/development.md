@@ -111,7 +111,8 @@ source carries no comments (see [Code comments](#code-comments)).
   provider. A new header tag kind (`cardTags.ts`)
   fails both header renderers until each surface decides. The card header is a grid of the
   provider icon, the name's column and the actions (the active dot and ⋯). Its tags come in one
-  order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the plan.
+  order (`cardTags.ts`): the usage clock first, then the renewal or sign-in tag, then the Desktop
+  account tag, then the plan.
   When `useTagsBeside` measures that they fit, they sit on the name's line, attached at the right
   and ending before the actions; otherwise they all move to their own row, starting under the
   name in the same order. The category starts under the name and its tags and runs to the

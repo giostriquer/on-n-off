@@ -27,6 +27,7 @@ fn the_catalogue_holds_one_row_per_provider_in_tab_order() {
                         client: "Claude Code",
                         vendor: "Anthropic",
                         on_load: &[OnLoad::DropResetCredits, OnLoad::MarkFirstMessageSessions],
+                        desktop_app: Some(DesktopApp::Claude),
                         ..LimitsFacts::NONE
                     }),
                     usage: Some(UsageProvider::Claude),
@@ -250,6 +251,7 @@ fn a_provider_without_limits_has_no_limits_fact_and_one_with_them_its_own_row() 
             banked_resets: None,
             subscription_term: None,
             paid_reset_offer: None,
+            desktop_app: None,
         }
     );
 }

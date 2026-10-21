@@ -131,3 +131,15 @@ it("says on the popover that a Claude sign-in has ended", async () => {
 
   expect(cards[0].text).toContain("Claude ended this sign-in on Aug 16. Sign in again to use this account.");
 });
+
+it("tags the screen's signed-in Claude card, and not the popover's, when Claude Desktop was last on another account", async () => {
+  readLimits.mockImplementation((provider: AgentId) => Promise.resolve(
+    provider === "claude" ? COLUMNS.claude.map(entry => ({ ...entry, otherDesktopAccount: { label: null } }))
+      : provider === "codex" ? COLUMNS.codex : []));
+
+  const onScreen = await screenCards("Claude");
+  const { cards: inPopover } = await popoverCards("Claude");
+
+  expect(onScreen[0].text).toContain("Desktop: other account");
+  expect(inPopover[0].text).not.toContain("Desktop");
+});

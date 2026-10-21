@@ -1,3 +1,4 @@
+import type { DesktopPresentation } from "./desktopAccount";
 import type { SignInPresentation } from "./loginState";
 import type { CardSubscription, LimitCard } from "./limitCards";
 import type { CardStatus } from "./limitPresentation";
@@ -5,6 +6,7 @@ import type { CardStatus } from "./limitPresentation";
 export type CardTag =
   | { kind: "term"; subscription: CardSubscription }
   | { kind: "signIn"; signIn: SignInPresentation }
+  | { kind: "desktop"; desktop: DesktopPresentation }
   | { kind: "usageStatus"; detail: string }
   | { kind: "remembered" }
   | { kind: "paused" }
@@ -15,6 +17,7 @@ export function cardTags(card: LimitCard): CardTag[] {
   if (card.status) tags.push(statusTag(card.status));
   if (card.subscription) tags.push({ kind: "term", subscription: card.subscription });
   if (card.signIn) tags.push({ kind: "signIn", signIn: card.signIn });
+  if (card.desktop) tags.push({ kind: "desktop", desktop: card.desktop });
   if (card.plan) tags.push({ kind: "plan", text: card.plan });
   return tags;
 }

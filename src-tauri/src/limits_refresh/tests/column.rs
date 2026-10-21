@@ -349,3 +349,56 @@ fn a_roster_reread_racing_the_saved_poll_keeps_the_verdict_the_poll_parked() {
         .map(|profile| serde_json::to_value(profile).unwrap()["loginState"].clone());
     assert_eq!(state, Some(serde_json::json!({"state": "refused"})));
 }
+
+#[test]
+fn the_served_column_tags_the_signed_in_claude_card_while_claude_desktop_is_on_another_account() {
+    let home = crate::paths::scratch_dir("served-desktop");
+    let data = crate::paths::claude_desktop_data_for(&home);
+    std::fs::create_dir_all(&data).unwrap();
+    std::fs::write(
+        data.join("config.json"),
+        r#"{"lastKnownAccountUuid": "user-desk"}"#,
+    )
+    .unwrap();
+    for app in crate::paths::claude_desktop_apps_for(&home) {
+        std::fs::create_dir_all(app).unwrap();
+    }
+    let me = Identity {
+        provider: AgentId::Claude,
+        user_id: "user-me".into(),
+        workspace_id: "org-me".into(),
+    };
+    let mut card = ProviderLimitsDto::for_test(AgentId::Claude, "replaced");
+    card.account = Some(crate::limits::scoped_account(
+        &me,
+        Some("me@claude.example".into()),
+    ));
+    let tagged = |column: Vec<ColumnEntryDto>| -> Vec<bool> {
+        column
+            .iter()
+            .map(|entry| entry.other_desktop_account.is_some())
+            .collect()
+    };
+
+    let claude = Cache::new(AgentId::Claude, Source::LimitsClaude);
+    assert_eq!(
+        tagged(claude.served_column(std::slice::from_ref(&card), Some(&home))),
+        [true]
+    );
+    assert_eq!(
+        tagged(claude.served_column(std::slice::from_ref(&card), None)),
+        [false]
+    );
+    assert_eq!(
+        tagged(claude.column(std::slice::from_ref(&card))),
+        [false],
+        "planning a removal or archive reads no Desktop file"
+    );
+
+    let codex = Cache::new(AgentId::Codex, Source::LimitsCodex);
+    card.provider = AgentId::Codex;
+    assert_eq!(
+        tagged(codex.served_column(std::slice::from_ref(&card), Some(&home))),
+        [false]
+    );
+}

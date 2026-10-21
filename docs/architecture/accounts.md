@@ -635,7 +635,9 @@ Disposable file-backed tests still redirect the OS home and never use the real K
 Ordinary Claude activation allows running clients: Claude Code handles native credential changes.
 It still acquires the native refresh locks, preserves outgoing credentials in the protected journal,
 and verifies the incoming identity. This does not move an already in-flight request to another account
-or claim immediate uptake by Claude Desktop or IDE sessions.
+or claim immediate uptake by IDE sessions. Claude Desktop never takes it up: it keeps its own
+sign-in, and the signed-in Limits card says when Desktop was last signed in to another account
+([PROVIDERS.md](../../PROVIDERS.md), Desktop account).
 
 Codex activation, and sign-out or explicit crash recovery for either provider, require known CLI,
 desktop and IDE agent processes to be closed. The conservative process preflight never terminates
@@ -735,7 +737,9 @@ that column is the Limits read's (`read_limits`, served by `limits_refresh::read
 `ColumnEntryDto`s and built by `limits::column`). Each entry is a `ProviderLimitsDto` with the
 account facts a card needs beside it: its saved profile (`profile`, the same `ProfileDto` the account
 list gives), its category (`category`), the legacy history it replaced (`replaced`, which Remove
-account and Archive account take with it, read by Rust from the column it serves) and, for a saved profile no read answered for yet, an
+account and Archive account take with it, read by Rust from the column it serves), on the signed-in
+card of a provider with a desktop app that keeps its own sign-in, the account that app is on when it
+is another one (`otherDesktopAccount`, `limits/desktop_app.rs`, a `LimitsFacts` row), and, for a saved profile no read answered for yet, an
 entry of its own (`unread`). The card model (`limitColumn`) therefore joins nothing, and the popover
 lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
 own.

@@ -5,6 +5,7 @@ import { providerLabel, type LimitsProvider } from "$lib/providers";
 import { checkNowEntry } from "./cardActionPlan";
 import { useCardActions, useCheckNow, type CardFrameInput } from "./cardActions";
 import { cardTags, unhandledTag, type CardTag } from "./cardTags";
+import { DesktopAccountBadge } from "./DesktopAccountBadge";
 import { isSignedIn, type LimitCard } from "./limitCards";
 import { SignInBadge } from "./SignInBadge";
 import { AccountSubscriptionBadge } from "./SubscriptionBadge";
@@ -68,6 +69,7 @@ function HeaderTag({ tag, now }: { tag: CardTag; now: number }) {
   switch (tag.kind) {
     case "term": return <AccountSubscriptionBadge subscription={tag.subscription} now={now} />;
     case "signIn": return <SignInBadge signIn={tag.signIn} />;
+    case "desktop": return <DesktopAccountBadge desktop={tag.desktop} />;
     case "usageStatus": return <UsageStatusBadge detail={tag.detail} />;
     case "remembered":
     case "paused": return null;
