@@ -521,6 +521,27 @@ test("every installer build installs the pinned cargo-about first, for the bundl
   }
 });
 
+test("bundle and release launch the app they built, with the side notch on, before keeping it", { skip }, () => {
+  for (const [name, job] of [["bundle", load("bundle").jobs.bundle], ["release", load("release").jobs.build]]) {
+    const launch = step(job, "Launch the built app with the side notch on");
+    const build = job.steps.findIndex((candidate) => /scripts\/build-bundle\.ps1/.test(candidate.run ?? ""));
+    assert.notEqual(build, -1, `${name} builds no bundle`);
+    assert.ok(build < launch.index, `${name} launches the app after building it`);
+    assert.equal(launch.run, "./scripts/launch-smoke.ps1 -InstallerKind $env:INSTALLER_KIND", name);
+    assert.equal(launch.env.INSTALLER_KIND, "${{ matrix.installer }}", name);
+    assert.ok(launch["timeout-minutes"] <= 5, `${name} bounds the launch`);
+    assert.equal(launch.if, undefined, `${name} launches every installer kind`);
+    assert.equal(launch["continue-on-error"], undefined, `${name} fails on a launch crash`);
+  }
+  const release = load("release").jobs.build;
+  assert.ok(step(release, "Launch the built app with the side notch on").index < step(release, "Record staged asset checksums").index,
+    "a release build that crashes at launch is never kept");
+  const notchClass = /const CLASS: PCWSTR = w!\("([^"]+)"\);/.exec(readFileSync(join(root, "src-tauri", "src", "side_notch", "win_window.rs"), "utf8"));
+  assert.ok(notchClass, "win_window.rs names the notch window class");
+  assert.ok(readFileSync(join(root, "scripts", "launch-smoke.ps1"), "utf8").includes(`WindowClass = "${notchClass[1]}"`),
+    `launch-smoke.ps1 waits for the "${notchClass[1]}" window the notch opens`);
+});
+
 test("every pull request generates the license notice, so a new license fails before it reaches main", { skip }, () => {
   const frontend = load("ci").jobs.frontend;
   const install = step(frontend, "Install cargo-about");

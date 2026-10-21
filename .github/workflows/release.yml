@@ -199,6 +199,15 @@ jobs:
           $assetDirectory = Join-Path $env:RUNNER_TEMP 'release-assets'
           ./scripts/build-bundle.ps1 -InstallerKind $env:INSTALLER_KIND -ReleaseVersion $env:RELEASE_VERSION -SignedUpdater -StageDirectory $assetDirectory
 
+      # Building proves the app compiles, not that it starts: v0.36.0 to v0.38.0 crashed at launch on
+      # Windows whenever the side notch was on, and a crash at launch also stops the in-app updater.
+      # See OS.md, Packaging and updates.
+      - name: Launch the built app with the side notch on
+        timeout-minutes: 5
+        env:
+          INSTALLER_KIND: ${{ matrix.installer }}
+        run: ./scripts/launch-smoke.ps1 -InstallerKind $env:INSTALLER_KIND
+
       - name: Record staged asset checksums
         env:
           INSTALLER: ${{ matrix.installer }}

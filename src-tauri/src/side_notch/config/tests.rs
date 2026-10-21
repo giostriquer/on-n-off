@@ -17,3 +17,19 @@ fn a_saved_document_round_trips_and_advances_the_revision() {
     assert_eq!(counter.current(), 1);
     fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn the_launch_smoke_settings_turn_on_the_notch_with_every_provider_and_pull_request_list() {
+    use super::super::model::{GITHUB_LIST_ORDER, RAIL_ORDER};
+    let settings: NotchSettings = serde_json::from_str(include_str!(
+        "../../../../scripts/fixtures/launch-smoke-side-notch.json"
+    ))
+    .unwrap();
+    assert!(settings.enabled);
+    assert_eq!(settings.rail_providers(), RAIL_ORDER.to_vec());
+    assert!(settings.pull_requests.enabled);
+    assert_eq!(
+        settings.pull_requests.selected_lists(),
+        GITHUB_LIST_ORDER.to_vec()
+    );
+}
