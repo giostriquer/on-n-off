@@ -97,6 +97,22 @@ fn a_pr_from_the_repository_default_branch_is_not_a_contribution() {
         0,
         "the default branch is not looked up again"
     );
+
+    let same_push_again =
+        FakeGithub::default().page(json!([push(10, "acme/app", "refs/heads/main", NOW - 60)]));
+    read_at(&same_push_again, &path, NOW + 60);
+    assert_eq!(same_push_again.pages(), vec![1]);
+    assert_eq!(
+        same_push_again.requests(),
+        0,
+        "a push already dropped stays dropped"
+    );
+
+    let newer_push = FakeGithub::default()
+        .page(json!([push(11, "acme/app", "refs/heads/main", NOW + 100)]))
+        .reply(lookup_reply(json!([]), &[json!([])]));
+    read_at(&newer_push, &path, NOW + 120);
+    assert_eq!(newer_push.branches_looked_up(0), vec!["acme/app:main"]);
 }
 
 #[test]
@@ -217,6 +233,36 @@ fn a_full_page_of_events_reads_the_next_up_to_three() {
     read_at(&github, &path, NOW);
 
     assert_eq!(github.pages(), vec![1, 2, 3]);
+}
+
+#[test]
+fn a_later_read_pages_on_until_it_reaches_the_newest_event_read() {
+    let path = store_path("contrib-events-catch-up");
+    let first = one_push().reply(empty_lookup());
+    read_at(&first, &path, NOW);
+
+    let newer: Vec<Value> = (201..=300)
+        .rev()
+        .map(|id| push(id, "acme/app", "refs/heads/fix/y", NOW + 30))
+        .collect();
+    let later = FakeGithub::default()
+        .page(Value::Array(newer))
+        .page(json!([
+            push(11, "acme/app", "refs/heads/fix/second-page", NOW + 20),
+            push(10, "acme/app", "refs/heads/fix/x", NOW - 60),
+        ]))
+        .reply(lookup_reply(json!([]), &[json!([]), json!([]), json!([])]));
+    read_at(&later, &path, NOW + 60);
+
+    assert_eq!(later.pages(), vec![1, 2]);
+    assert_eq!(
+        later.branches_looked_up(0),
+        vec![
+            "acme/app:fix/y",
+            "acme/app:fix/second-page",
+            "acme/app:fix/x"
+        ]
+    );
 }
 
 #[test]

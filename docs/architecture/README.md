@@ -463,7 +463,8 @@ come from your pushes instead (`github/contributions.rs`).
   open it, its head is the repository and branch you pushed, and that branch is not the
   repository's default branch: a release pull request from the default branch carries everyone's
   merged work, yours included. A branch whose repository is gone, or that is the default branch, is
-  dropped.
+  dropped, and the push that brought it is remembered so that rereading the same page of events
+  does not bring it back; only a newer push to it does.
 - **Check.** A tracked pull request is shown once a third request, sent only when its head moved and
   for ten pull requests per read at most, finds among its last hundred commits a non-merge commit
   whose authors include you. Rebased commits keep their authors, so an "Update branch" never counts.

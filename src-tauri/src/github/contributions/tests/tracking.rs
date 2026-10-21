@@ -112,6 +112,44 @@ fn a_merged_contribution_is_kept_for_fourteen_days() {
 }
 
 #[test]
+fn a_merge_github_gives_no_time_is_dated_when_first_seen() {
+    let path = store_path("contrib-merged-undated");
+    found_alice(&path);
+    let undated = || {
+        let mut node = merged_pr("PR_alice", NOW);
+        node["mergedAt"] = Value::Null;
+        lookup_reply(json!([node]), &[json!([])])
+    };
+    read_at(&FakeGithub::default().reply(undated()), &path, NOW + 30);
+    read_at(
+        &FakeGithub::default().reply(undated()),
+        &path,
+        NOW + 7 * DAY,
+    );
+
+    let after = FakeGithub::default().reply(empty_lookup());
+    read_at(&after, &path, NOW + 30 + 14 * DAY);
+
+    assert_eq!(after.ids_sent(0), json!([]));
+}
+
+#[test]
+fn a_read_without_github_still_forgets_a_merge_older_than_fourteen_days() {
+    let path = store_path("contrib-merged-offline-age");
+    found_alice(&path);
+    let merged = lookup_reply(json!([merged_pr("PR_alice", NOW)]), &[json!([])]);
+    read_at(&FakeGithub::default().reply(merged), &path, NOW + 30);
+
+    assert_eq!(
+        ids(&read(None, &path, "octocat", &[], NOW + 14 * DAY - 1).merged),
+        vec!["PR_alice"]
+    );
+    assert!(read(None, &path, "octocat", &[], NOW + 14 * DAY)
+        .merged
+        .is_empty());
+}
+
+#[test]
 fn a_failed_lookup_keeps_the_contributions_last_read_and_says_why() {
     let path = store_path("contrib-lookup-failed");
     let first = one_push()

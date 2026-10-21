@@ -165,7 +165,8 @@ adapter assumes today (change the adapter and this file together).
   `statusCheckRollup`; ~2 rate-limit points). Contributed PRs, ones someone else opened that carry
   a commit you wrote, add a read of `api.github.com/users/<login>/events` at most once a minute,
   one GraphQL lookup of the pushed branches and found PRs, and a GraphQL check of a found PR's
-  commits when its head moved (1 point each); they are skipped while fewer than 50 points remain.
+  commits when its head moved (the lookup 1-3 points, the check about 1 point per PR, at most 10
+  per read); they are skipped while fewer than 50 points remain.
   Nothing is written to GitHub. The only on-n-off writes are `~/.on-n-off/github/prs.json` (the
   last good read, shown as stale when a refresh fails), `~/.on-n-off/github/contributions.json`
   (pushed branches and contributed PRs) and `~/.on-n-off/github/monitor.json` (the CI monitor's

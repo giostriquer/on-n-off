@@ -64,6 +64,8 @@ struct Store {
     branches: Vec<Branch>,
     #[serde(default)]
     tracked: Vec<Tracked>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    dropped: Vec<Branch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,6 +117,17 @@ impl Branch {
     fn key(&self) -> (String, String) {
         (self.repo.clone(), self.name.clone())
     }
+
+    fn is(&self, other: &Branch) -> bool {
+        self.repo == other.repo && self.name == other.name
+    }
+}
+
+fn keep_latest(branches: &mut Vec<Branch>, push: Branch) {
+    match branches.iter_mut().find(|known| known.is(&push)) {
+        Some(known) => known.pushed_at = known.pushed_at.max(push.pushed_at),
+        None => branches.push(push),
+    }
 }
 
 impl Store {
@@ -126,18 +139,18 @@ impl Store {
             events_read_at: 0,
             branches: Vec::new(),
             tracked: Vec::new(),
+            dropped: Vec::new(),
         }
     }
 
     fn remember(&mut self, pushes: Pushes, now_secs: i64) {
         for push in pushes.branches {
-            match self
-                .branches
-                .iter_mut()
-                .find(|known| known.repo == push.repo && known.name == push.name)
-            {
-                Some(known) => known.pushed_at = known.pushed_at.max(push.pushed_at),
-                None => self.branches.push(push),
+            let seen_dropped = self
+                .dropped
+                .iter()
+                .any(|dropped| dropped.is(&push) && dropped.pushed_at >= push.pushed_at);
+            if !seen_dropped {
+                keep_latest(&mut self.branches, push);
             }
         }
         self.newest_event = self.newest_event.max(pushes.newest);
@@ -150,6 +163,8 @@ impl Store {
         self.branches
             .sort_by_key(|branch| std::cmp::Reverse(branch.pushed_at));
         self.branches.truncate(MAX_BRANCHES);
+        self.dropped
+            .retain(|branch| now_secs - branch.pushed_at < BRANCH_KEEP_SECS);
         let branches = &self.branches;
         self.tracked.retain(|tracked| {
             let fresh = tracked
@@ -164,8 +179,13 @@ impl Store {
     }
 
     fn reconcile(&mut self, lookup: Lookup) {
-        self.branches
-            .retain(|branch| !lookup.lost.contains(&branch.key()));
+        let (lost, kept): (Vec<Branch>, Vec<Branch>) = std::mem::take(&mut self.branches)
+            .into_iter()
+            .partition(|branch| lookup.lost.contains(&branch.key()));
+        self.branches = kept;
+        for branch in lost {
+            keep_latest(&mut self.dropped, branch);
+        }
         self.tracked
             .retain(|tracked| !lookup.gone.contains(&tracked.id));
         self.tracked.extend(lookup.discovered);
