@@ -127,9 +127,12 @@ fn a_merge_github_gives_no_time_is_dated_when_first_seen() {
         NOW + 7 * DAY,
     );
 
+    let last_day = FakeGithub::default().reply(undated());
+    read_at(&last_day, &path, NOW + 30 + 14 * DAY - 1);
+    assert_eq!(last_day.ids_sent(0), json!(["PR_alice"]));
+
     let after = FakeGithub::default().reply(empty_lookup());
     read_at(&after, &path, NOW + 30 + 14 * DAY);
-
     assert_eq!(after.ids_sent(0), json!([]));
 }
 
