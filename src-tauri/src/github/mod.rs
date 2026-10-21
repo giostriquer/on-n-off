@@ -17,7 +17,7 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::cli::AgentCli;
-use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus};
+use crate::dto::{GithubPrsData, GithubPrsDto, GithubStatus};
 use crate::http::{get_json, post_json, HttpError, RateLimitReset};
 use crate::paths;
 use crate::read_revision::{Reading, Revision, Source};
@@ -208,22 +208,26 @@ fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
             format!("GitHub sent an unreadable reply ({why})."),
         )
     })?;
-    if let Some(limit) = &parsed.data.rate_limit {
-        if limit.remaining < LOW_BUDGET_POINTS {
-            let until = DateTime::parse_from_rfc3339(&limit.reset_at)
-                .map_or(sources.now_secs + RATE_LIMIT_FALLBACK_SECS, |at| {
-                    at.timestamp()
-                });
-            sources.read_memo.state().paused_until = Some(until);
-        }
+    let budget_low = parsed
+        .data
+        .rate_limit
+        .as_ref()
+        .filter(|limit| limit.remaining < LOW_BUDGET_POINTS);
+    if let Some(limit) = budget_low {
+        let until = DateTime::parse_from_rfc3339(&limit.reset_at)
+            .map_or(sources.now_secs + RATE_LIMIT_FALLBACK_SECS, |at| {
+                at.timestamp()
+            });
+        sources.read_memo.state().paused_until = Some(until);
     }
+    let online = budget_low.is_none();
     let mut data = GithubPrsData {
         fetched_at: rfc3339(sources.now_secs),
         scope: sources.settings.github_scopes.clone(),
         ..parsed.data
     };
     let mut warnings = parsed.warnings;
-    add_contributions(sources, &mut data, &mut warnings);
+    add_contributions(sources, online, &mut data, &mut warnings);
     Ok(GithubPrsDto {
         status: GithubStatus::Ok,
         hint: None,
@@ -233,27 +237,20 @@ fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
     })
 }
 
-struct Api<'a> {
-    sources: &'a Sources<'a>,
-    viewer: &'a str,
-}
-
-impl contributions::Github for Api<'_> {
+impl contributions::Github for Sources<'_> {
     fn graphql(&self, body: &Value) -> Result<Value, String> {
-        post_with_token_retry(self.sources, body).map_err(|(_, hint)| hint)
+        post_with_token_retry(self, body).map_err(|(_, hint)| hint)
     }
 
-    fn events(&self, page: u32) -> Result<Value, String> {
+    fn events(&self, viewer: &str, page: u32) -> Result<Value, String> {
         let token = self
-            .sources
             .token_memo
-            .lookup(|| read_token_with(self.sources.cli, TOKEN_DEADLINE))
+            .lookup(|| read_token_with(self.cli, TOKEN_DEADLINE))
             .map_err(|error| token_failure(error).1)?;
         let authorization = format!("Bearer {}", token.as_str());
         let url = format!(
-            "{}/{}/events?per_page={}&page={page}",
-            self.sources.events_url,
-            self.viewer,
+            "{}/{viewer}/events?per_page={}&page={page}",
+            self.events_url,
             contributions::EVENTS_PER_PAGE
         );
         get_json(
@@ -263,11 +260,16 @@ impl contributions::Github for Api<'_> {
                 ("Accept", "application/vnd.github+json"),
             ],
         )
-        .map_err(|error| error.to_string())
+        .map_err(|error| format!("Could not reach GitHub ({error})."))
     }
 }
 
-fn add_contributions(sources: &Sources<'_>, data: &mut GithubPrsData, warnings: &mut Vec<String>) {
+fn add_contributions(
+    sources: &Sources<'_>,
+    online: bool,
+    data: &mut GithubPrsData,
+    warnings: &mut Vec<String>,
+) {
     let Some(viewer) = data
         .viewer
         .clone()
@@ -275,43 +277,16 @@ fn add_contributions(sources: &Sources<'_>, data: &mut GithubPrsData, warnings: 
     else {
         return;
     };
+    let github: &dyn contributions::Github = sources;
     let found = contributions::read(
-        &Api {
-            sources,
-            viewer: &viewer,
-        },
+        online.then_some(github),
         &paths::github_contributions_path_for(sources.home),
         &viewer,
         &sources.settings.github_scopes,
         sources.now_secs,
     );
     warnings.extend(found.warnings);
-    if found.complete {
-        contributions::add_to(data, found.open, found.merged);
-    } else if let Some(last) =
-        last_read(sources).filter(|last| last.viewer.as_deref() == Some(&viewer))
-    {
-        let carried = |list: GithubPrListDto| -> Vec<GithubPrDto> {
-            list.items
-                .into_iter()
-                .filter(|pr| {
-                    pr.contributed
-                        && contributions::in_scope(&pr.repo, &sources.settings.github_scopes)
-                })
-                .collect()
-        };
-        contributions::add_to(data, carried(last.mine), carried(last.merged));
-    }
-}
-
-fn last_read(sources: &Sources<'_>) -> Option<GithubPrsData> {
-    let cached = sources
-        .read_memo
-        .state()
-        .cached
-        .as_ref()
-        .map(|(_, cached)| cached.data.clone());
-    cached.or_else(|| snapshot::load(&paths::github_prs_path_for(sources.home)))
+    contributions::add_to(data, found.open, found.merged);
 }
 
 fn post_with_token_retry(sources: &Sources<'_>, body: &Value) -> Result<Value, Failure> {

@@ -60,6 +60,16 @@ pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
     query
 }
 
+pub(super) fn in_scope(repo: &str, scopes: &[String]) -> bool {
+    let owner = repo.split_once('/').map_or(repo, |(owner, _)| owner);
+    scopes.is_empty()
+        || scopes.iter().any(|scope| match scope.split_once(':') {
+            Some(("org" | "user", login)) => owner.eq_ignore_ascii_case(login),
+            Some(("repo", name)) => repo.eq_ignore_ascii_case(name),
+            _ => false,
+        })
+}
+
 pub(super) fn request_body(scopes: &[String]) -> Value {
     json!({
         "query": format!("{SEARCHES}{PR_FRAGMENT}"),

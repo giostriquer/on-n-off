@@ -450,24 +450,38 @@ costs about 2 rate-limit points. They are interpreted in exactly one place, `git
 fields existed load with `Unknown`/`false` defaults.
 
 GitHub's search cannot find a pull request by who wrote its commits, so contributed pull requests
-come from your pushes instead (`github/contributions.rs`). At most once a minute the read takes the
-events newer than the last one it saw from `api.github.com/users/<login>/events`, up to the three
-pages GitHub keeps, and remembers every branch you pushed for thirty days. One more GraphQL request
-then looks up the open pull requests on those branches, by variables and never by text spliced into
-the query, along with every pull request already tracked by node id. A pull request on one of your
-branches that you did not open, and whose head is that same repository and branch, is tracked; it is
-shown only once a third request, sent only when its head moved, finds among its last hundred commits
-a non-merge commit whose authors include you. That answer is final for the pull request. Tracked
-pull requests are dropped when closed and fourteen days after they merge, and the whole record,
-`~/.on-n-off/github/contributions.json`, belongs to one GitHub login and starts over for another.
+come from your pushes instead (`github/contributions.rs`).
+
+- **Pushes.** At most once a minute the read takes your events from
+  `api.github.com/users/<login>/events`, page by page up to the three pages GitHub keeps, and stops
+  after the page that reaches the newest event it read before. That whole page still counts,
+  because an event can show up late with an older id. Each branch push is remembered for thirty
+  days after its latest push, the fifty most recent at most.
+- **Lookup.** One more GraphQL request asks for the open pull requests on each remembered branch,
+  five at most, and for every pull request already tracked, by node id. Repository and branch
+  names travel as variables, never as text in the query. A pull request is tracked when you did not
+  open it, its head is the repository and branch you pushed, and that branch is not the
+  repository's default branch: a release pull request from the default branch carries everyone's
+  merged work, yours included. A branch whose repository is gone, or that is the default branch, is
+  dropped.
+- **Check.** A tracked pull request is shown once a third request, sent only when its head moved and
+  for ten pull requests per read at most, finds among its last hundred commits a non-merge commit
+  whose authors include you. Rebased commits keep their authors, so an "Update branch" never counts.
+  A yes is final for the pull request, which then stays tracked even after its branch is forgotten.
+- **Record.** Tracked pull requests are dropped when closed and fourteen days after they merge. The
+  record, `~/.on-n-off/github/contributions.json`, keeps each one's last read, belongs to one GitHub
+  login and starts over for another.
 
 Found pull requests join `mine`, marked `contributed`, and merged ones join `merged`, both under the
 same scope as the search. That is all the monitor, the notch and the screen see: the screen tags
 them with their author, and the monitor notifies on them, merges included, exactly as on authored
-ones. A failed lookup keeps the contributions of the last read rather than dropping them, so a
-transient error does not take them out of Mine, the notch or the monitor's baseline. The record
-misses a branch you last pushed before GitHub's three pages of events reach back, a push to a
-fork's branch, and commits of yours that someone else pushed.
+ones. They come after the authored ones, so the notch, which shows the first 25 rows of Mine, leaves
+them out when 25 authored pull requests come first. When the lookup fails, or the read has just
+found fewer than 50 rate-limit points left and skips the extra requests, the record's last read is
+shown, so a transient error does not take them out of Mine, the notch or the monitor's baseline.
+The record misses a branch you last pushed before GitHub's three pages of events reach back, a push
+to a fork's branch, commits of yours that someone else pushed, and commits of yours older than a
+pull request's last hundred.
 
 The monitor notifies on CI, review-decision, conflict and ready-to-merge transitions of the PRs
 Mine lists — the scoped first page of fifty authored ones, plus contributed ones. It is opt-in and
