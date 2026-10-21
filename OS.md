@@ -226,12 +226,19 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   `Tao Thread Event Target`) once per process, each with a window procedure compiled for the user-event
   type of the loop that registered it first. Tauri's loop always does, so a second
   `EventLoop<WindowMsg>` on the notch thread had its own windows' messages read as Tauri's types: the
-  heap corrupted and v0.36.0 and v0.37.0 died with `0xc0000005` at launch whenever the notch was on.
+  heap corrupted and v0.36.0 to v0.38.0 died with `0xc0000005` at launch whenever the notch was on.
   The notch registers its own class (`on-n-off Side notch`), pumps its own thread's queue and waits
   with `MsgWaitForMultipleObjectsEx` until the state machine's next deadline. tao's
   `EventLoop::run` also ends the process when its loop exits, which would have quit the app when the
-  notch was switched off. `tao` stays a dev-dependency for the regression test that builds a tao loop
-  of another type beside the notch.
+  notch was switched off; the notch thread now destroys its window and returns, and a later switch-on
+  creates the window again on the class already registered. `tao` stays a dev-dependency for the
+  regression test, which runs the notch beside a tao loop of another type in a child test process so
+  that a crash or an exit fails it instead of ending the test run.
+- **The window procedure only queues input.** `WM_MOUSEMOVE`, `WM_MOUSELEAVE` and `WM_LBUTTONDOWN`
+  become `Input` values carrying the client point from `lParam`, and the loop hands them to
+  `Machine::input`. `WM_CLOSE` is swallowed: `DefWindowProcW` would destroy the window while the loop
+  keeps presenting to it. `WM_MOUSELEAVE` is a local constant because the `windows` crate defines it
+  only under `Win32_UI_Controls`, a feature the app does not otherwise need.
 - **The window must be a bare `WS_POPUP`.** With `WS_CAPTION` or `WS_THICKFRAME`, Windows keeps an
   invisible resize border on the left, right and bottom, so the client area is inset by the border
   width, the layered surface is clipped to it, and the compositor draws a drop shadow and a top
@@ -258,7 +265,7 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
 - **A non-activating overlay cannot take the foreground.** The popover's "Open Limits" and "Open Pull
   requests" links show and raise the main window, but Windows refuses the focus change, so a window
   that was already open behind another app stays behind it and the taskbar button flashes instead.
-- **Always on top does not stay on top by itself.** `with_always_on_top` sets `WS_EX_TOPMOST` once,
+- **Always on top does not stay on top by itself.** `WS_EX_TOPMOST` at creation sets the flag once,
   and Windows can still stack the window below ordinary ones: on 2026-10-06 a maximized terminal sat
   above the notch and both taskbars while all three kept the flag, so the notch vanished behind it.
   The 500 ms screen poll walks the windows above the overlay (`GW_HWNDPREV`), and when a visible,

@@ -486,20 +486,75 @@ fn the_screens_change_only_after_the_first_read() {
     assert!(machine.set_displays(vec![display("d1", true)]));
 }
 
-fn notch_windows() -> Vec<HWND> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, GetWindowThreadProcessId,
+#[test]
+fn window_messages_queue_the_pointer_in_client_pixels() {
+    use windows::Win32::UI::WindowsAndMessaging::{WM_MOUSEMOVE, WM_NULL};
+    let at = |x: i16, y: i16| LPARAM(((y as u16 as isize) << 16) | x as u16 as isize);
+    INPUT.with_borrow_mut(Vec::clear);
+    for (message, lparam) in [
+        (WM_MOUSEMOVE, at(-3, 7)),
+        (WM_LBUTTONDOWN, at(40, -2)),
+        (WM_MOUSELEAVE, LPARAM(0)),
+        (WM_NULL, at(1, 1)),
+    ] {
+        unsafe { overlay_proc(HWND::default(), message, WPARAM(0), lparam) };
+    }
+    assert_eq!(
+        INPUT.with_borrow_mut(std::mem::take),
+        vec![
+            Input::Moved { x: -3, y: 7 },
+            Input::Pressed { x: 40, y: -2 },
+            Input::Left,
+        ]
+    );
+}
+
+#[test]
+fn window_input_reaches_the_machine_in_points_of_the_selected_display() {
+    let mut machine = Machine::new();
+    machine.accept(data(ShowMode::Always));
+    let mut scaled = display("d1", false);
+    scaled.scale = 1.5;
+    machine.set_displays(vec![scaled]);
+    let device = |points: f64| (points * 1.5).round() as i32;
+
+    let cap = machine.plan().unwrap().cap.rect;
+    assert_eq!(
+        machine.input(
+            Input::Pressed {
+                x: device(cap.mid_x()),
+                y: device(cap.mid_y()),
+            },
+            Instant::now(),
+        ),
+        vec![WinAction::SetShow(ShowMode::OnHover)]
+    );
+
+    let cell = cell_rect(&machine);
+    let entered = Instant::now();
+    let moved = Input::Moved {
+        x: device(cell.mid_x()),
+        y: device(cell.mid_y()),
     };
+    assert!(machine.input(moved, entered).is_empty());
+    machine.advance(entered + HOVER_OPEN_DELAY);
+    assert_eq!(machine.hover.active, Some(0));
+
+    assert!(machine.input(Input::Left, entered).is_empty());
+    assert!(!machine.cursor_inside);
+}
+
+fn notch_windows() -> Vec<HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowThreadProcessId};
     unsafe extern "system" fn collect(window: HWND, found: LPARAM) -> windows::core::BOOL {
         let mut process = 0;
-        let mut title = [0u16; 64];
+        let mut class = [0u16; 64];
         let len = unsafe {
             GetWindowThreadProcessId(window, Some(&mut process));
-            GetWindowTextW(window, &mut title)
+            GetClassNameW(window, &mut class)
         };
-        if process == std::process::id()
-            && String::from_utf16_lossy(&title[..len.max(0) as usize]) == "on-n-off Side notch"
-        {
+        let class = String::from_utf16_lossy(&class[..len.max(0) as usize]);
+        if process == std::process::id() && class == unsafe { CLASS.to_string() }.unwrap() {
             unsafe { &mut *(found.0 as *mut Vec<HWND>) }.push(window);
         }
         true.into()
@@ -519,35 +574,16 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-#[test]
-fn the_notch_runs_beside_the_apps_own_tao_event_loop_and_stops_without_ending_the_process() {
-    use tao::platform::windows::EventLoopBuilderExtWindows;
-    use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
-    let app_loop = tao::event_loop::EventLoopBuilder::<String>::with_user_event()
-        .with_any_thread(true)
-        .build();
-    let _app_window = tao::window::WindowBuilder::new()
-        .with_visible(false)
-        .build(&app_loop)
-        .expect("the app's own window");
-
+fn open_notch() -> (Sender<WindowMsg>, HWND) {
     let (action_tx, _actions) = std::sync::mpsc::channel();
     let messages = spawn(action_tx);
     eventually("the notch window never opened", || {
         notch_windows().len() == 1
     });
-    let notch = notch_windows()[0];
-    messages
-        .send(WindowMsg::Data(data(ShowMode::Always)))
-        .expect("the notch thread takes data");
-    for message in [WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_MOUSELEAVE] {
-        unsafe { SendMessageW(notch, message, Some(WPARAM(0)), Some(LPARAM(0))) };
-    }
-    assert!(
-        messages.send(WindowMsg::Ping).is_ok(),
-        "the notch thread died on its own input"
-    );
+    (messages, notch_windows()[0])
+}
 
+fn close_notch(messages: &Sender<WindowMsg>) {
     messages
         .send(WindowMsg::Shutdown)
         .expect("the notch thread takes the shutdown");
@@ -557,5 +593,91 @@ fn the_notch_runs_beside_the_apps_own_tao_event_loop_and_stops_without_ending_th
     assert!(
         notch_windows().is_empty(),
         "the notch window outlived its thread"
+    );
+}
+
+const BESIDE_TAO_DONE: &str = "the notch ran beside a tao event loop and stopped";
+
+#[test]
+#[ignore = "runs in its own process, started by the_notch_runs_beside_the_apps_own_tao_event_loop_and_stops_without_ending_the_process"]
+fn notch_beside_a_tao_event_loop() {
+    use tao::platform::windows::EventLoopBuilderExtWindows;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        SendMessageTimeoutW, GWL_STYLE, SMTO_ABORTIFHUNG, WM_MOUSEMOVE, WS_CAPTION, WS_THICKFRAME,
+    };
+    let app_loop = tao::event_loop::EventLoopBuilder::<String>::with_user_event()
+        .with_any_thread(true)
+        .build();
+    let _app_window = tao::window::WindowBuilder::new()
+        .with_visible(false)
+        .build(&app_loop)
+        .expect("the app's own window");
+
+    let (messages, notch) = open_notch();
+    let ex_style = unsafe { GetWindowLongPtrW(notch, GWL_EXSTYLE) } as u32;
+    let wanted = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
+    assert_eq!(
+        ex_style & wanted.0,
+        wanted.0,
+        "extended style {ex_style:#x}"
+    );
+    let style = unsafe { GetWindowLongPtrW(notch, GWL_STYLE) } as u32;
+    assert_ne!(style & WS_POPUP.0, 0, "style {style:#x}");
+    assert_eq!(
+        style & (WS_CAPTION.0 | WS_THICKFRAME.0),
+        0,
+        "style {style:#x}"
+    );
+
+    messages
+        .send(WindowMsg::Data(data(ShowMode::Always)))
+        .expect("the notch thread takes data");
+    for message in [WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_MOUSELEAVE] {
+        let answered = unsafe {
+            SendMessageTimeoutW(
+                notch,
+                message,
+                WPARAM(0),
+                LPARAM(0),
+                SMTO_ABORTIFHUNG,
+                5_000,
+                None,
+            )
+        };
+        assert_ne!(
+            answered.0, 0,
+            "the notch did not answer message {message:#x}"
+        );
+    }
+    assert!(
+        messages.send(WindowMsg::Ping).is_ok(),
+        "the notch thread died on its own input"
+    );
+    close_notch(&messages);
+
+    let (messages, _) = open_notch();
+    close_notch(&messages);
+    println!("{BESIDE_TAO_DONE}");
+}
+
+#[test]
+fn the_notch_runs_beside_the_apps_own_tao_event_loop_and_stops_without_ending_the_process() {
+    let output = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "side_notch::win_window::tests::notch_beside_a_tao_event_loop",
+            "--ignored",
+            "--nocapture",
+        ])
+        .output()
+        .expect("run the notch in its own test process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success() && stdout.contains(BESIDE_TAO_DONE),
+        "{}
+{stdout}
+{stderr}",
+        output.status
     );
 }

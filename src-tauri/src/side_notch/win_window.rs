@@ -346,6 +346,21 @@ impl Machine {
         Vec::new()
     }
 
+    fn input(&mut self, input: Input, now: Instant) -> Vec<WinAction> {
+        let scale = self.scale();
+        match input {
+            Input::Moved { x, y } => {
+                self.cursor_at(f64::from(x) / scale, f64::from(y) / scale, true, now);
+                Vec::new()
+            }
+            Input::Left => {
+                self.cursor_left(now);
+                Vec::new()
+            }
+            Input::Pressed { x, y } => self.clicked(f64::from(x) / scale, f64::from(y) / scale),
+        }
+    }
+
     pub fn deadline(&self, now: Instant) -> Instant {
         let mut deadline = now + SCREEN_POLL;
         if self.pointer_poll_active() {
@@ -428,11 +443,17 @@ unsafe extern "system" fn low_level_mouse_proc(
 const CLASS: PCWSTR = w!("on-n-off Side notch");
 const WM_MOUSELEAVE: u32 = 0x02A3;
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum Input {
     Moved { x: i32, y: i32 },
     Left,
-    Pressed,
+    Pressed { x: i32, y: i32 },
+}
+
+fn client_point(lparam: LPARAM) -> (i32, i32) {
+    let x = (lparam.0 & 0xFFFF) as u16 as i16;
+    let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16;
+    (i32::from(x), i32::from(y))
 }
 
 thread_local! {
@@ -454,13 +475,14 @@ unsafe extern "system" fn overlay_proc(
                 dwHoverTime: 0,
             };
             let _ = unsafe { TrackMouseEvent(&mut track) };
-            Input::Moved {
-                x: (lparam.0 & 0xFFFF) as u16 as i16 as i32,
-                y: ((lparam.0 >> 16) & 0xFFFF) as u16 as i16 as i32,
-            }
+            let (x, y) = client_point(lparam);
+            Input::Moved { x, y }
         }
         WM_MOUSELEAVE => Input::Left,
-        WM_LBUTTONDOWN => Input::Pressed,
+        WM_LBUTTONDOWN => {
+            let (x, y) = client_point(lparam);
+            Input::Pressed { x, y }
+        }
         WM_CLOSE => return LRESULT(0),
         _ => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     };
@@ -578,27 +600,9 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         }
 
         for input in INPUT.with_borrow_mut(std::mem::take) {
-            match input {
-                Input::Moved { x, y } => {
-                    let scale = machine.scale();
-                    machine.cursor_at(x as f64 / scale, y as f64 / scale, true, Instant::now());
-                }
-                Input::Left => machine.cursor_left(Instant::now()),
-                Input::Pressed => {
-                    let mut point = windows::Win32::Foundation::POINT::default();
-                    unsafe {
-                        let _ = GetCursorPos(&mut point);
-                    }
-                    let scale = machine.scale();
-                    let (origin_x, origin_y) = window_position(hwnd);
-                    let x = (point.x - origin_x) as f64 / scale;
-                    let y = (point.y - origin_y) as f64 / scale;
-
-                    for action in machine.clicked(x, y) {
-                        if action_tx.send(action).is_err() {
-                            exit = true;
-                        }
-                    }
+            for action in machine.input(input, Instant::now()) {
+                if action_tx.send(action).is_err() {
+                    exit = true;
                 }
             }
         }
