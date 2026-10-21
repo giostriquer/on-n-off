@@ -39,7 +39,7 @@ pub(crate) fn column(
                     .filter_map(|legacy| legacy.account.clone())
                     .collect(),
                 unread: false,
-                other_desktop_account: None,
+                desktop_account: false,
                 card: card.clone(),
             }
         })
@@ -97,7 +97,7 @@ fn unread(
         category: roster.category(id).map(str::to_owned),
         replaced: Vec::new(),
         unread: true,
-        other_desktop_account: None,
+        desktop_account: false,
     }
 }
 

@@ -157,7 +157,7 @@ impl Cache {
     ) -> Vec<ColumnEntryDto> {
         let mut column = self.column(entries);
         if let Some(home) = home {
-            crate::limits::desktop_app::mark_other_account(self.provider, &mut column, home);
+            crate::limits::desktop_app::mark_desktop_account(self.provider, &mut column, home);
         }
         column
     }

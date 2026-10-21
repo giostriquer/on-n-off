@@ -22,7 +22,7 @@ vi.mock("$lib/api", () => ({
 }));
 
 const DAY = 86_400_000;
-const TAG = "Claude Desktop was last signed in to another account";
+const TAG = "Claude Desktop account";
 
 function profile(overrides: Partial<SavedProfile> = {}): SavedProfile {
   return {
@@ -44,6 +44,11 @@ function renderLimits() {
 }
 
 const signedInCard = () => screen.findByRole("region", { name: "Claude limits · me@claude.example" });
+const desktopCard = () => screen.findByRole("region", { name: "Claude limits · desk@claude.example" });
+
+function desk(overrides: Partial<LimitsColumnEntry> = {}): LimitsColumnEntry {
+  return okClaude({ account: { id: "uuid-2", label: "desk@claude.example" }, currentAccount: false, savedProfile: true, ...overrides });
+}
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -57,44 +62,49 @@ afterEach(() => {
 });
 
 describe("Claude Desktop on another account", () => {
-  it("is a warning tag in the signed-in card's header naming Desktop's account", async () => {
-    answer([okClaude({ otherDesktopAccount: { label: "desk@claude.example" } })]);
+  it("is a Desktop tag in the header of the card Claude Desktop is on", async () => {
+    answer([okClaude(), desk({ desktopAccount: true })]);
     renderLimits();
-    const card = await signedInCard();
+    const card = await desktopCard();
     const tag = await within(card).findByRole("button", { name: TAG });
     expect(tag.closest("header")).toBeTruthy();
-    expect(tag).toHaveClass("term-badge--warning");
-    expect(tag).toHaveTextContent("Desktop: other account");
-    expect(parseFloat(tag.querySelector<HTMLElement>(".term-badge-fill")!.style.width)).toBe(0);
+    expect(tag).toHaveClass("term-badge--neutral");
+    expect(tag).toHaveTextContent(/^Desktop$/);
     fireEvent.focus(tag);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop was last signed in to desk@claude.example.");
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Sign in to this account in Claude Desktop to use it there.");
+    expect(screen.getByRole("tooltip")).toHaveTextContent(/^Claude Desktop was last signed in to this account\.$/);
+    expect(tag).toHaveAccessibleName("Claude Desktop account");
+    expect(tag).toHaveAccessibleDescription("Claude Desktop was last signed in to this account.");
   });
 
-  it("says another account when Desktop's account is not one Limits shows", async () => {
-    answer([okClaude({ otherDesktopAccount: { label: null } })]);
+  it("leaves the signed-in card untagged", async () => {
+    answer([okClaude(), desk({ desktopAccount: true })]);
     renderLimits();
-    const tag = await within(await signedInCard()).findByRole("button", { name: TAG });
-    fireEvent.focus(tag);
-    expect(screen.getByRole("tooltip")).toHaveTextContent("Claude Desktop was last signed in to another account.");
-  });
-
-  it("is not shown while the read carries no other Desktop account", async () => {
-    answer([okClaude()]);
-    renderLimits();
+    await within(await desktopCard()).findByRole("button", { name: TAG });
     const card = await signedInCard();
+    expect(within(card).queryByRole("button", { name: /Desktop/ })).toBeNull();
+    expect(within(card).queryByText(/Desktop/)).toBeNull();
+  });
+
+  it("is not shown while no card carries Desktop's account", async () => {
+    answer([okClaude(), desk()]);
+    renderLimits();
+    const card = await desktopCard();
     await within(card).findByText("Max");
-    expect(within(card).queryByRole("button", { name: TAG })).toBeNull();
-    expect(within(card).queryByText("Desktop: other account")).toBeNull();
+    expect(screen.queryByRole("button", { name: TAG })).toBeNull();
+    expect(screen.queryByText("Desktop")).toBeNull();
   });
 
   it("sits after the sign-in tag and before the plan", async () => {
     const endsAt = new Date(Date.parse(NOW) + 3 * DAY).toISOString();
-    answer([okClaude({ otherDesktopAccount: { label: "desk@claude.example" } })], [profile({ loginState: { state: "ending", endsAt } })]);
+    const saved = profile({
+      id: "saved-desk", observationId: "uuid-2", legacyId: "desk", identity: { provider: "claude", userId: "desk", workspaceId: "team" },
+      label: "desk@claude.example", email: "desk@claude.example", active: false, loginState: { state: "ending", endsAt },
+    });
+    answer([okClaude(), desk({ desktopAccount: true })], [saved]);
     renderLimits();
-    const card = await signedInCard();
+    const card = await desktopCard();
     await within(card).findByRole("button", { name: TAG });
     const tags = within(card).getByTestId("account-tags");
-    expect(Array.from(tags.children, tag => tag.textContent)).toEqual(["Sign-in ends Aug 20", "Desktop: other account", "Max"]);
+    expect(Array.from(tags.children, tag => tag.textContent)).toEqual(["Sign-in ends Aug 20", "Desktop", "Max"]);
   });
 });

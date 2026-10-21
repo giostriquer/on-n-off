@@ -46,12 +46,12 @@ export const SCENES = [
     limitsColumns: 3,
     steps: [{ wait: "role=button[name='Claude sign-in ended Aug 23']" }],
   })),
-  { name: "limits-desktop-account", url: "/limits?mock=claudeDesktop", steps: [{ hover: "role=button[name='Claude Desktop was last signed in to another account']" }, { wait: "role=tooltip" }] },
-  { name: "limits-desktop-account-light", url: "/limits?mock=claudeDesktop", theme: "light", steps: [{ wait: "role=button[name='Claude Desktop was last signed in to another account']" }] },
+  { name: "limits-desktop-account", url: "/limits?mock=claudeDesktop", steps: [{ hover: "role=button[name='Claude Desktop account']" }, { wait: "role=tooltip" }] },
+  { name: "limits-desktop-account-light", url: "/limits?mock=claudeDesktop", theme: "light", steps: [{ wait: "role=button[name='Claude Desktop account']" }] },
   ...[960, 1280, 1440].map(width => ({
     name: `limits-desktop-account-${width}`, url: "/limits?mock=claudeDesktop", viewport: { width, height: 980 },
     limitsColumns: 3,
-    steps: [{ wait: "role=button[name='Claude Desktop was last signed in to another account']" }],
+    steps: [{ wait: "role=button[name='Claude Desktop account']" }],
   })),
   { name: "limits-saved-logins-1280", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, limitsColumns: 3, steps: [{ wait: "role=region[name='Codex limits · moved@example.com']" }] },
   { name: "limits-saved-logins-menu", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, steps: [
