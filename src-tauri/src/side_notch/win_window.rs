@@ -4,6 +4,7 @@ use super::model::frame::RailData;
 use super::model::{selected_display, NotchSettings, ShowMode};
 use super::win_paint::{self, Hover, Plan};
 use crate::side_notch::model::Display;
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::{
     sync::mpsc::{Receiver, Sender},
@@ -11,24 +12,27 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use tao::event::{ElementState, Event, WindowEvent};
-use tao::event_loop::{ControlFlow, EventLoop, EventLoopBuilder};
-use tao::platform::windows::{
-    EventLoopBuilderExtWindows, WindowBuilderExtWindows, WindowExtWindows,
-};
-use tao::window::{Window, WindowBuilder};
 use tiny_skia::Pixmap;
+use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC, SelectObject,
     AC_SRC_ALPHA, AC_SRC_OVER, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, BLENDFUNCTION, DIB_RGB_COLORS,
 };
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, GetClassNameW, GetCursorPos, GetForegroundWindow, GetWindow, GetWindowRect,
     IsWindowVisible, SetWindowsHookExW, ShowWindow, UnhookWindowsHookEx, GW_HWNDPREV, HWND_TOPMOST,
     MSLLHOOKSTRUCT, SW_HIDE, SW_SHOWNOACTIVATE, WH_MOUSE_LL, WM_LBUTTONDOWN, WS_EX_LAYERED,
     WS_EX_TOPMOST,
+};
+use windows::Win32::UI::WindowsAndMessaging::{
+    CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, LoadCursorW,
+    MsgWaitForMultipleObjectsEx, PeekMessageW, RegisterClassExW, TranslateMessage, IDC_ARROW, MSG,
+    MWMO_INPUTAVAILABLE, PM_REMOVE, QS_ALLINPUT, WM_CLOSE, WM_MOUSEMOVE, WNDCLASSEXW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, UpdateLayeredWindow, GWL_EXSTYLE,
@@ -342,6 +346,21 @@ impl Machine {
         Vec::new()
     }
 
+    fn input(&mut self, input: Input, now: Instant) -> Vec<WinAction> {
+        let scale = self.scale();
+        match input {
+            Input::Moved { x, y } => {
+                self.cursor_at(f64::from(x) / scale, f64::from(y) / scale, true, now);
+                Vec::new()
+            }
+            Input::Left => {
+                self.cursor_left(now);
+                Vec::new()
+            }
+            Input::Pressed { x, y } => self.clicked(f64::from(x) / scale, f64::from(y) / scale),
+        }
+    }
+
     pub fn deadline(&self, now: Instant) -> Instant {
         let mut deadline = now + SCREEN_POLL;
         if self.pointer_poll_active() {
@@ -421,26 +440,113 @@ unsafe extern "system" fn low_level_mouse_proc(
     unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
+const CLASS: PCWSTR = w!("on-n-off Side notch");
+const WM_MOUSELEAVE: u32 = 0x02A3;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Input {
+    Moved { x: i32, y: i32 },
+    Left,
+    Pressed { x: i32, y: i32 },
+}
+
+fn client_point(lparam: LPARAM) -> (i32, i32) {
+    let x = (lparam.0 & 0xFFFF) as u16 as i16;
+    let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16;
+    (i32::from(x), i32::from(y))
+}
+
+thread_local! {
+    static INPUT: RefCell<Vec<Input>> = const { RefCell::new(Vec::new()) };
+}
+
+unsafe extern "system" fn overlay_proc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    let input = match msg {
+        WM_MOUSEMOVE => {
+            let mut track = TRACKMOUSEEVENT {
+                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                dwFlags: TME_LEAVE,
+                hwndTrack: hwnd,
+                dwHoverTime: 0,
+            };
+            let _ = unsafe { TrackMouseEvent(&mut track) };
+            let (x, y) = client_point(lparam);
+            Input::Moved { x, y }
+        }
+        WM_MOUSELEAVE => Input::Left,
+        WM_LBUTTONDOWN => {
+            let (x, y) = client_point(lparam);
+            Input::Pressed { x, y }
+        }
+        WM_CLOSE => return LRESULT(0),
+        _ => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    };
+    INPUT.with_borrow_mut(|queue| queue.push(input));
+    LRESULT(0)
+}
+
+fn create_overlay() -> Option<HWND> {
+    unsafe {
+        let instance = GetModuleHandleW(None).ok()?;
+        let class = WNDCLASSEXW {
+            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            lpfnWndProc: Some(overlay_proc),
+            hInstance: instance.into(),
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            lpszClassName: CLASS,
+            ..Default::default()
+        };
+        RegisterClassExW(&class);
+        CreateWindowExW(
+            WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
+            CLASS,
+            w!("on-n-off Side notch"),
+            WS_POPUP,
+            0,
+            0,
+            0,
+            0,
+            None,
+            None,
+            Some(instance.into()),
+            None,
+        )
+        .ok()
+    }
+}
+
+fn pump_messages() {
+    let mut msg = MSG::default();
+    unsafe {
+        while PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+            let _ = TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+}
+
+fn wait_until(deadline: Instant) {
+    let timeout = deadline.saturating_duration_since(Instant::now());
+    let millis = timeout
+        .as_nanos()
+        .div_ceil(1_000_000)
+        .min(u128::from(u32::MAX - 1)) as u32;
+    unsafe {
+        MsgWaitForMultipleObjectsEx(None, millis, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+    }
+}
+
 fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
     let _pm_v2 = super::win_displays::thread_pm_v2();
-    let event_loop: EventLoop<WindowMsg> = EventLoopBuilder::<WindowMsg>::with_user_event()
-        .with_any_thread(true)
-        .build();
-    let window = WindowBuilder::new()
-        .with_title("on-n-off Side notch")
-        .with_decorations(false)
-        .with_transparent(false)
-        .with_always_on_top(true)
-        .with_resizable(false)
-        .with_focusable(false)
-        .with_skip_taskbar(true)
-        .with_visible(false)
-        .build(&event_loop)
-        .expect("build the side notch window");
-
-    let hwnd = window.hwnd();
-    window.set_visible(true);
-    window.set_visible(false);
+    let Some(own) = create_overlay() else {
+        return;
+    };
+    let hwnd = own.0 as isize;
     unsafe { ensure_layered(hwnd) };
     disable_window_chrome(hwnd);
     disarm_outside_click_hook();
@@ -448,114 +554,70 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
     let mut machine = Machine::new();
     let mut was_visible = false;
     let mut last_poll = Instant::now();
+    let mut deadline = Instant::now();
 
-    event_loop.run(move |event, _, control| {
+    loop {
+        wait_until(deadline);
+        pump_messages();
         let mut exit = false;
-        match event {
-            Event::NewEvents(_) => {
-                while let Ok(msg) = msg_rx.try_recv() {
-                    match msg {
-                        WindowMsg::Data(data) => {
-                            machine.accept(data);
-                        }
-                        WindowMsg::Shutdown => exit = true,
+        while let Ok(msg) = msg_rx.try_recv() {
+            match msg {
+                WindowMsg::Data(data) => {
+                    machine.accept(data);
+                }
+                WindowMsg::Shutdown => exit = true,
 
-                        WindowMsg::Ping => {}
-                    }
-                }
-                if last_poll.elapsed() >= SCREEN_POLL {
-                    last_poll = Instant::now();
-                    let displays = super::win_displays::read().unwrap_or_default();
-                    if machine.set_displays(displays)
-                        && action_tx.send(WinAction::ScreensChanged).is_err()
-                    {
-                        exit = true;
-                    }
-                    let own = HWND(hwnd as *mut _);
-                    let fullscreen = fullscreen_foreground(&machine, own);
-                    machine.set_suppressed(fullscreen);
-                    keep_on_top(own, fullscreen);
-                }
+                WindowMsg::Ping => {}
+            }
+        }
+        if last_poll.elapsed() >= SCREEN_POLL {
+            last_poll = Instant::now();
+            let displays = super::win_displays::read().unwrap_or_default();
+            if machine.set_displays(displays) && action_tx.send(WinAction::ScreensChanged).is_err()
+            {
+                exit = true;
+            }
+            let fullscreen = fullscreen_foreground(&machine, own);
+            machine.set_suppressed(fullscreen);
+            keep_on_top(own, fullscreen);
+        }
 
-                if machine.pointer_poll_active() {
-                    let scale = machine.scale();
-                    let (origin_x, origin_y) = window_position(hwnd);
-                    if let Some((x, y, inside)) = cursor_over(hwnd, scale, origin_x, origin_y) {
-                        machine.cursor_at(x, y, inside, Instant::now());
-                    }
-                }
-                machine.advance(Instant::now());
-                if machine.pinned.is_some() {
-                    arm_outside_click_hook(hwnd);
-                } else {
-                    disarm_outside_click_hook();
-                }
-                if OUTSIDE_CLICK_PENDING.swap(false, Ordering::SeqCst) {
-                    machine.dismiss();
-                }
+        if machine.pointer_poll_active() {
+            let scale = machine.scale();
+            let (origin_x, origin_y) = window_position(hwnd);
+            if let Some((x, y, inside)) = cursor_over(hwnd, scale, origin_x, origin_y) {
+                machine.cursor_at(x, y, inside, Instant::now());
             }
-            Event::UserEvent(WindowMsg::Data(data)) => {
-                machine.accept(data);
-            }
-            Event::UserEvent(WindowMsg::Shutdown) => exit = true,
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::CursorMoved { position, .. },
-                ..
-            } if window_id == window.id() => {
-                let scale = machine.scale();
-                let x = position.x / scale;
-                let y = position.y / scale;
-                machine.cursor_at(x, y, true, Instant::now());
-            }
-            Event::WindowEvent {
-                window_id,
-                event: WindowEvent::CursorLeft { .. },
-                ..
-            } if window_id == window.id() => {
-                machine.cursor_left(Instant::now());
-            }
-            Event::WindowEvent {
-                window_id,
-                event:
-                    WindowEvent::MouseInput {
-                        button: tao::event::MouseButton::Left,
-                        state: ElementState::Pressed,
-                        ..
-                    },
-                ..
-            } if window_id == window.id() => {
-                let mut point = windows::Win32::Foundation::POINT::default();
-                unsafe {
-                    let _ = GetCursorPos(&mut point);
-                }
-                let scale = machine.scale();
-                let (origin_x, origin_y) = window_position(hwnd);
-                let x = (point.x - origin_x) as f64 / scale;
-                let y = (point.y - origin_y) as f64 / scale;
+        }
+        machine.advance(Instant::now());
+        if machine.pinned.is_some() {
+            arm_outside_click_hook(hwnd);
+        } else {
+            disarm_outside_click_hook();
+        }
+        if OUTSIDE_CLICK_PENDING.swap(false, Ordering::SeqCst) {
+            machine.dismiss();
+        }
 
-                for action in machine.clicked(x, y) {
-                    if action_tx.send(action).is_err() {
-                        exit = true;
-                    }
+        for input in INPUT.with_borrow_mut(std::mem::take) {
+            for action in machine.input(input, Instant::now()) {
+                if action_tx.send(action).is_err() {
+                    exit = true;
                 }
             }
-            _ => {}
         }
 
         if exit {
-            disarm_outside_click_hook();
-            *control = ControlFlow::Exit;
-            return;
+            break;
         }
 
         if machine.take_dirty() {
             match machine.plan() {
                 Some(plan) if !plan.cells.is_empty() => {
-                    present(&window, &plan);
+                    present(hwnd, &plan);
                     if !was_visible {
                         unsafe {
-                            let _ = ShowWindow(HWND(hwnd as *mut _), SW_SHOWNOACTIVATE);
+                            let _ = ShowWindow(own, SW_SHOWNOACTIVATE);
                         }
                     }
                     was_visible = true;
@@ -563,7 +625,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
                 _ => {
                     if was_visible {
                         unsafe {
-                            let _ = ShowWindow(HWND(hwnd as *mut _), SW_HIDE);
+                            let _ = ShowWindow(own, SW_HIDE);
                         }
                     }
                     was_visible = false;
@@ -571,13 +633,17 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
             }
         }
 
-        *control = ControlFlow::WaitUntil(machine.deadline(Instant::now()));
+        deadline = machine.deadline(Instant::now());
         unsafe {
-            if !IsWindowVisible(HWND(hwnd as *mut _)).as_bool() {
-                *control = ControlFlow::WaitUntil(Instant::now() + SCREEN_POLL);
+            if !IsWindowVisible(own).as_bool() {
+                deadline = Instant::now() + SCREEN_POLL;
             }
         }
-    });
+    }
+    disarm_outside_click_hook();
+    unsafe {
+        let _ = DestroyWindow(own);
+    }
 }
 
 fn cursor_over(hwnd: isize, scale: f64, origin_x: i32, origin_y: i32) -> Option<(f64, f64, bool)> {
@@ -759,9 +825,9 @@ fn disable_window_chrome(hwnd: isize) {
     }
 }
 
-fn present(window: &Window, plan: &Plan) {
+fn present(hwnd: isize, plan: &Plan) {
     let pixmap = win_paint::render(plan);
-    present_pixmap(window.hwnd(), &pixmap, plan);
+    present_pixmap(hwnd, &pixmap, plan);
 }
 
 fn present_pixmap(hwnd: isize, pixmap: &Pixmap, plan: &Plan) {
