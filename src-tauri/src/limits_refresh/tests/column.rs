@@ -351,7 +351,7 @@ fn a_roster_reread_racing_the_saved_poll_keeps_the_verdict_the_poll_parked() {
 }
 
 #[test]
-fn the_served_column_tags_the_signed_in_claude_card_while_claude_desktop_is_on_another_account() {
+fn the_served_column_tags_the_card_claude_desktop_is_on_while_it_is_another_account() {
     let home = crate::paths::scratch_dir("served-desktop");
     let data = crate::paths::claude_desktop_data_for(&home);
     std::fs::create_dir_all(&data).unwrap();
@@ -368,37 +368,50 @@ fn the_served_column_tags_the_signed_in_claude_card_while_claude_desktop_is_on_a
         user_id: "user-me".into(),
         workspace_id: "org-me".into(),
     };
-    let mut card = ProviderLimitsDto::for_test(AgentId::Claude, "replaced");
-    card.account = Some(crate::limits::scoped_account(
-        &me,
-        Some("me@claude.example".into()),
-    ));
+    let desk = Identity {
+        user_id: "user-desk".into(),
+        workspace_id: "org-desk".into(),
+        ..me.clone()
+    };
+    let card = |identity: &Identity, label: &str, provider: AgentId| {
+        let mut card = ProviderLimitsDto::for_test(provider, "replaced");
+        card.account = Some(crate::limits::scoped_account(
+            &Identity {
+                provider,
+                ..identity.clone()
+            },
+            Some(label.into()),
+        ));
+        card
+    };
+    let cards = |provider: AgentId| {
+        let mut saved = card(&desk, "desk@claude.example", provider);
+        saved.current_account = false;
+        saved.saved_profile = true;
+        vec![card(&me, "me@claude.example", provider), saved]
+    };
     let tagged = |column: Vec<ColumnEntryDto>| -> Vec<bool> {
-        column
-            .iter()
-            .map(|entry| entry.other_desktop_account.is_some())
-            .collect()
+        column.iter().map(|entry| entry.desktop_account).collect()
     };
 
     let claude = Cache::new(AgentId::Claude, Source::LimitsClaude);
     assert_eq!(
-        tagged(claude.served_column(std::slice::from_ref(&card), Some(&home))),
-        [true]
+        tagged(claude.served_column(&cards(AgentId::Claude), Some(&home))),
+        [false, true]
     );
     assert_eq!(
-        tagged(claude.served_column(std::slice::from_ref(&card), None)),
-        [false]
+        tagged(claude.served_column(&cards(AgentId::Claude), None)),
+        [false, false]
     );
     assert_eq!(
-        tagged(claude.column(std::slice::from_ref(&card))),
-        [false],
+        tagged(claude.column(&cards(AgentId::Claude))),
+        [false, false],
         "planning a removal or archive reads no Desktop file"
     );
 
     let codex = Cache::new(AgentId::Codex, Source::LimitsCodex);
-    card.provider = AgentId::Codex;
     assert_eq!(
-        tagged(codex.served_column(std::slice::from_ref(&card), Some(&home))),
-        [false]
+        tagged(codex.served_column(&cards(AgentId::Codex), Some(&home))),
+        [false, false]
     );
 }

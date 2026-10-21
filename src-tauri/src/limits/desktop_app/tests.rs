@@ -79,16 +79,8 @@ fn marked_for(
     column
 }
 
-fn tags(column: &[ColumnEntryDto]) -> Vec<Option<Option<&str>>> {
-    column
-        .iter()
-        .map(|entry| {
-            entry
-                .other_desktop_account
-                .as_ref()
-                .map(|account| account.label.as_deref())
-        })
-        .collect()
+fn tags(column: &[ColumnEntryDto]) -> Vec<bool> {
+    column.iter().map(|entry| entry.desktop_account).collect()
 }
 
 #[test]
@@ -126,7 +118,7 @@ fn names_no_desktop_account_without_a_config_that_names_one() {
 }
 
 #[test]
-fn the_signed_in_card_names_the_saved_account_claude_desktop_is_on() {
+fn the_saved_account_claude_desktop_is_on_carries_the_tag() {
     let me = identity("user-me", "org-me");
     let desk = identity("user-desk", "org-desk");
     let column = marked_for(
@@ -134,11 +126,11 @@ fn the_signed_in_card_names_the_saved_account_claude_desktop_is_on() {
         &[signed_in(&me, "me@claude.example")],
         &[(me, "me@claude.example"), (desk, "desk@claude.example")],
     );
-    assert_eq!(tags(&column), [Some(Some("desk@claude.example")), None]);
+    assert_eq!(tags(&column), [false, true]);
 }
 
 #[test]
-fn a_read_card_names_the_account_claude_desktop_is_on() {
+fn the_read_card_claude_desktop_is_on_carries_the_tag() {
     let me = identity("user-me", "org-me");
     let desk = identity("user-desk", "org-desk");
     let column = marked_for(
@@ -149,92 +141,138 @@ fn a_read_card_names_the_account_claude_desktop_is_on() {
         ],
         &[],
     );
-    assert_eq!(tags(&column), [Some(Some("desk@claude.example")), None]);
+    assert_eq!(tags(&column), [false, true]);
 }
 
 #[test]
-fn an_account_no_card_shows_is_another_account() {
+fn every_card_of_the_user_claude_desktop_is_on_carries_the_tag() {
+    let me = identity("user-me", "org-me");
+    let column = marked_for(
+        "user-desk",
+        &[
+            signed_in(&me, "me@claude.example"),
+            saved(&identity("user-desk", "org-desk"), "desk@claude.example"),
+            saved(&identity("user-desk", "org-team"), "desk@claude.example"),
+        ],
+        &[],
+    );
+    assert_eq!(tags(&column), [false, true, true]);
+}
+
+#[test]
+fn an_account_no_card_shows_tags_nothing() {
     let me = identity("user-me", "org-me");
     let column = marked_for(
         "user-stranger",
         &[signed_in(&me, "me@claude.example")],
         &[(me, "me@claude.example")],
     );
-    assert_eq!(tags(&column), [Some(None)]);
+    assert_eq!(tags(&column), [false]);
 }
 
 #[test]
 fn no_tag_while_claude_desktop_is_on_the_signed_in_account() {
     let me = identity("user-me", "org-me");
     let scoped = marked_for("user-me", &[signed_in(&me, "me@claude.example")], &[]);
-    assert_eq!(tags(&scoped), [None]);
-    let saved = marked_for(
+    assert_eq!(tags(&scoped), [false]);
+    let saved_too = marked_for(
         "user-me",
         &[signed_in(&me, "me@claude.example")],
-        &[(me.clone(), "me@claude.example")],
+        &[
+            (me.clone(), "me@claude.example"),
+            (identity("user-desk", "org-desk"), "desk@claude.example"),
+        ],
     );
-    assert_eq!(tags(&saved), [None]);
+    assert_eq!(tags(&saved_too), [false, false]);
     let unscoped = marked_for(
         "user-me",
         &[ProviderLimitsDto::for_test(AgentId::Claude, "user-me")],
         &[],
     );
-    assert_eq!(tags(&unscoped), [None]);
+    assert_eq!(tags(&unscoped), [false]);
     let other_organization = marked_for(
         "user-me",
-        &[signed_in(
-            &identity("user-me", "org-team"),
-            "me@claude.example",
-        )],
+        &[
+            signed_in(&identity("user-me", "org-team"), "me@claude.example"),
+            saved(&me, "me@claude.example"),
+        ],
         &[],
     );
-    assert_eq!(tags(&other_organization), [None]);
+    assert_eq!(tags(&other_organization), [false, false]);
 }
 
 #[test]
 fn an_unscoped_signed_in_card_is_compared_by_its_own_id() {
+    let desk = identity("user-desk", "org-desk");
     let column = marked_for(
         "user-desk",
-        &[ProviderLimitsDto::for_test(AgentId::Claude, "user-me")],
+        &[
+            ProviderLimitsDto::for_test(AgentId::Claude, "user-me"),
+            saved(&desk, "desk@claude.example"),
+        ],
         &[],
     );
-    assert_eq!(tags(&column), [Some(None)]);
+    assert_eq!(tags(&column), [false, true]);
 }
 
 #[test]
 fn no_tag_without_a_signed_in_claude_code_account() {
+    let desk = identity("user-desk", "org-desk");
     let default = marked_for(
         "user-desk",
-        &[ProviderLimitsDto::for_test(AgentId::Claude, "default")],
+        &[
+            ProviderLimitsDto::for_test(AgentId::Claude, "default"),
+            saved(&desk, "desk@claude.example"),
+        ],
         &[],
     );
-    assert_eq!(tags(&default), [None]);
+    assert_eq!(tags(&default), [false, false]);
     let mut signed_out = ProviderLimitsDto::for_test(AgentId::Claude, "default");
     signed_out.account = None;
-    assert_eq!(tags(&marked_for("user-desk", &[signed_out], &[])), [None]);
-    let me = identity("user-me", "org-me");
-    let saved_only = marked_for("user-desk", &[saved(&me, "me@claude.example")], &[]);
-    assert_eq!(tags(&saved_only), [None]);
+    assert_eq!(
+        tags(&marked_for(
+            "user-desk",
+            &[signed_out, saved(&desk, "desk@claude.example")],
+            &[]
+        )),
+        [false, false]
+    );
+    let saved_only = marked_for("user-desk", &[saved(&desk, "desk@claude.example")], &[]);
+    assert_eq!(tags(&saved_only), [false]);
 }
 
 #[test]
 fn marking_reads_the_desktop_app_of_a_provider_that_has_one() {
     let me = identity("user-me", "org-me");
+    let desk = identity("user-desk", "org-desk");
     let home = desktop_on("user-desk");
-    let mut claude = column_of(AgentId::Claude, &[signed_in(&me, "me@claude.example")], &[]);
-    mark_other_account(AgentId::Claude, &mut claude, &home);
-    assert_eq!(tags(&claude), [Some(None)]);
-    let codex = Identity {
+    let mut claude = column_of(
+        AgentId::Claude,
+        &[
+            signed_in(&me, "me@claude.example"),
+            saved(&desk, "desk@claude.example"),
+        ],
+        &[],
+    );
+    mark_desktop_account(AgentId::Claude, &mut claude, &home);
+    assert_eq!(tags(&claude), [false, true]);
+    let codex = |identity: &Identity| Identity {
         provider: AgentId::Codex,
-        ..me
+        ..identity.clone()
     };
     let mut column = column_of(
         AgentId::Codex,
-        &[signed_in(&codex, "me@codex.example")],
-        &[],
+        &[
+            signed_in(&codex(&me), "me@codex.example"),
+            saved(&codex(&desk), "desk@codex.example"),
+        ],
+        &[(
+            codex(&identity("user-away", "org-away")),
+            "away@codex.example",
+        )],
     );
-    mark_other_account(AgentId::Codex, &mut column, &home);
-    assert_eq!(tags(&column), [None]);
+    mark_desktop_account(AgentId::Codex, &mut column, &home);
+    assert_eq!(tags(&column), [false, false, false]);
 }
 
 #[test]
@@ -250,16 +288,8 @@ fn the_tag_reaches_the_ui_only_on_the_marked_card() {
         .iter()
         .map(|entry| serde_json::to_value(entry).unwrap())
         .collect();
-    assert_eq!(
-        sent[0]["otherDesktopAccount"],
-        serde_json::json!({"label": "desk@claude.example"})
-    );
-    assert!(sent[1].get("otherDesktopAccount").is_none());
-    let stranger = marked_for("user-stranger", &[signed_in(&me, "me@claude.example")], &[]);
-    assert_eq!(
-        serde_json::to_value(&stranger[0]).unwrap()["otherDesktopAccount"],
-        serde_json::json!({"label": null})
-    );
+    assert!(sent[0].get("desktopAccount").is_none());
+    assert_eq!(sent[1]["desktopAccount"], serde_json::json!(true));
 }
 
 #[test]

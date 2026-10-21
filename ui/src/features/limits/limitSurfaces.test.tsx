@@ -132,14 +132,17 @@ it("says on the popover that a Claude sign-in has ended", async () => {
   expect(cards[0].text).toContain("Claude ended this sign-in on Aug 16. Sign in again to use this account.");
 });
 
-it("tags the screen's signed-in Claude card, and not the popover's, when Claude Desktop was last on another account", async () => {
+it("tags the screen's card Claude Desktop is on, and not the popover's", async () => {
+  const desk = okClaude({ account: { id: "uuid-desk", label: "desk@claude.example" }, currentAccount: false, savedProfile: true, desktopAccount: true });
   readLimits.mockImplementation((provider: AgentId) => Promise.resolve(
-    provider === "claude" ? COLUMNS.claude.map(entry => ({ ...entry, otherDesktopAccount: { label: null } }))
+    provider === "claude" ? [...COLUMNS.claude, desk]
       : provider === "codex" ? COLUMNS.codex : []));
 
   const onScreen = await screenCards("Claude");
   const { cards: inPopover } = await popoverCards("Claude");
 
-  expect(onScreen[0].text).toContain("Desktop: other account");
-  expect(inPopover[0].text).not.toContain("Desktop");
+  const named = (name: string) => onScreen.find(card => card.name === `Claude limits · ${name}`)?.text;
+  expect(named("me@claude.example")).not.toContain("Desktop");
+  expect(named("desk@claude.example")).toContain("Desktop");
+  expect(inPopover.map(card => card.text).join(" ")).not.toContain("Desktop");
 });

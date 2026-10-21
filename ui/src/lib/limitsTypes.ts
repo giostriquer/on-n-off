@@ -105,7 +105,5 @@ export type LimitsColumnEntry = ProviderLimits & {
   category?: string | null;
   replaced?: LimitsAccount[];
   unread?: boolean;
-  otherDesktopAccount?: OtherDesktopAccount;
+  desktopAccount?: boolean;
 };
-
-export type OtherDesktopAccount = { label: string | null };

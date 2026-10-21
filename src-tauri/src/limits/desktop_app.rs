@@ -4,7 +4,7 @@ use serde::Deserialize;
 
 use super::DEFAULT_ACCOUNT;
 use crate::accounts::model::Identity;
-use crate::dto::{AgentId, ColumnEntryDto, OtherDesktopAccountDto};
+use crate::dto::{AgentId, ColumnEntryDto};
 use crate::paths;
 use crate::provider_catalogue::DesktopApp;
 
@@ -14,7 +14,7 @@ struct ClaudeDesktopConfig {
     last_known_account: Option<String>,
 }
 
-pub(crate) fn mark_other_account(provider: AgentId, column: &mut [ColumnEntryDto], home: &Path) {
+pub(crate) fn mark_desktop_account(provider: AgentId, column: &mut [ColumnEntryDto], home: &Path) {
     let Some(app) = provider.limits_facts().desktop_app else {
         return;
     };
@@ -27,22 +27,17 @@ pub(crate) fn mark_other_account(provider: AgentId, column: &mut [ColumnEntryDto
 }
 
 fn mark(app: DesktopApp, column: &mut [ColumnEntryDto], desktop: &str) {
-    let Some((index, user)) = signed_in(app, column) else {
-        return;
-    };
-    if user == desktop {
+    if signed_in(app, column).is_none_or(|user| user == desktop) {
         return;
     }
-    let label = column
-        .iter()
-        .filter(|entry| user_of(app, entry) == Some(desktop))
-        .find_map(|entry| entry.card.account.as_ref()?.label.clone());
-    column[index].other_desktop_account = Some(OtherDesktopAccountDto { label });
+    for entry in column.iter_mut() {
+        entry.desktop_account = user_of(app, entry) == Some(desktop);
+    }
 }
 
-fn signed_in(app: DesktopApp, column: &[ColumnEntryDto]) -> Option<(usize, &str)> {
-    let index = column.iter().position(|entry| entry.card.current_account)?;
-    Some((index, user_of(app, &column[index])?))
+fn signed_in(app: DesktopApp, column: &[ColumnEntryDto]) -> Option<&str> {
+    let entry = column.iter().find(|entry| entry.card.current_account)?;
+    user_of(app, entry)
 }
 
 fn desktop_user(app: DesktopApp, home: &Path) -> Option<String> {

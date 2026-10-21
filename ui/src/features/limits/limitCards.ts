@@ -183,7 +183,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
     login,
     signIn,
-    desktop: desktopPresentation(entry.otherDesktopAccount, provider),
+    desktop: entry.desktopAccount ? desktopPresentation(provider) : null,
     archived: !!entry.archived,
   };
 }
