@@ -1,4 +1,5 @@
 mod auth;
+mod contributions;
 #[cfg(test)]
 mod fixtures;
 pub(crate) mod merge;
@@ -16,13 +17,13 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::cli::AgentCli;
-use crate::dto::{GithubPrsData, GithubPrsDto, GithubStatus};
-use crate::http::{post_json, HttpError, RateLimitReset};
+use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData, GithubPrsDto, GithubStatus};
+use crate::http::{get_json, post_json, HttpError, RateLimitReset};
 use crate::paths;
 use crate::read_revision::{Reading, Revision, Source};
 use crate::settings::{self, AppSettings};
 use auth::{read_token_with, GhTokenMemo, TokenError, GH_TOKEN, TOKEN_DEADLINE};
-use query::{request_body, GRAPHQL_URL};
+use query::{request_body, EVENTS_URL, GRAPHQL_URL};
 
 const LOW_BUDGET_POINTS: u64 = 50;
 const CACHE_MARGIN_SECS: i64 = 5;
@@ -68,6 +69,7 @@ struct Sources<'a> {
     read_memo: &'a ReadMemo,
     cli: &'a AgentCli,
     url: &'a str,
+    events_url: &'a str,
     now_secs: i64,
 }
 
@@ -129,6 +131,7 @@ fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {
             read_memo: &READ_MEMO,
             cli: &cli,
             url: GRAPHQL_URL,
+            events_url: EVENTS_URL,
             now_secs: Utc::now().timestamp(),
         },
         force,
@@ -214,17 +217,101 @@ fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
             sources.read_memo.state().paused_until = Some(until);
         }
     }
+    let mut data = GithubPrsData {
+        fetched_at: rfc3339(sources.now_secs),
+        scope: sources.settings.github_scopes.clone(),
+        ..parsed.data
+    };
+    let mut warnings = parsed.warnings;
+    add_contributions(sources, &mut data, &mut warnings);
     Ok(GithubPrsDto {
         status: GithubStatus::Ok,
         hint: None,
         stale: false,
-        data: GithubPrsData {
-            fetched_at: rfc3339(sources.now_secs),
-            scope: sources.settings.github_scopes.clone(),
-            ..parsed.data
-        },
-        warnings: parsed.warnings,
+        data,
+        warnings,
     })
+}
+
+struct Api<'a> {
+    sources: &'a Sources<'a>,
+    viewer: &'a str,
+}
+
+impl contributions::Github for Api<'_> {
+    fn graphql(&self, body: &Value) -> Result<Value, String> {
+        post_with_token_retry(self.sources, body).map_err(|(_, hint)| hint)
+    }
+
+    fn events(&self, page: u32) -> Result<Value, String> {
+        let token = self
+            .sources
+            .token_memo
+            .lookup(|| read_token_with(self.sources.cli, TOKEN_DEADLINE))
+            .map_err(|error| token_failure(error).1)?;
+        let authorization = format!("Bearer {}", token.as_str());
+        let url = format!(
+            "{}/{}/events?per_page={}&page={page}",
+            self.sources.events_url,
+            self.viewer,
+            contributions::EVENTS_PER_PAGE
+        );
+        get_json(
+            &url,
+            &[
+                ("Authorization", authorization.as_str()),
+                ("Accept", "application/vnd.github+json"),
+            ],
+        )
+        .map_err(|error| error.to_string())
+    }
+}
+
+fn add_contributions(sources: &Sources<'_>, data: &mut GithubPrsData, warnings: &mut Vec<String>) {
+    let Some(viewer) = data
+        .viewer
+        .clone()
+        .filter(|login| settings::is_github_login(login))
+    else {
+        return;
+    };
+    let found = contributions::read(
+        &Api {
+            sources,
+            viewer: &viewer,
+        },
+        &paths::github_contributions_path_for(sources.home),
+        &viewer,
+        &sources.settings.github_scopes,
+        sources.now_secs,
+    );
+    warnings.extend(found.warnings);
+    if found.complete {
+        contributions::add_to(data, found.open, found.merged);
+    } else if let Some(last) =
+        last_read(sources).filter(|last| last.viewer.as_deref() == Some(&viewer))
+    {
+        let carried = |list: GithubPrListDto| -> Vec<GithubPrDto> {
+            list.items
+                .into_iter()
+                .filter(|pr| {
+                    pr.contributed
+                        && contributions::in_scope(&pr.repo, &sources.settings.github_scopes)
+                })
+                .collect()
+        };
+        contributions::add_to(data, carried(last.mine), carried(last.merged));
+    }
+}
+
+fn last_read(sources: &Sources<'_>) -> Option<GithubPrsData> {
+    let cached = sources
+        .read_memo
+        .state()
+        .cached
+        .as_ref()
+        .map(|(_, cached)| cached.data.clone());
+    cached.or_else(|| snapshot::load(&paths::github_prs_path_for(sources.home)))
 }
 
 fn post_with_token_retry(sources: &Sources<'_>, body: &Value) -> Result<Value, Failure> {

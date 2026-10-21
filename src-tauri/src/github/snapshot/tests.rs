@@ -32,6 +32,7 @@ fn data() -> GithubPrsData {
                 auto_merge: true,
                 merge_kind: Some(MergeKind::Conflicts),
                 in_organization: Some(true),
+                contributed: false,
             }],
         },
         review_requested: GithubPrListDto::default(),

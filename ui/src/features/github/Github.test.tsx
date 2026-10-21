@@ -379,6 +379,28 @@ describe("Github", () => {
     expect(within(mine).getByText("Queued #2").style.color).toBe("var(--live)");
   });
 
+  it("tags a pull request someone else opened that carries a commit of yours with its author", async () => {
+    readGithubPrs.mockResolvedValue(
+      okPrs({
+        mine: {
+          total: 2,
+          items: [
+            pr(),
+            pr({ id: "PR_12", number: 12, title: "Shared work", author: "alice", contributed: true }),
+          ],
+        },
+      }),
+    );
+    renderGithub();
+
+    await screen.findByText("Shared work");
+    const mine = section("Mine");
+    const shared = within(mine).getByText("Shared work").closest("li") as HTMLElement;
+    const own = within(mine).getByText("Add the thing").closest("li") as HTMLElement;
+    expect(within(shared).getByText("by @alice")).toBeTruthy();
+    expect(within(own).queryByText(/^by @/)).toBeNull();
+  });
+
   it("groups a list that spans several repositories under one sub-heading per repository", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({

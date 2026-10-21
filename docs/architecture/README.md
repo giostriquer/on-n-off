@@ -437,7 +437,7 @@ and Archive account never takes Use account's place on it.
 
 ### Pull requests
 
-One GraphQL request per refresh reads authored (scoped), review-requested and assigned PRs with
+One GraphQL search request per refresh reads authored (scoped), review-requested and assigned PRs with
 their CI rollups and merge state. Problems come back as a `status` + `hint` on the DTO, backed by the
 last snapshot under `~/.on-n-off/github/`. Auth is borrowed from `gh auth token`, memoised per
 app run, re-read once on a 401, never persisted.
@@ -449,9 +449,29 @@ costs about 2 rate-limit points. They are interpreted in exactly one place, `git
 `Seen` record takes its unknown-aware facts from the same module. Snapshots written before those
 fields existed load with `Unknown`/`false` defaults.
 
-The monitor notifies on CI, review-decision, conflict and ready-to-merge transitions of the
-authored PRs the screen lists — the scoped first page of fifty. It is opt-in and polls while the
-window is hidden.
+GitHub's search cannot find a pull request by who wrote its commits, so contributed pull requests
+come from your pushes instead (`github/contributions.rs`). At most once a minute the read takes the
+events newer than the last one it saw from `api.github.com/users/<login>/events`, up to the three
+pages GitHub keeps, and remembers every branch you pushed for thirty days. One more GraphQL request
+then looks up the open pull requests on those branches, by variables and never by text spliced into
+the query, along with every pull request already tracked by node id. A pull request on one of your
+branches that you did not open, and whose head is that same repository and branch, is tracked; it is
+shown only once a third request, sent only when its head moved, finds among its last hundred commits
+a non-merge commit whose authors include you. That answer is final for the pull request. Tracked
+pull requests are dropped when closed and fourteen days after they merge, and the whole record,
+`~/.on-n-off/github/contributions.json`, belongs to one GitHub login and starts over for another.
+
+Found pull requests join `mine`, marked `contributed`, and merged ones join `merged`, both under the
+same scope as the search. That is all the monitor, the notch and the screen see: the screen tags
+them with their author, and the monitor notifies on them, merges included, exactly as on authored
+ones. A failed lookup keeps the contributions of the last read rather than dropping them, so a
+transient error does not take them out of Mine, the notch or the monitor's baseline. The record
+misses a branch you last pushed before GitHub's three pages of events reach back, a push to a
+fork's branch, and commits of yours that someone else pushed.
+
+The monitor notifies on CI, review-decision, conflict and ready-to-merge transitions of the PRs
+Mine lists — the scoped first page of fifty authored ones, plus contributed ones. It is opt-in and
+polls while the window is hidden.
 
 ### Usage
 

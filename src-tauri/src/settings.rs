@@ -260,7 +260,7 @@ pub fn normalize_github_scope(raw: &str) -> Option<String> {
     valid.then(|| format!("{kind}:{value}"))
 }
 
-fn is_github_login(value: &str) -> bool {
+pub(crate) fn is_github_login(value: &str) -> bool {
     !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 

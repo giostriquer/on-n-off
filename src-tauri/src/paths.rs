@@ -203,6 +203,12 @@ pub fn github_prs_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("github").join("prs.json")
 }
 
+pub fn github_contributions_path_for(home: &std::path::Path) -> PathBuf {
+    home.join(".on-n-off")
+        .join("github")
+        .join("contributions.json")
+}
+
 pub fn github_monitor_state_path_for(home: &std::path::Path) -> PathBuf {
     home.join(".on-n-off").join("github").join("monitor.json")
 }

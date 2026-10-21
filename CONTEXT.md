@@ -163,6 +163,12 @@ organization, owned by one or a private fork of one's repository, and personal w
 owns it. A pull request read before GitHub reported this has neither.
 _Avoid_: scope, workspace
 
+**Contributed pull request**:
+An open or recently merged pull request someone else opened that carries a commit you wrote or
+co-wrote, other than a merge commit. It is found from your pushes and listed under Mine, tagged with
+its author.
+_Avoid_: co-authored, shared, involved
+
 ### Side notch
 
 **Rail cell**:

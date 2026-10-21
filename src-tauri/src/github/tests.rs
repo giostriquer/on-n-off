@@ -65,6 +65,17 @@ impl Harness {
         now_secs: i64,
         force: bool,
     ) -> (GithubPrsDto, Reading) {
+        self.read_with_events(cli, url, &refused_url(), now_secs, force)
+    }
+
+    fn read_with_events(
+        &self,
+        cli: &AgentCli,
+        url: &str,
+        events_url: &str,
+        now_secs: i64,
+        force: bool,
+    ) -> (GithubPrsDto, Reading) {
         read_prs_in(
             &Sources {
                 home: &self.home,
@@ -73,6 +84,7 @@ impl Harness {
                 read_memo: &self.read_memo,
                 cli,
                 url,
+                events_url,
                 now_secs,
             },
             force,
@@ -617,4 +629,129 @@ fn the_memory_window_follows_the_current_poll_interval() {
 fn a_saved_pull_request_interval_replaces_the_remembered_one() {
     set_poll_seconds(120);
     assert_eq!(POLL_SECONDS.load(Ordering::Acquire), 120);
+}
+
+const CONTRIBUTED_PR: &str = r#"{
+  "id": "PR_shared", "number": 12, "title": "Shared work", "url": "https://github.com/acme/app/pull/12",
+  "isDraft": false, "updatedAt": "2026-08-24T20:00:00Z", "headRefName": "fix/shared", "baseRefName": "main",
+  "reviewDecision": null, "repository": { "nameWithOwner": "acme/app", "isInOrganization": true },
+  "author": { "login": "alice" }, "mergeable": "MERGEABLE", "mergeStateStatus": "CLEAN",
+  "mergeQueueEntry": null, "autoMergeRequest": null,
+  "commits": { "nodes": [ { "commit": { "statusCheckRollup": { "state": "SUCCESS" } } } ] },
+  "state": "OPEN", "mergedAt": null, "headRefOid": "head1", "headRepository": { "nameWithOwner": "acme/app" }
+}"#;
+
+fn pushed_to_shared_branch() -> String {
+    json!([{
+        "id": "10", "type": "PushEvent", "repo": { "name": "acme/app" },
+        "payload": { "ref": "refs/heads/fix/shared", "head": "head1", "before": "head0" },
+        "created_at": rfc3339(NOW - 60).unwrap(),
+    }])
+    .to_string()
+}
+
+fn shared_branch_lookup(tracked: &str) -> String {
+    format!(
+        r#"{{ "data": {{ "tracked": {tracked}, "b0": {{ "pullRequests": {{ "nodes": [{CONTRIBUTED_PR}] }} }} }} }}"#
+    )
+}
+
+const YOUR_COMMIT: &str = r#"{ "data": { "nodes": [ { "commits": { "nodes": [
+  { "commit": { "parents": { "totalCount": 1 }, "authors": { "nodes": [ { "user": { "login": "octocat" } } ] } } }
+] } } ] } }"#;
+
+fn events_url(url: &str) -> String {
+    url.replace("/graphql", "/users")
+}
+
+#[test]
+fn a_pull_request_someone_else_opened_with_a_commit_of_yours_is_read_into_mine() {
+    let harness = Harness::new("gh-read-contributed", &["org:acme"], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let events = pushed_to_shared_branch();
+    let lookup = shared_branch_lookup("[]");
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], &events),
+        ("200 OK", &[], &lookup),
+        ("200 OK", &[], YOUR_COMMIT),
+    ]);
+
+    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, false);
+
+    assert_eq!(dto.status, GithubStatus::Ok);
+    assert_eq!(dto.warnings, Vec::<String>::new());
+    let mine: Vec<(&str, &str, bool)> = dto
+        .data
+        .mine
+        .items
+        .iter()
+        .map(|pr| (pr.id.as_str(), pr.author.as_str(), pr.contributed))
+        .collect();
+    assert_eq!(
+        mine,
+        vec![("PR_mine1", "octocat", false), ("PR_shared", "alice", true)]
+    );
+    assert_eq!(dto.data.mine.total, 2);
+    let requests = server.join().unwrap();
+    assert!(
+        requests[1]
+            .head
+            .starts_with("GET /users/octocat/events?per_page=100&page=1 "),
+        "{}",
+        requests[1].head
+    );
+    assert_eq!(authorization(&requests[1]), "Bearer gho_t");
+    assert_eq!(authorization(&requests[2]), "Bearer gho_t");
+    assert_no_token(&dto, &harness.home, "gho_t");
+    let remembered = fs::read_to_string(
+        harness
+            .home
+            .join(".on-n-off")
+            .join("github")
+            .join("contributions.json"),
+    )
+    .unwrap();
+    assert!(!remembered.contains("gho_t"));
+    assert_eq!(
+        snapshot::load(&github_prs_path_for(&harness.home)),
+        Some(dto.data)
+    );
+}
+
+#[test]
+fn a_failed_contribution_lookup_keeps_the_contributions_last_read() {
+    let harness = Harness::new("gh-read-contributed-kept", &[], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let events = pushed_to_shared_branch();
+    let lookup = shared_branch_lookup("[]");
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], &events),
+        ("200 OK", &[], &lookup),
+        ("200 OK", &[], YOUR_COMMIT),
+    ]);
+    harness.read_with_events(&gh, &url, &events_url(&url), NOW, false);
+    server.join().unwrap();
+
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], "[]"),
+        ("502 Bad Gateway", &[], "{}"),
+    ]);
+    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW + 60, true);
+    server.join().unwrap();
+
+    assert_eq!(dto.status, GithubStatus::Ok);
+    assert!(!dto.stale);
+    assert_eq!(dto.data.mine.items.len(), 2);
+    assert!(dto.data.mine.items[1].contributed);
+    assert_eq!(dto.data.mine.total, 2);
+    assert_eq!(
+        dto.warnings,
+        vec![
+            "Could not look up the pull requests on your pushed branches (Could not reach GitHub (HTTP 502).)."
+                .to_string()
+        ]
+    );
 }
