@@ -218,21 +218,35 @@ in the last hour; the helper never opens those files itself.
 
 ## Native side notch: Windows
 
-Windows has no helper process. One transparent, always-on-top, non-activating `tao` window per
+Windows has no helper process. One transparent, always-on-top, non-activating Win32 window per
 selected display is painted with tiny-skia and presented through `UpdateLayeredWindow`, which
 carries the new origin, size and pixels in one call. These behaviours decide whether it works:
 
-- **The window must be a bare `WS_POPUP`.** tao leaves an undecorated window with `WS_CAPTION` and
-  `WS_THICKFRAME`; Windows then keeps an invisible resize border on the left, right and bottom, so
-  the client area is inset by the border width, the layered surface is clipped to it, and the
-  compositor draws a drop shadow and a top hairline around what is left. `overlay_style` strips the
-  frame before every present, which is also what lets the rail reach the screen edge.
+- **The notch runs no tao event loop.** tao 0.37 registers its window classes (`Window Class`,
+  `Tao Thread Event Target`) once per process, each with a window procedure compiled for the user-event
+  type of the loop that registered it first. Tauri's loop always does, so a second
+  `EventLoop<WindowMsg>` on the notch thread had its own windows' messages read as Tauri's types: the
+  heap corrupted and v0.36.0 and v0.37.0 died with `0xc0000005` at launch whenever the notch was on.
+  The notch registers its own class (`on-n-off Side notch`), pumps its own thread's queue and waits
+  with `MsgWaitForMultipleObjectsEx` until the state machine's next deadline. tao's
+  `EventLoop::run` also ends the process when its loop exits, which would have quit the app when the
+  notch was switched off. `tao` stays a dev-dependency for the regression test that builds a tao loop
+  of another type beside the notch.
+- **The window must be a bare `WS_POPUP`.** With `WS_CAPTION` or `WS_THICKFRAME`, Windows keeps an
+  invisible resize border on the left, right and bottom, so the client area is inset by the border
+  width, the layered surface is clipped to it, and the compositor draws a drop shadow and a top
+  hairline around what is left. The overlay is created as `WS_POPUP`, and `overlay_style` strips any
+  frame bits before every present, which is also what lets the rail reach the screen edge.
+- **It stays off the taskbar and out of Alt+Tab** through `WS_EX_TOOLWINDOW`, and never activates
+  (`WS_EX_NOACTIVATE`), so a click on it leaves the foreground app focused.
 - **Hit testing is per-pixel alpha.** A transparent part of the overlay clicks through to whatever is
   underneath, so the rail's flared ends and the gap beside a popover are not clickable, and
   `WindowFromPoint` is what tells the state machine whether the pointer is on the notch.
-- **tao reports no `CursorMoved` for this window.** The 80 ms pointer poll is the only hover input
-  there is, and it has to keep running while the collapsed strip is showing or reaching the strip
-  never opens the rail.
+- **The pointer poll is the hover input that does not depend on the window.** The overlay turns its
+  own `WM_MOUSEMOVE` and `WM_MOUSELEAVE` into hover input too, but a per-pixel-alpha window gets no
+  mouse messages over its transparent parts (and the tao window it replaced reported none at all).
+  The 80 ms poll has to keep running while the collapsed strip is showing or reaching the strip may
+  never open the rail.
 - **The text engine hints every pixel size on its own.** A string measured at the point size is not `scale` times
   narrower than the same string rasterised at point x scale, so measurement for layout has to happen
   at the device size and convert back, or a 150 % display drifts by about a fifth on longer labels.

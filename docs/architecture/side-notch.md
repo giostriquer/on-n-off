@@ -274,7 +274,8 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 ## On Windows
 
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
-non-activating `tao` window per selected display and presents it with `UpdateLayeredWindow`;
+non-activating Win32 window per selected display, on its own window class and message loop rather
+than a second tao event loop (`OS.md` says why), and presents it with `UpdateLayeredWindow`;
 `win_paint.rs` draws the rail (from `model.rs`'s metrics and frames, and the cells `model/frame.rs`
 decided), the marks and the popovers into a tiny-skia pixmap; `win_displays.rs` enumerates monitors;
 and `win_transport.rs` is the host's Windows transport, in-process channels where macOS has pipes.
@@ -282,11 +283,11 @@ The display is chosen by device name rather than UUID, and the same rule holds �
 mirrored selection hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the
 settings card says so on older builds.
 
-`OS.md` carries the Windows behaviours that decide whether this works at all — the bare `WS_POPUP`
-style, per-pixel-alpha hit testing, the pointer poll that stands in for the `CursorMoved` events
-tao never sends, pixel alignment on fractional display scaling, and the screen poll that puts the
-notch back on top when Windows stacks it below an ordinary window. Read it before changing
-`win_window.rs`.
+`OS.md` carries the Windows behaviours that decide whether this works at all — why the notch runs
+no tao event loop, the bare `WS_POPUP` style, per-pixel-alpha hit testing, the pointer poll that
+the window's own mouse messages cannot replace, pixel alignment on fractional display scaling, and
+the screen poll that puts the notch back on top when Windows stacks it below an ordinary window.
+Read it before changing `win_window.rs`.
 
 **Typography is measured, not eyeballed.** The overlay sits next to the app's own window, so any
 mismatch in face, weight or antialiasing reads instantly as the wrong font. `win_paint/text.rs`

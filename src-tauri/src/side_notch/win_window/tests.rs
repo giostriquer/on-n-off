@@ -485,3 +485,77 @@ fn the_screens_change_only_after_the_first_read() {
     assert!(machine.set_displays(Vec::new()), "a read that failed");
     assert!(machine.set_displays(vec![display("d1", true)]));
 }
+
+fn notch_windows() -> Vec<HWND> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextW, GetWindowThreadProcessId,
+    };
+    unsafe extern "system" fn collect(window: HWND, found: LPARAM) -> windows::core::BOOL {
+        let mut process = 0;
+        let mut title = [0u16; 64];
+        let len = unsafe {
+            GetWindowThreadProcessId(window, Some(&mut process));
+            GetWindowTextW(window, &mut title)
+        };
+        if process == std::process::id()
+            && String::from_utf16_lossy(&title[..len.max(0) as usize]) == "on-n-off Side notch"
+        {
+            unsafe { &mut *(found.0 as *mut Vec<HWND>) }.push(window);
+        }
+        true.into()
+    }
+    let mut found = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(collect), LPARAM(&mut found as *mut Vec<HWND> as isize));
+    }
+    found
+}
+
+fn eventually(what: &str, mut done: impl FnMut() -> bool) {
+    let until = Instant::now() + Duration::from_secs(10);
+    while !done() {
+        assert!(Instant::now() < until, "{what}");
+        thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn the_notch_runs_beside_the_apps_own_tao_event_loop_and_stops_without_ending_the_process() {
+    use tao::platform::windows::EventLoopBuilderExtWindows;
+    use windows::Win32::UI::WindowsAndMessaging::SendMessageW;
+    let app_loop = tao::event_loop::EventLoopBuilder::<String>::with_user_event()
+        .with_any_thread(true)
+        .build();
+    let _app_window = tao::window::WindowBuilder::new()
+        .with_visible(false)
+        .build(&app_loop)
+        .expect("the app's own window");
+
+    let (action_tx, _actions) = std::sync::mpsc::channel();
+    let messages = spawn(action_tx);
+    eventually("the notch window never opened", || {
+        notch_windows().len() == 1
+    });
+    let notch = notch_windows()[0];
+    messages
+        .send(WindowMsg::Data(data(ShowMode::Always)))
+        .expect("the notch thread takes data");
+    for message in [WM_MOUSEMOVE, WM_LBUTTONDOWN, WM_MOUSELEAVE] {
+        unsafe { SendMessageW(notch, message, Some(WPARAM(0)), Some(LPARAM(0))) };
+    }
+    assert!(
+        messages.send(WindowMsg::Ping).is_ok(),
+        "the notch thread died on its own input"
+    );
+
+    messages
+        .send(WindowMsg::Shutdown)
+        .expect("the notch thread takes the shutdown");
+    eventually("the notch thread kept running after Shutdown", || {
+        messages.send(WindowMsg::Ping).is_err()
+    });
+    assert!(
+        notch_windows().is_empty(),
+        "the notch window outlived its thread"
+    );
+}
