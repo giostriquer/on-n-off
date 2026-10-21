@@ -514,9 +514,9 @@ fn window_input_reaches_the_machine_in_points_of_the_selected_display() {
     let mut machine = Machine::new();
     machine.accept(data(ShowMode::Always));
     let mut scaled = display("d1", false);
-    scaled.scale = 1.5;
+    scaled.scale = 2.0;
     machine.set_displays(vec![scaled]);
-    let device = |points: f64| (points * 1.5).round() as i32;
+    let device = |points: f64| (points * 2.0).round() as i32;
 
     let cap = machine.plan().unwrap().cap.rect;
     assert_eq!(
@@ -542,6 +542,14 @@ fn window_input_reaches_the_machine_in_points_of_the_selected_display() {
 
     assert!(machine.input(Input::Left, entered).is_empty());
     assert!(!machine.cursor_inside);
+
+    let cell = cell_rect(&machine);
+    let pressed = Input::Pressed {
+        x: device(cell.mid_x()),
+        y: device(cell.mid_y()),
+    };
+    assert!(machine.input(pressed, entered).is_empty());
+    assert_eq!(machine.pinned, Some(0));
 }
 
 fn notch_windows() -> Vec<HWND> {
@@ -574,13 +582,13 @@ fn eventually(what: &str, mut done: impl FnMut() -> bool) {
     }
 }
 
-fn open_notch() -> (Sender<WindowMsg>, HWND) {
-    let (action_tx, _actions) = std::sync::mpsc::channel();
+fn open_notch() -> (Sender<WindowMsg>, Receiver<WinAction>, HWND) {
+    let (action_tx, actions) = std::sync::mpsc::channel();
     let messages = spawn(action_tx);
     eventually("the notch window never opened", || {
         notch_windows().len() == 1
     });
-    (messages, notch_windows()[0])
+    (messages, actions, notch_windows()[0])
 }
 
 fn close_notch(messages: &Sender<WindowMsg>) {
@@ -613,7 +621,7 @@ fn notch_beside_a_tao_event_loop() {
         .build(&app_loop)
         .expect("the app's own window");
 
-    let (messages, notch) = open_notch();
+    let (messages, _actions, notch) = open_notch();
     let ex_style = unsafe { GetWindowLongPtrW(notch, GWL_EXSTYLE) } as u32;
     let wanted = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
     assert_eq!(
@@ -655,7 +663,7 @@ fn notch_beside_a_tao_event_loop() {
     );
     close_notch(&messages);
 
-    let (messages, _) = open_notch();
+    let (messages, _actions, _) = open_notch();
     close_notch(&messages);
     println!("{BESIDE_TAO_DONE}");
 }
