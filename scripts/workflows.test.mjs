@@ -521,6 +521,22 @@ test("every installer build installs the pinned cargo-about first, for the bundl
   }
 });
 
+test("bundle and release launch the app they built, with the side notch on, before keeping it", { skip }, () => {
+  for (const [name, job, keep] of [
+    ["bundle", load("bundle").jobs.bundle, "Save Swift build cache"],
+    ["release", load("release").jobs.build, "Record staged asset checksums"],
+  ]) {
+    const launch = step(job, "Launch the built app with the side notch on");
+    const build = job.steps.findIndex((candidate) => /scripts\/build-bundle\.ps1/.test(candidate.run ?? ""));
+    assert.ok(build < launch.index && launch.index < step(job, keep).index, `${name} launches between its build and ${keep}`);
+    assert.equal(launch.run, "./scripts/launch-smoke.ps1 -InstallerKind $env:INSTALLER_KIND", name);
+    assert.equal(launch.env.INSTALLER_KIND, "${{ matrix.installer }}", name);
+    assert.ok(launch["timeout-minutes"] <= 5, `${name} bounds the launch`);
+    assert.equal(launch.if, undefined, `${name} launches every installer kind`);
+    assert.equal(launch["continue-on-error"], undefined, `${name} fails on a launch crash`);
+  }
+});
+
 test("every pull request generates the license notice, so a new license fails before it reaches main", { skip }, () => {
   const frontend = load("ci").jobs.frontend;
   const install = step(frontend, "Install cargo-about");

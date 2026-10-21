@@ -125,6 +125,15 @@ jobs:
           INSTALLER_KIND: ${{ matrix.installer }}
         run: ./scripts/build-bundle.ps1 -InstallerKind $env:INSTALLER_KIND -ReleaseVersion $env:RELEASE_VERSION
 
+      # Building proves the app compiles, not that it starts: v0.36.0 to v0.38.0 crashed at launch on
+      # Windows whenever the side notch was on, and a crash at launch also stops the in-app updater.
+      # See OS.md, Packaging and updates.
+      - name: Launch the built app with the side notch on
+        timeout-minutes: 5
+        env:
+          INSTALLER_KIND: ${{ matrix.installer }}
+        run: ./scripts/launch-smoke.ps1 -InstallerKind $env:INSTALLER_KIND
+
       # This workflow only runs on main; the ref check keeps the rule the same as verify.yml's.
       - name: Save Swift build cache
         if: runner.os == 'macOS' && github.ref == 'refs/heads/main' && steps.swift-cache.outputs.cache-hit != 'true'

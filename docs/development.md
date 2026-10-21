@@ -251,6 +251,8 @@ PowerShell 7 on either platform; if `pwsh` is not installed locally, rely on CI:
 ./scripts/read-rust-toolchain.test.ps1
 ./scripts/prune-rust-toolchains.test.ps1
 ./scripts/write-checksums.test.ps1
+./scripts/launch-smoke.test.ps1
+./scripts/launch-smoke.ps1 -InstallerKind nsis   # after a release build: starts it with the side notch on
 ```
 
 ## Content security policy

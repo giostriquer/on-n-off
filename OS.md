@@ -88,6 +88,17 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   jobs install a pinned cargo-about (`scripts/install-cargo-about.ps1`, SHA-256 checked;
   `CARGO_ABOUT` overrides the binary the script runs). A plain local `bun run tauri build` leaves
   the file out.
+- Bundle and Release launch the app they built before keeping it. `scripts/launch-smoke.ps1
+  -InstallerKind nsis|dmg` starts `target/release/on-n-off.exe` or the `.app`'s binary from a scratch
+  `ON_N_OFF_HOME` whose `side-notch.json` turns the notch on, with a private
+  `WEBVIEW2_USER_DATA_FOLDER` and without `GH_TOKEN`/`GITHUB_TOKEN`, and fails if the app exits
+  within 20 s. On Windows it also needs an `on-n-off Side notch` window from that process, so the
+  check keeps covering the in-process notch. v0.36.0 to v0.38.0 crashed at launch whenever the
+  notch was on; a crash that early also stops the in-app updater, because its check runs in the
+  window after it loads, so the only way out was the installer from the release page. The smoke
+  fails that build with `0xC0000005` in about a second. Locally, run it while no other on-n-off is
+  open, or against a `--no-default-features` build: the single-instance check hands a second copy
+  over to the first and exits, which the smoke reports as a failed launch.
 - `tauri-plugin-updater` is built without its default `zip` feature. A Windows update is the signed
   NSIS installer and a macOS one the `.app.tar.gz`, both of which the plugin installs without it,
   so the `zip` crate and its advisories stay out of the build. Turn it back on only for a zipped
