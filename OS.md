@@ -90,15 +90,19 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   the file out.
 - Bundle and Release launch the app they built before keeping it. `scripts/launch-smoke.ps1
   -InstallerKind nsis|dmg` starts `target/release/on-n-off.exe` or the `.app`'s binary from a scratch
-  `ON_N_OFF_HOME` whose `side-notch.json` turns the notch on, with a private
-  `WEBVIEW2_USER_DATA_FOLDER` and without `GH_TOKEN`/`GITHUB_TOKEN`, and fails if the app exits
-  within 20 s. On Windows it also needs an `on-n-off Side notch` window from that process, so the
-  check keeps covering the in-process notch. v0.36.0 to v0.38.0 crashed at launch whenever the
-  notch was on; a crash that early also stops the in-app updater, because its check runs in the
-  window after it loads, so the only way out was the installer from the release page. The smoke
-  fails that build with `0xC0000005` in about a second. Locally, run it while no other on-n-off is
-  open, or against a `--no-default-features` build: the single-instance check hands a second copy
-  over to the first and exits, which the smoke reports as a failed launch.
+  `ON_N_OFF_HOME` and fails if it exits within 20 s. Its `side-notch.json` turns the notch and every
+  pull request list on and leaves the rest at their defaults, so every provider gets a cell. The
+  WebView2 profile (`WEBVIEW2_USER_DATA_FOLDER`) and `gh`'s login (`GH_CONFIG_DIR`) live in the
+  scratch home and `GH_TOKEN`/`GITHUB_TOKEN` are dropped, so a local run never uses a real login.
+  The notifications in `settings.json` stay off: the GitHub monitor's first poll waits the whole
+  20 s, and on macOS the limit alerts would ask for notification permission. On Windows the smoke
+  also needs an `on-n-off Side notch` window from that process, so it keeps covering the in-process
+  notch; `workflows.test.mjs` checks that name against `win_window.rs`. v0.36.0 to v0.38.0 crashed
+  at launch whenever the notch was on, and a crash that early also stops the in-app updater, whose
+  check runs in the window after it loads: the only way out was the installer on the release page.
+  The smoke fails that build with `0xC0000005` in about a second. On Windows, run it locally only
+  while no other on-n-off is open, or against a `--no-default-features` build: single-instance hands
+  a second copy over to the first, which exits and fails the smoke.
 - `tauri-plugin-updater` is built without its default `zip` feature. A Windows update is the signed
   NSIS installer and a macOS one the `.app.tar.gz`, both of which the plugin installs without it,
   so the `zip` crate and its advisories stay out of the build. Turn it back on only for a zipped

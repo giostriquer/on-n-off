@@ -1,0 +1,7 @@
+{
+  "enabled": true,
+  "pullRequests": {
+    "enabled": true,
+    "lists": ["mine", "reviewRequested", "assigned"]
+  }
+}

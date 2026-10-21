@@ -13,62 +13,44 @@ $ErrorActionPreference = "Stop"
 
 if ($PSCmdlet.ParameterSetName -eq "Build") {
     $releaseRoot = Join-Path $RepositoryRoot "src-tauri" "target" "release"
-    if ($InstallerKind -eq "nsis") {
-        $App = Join-Path $releaseRoot "on-n-off.exe"
-        $WindowClass = "on-n-off Side notch"
-    } else {
-        $App = Join-Path $releaseRoot "bundle" "macos" "on-n-off.app" "Contents" "MacOS" "on-n-off"
-        $WindowClass = $null
+    $targets = @{
+        nsis = @{ App = Join-Path $releaseRoot "on-n-off.exe"; WindowClass = "on-n-off Side notch" }
+        dmg  = @{ App = Join-Path $releaseRoot "bundle" "macos" "on-n-off.app" "Contents" "MacOS" "on-n-off"; WindowClass = $null }
     }
+    $App = $targets[$InstallerKind].App
+    $WindowClass = $targets[$InstallerKind].WindowClass
 }
 if (-not (Test-Path -LiteralPath $App -PathType Leaf)) {
     throw "The app to launch does not exist: $App"
 }
-if ($WindowClass -and -not $IsWindows) {
-    throw "-WindowClass is checked only on Windows."
-}
 
 if ($WindowClass) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Runtime.InteropServices;
-using System.Text;
-public static class LaunchSmokeWindows {
-    private delegate bool EnumWindowsProc(IntPtr window, IntPtr state);
-    [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr state);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int capacity);
-    public static bool Owns(int processId, string className) {
-        bool found = false;
-        EnumWindows((window, state) => {
-            uint owner;
-            GetWindowThreadProcessId(window, out owner);
-            if (owner == (uint)processId) {
-                StringBuilder name = new StringBuilder(256);
-                GetClassName(window, name, name.Capacity);
-                if (name.ToString() == className) {
-                    found = true;
-                }
-            }
-            return true;
-        }, IntPtr.Zero);
-        return found;
-    }
-}
+    Add-Type -Namespace LaunchSmoke -Name Windows -MemberDefinition @'
+[DllImport("user32.dll", CharSet = CharSet.Unicode)]
+public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string className, string title);
+[DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(IntPtr window, out uint processId);
 '@
+}
+
+function Test-OwnsWindow {
+    param([int] $ProcessId, [string] $ClassName)
+
+    $window = [IntPtr]::Zero
+    while (($window = [LaunchSmoke.Windows]::FindWindowEx([IntPtr]::Zero, $window, $ClassName, [NullString]::Value)) -ne [IntPtr]::Zero) {
+        $owner = [uint32] 0
+        [LaunchSmoke.Windows]::GetWindowThreadProcessId($window, [ref] $owner) | Out-Null
+        if ($owner -eq $ProcessId) {
+            return $true
+        }
+    }
+    return $false
 }
 
 $scratchHome = Join-Path ([System.IO.Path]::GetTempPath()) ("on-n-off-launch-smoke-" + [guid]::NewGuid().ToString("N"))
 $settingsDirectory = Join-Path $scratchHome ".on-n-off"
 New-Item -ItemType Directory -Path $settingsDirectory -Force | Out-Null
-[ordered]@{
-    enabled      = $true
-    edge         = "right"
-    size         = "compact"
-    show         = "always"
-    providers    = @("claude", "codex")
-    pullRequests = [ordered]@{ enabled = $true; lists = @("mine") }
-} | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $settingsDirectory "side-notch.json")
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot "fixtures" "launch-smoke-side-notch.json") -Destination (Join-Path $settingsDirectory "side-notch.json")
 
 $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = $App
@@ -76,6 +58,7 @@ $startInfo.Arguments = $AppArguments
 $startInfo.UseShellExecute = $false
 $startInfo.Environment["ON_N_OFF_HOME"] = $scratchHome
 $startInfo.Environment["WEBVIEW2_USER_DATA_FOLDER"] = Join-Path $scratchHome "webview2"
+$startInfo.Environment["GH_CONFIG_DIR"] = Join-Path $scratchHome "gh"
 foreach ($token in @("GH_TOKEN", "GITHUB_TOKEN")) {
     $startInfo.Environment.Remove($token) | Out-Null
 }
@@ -92,11 +75,10 @@ try {
     $windowSeen = -not $WindowClass
     while ($clock.Elapsed.TotalSeconds -lt $Seconds) {
         if ($process.HasExited) {
-            $code = $process.ExitCode
-            $hex = "0x{0:X8}" -f [System.BitConverter]::ToUInt32([System.BitConverter]::GetBytes([int] $code), 0)
-            throw ("on-n-off exited with code $code ($hex) after {0:N1} s with the side notch on. A crash at launch also stops the in-app updater, so this build must not ship. Run alone on a machine that already runs on-n-off, the single-instance check hands over to that copy and exits." -f $clock.Elapsed.TotalSeconds)
+            $code = if ($IsWindows) { "{0} (0x{0:X8})" -f $process.ExitCode } else { "$($process.ExitCode)" }
+            throw ("on-n-off exited with code {0} after {1:N1} s with the side notch on. See OS.md, Packaging and updates." -f $code, $clock.Elapsed.TotalSeconds)
         }
-        if (-not $windowSeen -and [LaunchSmokeWindows]::Owns($process.Id, $WindowClass)) {
+        if (-not $windowSeen -and (Test-OwnsWindow -ProcessId $process.Id -ClassName $WindowClass)) {
             $windowSeen = $true
         }
         Start-Sleep -Milliseconds 250
@@ -104,7 +86,7 @@ try {
     if (-not $windowSeen) {
         throw "on-n-off kept running for $Seconds s but never opened a '$WindowClass' window, so the side notch path did not run."
     }
-    Write-Output ("launched=$App ran {0:N0} s" -f $clock.Elapsed.TotalSeconds)
+    Write-Output ("launched={0} ran {1:N0} s" -f $App, $clock.Elapsed.TotalSeconds)
 } finally {
     if ($started -and -not $process.HasExited) {
         $process.Kill($true)
