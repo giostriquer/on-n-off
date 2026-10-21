@@ -5,7 +5,7 @@ import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 import { asColumn } from "./limitsColumn";
 
-type ReadCard = ProviderLimits & Pick<LimitsColumnEntry, "standing" | "otherDesktopAccount">;
+type ReadCard = ProviderLimits & Pick<LimitsColumnEntry, "standing" | "desktopAccount">;
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -406,7 +406,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
   museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
-  claudeDesktop: () => ({ claude: () => CLAUDE.map(entry => entry.currentAccount ? { ...entry, otherDesktopAccount: { label: "person@acme.example" } } : entry) }),
+  claudeDesktop: () => ({ claude: () => [...CLAUDE, { ...CLAUDE[0], account: { id: "claude-2", label: "other@example.com" }, currentAccount: false, savedProfile: true, desktopAccount: true }] }),
   savedLogins: () => ({
     claude: () => savedLogins("claude", CLAUDE[0]), codex: () => savedLogins("codex", CODEX[0]), muse: () => savedLogins("muse", MUSE[0]),
     accounts: { claude: () => savedLoginsAccounts("claude"), codex: () => savedLoginsAccounts("codex"), muse: () => savedLoginsAccounts("muse") },
