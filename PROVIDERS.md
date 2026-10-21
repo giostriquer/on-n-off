@@ -143,7 +143,7 @@ adapter assumes today (change the adapter and this file together).
   which implementation, if any, gives the provider each of these: credits spent (Codex), session
   rollouts as extra observations (Codex), banked resets (Codex), the subscription term (Codex:
   asked by the read and shown by the card, one fact), the paid reset offer (Codex) and a desktop
-  app with a sign-in of its own whose account the signed-in card compares (`DesktopApp::Claude`). Each of
+  app with a sign-in of its own, whose account's cards are tagged when it is not the signed-in account (`DesktopApp::Claude`). Each of
   those is a closed enum naming the implementations it has (`BankedResets::Codex`,
   `SubscriptionTerm::Codex`, …), so a row can only name one that exists,
   and the code that runs it matches on it. Exactly one provider banks resets: a compile-time check

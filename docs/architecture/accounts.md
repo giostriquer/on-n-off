@@ -737,9 +737,9 @@ that column is the Limits read's (`read_limits`, served by `limits_refresh::read
 `ColumnEntryDto`s and built by `limits::column`). Each entry is a `ProviderLimitsDto` with the
 account facts a card needs beside it: its saved profile (`profile`, the same `ProfileDto` the account
 list gives), its category (`category`), the legacy history it replaced (`replaced`, which Remove
-account and Archive account take with it, read by Rust from the column it serves), on the card of
-the account a provider's desktop app is on, for a desktop app that keeps its own sign-in, when that is
-not the signed-in account (`desktopAccount`, `limits/desktop_app.rs`, a `LimitsFacts` row), and, for a saved profile no read answered for yet, an
+account and Archive account take with it, read by Rust from the column it serves), a mark that a
+provider's desktop app with its own sign-in is on the card's account, when that is not the signed-in
+account (`desktopAccount`, `limits/desktop_app.rs`, a `LimitsFacts` row), and, for a saved profile no read answered for yet, an
 entry of its own (`unread`). The card model (`limitColumn`) therefore joins nothing, and the popover
 lists the same accounts, counts and copy as the screen, with no account manager and no vault of its
 own.

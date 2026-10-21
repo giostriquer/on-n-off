@@ -406,7 +406,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
   museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
-  claudeDesktop: () => ({ claude: () => [...CLAUDE, { ...CLAUDE[0], account: { id: "claude-2", label: "other@example.com" }, currentAccount: false, savedProfile: true, desktopAccount: true }] }),
+  claudeDesktop: () => ({ claude: () => [...CLAUDE, { ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, desktopAccount: true }] }),
   savedLogins: () => ({
     claude: () => savedLogins("claude", CLAUDE[0]), codex: () => savedLogins("codex", CODEX[0]), muse: () => savedLogins("muse", MUSE[0]),
     accounts: { claude: () => savedLoginsAccounts("claude"), codex: () => savedLoginsAccounts("codex"), muse: () => savedLoginsAccounts("muse") },

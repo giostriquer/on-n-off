@@ -178,9 +178,12 @@ fn no_tag_while_claude_desktop_is_on_the_signed_in_account() {
     let saved_too = marked_for(
         "user-me",
         &[signed_in(&me, "me@claude.example")],
-        &[(me.clone(), "me@claude.example")],
+        &[
+            (me.clone(), "me@claude.example"),
+            (identity("user-desk", "org-desk"), "desk@claude.example"),
+        ],
     );
-    assert_eq!(tags(&saved_too), [false]);
+    assert_eq!(tags(&saved_too), [false, false]);
     let unscoped = marked_for(
         "user-me",
         &[ProviderLimitsDto::for_test(AgentId::Claude, "user-me")],
@@ -263,10 +266,13 @@ fn marking_reads_the_desktop_app_of_a_provider_that_has_one() {
             signed_in(&codex(&me), "me@codex.example"),
             saved(&codex(&desk), "desk@codex.example"),
         ],
-        &[],
+        &[(
+            codex(&identity("user-away", "org-away")),
+            "away@codex.example",
+        )],
     );
     mark_desktop_account(AgentId::Codex, &mut column, &home);
-    assert_eq!(tags(&column), [false, false]);
+    assert_eq!(tags(&column), [false, false, false]);
 }
 
 #[test]

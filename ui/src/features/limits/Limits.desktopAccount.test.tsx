@@ -22,7 +22,7 @@ vi.mock("$lib/api", () => ({
 }));
 
 const DAY = 86_400_000;
-const TAG = "Claude Desktop was last signed in to this account";
+const TAG = "Claude Desktop account";
 
 function profile(overrides: Partial<SavedProfile> = {}): SavedProfile {
   return {
@@ -72,6 +72,8 @@ describe("Claude Desktop on another account", () => {
     expect(tag).toHaveTextContent(/^Desktop$/);
     fireEvent.focus(tag);
     expect(screen.getByRole("tooltip")).toHaveTextContent(/^Claude Desktop was last signed in to this account\.$/);
+    expect(tag).toHaveAccessibleName("Claude Desktop account");
+    expect(tag).toHaveAccessibleDescription("Claude Desktop was last signed in to this account.");
   });
 
   it("leaves the signed-in card untagged", async () => {
