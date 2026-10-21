@@ -78,3 +78,19 @@ fn the_request_body_carries_the_document_and_every_search_string() {
     assert_eq!(body["variables"]["recent"], RECENT_MERGES);
     assert!(document.contains("merged: search("));
 }
+
+#[test]
+fn a_repository_is_in_scope_when_any_scope_names_its_owner_or_itself() {
+    let repo = "Acme/App";
+    assert!(in_scope(repo, &[]));
+    assert!(in_scope(repo, &["org:acme".into()]));
+    assert!(in_scope(repo, &["user:ACME".into()]));
+    assert!(in_scope(repo, &["repo:acme/app".into()]));
+    assert!(in_scope(
+        repo,
+        &["org:other".into(), "repo:acme/app".into()]
+    ));
+    assert!(!in_scope(repo, &["repo:acme/application".into()]));
+    assert!(!in_scope(repo, &["org:acm".into()]));
+    assert!(!in_scope(repo, &["org:other".into()]));
+}

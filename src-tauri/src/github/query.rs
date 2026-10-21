@@ -1,10 +1,11 @@
 use serde_json::{json, Value};
 
 pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
+pub(super) const EVENTS_URL: &str = "https://api.github.com/users";
 pub(super) const PAGE_SIZE: u32 = 50;
 pub(super) const RECENT_MERGES: u32 = 10;
 
-const DOCUMENT: &str = "\
+const SEARCHES: &str = "\
 query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $merged: String!, $first: Int!, $recent: Int!) {
   viewer { login }
   rateLimit { remaining resetAt }
@@ -14,6 +15,9 @@ query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $m
   assigned: search(type: ISSUE, query: $assigned, first: $first) { issueCount nodes { ...pr } }
   merged: search(type: ISSUE, query: $merged, first: $recent) { issueCount nodes { ...pr } }
 }
+";
+
+pub(super) const PR_FRAGMENT: &str = "\
 fragment pr on PullRequest {
   id number title url isDraft updatedAt headRefName baseRefName reviewDecision
   mergeable mergeStateStatus mergeQueueEntry { position } autoMergeRequest { enabledAt }
@@ -56,9 +60,19 @@ pub(super) fn search_query(search: Search, scopes: &[String]) -> String {
     query
 }
 
+pub(super) fn in_scope(repo: &str, scopes: &[String]) -> bool {
+    let owner = repo.split_once('/').map_or(repo, |(owner, _)| owner);
+    scopes.is_empty()
+        || scopes.iter().any(|scope| match scope.split_once(':') {
+            Some(("org" | "user", login)) => owner.eq_ignore_ascii_case(login),
+            Some(("repo", name)) => repo.eq_ignore_ascii_case(name),
+            _ => false,
+        })
+}
+
 pub(super) fn request_body(scopes: &[String]) -> Value {
     json!({
-        "query": DOCUMENT,
+        "query": format!("{SEARCHES}{PR_FRAGMENT}"),
         "variables": {
             "mine": search_query(Search::Mine, scopes),
             "review": search_query(Search::ReviewRequested, scopes),

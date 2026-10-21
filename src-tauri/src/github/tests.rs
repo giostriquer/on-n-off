@@ -65,6 +65,17 @@ impl Harness {
         now_secs: i64,
         force: bool,
     ) -> (GithubPrsDto, Reading) {
+        self.read_with_events(cli, url, &refused_url(), now_secs, force)
+    }
+
+    fn read_with_events(
+        &self,
+        cli: &AgentCli,
+        url: &str,
+        events_url: &str,
+        now_secs: i64,
+        force: bool,
+    ) -> (GithubPrsDto, Reading) {
         read_prs_in(
             &Sources {
                 home: &self.home,
@@ -73,6 +84,7 @@ impl Harness {
                 read_memo: &self.read_memo,
                 cli,
                 url,
+                events_url,
                 now_secs,
             },
             force,
@@ -617,4 +629,180 @@ fn the_memory_window_follows_the_current_poll_interval() {
 fn a_saved_pull_request_interval_replaces_the_remembered_one() {
     set_poll_seconds(120);
     assert_eq!(POLL_SECONDS.load(Ordering::Acquire), 120);
+}
+
+fn pushed_to_shared_branch() -> String {
+    json!([{
+        "id": "10", "type": "PushEvent", "repo": { "name": "acme/app" },
+        "payload": { "ref": "refs/heads/fix/shared", "head": "head1", "before": "head0" },
+        "created_at": rfc3339(NOW - 60).unwrap(),
+    }])
+    .to_string()
+}
+
+fn shared_branch_lookup() -> String {
+    fixtures::lookup_reply(
+        json!([]),
+        &[json!([fixtures::contribution_node(
+            "PR_shared",
+            "alice",
+            "acme/app",
+            "OPEN"
+        )])],
+    )
+    .to_string()
+}
+
+fn your_commit() -> String {
+    fixtures::commits_reply(&[vec![fixtures::commit(1, &["octocat"])]]).to_string()
+}
+
+fn events_url(url: &str) -> String {
+    url.replace("/graphql", "/users")
+}
+
+fn mine(dto: &GithubPrsDto) -> Vec<(&str, &str, bool)> {
+    dto.data
+        .mine
+        .items
+        .iter()
+        .map(|pr| (pr.id.as_str(), pr.author.as_str(), pr.contributed))
+        .collect()
+}
+
+fn read_contribution(harness: &Harness, gh: &AgentCli) {
+    let (events, lookup, commit) = (
+        pushed_to_shared_branch(),
+        shared_branch_lookup(),
+        your_commit(),
+    );
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], &events),
+        ("200 OK", &[], &lookup),
+        ("200 OK", &[], &commit),
+    ]);
+    let (dto, _) = harness.read_with_events(gh, &url, &events_url(&url), NOW, false);
+    server.join().unwrap();
+    assert_eq!(dto.warnings, Vec::<String>::new());
+}
+
+#[test]
+fn a_pull_request_someone_else_opened_with_a_commit_of_yours_is_read_into_mine() {
+    let harness = Harness::new("gh-read-contributed", &["org:acme"], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let (events, lookup, commit) = (
+        pushed_to_shared_branch(),
+        shared_branch_lookup(),
+        your_commit(),
+    );
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], &events),
+        ("200 OK", &[], &lookup),
+        ("200 OK", &[], &commit),
+    ]);
+
+    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, false);
+
+    assert_eq!(dto.status, GithubStatus::Ok);
+    assert_eq!(dto.warnings, Vec::<String>::new());
+    assert_eq!(
+        mine(&dto),
+        vec![("PR_mine1", "octocat", false), ("PR_shared", "alice", true)]
+    );
+    assert_eq!(dto.data.mine.total, 2);
+    let requests = server.join().unwrap();
+    assert!(
+        requests[1]
+            .head
+            .starts_with("GET /users/octocat/events?per_page=100&page=1 "),
+        "{}",
+        requests[1].head
+    );
+    assert_eq!(authorization(&requests[1]), "Bearer gho_t");
+    assert_eq!(authorization(&requests[2]), "Bearer gho_t");
+    assert_no_token(&dto, &harness.home, "gho_t");
+    let remembered = fs::read_to_string(
+        harness
+            .home
+            .join(".on-n-off")
+            .join("github")
+            .join("contributions.json"),
+    )
+    .unwrap();
+    assert!(!remembered.contains("gho_t"));
+    assert_eq!(
+        snapshot::load(&github_prs_path_for(&harness.home)),
+        Some(dto.data)
+    );
+}
+
+#[test]
+fn after_a_restart_a_failed_contribution_lookup_shows_the_contributions_last_read() {
+    let first = Harness::new("gh-read-contributed-kept", &[], 60);
+    let gh = gh(&first.home.join("cli"), "gho_t");
+    read_contribution(&first, &gh);
+    let restarted = Harness {
+        home: first.home.clone(),
+        ..Harness::new("gh-read-contributed-kept-again", &[], 60)
+    };
+
+    let (url, server) = serve_sequence(&[
+        ("200 OK", &[], REPLY),
+        ("200 OK", &[], "[]"),
+        ("502 Bad Gateway", &[], "{}"),
+    ]);
+    let (dto, _) = restarted.read_with_events(&gh, &url, &events_url(&url), NOW + 60, true);
+    server.join().unwrap();
+
+    assert_eq!(dto.status, GithubStatus::Ok);
+    assert!(!dto.stale);
+    assert_eq!(
+        mine(&dto),
+        vec![("PR_mine1", "octocat", false), ("PR_shared", "alice", true)]
+    );
+    assert_eq!(dto.data.mine.total, 2);
+    assert_eq!(
+        dto.warnings,
+        vec![
+            "Pull requests on your pushed branches were not looked up. Could not reach GitHub (HTTP 502)."
+                .to_string()
+        ]
+    );
+}
+
+#[test]
+fn a_low_rate_budget_shows_the_contributions_last_read_without_asking_github_again() {
+    let harness = Harness::new("gh-read-contributed-budget", &[], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    read_contribution(&harness, &gh);
+
+    let low = reply_with_budget(10, NOW + 3_600);
+    let (url, server) = serve_sequence(&[("200 OK", &[], &low)]);
+    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW + 120, true);
+
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert_eq!(dto.warnings, Vec::<String>::new());
+    assert_eq!(
+        mine(&dto),
+        vec![("PR_mine1", "octocat", false), ("PR_shared", "alice", true)]
+    );
+}
+
+#[test]
+fn a_viewer_login_github_would_never_issue_is_not_put_in_the_events_path() {
+    let harness = Harness::new("gh-read-contributed-login", &[], 60);
+    let gh = gh(&harness.home.join("cli"), "gho_t");
+    let mut reply: Value = serde_json::from_str(REPLY).unwrap();
+    reply["data"]["viewer"]["login"] = json!("../octocat");
+    let reply = reply.to_string();
+    let (url, server) = serve_sequence(&[("200 OK", &[], &reply)]);
+
+    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, false);
+
+    assert_eq!(server.join().unwrap().len(), 1);
+    assert_eq!(dto.status, GithubStatus::Ok);
+    assert_eq!(dto.warnings, Vec::<String>::new());
+    assert_eq!(mine(&dto), vec![("PR_mine1", "octocat", false)]);
 }

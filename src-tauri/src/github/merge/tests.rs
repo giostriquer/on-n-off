@@ -22,6 +22,7 @@ fn pr() -> GithubPrDto {
         auto_merge: false,
         merge_kind: None,
         in_organization: None,
+        contributed: false,
     }
 }
 

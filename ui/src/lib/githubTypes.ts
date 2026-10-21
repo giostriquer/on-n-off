@@ -28,6 +28,7 @@ export type GithubPr = {
   reviewRequest?: "direct" | "team" | null;
   mergeKind?: MergeKind | null;
   mergeQueue?: { position?: number | null } | null;
+  contributed?: boolean;
 };
 
 export type GithubPrList = {

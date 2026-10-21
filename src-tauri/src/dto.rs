@@ -447,6 +447,8 @@ pub struct GithubPrDto {
     pub merge_kind: Option<MergeKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub in_organization: Option<bool>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub contributed: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

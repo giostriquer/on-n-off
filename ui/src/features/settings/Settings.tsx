@@ -195,8 +195,8 @@ function GithubSettingsCard({
             Scopes
           </label>
           <span id="github-scope-help" className="font-mono text-[11px] text-[var(--mute)]">
-            org:NAME, user:NAME or OWNER/REPO narrow the pull requests you authored · Enter adds · empty
-            means all repositories · same-kind scopes combine, mixing kinds narrows
+            org:NAME, user:NAME or OWNER/REPO narrow Mine, contributed pull requests included · Enter adds ·
+            empty means all repositories · scopes combine, each adding its repositories
           </span>
         </div>
         <div className="flex flex-wrap items-center gap-2">

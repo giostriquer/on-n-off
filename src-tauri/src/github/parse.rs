@@ -73,7 +73,7 @@ fn list(search: &Value) -> GithubPrListDto {
     }
 }
 
-fn pull_request(node: &Value) -> Option<GithubPrDto> {
+pub(super) fn pull_request(node: &Value) -> Option<GithubPrDto> {
     let text = |key: &str| node[key].as_str().map(str::to_string);
     let mut pr = GithubPrDto {
         id: text("id")?,
@@ -101,6 +101,7 @@ fn pull_request(node: &Value) -> Option<GithubPrDto> {
         auto_merge: node["autoMergeRequest"].is_object(),
         merge_kind: None,
         in_organization: node["repository"]["isInOrganization"].as_bool(),
+        contributed: false,
     };
     pr.merge_kind = super::merge::classify(&pr);
     Some(pr)

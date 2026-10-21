@@ -162,12 +162,18 @@ adapter assumes today (change the adapter and this file together).
   re-read once when GitHub answers 401, never written anywhere) and sends one GraphQL request
   per refresh to `api.github.com/graphql` (authored PRs narrowed by the configured scopes,
   review-requested, direct-review-requested for tagging, assigned; each with the head commit's
-  `statusCheckRollup`; ~2 rate-limit points). Nothing is written to GitHub. The only on-n-off
-  writes are `~/.on-n-off/github/prs.json` (the last good read, shown as stale when a refresh
-  fails) and `~/.on-n-off/github/monitor.json` (the CI monitor's last-seen rollup per own PR).
-  Polling pauses until GitHub's reset when a reply is rate limited or fewer than 50 points
-  remain. The CI monitor watches the authored PRs the screen lists (the scoped first page of
-  fifty), so PRs past that page or outside the scope are not watched. Public and private
+  `statusCheckRollup`; ~2 rate-limit points). Contributed PRs, ones someone else opened that carry
+  a commit you wrote, add a read of `api.github.com/users/<login>/events` at most once a minute,
+  one GraphQL lookup of the pushed branches and found PRs, and a GraphQL check of a found PR's
+  commits when its head moved (the lookup 1-3 points, the check about 1 point per PR, at most 10
+  per read); they are skipped while fewer than 50 points remain.
+  Nothing is written to GitHub. The only on-n-off writes are `~/.on-n-off/github/prs.json` (the
+  last good read, shown as stale when a refresh fails), `~/.on-n-off/github/contributions.json`
+  (pushed branches and contributed PRs) and `~/.on-n-off/github/monitor.json` (the CI monitor's
+  last-seen rollup per PR). Polling pauses until GitHub's reset when a reply is rate limited or
+  fewer than 50 points remain. The CI monitor watches the PRs Mine lists (the scoped first page of
+  fifty authored ones, plus contributed ones), so PRs past that page or outside the scope are not
+  watched. Public and private
   repositories the `gh` token can read; github.com only. **verified** (gh 2.97, macOS,
   2026-08): the token hand-over, the GraphQL reply shape, and the ~2 points per read (via
   `gh api graphql` with `rateLimit { cost }`); **code**: the pause thresholds.

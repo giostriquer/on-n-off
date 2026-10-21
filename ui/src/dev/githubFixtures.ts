@@ -14,6 +14,7 @@ type Seed = {
   minutesAgo?: number;
   merge?: MergeKind;
   queued?: number | null;
+  contributed?: boolean;
 };
 
 function pr(seed: Seed, kind: "mine" | "review" | "assigned"): GithubPr {
@@ -34,6 +35,7 @@ function pr(seed: Seed, kind: "mine" | "review" | "assigned"): GithubPr {
     ...(kind === "review" ? { reviewRequest: seed.team ? "team" : "direct" } : {}),
     mergeKind: seed.queued !== undefined ? "queued" : (seed.merge ?? null),
     ...(seed.queued !== undefined ? { mergeQueue: { position: seed.queued } } : {}),
+    ...(seed.contributed ? { contributed: true } : {}),
   };
 }
 
@@ -42,6 +44,7 @@ const MINE: Seed[] = [
   { n: 398, title: "Tighten the CSP for the updater window", ci: "success", decision: "APPROVED", merge: "ready", minutesAgo: 41 },
   { n: 401, title: "Migrate the settings store to versioned JSON", ci: "pending", draft: true, minutesAgo: 12 },
   { n: 388, title: "Rename the tray menu entries", ci: "success", merge: "conflicts", minutesAgo: 900 },
+  { n: 395, title: "Stream the export in chunks", author: "devon", contributed: true, ci: "pending", minutesAgo: 20 },
 ];
 
 const REVIEW: Seed[] = [

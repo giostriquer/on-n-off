@@ -21,11 +21,11 @@ const CI_GLYPH: Record<CiState, LucideIcon> = {
   none: Circle,
 };
 
-function Badge({ children, tone = "mute" }: { children: string; tone?: CiTone }) {
+function Badge({ children, tone = "mute", caps = true }: { children: string; tone?: CiTone; caps?: boolean }) {
   const color = ciToneColor(tone);
   return (
     <span
-      className="shrink-0 rounded-md border px-1.5 py-0.5 type-badge uppercase"
+      className={`shrink-0 rounded-md border px-1.5 py-0.5 type-badge ${caps ? "uppercase" : ""}`}
       style={{ borderColor: tone === "mute" ? "var(--hair)" : color, color }}
     >
       {children}
@@ -68,6 +68,7 @@ export function PrRow({ pr, now }: { pr: GithubPr; now: number }) {
             ) : null,
           )}
           {pr.reviewRequest === "team" ? <Badge>team</Badge> : null}
+          {pr.contributed ? <Badge caps={false}>{`by @${pr.author}`}</Badge> : null}
         </span>
         <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] text-[var(--mute)]">
           <span className="shrink-0">{pr.author}</span>
