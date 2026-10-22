@@ -72,8 +72,8 @@
     "supersedes": false
   },
   {
-    "case": "a signed-out scoped card that still shows its last reading replaces history",
-    "scoped": { "provider": "codex", "status": "unauthenticated", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": "windows" },
+    "case": "a scoped card whose plan the read does not support still replaces history while it shows its last reading",
+    "scoped": { "provider": "codex", "status": "unsupported", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": "windows" },
     "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": "windows" },
     "supersedes": true
   },
