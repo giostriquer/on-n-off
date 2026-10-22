@@ -467,10 +467,11 @@ only removes on-n-off's saved copy. Abandoned isolated-login directories are cle
 their lease is free and provider processes are gone.
 
 New observation keys include both user and workspace/organization. Older snapshots still load as
-historical observations and are not assigned to an inferred workspace. A successful scoped read
-folds the old card into its own in the Limits read's column (`limits::column`) when both its legacy
-provider ID and email (trimmed, ASCII case ignored) match, the same for the Limits screen and the tray
-popover. This survives cache reloads without transferring unscoped usage; other users and
+historical observations and are not assigned to an inferred workspace. A scoped card that does not
+stand unavailable (its read answered, or it still shows what an earlier read recorded) folds the old
+card into its own in the Limits read's column (`limits::column`) when both its legacy provider ID and
+email (trimmed, ASCII case ignored) match, the same for the Limits screen and the tray popover; the
+account guide owns the rule. This survives cache reloads without transferring unscoped usage; other users and
 workspaces remain separate. Muse is
 the exception: its legacy id, `email:` and the lowercased email, names the whole identity, so a
 Muse card's first successful scoped reading takes the weekly window its legacy card last read when

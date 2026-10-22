@@ -141,7 +141,8 @@ source carries no comments (see [Code comments](#code-comments)).
   shows: its read standing, `ReadStanding::of` (`limits/standing.rs`), worked out from the card as it
   leaves the read (each Limits column entry for the UI, `NotchProvider::current` for the notch),
   never stored on it. The card, the tray popover and both notches render the standing and never
-  restate the rule, `Reading::has_observations` among it; the cases they all check are
+  restate the rule, `Reading::has_observations` among it. The Limits column's legacy fold asks the
+  same rule through `ProviderLimitsDto::stands_unavailable`. The cases they all check are
   `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;

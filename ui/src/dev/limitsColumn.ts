@@ -14,9 +14,13 @@ function email(label: string | null | undefined): string | null {
   return label?.trim().replace(/[A-Z]/g, letter => letter.toLowerCase()) || null;
 }
 
+function observed(card: ProviderLimits): boolean {
+  return card.windows.length > 0 || !!card.credits || !!card.workspaceCredits || !!card.creditsSpent || (card.resetCredits?.availableCount ?? 0) > 0;
+}
+
 export function supersedes(scoped: ProviderLimits, legacy: ProviderLimits): boolean {
   const [now, before] = [scoped.account, legacy.account];
-  return !!now && !!before && !legacy.currentAccount && scoped.provider === legacy.provider && scoped.status === "ok"
+  return !!now && !!before && !legacy.currentAccount && scoped.provider === legacy.provider && (scoped.status === "ok" || observed(scoped))
     && now.id.startsWith(PROFILE_KEY) && !before.id.startsWith(PROFILE_KEY) && now.legacyId === before.id
     && email(now.label) !== null && email(now.label) === email(before.label);
 }
