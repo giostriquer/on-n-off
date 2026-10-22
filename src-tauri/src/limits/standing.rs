@@ -2,6 +2,12 @@ use crate::dto::{
     LastObserved, LimitsStatus, MessageTone, ProviderLimitsDto, ReadStanding, StandingMessage,
 };
 
+impl ProviderLimitsDto {
+    pub(crate) fn stands_unavailable(&self) -> bool {
+        self.status != LimitsStatus::Ok && !self.reading.has_observations()
+    }
+}
+
 impl ReadStanding {
     pub(crate) fn of(card: &ProviderLimitsDto) -> Self {
         let observed = card.reading.has_observations();
@@ -14,7 +20,7 @@ impl ReadStanding {
             };
         }
         let message = StandingMessage::of(card);
-        if !observed {
+        if card.stands_unavailable() {
             return Self::Unavailable { message };
         }
         Self::LastObserved(if card.saved_profile {
