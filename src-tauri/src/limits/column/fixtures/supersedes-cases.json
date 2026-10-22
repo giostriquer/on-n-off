@@ -36,10 +36,10 @@
     "supersedes": false
   },
   {
-    "case": "a scoped read that failed replaces nothing",
+    "case": "a scoped card whose latest read failed still replaces history while it shows the reading an earlier read verified",
     "scoped": { "provider": "codex", "status": "failed", "current": false, "id": "profile:you", "legacyId": "team", "label": "you@example.com", "observed": true },
     "legacy": { "provider": "codex", "status": "ok", "current": false, "id": "team", "legacyId": null, "label": "you@example.com", "observed": true },
-    "supersedes": false
+    "supersedes": true
   },
   {
     "case": "the signed-in legacy read is never replaced",

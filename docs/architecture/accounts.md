@@ -782,8 +782,11 @@ vault and reloads accounts; it does not start sign-in, create a vault, or change
 Card headers never display workspace IDs. Saved profiles keep their verified workspace identity;
 accounts that share an email are told apart by their plan badge when usage reports one, and by the
 optional category otherwise.
-When a scoped account has a successful reading, the column folds into it the legacy observation it
-replaces, by one rule (`snapshots::supersedes`, which Forget also uses): the scoped card's legacy id
+When a scoped account has a reading, the column folds into it the legacy observation it replaces,
+by one rule (`snapshots::supersedes`, which Forget also uses). A reading means its latest read
+succeeded, or that read failed while the card still shows the last reading an earlier read
+recorded, which verified the account then; a failed card that never observed anything replaces
+nothing, so the legacy card keeps its old figures in view. The scoped card's legacy id
 names the legacy card, which is not the signed-in read, and both carry the same email, compared
 trimmed and ignoring ASCII case only (a non-ASCII letter's case is not folded). The legacy key has
 one owner, `Identity::legacy_key`: the workspace id for Codex, the user id for Claude, `email:` and

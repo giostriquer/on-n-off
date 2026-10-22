@@ -371,7 +371,7 @@ fn fnv1a(input: &str) -> u32 {
 pub(super) fn supersedes(scoped: &ProviderLimitsDto, legacy: &ProviderLimitsDto) -> bool {
     !legacy.current_account
         && scoped.provider == legacy.provider
-        && scoped.status == LimitsStatus::Ok
+        && (scoped.status == LimitsStatus::Ok || scoped.reading.has_observations())
         && matches!(
             (&scoped.account, &legacy.account),
             (Some(new), Some(old)) if replaces(new, old)

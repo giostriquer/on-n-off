@@ -184,6 +184,7 @@ fn history_stays_beside_a_replacement_it_cannot_verify() {
     let account = identity(AgentId::Codex, "user", "team");
     let mut failed = scoped(&account, "you@example.com");
     failed.status = LimitsStatus::Failed;
+    failed.reading = Reading::default();
     let other_email = scoped(&account, "other@example.com");
     let mut other_history = scoped(&account, "you@example.com");
     other_history.account.as_mut().unwrap().legacy_id = Some("other-team".into());
@@ -194,7 +195,7 @@ fn history_stays_beside_a_replacement_it_cannot_verify() {
 
     for (case, entries) in [
         (
-            "a failed read",
+            "a failed read that never observed anything",
             vec![failed, history(&account, "you@example.com")],
         ),
         (
@@ -221,6 +222,30 @@ fn history_stays_beside_a_replacement_it_cannot_verify() {
             "{case}"
         );
     }
+}
+
+#[test]
+fn a_saved_card_whose_latest_read_failed_still_folds_the_history_it_replaced() {
+    let account = identity(AgentId::Claude, "user", "org");
+    let mut failed = scoped(&account, "you@example.com");
+    failed.status = LimitsStatus::Failed;
+    failed.message = Some("Claude did not answer.".into());
+
+    let column = column(
+        &[failed, history(&account, "you@example.com")],
+        &roster(AgentId::Claude, &[(account.clone(), "you@example.com")]),
+        &no_ends(),
+        0,
+    );
+
+    assert_eq!(ids(&column), [account.observation_key().as_str()]);
+    assert_eq!(replaced(&column[0]), [("user", Some("you@example.com"))]);
+    assert!(matches!(
+        column[0].standing,
+        Some(ReadStanding::LastObserved(
+            crate::dto::LastObserved::SavedRefreshPaused { .. }
+        ))
+    ));
 }
 
 #[test]
