@@ -210,6 +210,11 @@ Rust and Swift cache generations; the workflows and scripts own current keys.
   every workflow must use, so a bump replaces it and changes every workflow together.
 - In this repo's shell tooling, prefer `Join-Path`, `$env:VAR`, `-LiteralPath`; in bash use forward
   slashes and `cygpath -w` when handing paths to Windows programs.
+- Resolve a program with `Get-Command <name> -CommandType Application | Select-Object -First 1`.
+  `Get-Command` returns every match on PATH, and the `.Source` of several matches is an array that
+  `ProcessStartInfo.FileName` joins into one path that does not exist. The `macos-26` image of
+  2026-10-21 puts Homebrew's rustup (`/opt/homebrew/opt/rustup/bin`) before `~/.cargo/bin`, so
+  `cargo` matches twice there. The first match is the one bash runs.
 
 ## Native side notch: macOS
 

@@ -60,7 +60,7 @@ function Invoke-CargoMetadata {
         [string]$ManifestPath
     )
 
-    $cargoExecutable = (Get-Command cargo -CommandType Application -ErrorAction Stop).Source
+    $cargoExecutable = (Get-Command cargo -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $cargoExecutable
     $startInfo.Arguments = "metadata --manifest-path `"$ManifestPath`" --no-deps --format-version 1"
