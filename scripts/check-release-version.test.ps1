@@ -50,13 +50,18 @@ function Invoke-Checker {
         [Parameter(Mandatory)]
         [string]$ExpectedTag,
 
-        [switch]$UseDefaultRepositoryRoot
+        [switch]$UseDefaultRepositoryRoot,
+
+        [string]$AppendPath
     )
 
     $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
     $startInfo.FileName = $powershell
     $rootArgument = if ($UseDefaultRepositoryRoot) { "" } else { " -RepositoryRoot `"$fixtureRoot`"" }
     $startInfo.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$scriptUnderTest`"$rootArgument -ExpectedTag `"$ExpectedTag`""
+    if ($AppendPath) {
+        $startInfo.Environment["PATH"] = $env:PATH + [System.IO.Path]::PathSeparator + $AppendPath
+    }
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
@@ -124,6 +129,20 @@ try {
     $matching = Invoke-Checker -ExpectedTag "v0.1.0"
     Assert-ExitCode -Result $matching -Expected 0 -Case "matching versions"
     Assert-OutputContains -Result $matching -ExpectedText "version=0.1.0" -Case "matching versions"
+
+    $shadowCargoDir = Join-Path $fixtureRoot "shadow-cargo"
+    New-Item -ItemType Directory -Path $shadowCargoDir -Force | Out-Null
+    if ($IsWindows) {
+        New-Item -ItemType File -Path (Join-Path $shadowCargoDir "cargo.exe") | Out-Null
+    }
+    else {
+        $shadowCargo = Join-Path $shadowCargoDir "cargo"
+        "#!/bin/sh`nexit 1`n" | Set-Content -LiteralPath $shadowCargo -NoNewline -Encoding ascii
+        [System.IO.File]::SetUnixFileMode($shadowCargo, [System.IO.UnixFileMode]"UserRead, UserWrite, UserExecute")
+    }
+    $twoCargos = Invoke-Checker -ExpectedTag "v0.1.0" -AppendPath $shadowCargoDir
+    Assert-ExitCode -Result $twoCargos -Expected 0 -Case "second cargo later on PATH"
+    Assert-OutputContains -Result $twoCargos -ExpectedText "version=0.1.0" -Case "second cargo later on PATH"
 
     $repositoryVersion = [string]((Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) "package.json") | ConvertFrom-Json).version)
     $defaultRoot = Invoke-Checker -ExpectedTag "v$repositoryVersion" -UseDefaultRepositoryRoot
