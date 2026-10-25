@@ -1,15 +1,15 @@
 name: Prune caches
 
 # GitHub caps Actions cache at 10 GB for the whole repository and evicts least-recently-used
-# entries once that is reached. Each Rust key generation costs roughly 2.7 GB across the six
-# shared keys, so a few compiler rolls or lockfile changes are enough to start evicting caches
-# that jobs are still restoring from. On 2026-08-20 the store sat at 9.85 GB across 20 entries.
+# entries once that is reached. Each Rust key generation costs roughly 4.1 GB across the six
+# shared keys, so two generations alone sit near the cap. On 2026-10-25, keeping two, the store
+# sat at 8.55 GB across 20 entries.
 # The macOS jobs' Swift build caches (v0-swiftpm-*, one debug and one release family) add a
 # generation whenever the Swift toolchain or a Swift package input changes.
 #
-# This keeps the newest generations per shared key and deletes the rest. Two are kept, not one:
-# both caches fall back to a restore key that drops the last component (the lockfile, or the
-# Swift package inputs), so the previous generation still does useful work after a change.
+# This keeps the newest generation per shared key and deletes the rest. One is enough: both
+# caches fall back to a restore key that drops the last component (the lockfile, or the Swift
+# package inputs), so a ref still on an older lockfile restores from the newest generation.
 
 on:
   schedule:
@@ -19,7 +19,7 @@ on:
       keep:
         description: Generations to keep per shared key
         required: false
-        default: "2"
+        default: "1"
       dry-run:
         description: List what would be deleted without deleting it
         type: boolean
@@ -47,7 +47,7 @@ jobs:
       - name: Delete superseded cache generations
         env:
           GH_TOKEN: ${{ github.token }}
-          KEEP: ${{ inputs.keep || '2' }}
+          KEEP: ${{ inputs.keep || '1' }}
           DRY_RUN: ${{ inputs.dry-run || 'false' }}
         run: |
           Set-StrictMode -Version Latest
