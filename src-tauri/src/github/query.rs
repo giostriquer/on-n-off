@@ -19,7 +19,7 @@ query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $m
 
 pub(super) const PR_FRAGMENT: &str = "\
 fragment pr on PullRequest {
-  id number title url isDraft updatedAt headRefName baseRefName reviewDecision
+  id number title url isDraft updatedAt headRefName headRefOid baseRefName reviewDecision
   mergeable mergeStateStatus mergeQueueEntry { position } autoMergeRequest { enabledAt }
   repository { nameWithOwner isInOrganization }
   author { login }

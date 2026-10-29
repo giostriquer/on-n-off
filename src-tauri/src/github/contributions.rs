@@ -24,7 +24,7 @@ const VERIFY_PER_READ: usize = 10;
 
 const CONTRIBUTION_FRAGMENT: &str = "\
 fragment contribution on PullRequest {
-  ...pr state mergedAt headRefOid headRepository { nameWithOwner }
+  ...pr state mergedAt headRepository { nameWithOwner }
 }
 ";
 
@@ -191,9 +191,15 @@ impl Store {
         self.tracked.extend(lookup.discovered);
         for tracked in &mut self.tracked {
             if let Some(found) = lookup.found.get(&tracked.id) {
+                let mut pr = found.pr.clone();
+                if found.merged_at.is_none() {
+                    if let Some(previous) = &tracked.last {
+                        merge::keep_conflict(&mut pr, previous);
+                    }
+                }
                 tracked.head.clone_from(&found.head);
                 tracked.merged_at = found.merged_at.map(|at| tracked.merged_at.unwrap_or(at));
-                tracked.last = Some(found.pr.clone());
+                tracked.last = Some(pr);
             }
         }
     }
@@ -220,10 +226,19 @@ pub(super) fn read(
     path: &Path,
     viewer: &str,
     scopes: &[String],
+    observed: &[GithubPrDto],
     now_secs: i64,
 ) -> Contributed {
     let mut store = load(path, viewer);
     let before = store.clone();
+    for pr in store
+        .tracked
+        .iter_mut()
+        .filter(|tracked| tracked.merged_at.is_none())
+        .filter_map(|tracked| tracked.last.as_mut())
+    {
+        merge::apply_observed(pr, observed);
+    }
     let mut warnings = Vec::new();
     match github {
         Some(github) => refresh(github, &mut store, viewer, now_secs, &mut warnings),
@@ -521,7 +536,7 @@ fn load(path: &Path, viewer: &str) -> Store {
         .iter_mut()
         .filter_map(|tracked| tracked.last.as_mut())
     {
-        pr.merge_kind = merge::classify(pr);
+        merge::restore(pr);
     }
     store
 }

@@ -431,6 +431,8 @@ pub struct GithubPrDto {
     pub review_decision: Option<ReviewDecision>,
     pub ci: CiState,
     pub head_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub head_ref_oid: Option<String>,
     pub base_ref: String,
     pub updated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

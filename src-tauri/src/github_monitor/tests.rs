@@ -17,6 +17,7 @@ fn pr(id: &str, ci: CiState) -> GithubPrDto {
         review_decision: None,
         ci,
         head_ref: "feat/thing".into(),
+        head_ref_oid: None,
         base_ref: "main".into(),
         updated_at: "2026-08-24T20:00:00Z".into(),
         review_request: None,

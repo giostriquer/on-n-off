@@ -37,7 +37,7 @@ pub(super) fn load(path: &Path) -> Option<GithubPrsData> {
         .chain(data.review_requested.items.iter_mut())
         .chain(data.assigned.items.iter_mut())
     {
-        pr.merge_kind = super::merge::classify(pr);
+        super::merge::restore(pr);
     }
     Some(data)
 }

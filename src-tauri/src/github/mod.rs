@@ -173,7 +173,13 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
         }
     }
     match fetch(sources) {
-        Ok(dto) => {
+        Ok(mut dto) => {
+            let remembered = {
+                let state = sources.read_memo.state();
+                state.cached.as_ref().map(|(_, cached)| cached.data.clone())
+            }
+            .or_else(|| snapshot::load(&snapshot_path));
+            merge::keep_conflicts(&mut dto.data, remembered.as_ref());
             if let Err(error) = snapshot::save(&snapshot_path, &dto.data) {
                 eprintln!("could not remember the GitHub read: {error}");
             }
@@ -283,6 +289,7 @@ fn add_contributions(
         &paths::github_contributions_path_for(sources.home),
         &viewer,
         &sources.settings.github_scopes,
+        &merge::observed(data),
         sources.now_secs,
     );
     warnings.extend(found.warnings);

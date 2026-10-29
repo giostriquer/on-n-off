@@ -150,7 +150,14 @@ fn empty_lookup() -> Value {
 }
 
 fn read_at(github: &FakeGithub, path: &Path, now_secs: i64) -> Contributed {
-    read(Some(github as &dyn Github), path, "octocat", &[], now_secs)
+    read(
+        Some(github as &dyn Github),
+        path,
+        "octocat",
+        &[],
+        &[],
+        now_secs,
+    )
 }
 
 fn ids(prs: &[GithubPrDto]) -> Vec<&str> {

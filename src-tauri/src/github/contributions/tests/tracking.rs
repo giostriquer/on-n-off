@@ -144,10 +144,10 @@ fn a_read_without_github_still_forgets_a_merge_older_than_fourteen_days() {
     read_at(&FakeGithub::default().reply(merged), &path, NOW + 30);
 
     assert_eq!(
-        ids(&read(None, &path, "octocat", &[], NOW + 14 * DAY - 1).merged),
+        ids(&read(None, &path, "octocat", &[], &[], NOW + 14 * DAY - 1).merged),
         vec!["PR_alice"]
     );
-    assert!(read(None, &path, "octocat", &[], NOW + 14 * DAY)
+    assert!(read(None, &path, "octocat", &[], &[], NOW + 14 * DAY)
         .merged
         .is_empty());
 }
@@ -275,7 +275,7 @@ fn without_github_the_last_read_is_shown_and_nothing_is_read() {
     found_alice(&path);
     let before = fs::read_to_string(&path).unwrap();
 
-    let found = read(None, &path, "octocat", &[], NOW + 60);
+    let found = read(None, &path, "octocat", &[], &[], NOW + 60);
 
     assert_eq!(ids(&found.open), vec!["PR_alice"]);
     assert_eq!(found.warnings, Vec::<String>::new());
@@ -287,8 +287,22 @@ fn the_scope_applies_when_a_contribution_is_shown() {
     let path = store_path("contrib-scope");
     found_alice(&path);
 
-    let other = read(None, &path, "octocat", &["org:other".to_string()], NOW + 1);
-    let acme = read(None, &path, "octocat", &["org:acme".to_string()], NOW + 1);
+    let other = read(
+        None,
+        &path,
+        "octocat",
+        &["org:other".to_string()],
+        &[],
+        NOW + 1,
+    );
+    let acme = read(
+        None,
+        &path,
+        "octocat",
+        &["org:acme".to_string()],
+        &[],
+        NOW + 1,
+    );
 
     assert!(other.open.is_empty());
     assert_eq!(ids(&acme.open), vec!["PR_alice"]);
@@ -299,11 +313,18 @@ fn the_record_belongs_to_one_github_account_in_any_case() {
     let path = store_path("contrib-viewer");
     found_alice(&path);
 
-    let same = read(None, &path, "OctoCat", &[], NOW + 1);
+    let same = read(None, &path, "OctoCat", &[], &[], NOW + 1);
     assert_eq!(ids(&same.open), vec!["PR_alice"]);
 
     let other = FakeGithub::default();
-    let found = read(Some(&other as &dyn Github), &path, "hubot", &[], NOW + 2);
+    let found = read(
+        Some(&other as &dyn Github),
+        &path,
+        "hubot",
+        &[],
+        &[],
+        NOW + 2,
+    );
     assert!(found.open.is_empty());
     assert_eq!(*other.pages_asked.borrow(), vec![("hubot".to_string(), 1)]);
     assert_eq!(other.requests(), 0, "the other account's branches are gone");
@@ -323,4 +344,52 @@ fn an_unreadable_record_starts_from_nothing() {
     assert!(fs::read_to_string(&path)
         .unwrap()
         .contains("\"viewer\":\"octocat\""));
+}
+
+#[test]
+fn a_contributions_conflict_survives_unknown_reads_but_not_a_resolved_or_merged_pr() {
+    use crate::dto::MergeKind;
+
+    let path = store_path("contrib-conflict-refresh");
+    let mut node = pr("PR_alice", "alice");
+    node["mergeable"] = json!("CONFLICTING");
+    node["mergeStateStatus"] = json!("DIRTY");
+    let first = one_push()
+        .reply(lookup_reply(json!([]), &[json!([node.clone()])]))
+        .reply(commits_reply(&[yours()]));
+    assert_eq!(
+        read_at(&first, &path, NOW).open[0].merge_kind,
+        Some(MergeKind::Conflicts)
+    );
+
+    node["mergeable"] = json!("UNKNOWN");
+    node["mergeStateStatus"] = json!("UNKNOWN");
+    let unknown = FakeGithub::default().reply(lookup_reply(json!([node.clone()]), &[json!([])]));
+    assert_eq!(
+        read_at(&unknown, &path, NOW + 30).open[0].merge_kind,
+        Some(MergeKind::Conflicts)
+    );
+    let offline = read(None, &path, "octocat", &[], &[], NOW + 40);
+    assert_eq!(offline.open[0].merge_kind, Some(MergeKind::Conflicts));
+
+    node["mergeable"] = json!("MERGEABLE");
+    node["mergeStateStatus"] = json!("CLEAN");
+    let resolved = FakeGithub::default().reply(lookup_reply(json!([node.clone()]), &[json!([])]));
+    assert_eq!(
+        read_at(&resolved, &path, NOW + 50).open[0].merge_kind,
+        Some(MergeKind::Ready)
+    );
+
+    node["mergeable"] = json!("CONFLICTING");
+    node["mergeStateStatus"] = json!("DIRTY");
+    let conflicting =
+        FakeGithub::default().reply(lookup_reply(json!([node.clone()]), &[json!([])]));
+    read_at(&conflicting, &path, NOW + 60);
+    node["state"] = json!("MERGED");
+    node["mergeable"] = json!("UNKNOWN");
+    node["mergeStateStatus"] = json!("UNKNOWN");
+    let merged = FakeGithub::default().reply(lookup_reply(json!([node]), &[json!([])]));
+    let found = read_at(&merged, &path, NOW + 70);
+    assert!(found.open.is_empty());
+    assert_eq!(found.merged[0].merge_kind, None);
 }

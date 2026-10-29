@@ -449,6 +449,18 @@ costs about 2 rate-limit points. They are interpreted in exactly one place, `git
 `Seen` record takes its unknown-aware facts from the same module. Snapshots written before those
 fields existed load with `Unknown`/`false` defaults.
 
+GitHub can report `UNKNOWN` while recalculating mergeability after the base branch advances.
+Before replacing a successful read, `merge::keep_conflicts` carries forward a known conflict for
+that viewer's same PR id, head commit (`headRefOid`) and target branch. It retains only the displayed
+`mergeKind`; raw unknown mergeability, CI, review, title and other fields still refresh. It never
+carries forward a ready verdict. A current definite answer for the same PR revision takes precedence
+across the open lists and clears conflicting contribution history before that history is refreshed.
+A changed head or target, or a missing head id in an older snapshot, discards the remembered conflict.
+The saved snapshot preserves it across restart and failed reads. Contributed PRs apply the same
+rule before replacing their own stored read, but merged PRs do not.
+The badge and both native rings therefore keep a known conflict during recalculation and clear it
+once GitHub confirms it is gone.
+
 GitHub's search cannot find a pull request by who wrote its commits, so contributed pull requests
 come from your pushes instead (`github/contributions.rs`).
 

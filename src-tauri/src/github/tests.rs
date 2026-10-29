@@ -12,6 +12,8 @@ use std::path::{Path, PathBuf};
 
 const NOW: i64 = 1_787_000_000;
 
+mod merge_refresh;
+
 fn settings(scopes: &[&str], poll_seconds: u16) -> AppSettings {
     AppSettings {
         github_scopes: scopes.iter().map(|scope| scope.to_string()).collect(),

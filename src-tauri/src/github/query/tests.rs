@@ -45,6 +45,7 @@ fn the_request_body_carries_the_document_and_every_search_string() {
         "statusCheckRollup { state }",
         "reviewDecision",
         "mergeable",
+        "headRefOid",
         "mergeStateStatus",
         "mergeQueueEntry { position }",
         "autoMergeRequest { enabledAt }",
