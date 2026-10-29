@@ -92,6 +92,7 @@ pub(super) fn pull_request(node: &Value) -> Option<GithubPrDto> {
         review_decision: review_decision(node["reviewDecision"].as_str()),
         ci: ci_state(node["commits"]["nodes"][0]["commit"]["statusCheckRollup"]["state"].as_str()),
         head_ref: text("headRefName").unwrap_or_default(),
+        head_ref_oid: text("headRefOid").filter(|oid| !oid.is_empty()),
         base_ref: text("baseRefName").unwrap_or_default(),
         updated_at: text("updatedAt").unwrap_or_default(),
         review_request: None,

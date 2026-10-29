@@ -13,6 +13,7 @@ fn pr() -> GithubPrDto {
         review_decision: None,
         ci: CiState::Success,
         head_ref: "h".into(),
+        head_ref_oid: None,
         base_ref: "main".into(),
         updated_at: "2026-08-24T19:00:00Z".into(),
         review_request: None,
@@ -176,4 +177,15 @@ fn the_monitor_facts_are_none_only_while_github_has_not_computed_them() {
         })),
         Some(false)
     );
+}
+
+#[test]
+fn a_remembered_conflict_does_not_report_ready_while_mergeability_is_unknown() {
+    let retained = with(|pr| {
+        pr.mergeable = Mergeability::Unknown;
+        pr.merge_state = MergeState::Clean;
+        pr.merge_kind = Some(MergeKind::Conflicts);
+    });
+    assert_eq!(conflicts_known(&retained), None);
+    assert_eq!(ready_known(&retained), Some(false));
 }

@@ -23,6 +23,7 @@ fn data() -> GithubPrsData {
                 review_decision: None,
                 ci: CiState::Success,
                 head_ref: "h".into(),
+                head_ref_oid: None,
                 base_ref: "main".into(),
                 updated_at: "2026-08-24T19:00:00Z".into(),
                 review_request: None,
@@ -74,6 +75,7 @@ fn a_snapshot_from_before_the_merge_state_fields_loads_with_defaults() {
     let pr = &loaded.mine.items[0];
     assert_eq!(pr.id, "PR_1");
     assert_eq!(pr.mergeable, Mergeability::Unknown);
+    assert_eq!(pr.head_ref_oid, None);
     assert_eq!(pr.merge_state, MergeState::Unknown);
     assert_eq!(pr.merge_queue, None);
     assert!(!pr.auto_merge);
