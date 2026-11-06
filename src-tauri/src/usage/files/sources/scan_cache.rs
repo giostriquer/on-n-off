@@ -11,8 +11,7 @@ use serde_json::Value;
 use crate::provider_catalogue::UsageProvider;
 use crate::usage::cache_io::atomic_write;
 use crate::usage::files::history::Watermark;
-use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
-use crate::usage::transcripts::{richest_copies, TokenTotals, UsageRecord};
+use crate::usage::transcripts::{TokenTotals, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
 
 pub(crate) const USAGE_SCAN_CACHE_VERSION: u32 = 4;
 
@@ -125,7 +124,7 @@ fn encode_scan_cache(cache: &ScanCache) -> Value {
                     record.totals.cache_creation_tokens,
                     record.totals.output_tokens,
                     record.totals.reasoning_tokens,
-                    record.dedupe_key,
+                    record.copy_key,
                     record.reported_cost_usd,
                     record.totals.cache_creation_1h_tokens,
                 ])
@@ -223,7 +222,7 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
                 corrupt = true;
                 break;
             };
-            let dedupe_key = match &arr[8] {
+            let copy_key = match &arr[8] {
                 Value::Null => None,
                 Value::String(s) => Some(s.clone()),
                 _ => {
@@ -250,7 +249,7 @@ fn decode_scan_cache(document: &Value) -> ScanCache {
                     reasoning_tokens: reasoning,
                 },
                 reported_cost_usd,
-                dedupe_key,
+                copy_key,
             });
         }
         if corrupt {
@@ -307,10 +306,6 @@ fn prune_scan_cache(cache: &mut ScanCache, options: &PruneOptions) -> usize {
 
 fn path_under_root(path: &str, root: &str) -> bool {
     Path::new(path).starts_with(Path::new(root))
-}
-
-pub(super) fn dedupe_within_file(records: &[UsageRecord]) -> Vec<UsageRecord> {
-    richest_copies([records]).into_iter().cloned().collect()
 }
 
 #[cfg(test)]

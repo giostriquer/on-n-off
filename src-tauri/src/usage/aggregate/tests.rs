@@ -20,7 +20,7 @@ fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
             reasoning_tokens: 0,
         },
         reported_cost_usd: None,
-        dedupe_key: None,
+        copy_key: None,
     };
     overrides(&mut r);
     r
@@ -121,7 +121,7 @@ fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
 fn add_says_whether_the_record_was_counted() {
     let (window, rates) = (august("UTC"), sample_rates());
     let mut agg = UsageAggregator::new(&window, &rates);
-    assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
+    assert!(agg.add(&record(|r| r.copy_key = Some("msg_1:".into()))));
     assert!(!agg.add(&record(|r| {
         r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
             .unwrap()

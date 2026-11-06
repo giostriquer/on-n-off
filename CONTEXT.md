@@ -201,6 +201,16 @@ _Avoid_: tile, entry
 One transcript file a provider wrote, found by walking that provider's transcript directories.
 _Avoid_: log, session file
 
+**Transcript format**:
+What one provider's transcripts look like to Usage: the directories they are in, which lines can
+matter, what a line counts as, and which records are copies of one another.
+_Avoid_: parser, transcript type
+
+**Copy group**:
+One provider's records that are copies of one model call, in one transcript or several; only its
+richest copy is counted.
+_Avoid_: duplicates
+
 **Usage window**:
 The days a usage summary counts, in the time zone it is read in, or for the last day the exact
 instants. Its periods are its days, or the hours from its opening instant.

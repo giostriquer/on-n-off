@@ -1,4 +1,12 @@
+mod claude;
+mod codex;
+mod muse;
+
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::{self, BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 use serde_json::Value;
 
@@ -45,36 +53,176 @@ pub struct UsageRecord {
     pub session_id: String,
     pub totals: TokenTotals,
     pub reported_cost_usd: Option<f64>,
-    pub dedupe_key: Option<String>,
+    pub copy_key: Option<String>,
 }
 
 impl UsageRecord {
-    pub fn is_richer_than(&self, kept: &Self) -> bool {
+    fn is_richer_than(&self, kept: &Self) -> bool {
         (self.totals.output_tokens, self.totals.total_tokens())
             > (kept.totals.output_tokens, kept.totals.total_tokens())
     }
 }
 
+type LineReader = Box<dyn FnMut(&str) -> Option<UsageRecord>>;
+
+type CopyKeys = Box<dyn FnMut(&UsageRecord) -> Option<String>>;
+
+trait Format {
+    fn dirs(&self, home: &Path) -> TranscriptDirs;
+
+    fn markers(&self) -> &'static [&'static str];
+
+    fn line_reader(&self) -> LineReader;
+
+    fn copy_keys(&self) -> CopyKeys;
+}
+
+fn format_of(provider: UsageProvider) -> &'static dyn Format {
+    match provider {
+        UsageProvider::Claude => &claude::Claude,
+        UsageProvider::Codex => &codex::Codex,
+        UsageProvider::Muse => &muse::Muse,
+    }
+}
+
+pub struct TranscriptDirs {
+    reported: PathBuf,
+    more: Vec<PathBuf>,
+}
+
+impl TranscriptDirs {
+    fn only(reported: PathBuf) -> Self {
+        Self {
+            reported,
+            more: Vec::new(),
+        }
+    }
+
+    pub fn reported(&self) -> &Path {
+        &self.reported
+    }
+
+    pub fn all(&self) -> impl Iterator<Item = &Path> {
+        std::iter::once(self.reported.as_path()).chain(self.more.iter().map(PathBuf::as_path))
+    }
+}
+
+pub fn transcript_dirs(provider: UsageProvider, home: &Path) -> TranscriptDirs {
+    format_of(provider).dirs(home)
+}
+
+#[derive(Debug, Clone)]
+pub struct TranscriptFile {
+    pub path: PathBuf,
+    pub size: u64,
+    pub mtime_ms: i64,
+}
+
+pub struct TranscriptInventory {
+    pub files: Vec<TranscriptFile>,
+    pub complete: bool,
+}
+
+pub fn inventory_transcript_files(root: &Path, since_ms: i64) -> TranscriptInventory {
+    let mut found = Vec::new();
+    let complete = walk(root, since_ms, &mut found);
+    TranscriptInventory {
+        files: found,
+        complete,
+    }
+}
+
+fn walk(dir: &Path, since_ms: i64, found: &mut Vec<TranscriptFile>) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut complete = true;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            complete = false;
+            continue;
+        };
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            complete = false;
+            continue;
+        };
+        if file_type.is_dir() {
+            complete &= walk(&path, since_ms, found);
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if !is_transcript_name(name) {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            complete = false;
+            continue;
+        };
+        let mtime_ms = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        if mtime_ms >= since_ms {
+            found.push(TranscriptFile {
+                path,
+                size: meta.len(),
+                mtime_ms,
+            });
+        }
+    }
+    complete
+}
+
+fn is_transcript_name(name: &str) -> bool {
+    name.ends_with(".jsonl") || name.contains(".jsonl.superseded-")
+}
+
+pub fn read_transcript(path: &Path, provider: UsageProvider) -> Option<Vec<UsageRecord>> {
+    let file = File::open(path).ok()?;
+    let records = records_of(BufReader::new(file).lines(), format_of(provider))?;
+    Some(
+        richest_copies([(provider, records.as_slice())])
+            .into_iter()
+            .cloned()
+            .collect(),
+    )
+}
+
+fn records_of(
+    lines: impl Iterator<Item = io::Result<String>>,
+    format: &dyn Format,
+) -> Option<Vec<UsageRecord>> {
+    let mut record_of = format.line_reader();
+    let mut records = Vec::new();
+    for line in lines {
+        let line = line.ok()?;
+        if may_matter(format, &line) {
+            records.extend(record_of(&line));
+        }
+    }
+    Some(records)
+}
+
+fn may_matter(format: &dyn Format, line: &str) -> bool {
+    format.markers().iter().any(|marker| line.contains(marker))
+}
+
 pub fn richest_copies<'a>(
-    files: impl IntoIterator<Item = &'a [UsageRecord]>,
+    files: impl IntoIterator<Item = (UsageProvider, &'a [UsageRecord])>,
 ) -> Vec<&'a UsageRecord> {
     let mut kept: Vec<&UsageRecord> = Vec::new();
-    let mut slot_of: HashMap<String, usize> = HashMap::new();
-    for records in files {
-        let mut occurrences: HashMap<String, u32> = HashMap::new();
+    let mut slot_of: HashMap<(UsageProvider, String), usize> = HashMap::new();
+    for (provider, records) in files {
+        let mut key_of = format_of(provider).copy_keys();
         for record in records {
-            let key = match (&record.dedupe_key, record.provider) {
-                (Some(key), _) => key.clone(),
-                (None, UsageProvider::Codex) if !record.session_id.is_empty() => {
-                    let event = codex_event_key(record);
-                    let occurrence = occurrences.entry(event.clone()).or_insert(0);
-                    *occurrence += 1;
-                    format!("{event}#{occurrence}")
-                }
-                _ => {
-                    kept.push(record);
-                    continue;
-                }
+            let Some(key) = key_of(record).map(|key| (provider, key)) else {
+                kept.push(record);
+                continue;
             };
             if let Some(&slot) = slot_of.get(&key) {
                 if record.is_richer_than(kept[slot]) {
@@ -89,86 +237,8 @@ pub fn richest_copies<'a>(
     kept
 }
 
-fn codex_event_key(record: &UsageRecord) -> String {
-    let t = &record.totals;
-    format!(
-        "codex\0{}\0{}\0{}\0{}:{}:{}:{}:{}:{}",
-        record.session_id,
-        record.timestamp_ms,
-        record.model,
-        t.uncached_input_tokens,
-        t.cached_input_tokens,
-        t.cache_creation_tokens,
-        t.cache_creation_1h_tokens,
-        t.output_tokens,
-        t.reasoning_tokens
-    )
-}
-
-pub fn might_carry_usage(line: &str, provider: UsageProvider) -> bool {
-    match provider {
-        UsageProvider::Claude => line.contains("\"usage\""),
-        UsageProvider::Codex => line.contains("\"token_count\""),
-        UsageProvider::Muse => line.contains("\"model_completed\""),
-    }
-}
-
-pub fn parse_muse_line(line: &str) -> Option<UsageRecord> {
-    let parsed: Value = serde_json::from_str(line).ok()?;
-    let obj = parsed.as_object()?;
-    let event = obj.get("payload")?.get("event")?.as_object()?;
-    if event.get("kind").and_then(|v| v.as_str()) != Some("model_completed") {
-        return None;
-    }
-    let usage = event.get("usage")?.as_object()?;
-    let model = event.get("model")?.as_str()?.to_string();
-    if model.is_empty() {
-        return None;
-    }
-    let timestamp_ms = obj.get("recorded_at").and_then(|v| v.as_i64())? / 1_000;
-    let session_id = obj
-        .get("stream")
-        .and_then(|stream| stream.get("id"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let dedupe_key = obj
-        .get("id")
-        .and_then(|v| v.as_str())
-        .filter(|id| !id.is_empty())
-        .map(str::to_string);
-
-    let get = |key: &str| positive_int(usage.get(key).unwrap_or(&Value::Null));
-    let input_tokens = get("input_tokens");
-    let cache_read_tokens = match usage.get("cache_read_tokens") {
-        Some(_) => get("cache_read_tokens"),
-        None => get("cached_tokens"),
-    };
-    let cache_creation_tokens = get("cache_write_tokens");
-    let output_tokens = get("output_tokens");
-    let totals = TokenTotals {
-        uncached_input_tokens: input_tokens
-            .saturating_sub(cache_read_tokens)
-            .saturating_sub(cache_creation_tokens),
-        cached_input_tokens: cache_read_tokens,
-        cache_creation_tokens,
-        cache_creation_1h_tokens: 0,
-        output_tokens,
-        reasoning_tokens: get("reasoning_tokens").min(output_tokens),
-    };
-    if totals.total_tokens() == 0 {
-        return None;
-    }
-
-    Some(UsageRecord {
-        provider: UsageProvider::Muse,
-        timestamp_ms,
-        model,
-        session_id,
-        totals,
-        reported_cost_usd: None,
-        dedupe_key,
-    })
+fn record_key(record: &UsageRecord) -> Option<String> {
+    record.copy_key.clone()
 }
 
 fn positive_int(value: &Value) -> u64 {
@@ -192,216 +262,6 @@ fn parse_timestamp_ms(value: &Value) -> Option<i64> {
                 .ok()
                 .map(|dt| dt.timestamp_millis())
         })
-}
-
-pub fn parse_claude_line(line: &str) -> Option<UsageRecord> {
-    let parsed: Value = serde_json::from_str(line).ok()?;
-    let obj = parsed.as_object()?;
-    if obj.get("type").and_then(|v| v.as_str()) != Some("assistant") {
-        return None;
-    }
-    let message = obj.get("message")?.as_object()?;
-    let usage = message.get("usage")?.as_object()?;
-    let timestamp_ms = parse_timestamp_ms(obj.get("timestamp")?)?;
-    let model = message.get("model")?.as_str()?.to_string();
-    if model.is_empty() {
-        return None;
-    }
-
-    let message_id = message.get("id").and_then(|v| v.as_str());
-    let request_id = obj.get("requestId").and_then(|v| v.as_str());
-    let dedupe_key = match (message_id, request_id) {
-        (None, None) => None,
-        (mid, rid) => Some(format!("{}:{}", mid.unwrap_or(""), rid.unwrap_or(""))),
-    };
-
-    let reported_cost_usd = obj
-        .get("costUSD")
-        .and_then(|v| v.as_f64())
-        .filter(|v| v.is_finite());
-
-    let cache_creation_tokens = positive_int(
-        usage
-            .get("cache_creation_input_tokens")
-            .unwrap_or(&Value::Null),
-    );
-    let cache_creation_1h_tokens = usage
-        .get("cache_creation")
-        .and_then(|split| split.get("ephemeral_1h_input_tokens"))
-        .map_or(0, positive_int)
-        .min(cache_creation_tokens);
-    let totals = TokenTotals {
-        uncached_input_tokens: positive_int(usage.get("input_tokens").unwrap_or(&Value::Null)),
-        cached_input_tokens: positive_int(
-            usage.get("cache_read_input_tokens").unwrap_or(&Value::Null),
-        ),
-        cache_creation_tokens,
-        cache_creation_1h_tokens,
-        output_tokens: positive_int(usage.get("output_tokens").unwrap_or(&Value::Null)),
-        reasoning_tokens: 0,
-    };
-    if totals.total_tokens() == 0 {
-        return None;
-    }
-
-    Some(UsageRecord {
-        provider: UsageProvider::Claude,
-        timestamp_ms,
-        model,
-        session_id: obj
-            .get("sessionId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        totals,
-        reported_cost_usd,
-        dedupe_key,
-    })
-}
-
-const FORK_COPY_MAX_GAP_MS: i64 = 1000;
-
-#[derive(Debug, Clone)]
-pub struct CodexScanState {
-    pub model: String,
-    pub session_id: String,
-    last_usage_signature: Option<String>,
-    saw_session_meta: bool,
-    suppressing_fork_copies: bool,
-    fork_copy_anchor_ms: i64,
-}
-
-impl Default for CodexScanState {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl CodexScanState {
-    pub fn new() -> Self {
-        Self {
-            model: String::new(),
-            session_id: String::new(),
-            last_usage_signature: None,
-            saw_session_meta: false,
-            suppressing_fork_copies: false,
-            fork_copy_anchor_ms: 0,
-        }
-    }
-}
-
-fn is_forked_session_meta(payload: &serde_json::Map<String, Value>) -> bool {
-    if payload
-        .get("forked_from_id")
-        .and_then(|v| v.as_str())
-        .is_some()
-    {
-        return true;
-    }
-    let Some(source) = payload.get("source").and_then(|v| v.as_object()) else {
-        return false;
-    };
-    let Some(subagent) = source.get("subagent").and_then(|v| v.as_object()) else {
-        return false;
-    };
-    let Some(spawn) = subagent.get("thread_spawn").and_then(|v| v.as_object()) else {
-        return false;
-    };
-    spawn
-        .get("parent_thread_id")
-        .and_then(|v| v.as_str())
-        .is_some()
-}
-
-pub fn parse_codex_line(line: &str, state: &mut CodexScanState) -> Option<UsageRecord> {
-    let parsed: Value = serde_json::from_str(line).ok()?;
-    let obj = parsed.as_object()?;
-    let payload = obj.get("payload")?.as_object()?;
-    let record_type = obj.get("type").and_then(|v| v.as_str()).unwrap_or("");
-
-    if record_type == "session_meta" {
-        if state.saw_session_meta {
-            return None;
-        }
-        state.saw_session_meta = true;
-        if let Some(id) = payload
-            .get("id")
-            .or_else(|| payload.get("session_id"))
-            .and_then(|v| v.as_str())
-        {
-            state.session_id = id.to_string();
-        }
-        if let Some(meta_ts) = obj.get("timestamp").and_then(parse_timestamp_ms) {
-            if is_forked_session_meta(payload) {
-                state.suppressing_fork_copies = true;
-                state.fork_copy_anchor_ms = meta_ts;
-            }
-        }
-        return None;
-    }
-
-    if record_type == "turn_context" {
-        if let Some(model) = payload.get("model").and_then(|v| v.as_str()) {
-            state.model = model.to_string();
-        }
-        return None;
-    }
-
-    if payload.get("type").and_then(|v| v.as_str()) != Some("token_count") {
-        return None;
-    }
-
-    let info = payload.get("info")?.as_object()?;
-    let last = info.get("last_token_usage")?.as_object()?;
-    let timestamp_ms = parse_timestamp_ms(obj.get("timestamp")?)?;
-    if state.model.is_empty() {
-        return None;
-    }
-
-    let signature = serde_json::to_string(last).ok()?;
-    if state.last_usage_signature.as_deref() == Some(signature.as_str()) {
-        return None;
-    }
-    state.last_usage_signature = Some(signature);
-
-    if state.suppressing_fork_copies {
-        if timestamp_ms - state.fork_copy_anchor_ms < FORK_COPY_MAX_GAP_MS {
-            state.fork_copy_anchor_ms = timestamp_ms;
-            return None;
-        }
-        state.suppressing_fork_copies = false;
-    }
-
-    let input_tokens = positive_int(last.get("input_tokens").unwrap_or(&Value::Null));
-    let cached_input_tokens = positive_int(last.get("cached_input_tokens").unwrap_or(&Value::Null));
-    let cache_creation_tokens =
-        positive_int(last.get("cache_write_input_tokens").unwrap_or(&Value::Null));
-    let output_tokens = positive_int(last.get("output_tokens").unwrap_or(&Value::Null));
-    let reasoning_raw = positive_int(last.get("reasoning_output_tokens").unwrap_or(&Value::Null));
-
-    let totals = TokenTotals {
-        uncached_input_tokens: input_tokens
-            .saturating_sub(cached_input_tokens)
-            .saturating_sub(cache_creation_tokens),
-        cached_input_tokens,
-        cache_creation_tokens,
-        cache_creation_1h_tokens: 0,
-        output_tokens,
-        reasoning_tokens: reasoning_raw.min(output_tokens),
-    };
-    if totals.total_tokens() == 0 {
-        return None;
-    }
-
-    Some(UsageRecord {
-        provider: UsageProvider::Codex,
-        timestamp_ms,
-        model: state.model.clone(),
-        session_id: state.session_id.clone(),
-        totals,
-        reported_cost_usd: None,
-        dedupe_key: None,
-    })
 }
 
 #[cfg(test)]

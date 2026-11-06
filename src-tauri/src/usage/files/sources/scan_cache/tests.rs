@@ -15,7 +15,7 @@ fn sample_record() -> UsageRecord {
             reasoning_tokens: 6,
         },
         reported_cost_usd: Some(1.5),
-        dedupe_key: Some("msg_1:".into()),
+        copy_key: Some("msg_1:".into()),
     }
 }
 

@@ -1,107 +1,5 @@
 use super::*;
-
-fn claude_line(message_id: &str, content_type: &str) -> String {
-    serde_json::json!({
-        "type": "assistant",
-        "timestamp": "2026-08-07T04:05:13.944Z",
-        "sessionId": "5a128faa-8253-489e-b935-6c08e8e670c0",
-        "message": {
-            "id": message_id,
-            "role": "assistant",
-            "model": "claude-fable-5",
-            "content": [{ "type": content_type }],
-            "usage": {
-                "input_tokens": 2,
-                "cache_creation_input_tokens": 66818,
-                "cache_read_input_tokens": 1000,
-                "output_tokens": 286
-            }
-        }
-    })
-    .to_string()
-}
-
-#[test]
-fn parse_claude_extracts_totals_and_dedupe_key() {
-    let record = parse_claude_line(&claude_line("msg_1", "text")).expect("record");
-    assert_eq!(record.provider, UsageProvider::Claude);
-    assert_eq!(record.model, "claude-fable-5");
-    assert_eq!(record.totals.uncached_input_tokens, 2);
-    assert_eq!(record.totals.cached_input_tokens, 1000);
-    assert_eq!(record.totals.cache_creation_tokens, 66818);
-    assert_eq!(record.totals.output_tokens, 286);
-    assert_eq!(record.dedupe_key.as_deref(), Some("msg_1:"));
-}
-
-#[test]
-fn parse_claude_same_dedupe_key_across_content_blocks() {
-    let text = parse_claude_line(&claude_line("msg_2", "text")).unwrap();
-    let tool = parse_claude_line(&claude_line("msg_2", "tool_use")).unwrap();
-    assert_eq!(text.dedupe_key, tool.dedupe_key);
-    assert_eq!(text.totals, tool.totals);
-}
-
-fn claude_usage_line(model: &str, usage: serde_json::Value) -> String {
-    serde_json::json!({
-        "type": "assistant",
-        "timestamp": "2026-08-07T04:05:13.944Z",
-        "sessionId": "session-a",
-        "requestId": "req_1",
-        "message": { "id": "msg_1", "model": model, "usage": usage }
-    })
-    .to_string()
-}
-
-#[test]
-fn parse_claude_keeps_the_one_hour_share_of_cache_writes() {
-    let usage = |one_hour: u64| {
-        serde_json::json!({
-            "input_tokens": 2,
-            "cache_creation_input_tokens": 1000,
-            "cache_read_input_tokens": 0,
-            "output_tokens": 5,
-            "cache_creation": {
-                "ephemeral_5m_input_tokens": 1000 - one_hour.min(1000),
-                "ephemeral_1h_input_tokens": one_hour
-            }
-        })
-    };
-    let record = parse_claude_line(&claude_usage_line("claude-opus-5", usage(600))).unwrap();
-    assert_eq!(record.totals.cache_creation_tokens, 1000);
-    assert_eq!(record.totals.cache_creation_1h_tokens, 600);
-
-    let inconsistent = parse_claude_line(&claude_usage_line("claude-opus-5", usage(5000))).unwrap();
-    assert_eq!(
-        inconsistent.totals.cache_creation_1h_tokens, 1000,
-        "the one-hour share never exceeds the writes it is a share of"
-    );
-
-    let unsplit = parse_claude_line(&claude_line("msg_3", "text")).unwrap();
-    assert_eq!(unsplit.totals.cache_creation_1h_tokens, 0);
-}
-
-#[test]
-fn parse_claude_skips_records_without_tokens() {
-    let zero = serde_json::json!({
-        "input_tokens": 0,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "output_tokens": 0
-    });
-    assert!(parse_claude_line(&claude_usage_line("<synthetic>", zero)).is_none());
-}
-
-#[test]
-fn parse_claude_keeps_a_line_with_input_but_no_output() {
-    let input_only = serde_json::json!({
-        "input_tokens": 5,
-        "cache_creation_input_tokens": 0,
-        "cache_read_input_tokens": 0,
-        "output_tokens": 0
-    });
-    let record = parse_claude_line(&claude_usage_line("claude-opus-5", input_only)).unwrap();
-    assert_eq!(record.totals.uncached_input_tokens, 5);
-}
+use crate::paths::scratch_dir;
 
 fn usage_record(
     provider: UsageProvider,
@@ -121,7 +19,7 @@ fn usage_record(
             ..TokenTotals::default()
         },
         reported_cost_usd: None,
-        dedupe_key: key.map(str::to_string),
+        copy_key: key.map(str::to_string),
     }
 }
 
@@ -139,7 +37,11 @@ fn richest_copies_keeps_one_record_per_message_whichever_file_holds_it_first() {
         [vec![partial.clone()], vec![billed.clone()]],
         [vec![billed.clone()], vec![partial.clone()]],
     ] {
-        let kept = richest_copies(files.iter().map(Vec::as_slice));
+        let kept = richest_copies(
+            files
+                .iter()
+                .map(|file| (UsageProvider::Claude, file.as_slice())),
+        );
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].totals.output_tokens, 50);
         assert_eq!(kept[0].session_id, "fork");
@@ -159,9 +61,9 @@ fn richest_copies_keeps_a_messages_billed_line_in_its_first_lines_place() {
         line(Some("msg_1:"), 7),
     ];
 
-    let kept: Vec<(Option<&str>, u64)> = richest_copies([&file[..]])
+    let kept: Vec<(Option<&str>, u64)> = richest_copies([(UsageProvider::Claude, &file[..])])
         .into_iter()
-        .map(|record| (record.dedupe_key.as_deref(), record.totals.output_tokens))
+        .map(|record| (record.copy_key.as_deref(), record.totals.output_tokens))
         .collect();
 
     assert_eq!(kept, [(Some("msg_1:"), 99), (None, 4), (Some("msg_2:"), 4)]);
@@ -174,11 +76,62 @@ fn richest_copies_breaks_output_ties_by_total_tokens_and_keeps_the_held_copy_on_
     let more_input = usage_record(UsageProvider::Claude, Some("k"), "richer", 200, 50);
 
     let tie = [held.clone(), same_usage];
-    let kept = richest_copies([&tie[..]]);
+    let kept = richest_copies([(UsageProvider::Claude, &tie[..])]);
     assert_eq!(kept[0].session_id, "held");
     let richer = [held, more_input];
-    let kept = richest_copies([&richer[..]]);
+    let kept = richest_copies([(UsageProvider::Claude, &richer[..])]);
     assert_eq!(kept[0].session_id, "richer");
+}
+
+#[test]
+fn richest_copies_keeps_one_muse_line_per_id_and_every_line_without_one() {
+    let line = |key: Option<&str>, session: &str, output: u64| {
+        usage_record(UsageProvider::Muse, key, session, 100, output)
+    };
+    let session = [line(Some("line-1"), "parent", 10), line(None, "parent", 3)];
+    let subagent = [line(Some("line-1"), "child", 12), line(None, "child", 3)];
+
+    let kept: Vec<(&str, u64)> = richest_copies([
+        (UsageProvider::Muse, &session[..]),
+        (UsageProvider::Muse, &subagent[..]),
+    ])
+    .into_iter()
+    .map(|record| (record.session_id.as_str(), record.totals.output_tokens))
+    .collect();
+
+    assert_eq!(kept, [("child", 12), ("parent", 3), ("child", 3)]);
+}
+
+#[test]
+fn richest_copies_never_collapses_two_providers_records_that_share_a_key() {
+    let claude = [usage_record(
+        UsageProvider::Claude,
+        Some("msg_1:req_1"),
+        "claude-session",
+        100,
+        5,
+    )];
+    let muse = [usage_record(
+        UsageProvider::Muse,
+        Some("msg_1:req_1"),
+        "muse-session",
+        100,
+        9,
+    )];
+
+    let kept: Vec<(UsageProvider, u64)> = richest_copies([
+        (UsageProvider::Claude, &claude[..]),
+        (UsageProvider::Muse, &muse[..]),
+    ])
+    .into_iter()
+    .map(|record| (record.provider, record.totals.output_tokens))
+    .collect();
+
+    assert_eq!(kept, [(UsageProvider::Claude, 5), (UsageProvider::Muse, 9)]);
+}
+
+fn codex(files: [&[UsageRecord]; 2]) -> impl Iterator<Item = (UsageProvider, &[UsageRecord])> {
+    files.into_iter().map(|file| (UsageProvider::Codex, file))
 }
 
 #[test]
@@ -190,10 +143,10 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
     };
     let rollout = vec![event(1_000), event(5_000), event(1_000)];
 
-    let kept = richest_copies([rollout.as_slice(), rollout.as_slice()]);
+    let kept = richest_copies(codex([rollout.as_slice(), rollout.as_slice()]));
     assert_eq!(kept.len(), 3);
 
-    let kept = richest_copies([&rollout[..2], rollout.as_slice()]);
+    let kept = richest_copies(codex([&rollout[..2], rollout.as_slice()]));
     assert_eq!(kept.len(), 3, "a stale, shorter listing adds nothing");
 
     let other_session: Vec<UsageRecord> = rollout
@@ -203,11 +156,11 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
             ..record.clone()
         })
         .collect();
-    let kept = richest_copies([rollout.as_slice(), other_session.as_slice()]);
+    let kept = richest_copies(codex([rollout.as_slice(), other_session.as_slice()]));
     assert_eq!(kept.len(), 6);
 
     let later_elsewhere = [event(9_000)];
-    let kept = richest_copies([rollout.as_slice(), &later_elsewhere[..]]);
+    let kept = richest_copies(codex([rollout.as_slice(), &later_elsewhere[..]]));
     assert_eq!(
         kept.len(),
         4,
@@ -217,7 +170,7 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
         model: "gpt-6-sol".into(),
         ..event(1_000)
     }];
-    let kept = richest_copies([rollout.as_slice(), &other_model[..]]);
+    let kept = richest_copies(codex([rollout.as_slice(), &other_model[..]]));
     assert_eq!(kept.len(), 4, "and so are they under another model");
 
     let anonymous = [
@@ -230,7 +183,7 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
             ..event(1_000)
         },
     ];
-    let kept = richest_copies([&anonymous[..], &anonymous[..]]);
+    let kept = richest_copies(codex([&anonymous[..], &anonymous[..]]));
     assert_eq!(
         kept.len(),
         4,
@@ -239,232 +192,107 @@ fn richest_copies_counts_a_codex_rollout_once_however_many_times_it_is_listed() 
 }
 
 #[test]
-fn parse_claude_ignores_non_assistant_and_garbage() {
-    assert!(parse_claude_line(r#"{"type":"user","message":{}}"#).is_none());
-    assert!(parse_claude_line("not json").is_none());
-}
-
-fn session_meta() -> String {
-    serde_json::json!({
-        "type": "session_meta",
-        "timestamp": "2026-08-01T05:17:41.289Z",
-        "payload": { "type": "session_meta", "id": "019fbbc1-b12c-7360-a685-28c181f0025f" }
-    })
-    .to_string()
-}
-
-fn turn_context() -> String {
-    serde_json::json!({
-        "type": "turn_context",
-        "timestamp": "2026-08-01T05:17:42.694Z",
-        "payload": { "type": "turn_context", "model": "gpt-5.6-sol" }
-    })
-    .to_string()
-}
-
-fn token_count(input: u64, cached: u64, output: u64, reasoning: u64) -> String {
-    serde_json::json!({
-        "type": "event_msg",
-        "timestamp": "2026-08-01T05:17:49.919Z",
-        "payload": {
-            "type": "token_count",
-            "info": {
-                "last_token_usage": {
-                    "input_tokens": input,
-                    "cached_input_tokens": cached,
-                    "cache_write_input_tokens": 0,
-                    "output_tokens": output,
-                    "reasoning_output_tokens": reasoning
-                }
-            }
-        }
-    })
-    .to_string()
+fn list_finds_jsonl_by_mtime() {
+    let root = scratch_dir("usage-list");
+    let nested = root.join("a").join("b");
+    std::fs::create_dir_all(&nested).unwrap();
+    let path = nested.join("session.jsonl");
+    std::fs::write(&path, "{}\n").unwrap();
+    let inventory = inventory_transcript_files(&root, 0);
+    assert!(inventory.complete);
+    assert_eq!(inventory.files.len(), 1);
+    assert_eq!(inventory.files[0].path, path);
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn parse_codex_attributes_model_from_turn_context() {
-    let mut state = CodexScanState::new();
-    parse_codex_line(&session_meta(), &mut state);
-    parse_codex_line(&turn_context(), &mut state);
-    let record = parse_codex_line(&token_count(19239, 11008, 299, 116), &mut state).unwrap();
-    assert_eq!(record.provider, UsageProvider::Codex);
-    assert_eq!(record.model, "gpt-5.6-sol");
-    assert_eq!(record.session_id, "019fbbc1-b12c-7360-a685-28c181f0025f");
-    assert_eq!(record.totals.uncached_input_tokens, 19239 - 11008);
-    assert_eq!(record.totals.cached_input_tokens, 11008);
-    assert_eq!(record.totals.reasoning_tokens, 116);
-}
-
-#[test]
-fn parse_codex_skips_repeated_token_count() {
-    let mut state = CodexScanState::new();
-    parse_codex_line(&turn_context(), &mut state);
-    assert!(parse_codex_line(&token_count(100, 0, 10, 0), &mut state).is_some());
-    assert!(parse_codex_line(&token_count(100, 0, 10, 0), &mut state).is_none());
-}
-
-#[test]
-fn parse_codex_drops_usage_before_model() {
-    let mut state = CodexScanState::new();
-    assert!(parse_codex_line(&token_count(100, 0, 10, 0), &mut state).is_none());
-}
-
-#[test]
-fn parse_codex_pre_model_event_does_not_poison_signature() {
-    let mut state = CodexScanState::new();
-    assert!(parse_codex_line(&token_count(100, 0, 10, 0), &mut state).is_none());
-    parse_codex_line(&turn_context(), &mut state);
-    assert!(parse_codex_line(&token_count(100, 0, 10, 0), &mut state).is_some());
-}
-
-fn forked_meta(id: &str, timestamp: &str, forked_from: Option<&str>) -> String {
-    let mut payload = serde_json::json!({
-        "type": "session_meta",
-        "id": id
-    });
-    if let Some(parent) = forked_from {
-        payload["forked_from_id"] = serde_json::json!(parent);
+fn list_finds_superseded_transcripts_and_nothing_else() {
+    let root = scratch_dir("usage-list-superseded");
+    std::fs::create_dir_all(&root).unwrap();
+    let names = [
+        "session.jsonl",
+        "session.jsonl.superseded-1758000000000",
+        "session.jsonl.tmp",
+        "notes.txt",
+    ];
+    for name in names {
+        std::fs::write(root.join(name), "{}\n").unwrap();
     }
-    serde_json::json!({
-        "type": "session_meta",
-        "timestamp": timestamp,
-        "payload": payload
-    })
-    .to_string()
-}
 
-fn stamp(timestamp: &str, line: &str) -> String {
-    let mut parsed: Value = serde_json::from_str(line).unwrap();
-    parsed["timestamp"] = Value::String(timestamp.to_string());
-    parsed.to_string()
+    let inventory = inventory_transcript_files(&root, 0);
+    let mut found: Vec<String> = inventory
+        .files
+        .iter()
+        .map(|file| {
+            file.path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    found.sort();
+
+    assert_eq!(
+        found,
+        ["session.jsonl", "session.jsonl.superseded-1758000000000"]
+    );
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn parse_codex_keeps_child_session_over_ancestor_metas() {
-    let mut state = CodexScanState::new();
-    parse_codex_line(
-        &forked_meta("child", "2026-08-01T05:00:00.000Z", None),
-        &mut state,
-    );
-    parse_codex_line(
-        &forked_meta("parent", "2026-08-01T05:00:00.000Z", None),
-        &mut state,
-    );
-    parse_codex_line(&turn_context(), &mut state);
-    let record = parse_codex_line(&token_count(100, 0, 10, 0), &mut state).unwrap();
-    assert_eq!(record.session_id, "child");
-}
-
-fn muse_completed_line() -> String {
-    serde_json::json!({
-        "schema_version": 1,
-        "id": "01acme-line-1",
-        "stream": {"kind": "session", "id": "01acme-session"},
-        "sequence": 65,
-        "recorded_at": 1_792_013_706_016_282i64,
-        "record_type": "event",
-        "payload": {
-            "kind": "run",
-            "event": {
-                "kind": "model_completed",
-                "usage": {
-                    "input_tokens": 56645,
-                    "output_tokens": 337,
-                    "cached_tokens": 34292,
-                    "cache_write_tokens": 120,
-                    "cache_read_tokens": 34292,
-                    "reasoning_tokens": 400
-                },
-                "duration_ms": 900,
-                "finish_reason": "tool_calls",
-                "model": "muse-acme-1.0"
+fn read_claude_file() {
+    let root = scratch_dir("usage-read");
+    let path = root.join("t.jsonl");
+    let line = serde_json::json!({
+        "type": "assistant",
+        "timestamp": "2026-08-07T04:05:13.944Z",
+        "sessionId": "s1",
+        "message": {
+            "id": "msg_1",
+            "model": "claude-fable-5",
+            "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 10
             }
         }
-    })
-    .to_string()
-}
-
-#[test]
-fn parse_muse_counts_model_completed_once_with_cache_split() {
-    let record = parse_muse_line(&muse_completed_line()).expect("record");
-    assert_eq!(record.provider, UsageProvider::Muse);
-    assert_eq!(record.provider.as_str(), "muse");
-    assert_eq!(record.model, "muse-acme-1.0");
-    assert_eq!(record.session_id, "01acme-session");
-    assert_eq!(record.timestamp_ms, 1_792_013_706_016);
-    assert_eq!(record.totals.uncached_input_tokens, 56645 - 34292 - 120);
-    assert_eq!(record.totals.cached_input_tokens, 34292);
-    assert_eq!(record.totals.cache_creation_tokens, 120);
-    assert_eq!(record.totals.output_tokens, 337);
-    assert_eq!(
-        record.totals.reasoning_tokens, 337,
-        "reasoning is an output subset"
-    );
-    assert_eq!(record.dedupe_key.as_deref(), Some("01acme-line-1"));
-    assert_eq!(record.reported_cost_usd, None);
-}
-
-#[test]
-fn parse_muse_skips_attribution_records_and_other_lines() {
-    let attribution = serde_json::json!({
-        "id": "01acme-line-0",
-        "stream": {"kind": "session", "id": "01acme-session"},
-        "recorded_at": 1_792_013_706_002_824i64,
-        "payload": {"event": {"kind": "goal_usage_attribution", "record": {
-            "usage_id": "usage-acme",
-            "usage_family": "provider",
-            "quantity": {"input_tokens": 56645, "output_tokens": 337},
-            "owner": {"session_id": "01acme-session"}
-        }}}
     })
     .to_string();
-    assert!(
-        parse_muse_line(&attribution).is_none(),
-        "the attribution twin must not double-count"
-    );
-    assert!(parse_muse_line("{not json").is_none());
-    assert!(parse_muse_line("{}").is_none());
-    assert!(might_carry_usage(
-        &muse_completed_line(),
-        UsageProvider::Muse
-    ));
-    assert!(!might_carry_usage(&attribution, UsageProvider::Muse));
+    std::fs::write(&path, format!("{line}\n")).unwrap();
+    let records = read_transcript(&path, UsageProvider::Claude).unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].totals.output_tokens, 10);
+    let _ = std::fs::remove_dir_all(&root);
 }
 
 #[test]
-fn parse_muse_drops_zero_and_modelless_usage() {
-    let zero = muse_completed_line()
-        .replace("56645", "0")
-        .replace("337", "0")
-        .replace("34292", "0")
-        .replace("120", "0");
-    assert!(parse_muse_line(&zero).is_none());
-    let modelless = muse_completed_line().replace("\"muse-acme-1.0\"", "\"\"");
-    assert!(parse_muse_line(&modelless).is_none());
-}
+fn read_error_after_valid_line_rejects_partial_records() {
+    let line = serde_json::json!({
+        "type": "assistant",
+        "timestamp": "2026-08-07T04:05:13.944Z",
+        "sessionId": "s1",
+        "message": {
+            "id": "msg_1",
+            "model": "claude-fable-5",
+            "usage": {
+                "input_tokens": 2,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+                "output_tokens": 10
+            }
+        }
+    })
+    .to_string();
+    let lines = vec![
+        Ok(line),
+        Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "injected read failure",
+        )),
+    ]
+    .into_iter();
 
-#[test]
-fn parse_codex_drops_fork_copy_burst() {
-    let mut state = CodexScanState::new();
-    let fork = "2026-08-01T05:00:00.000Z";
-    parse_codex_line(&forked_meta("child", fork, Some("parent")), &mut state);
-    parse_codex_line(&forked_meta("parent", fork, None), &mut state);
-    parse_codex_line(&stamp(fork, &turn_context()), &mut state);
-    assert!(parse_codex_line(
-        &stamp("2026-08-01T05:00:00.001Z", &token_count(100, 0, 10, 0)),
-        &mut state
-    )
-    .is_none());
-    assert!(parse_codex_line(
-        &stamp("2026-08-01T05:00:00.002Z", &token_count(200, 0, 20, 0)),
-        &mut state
-    )
-    .is_none());
-    let real = parse_codex_line(
-        &stamp("2026-08-01T05:00:06.000Z", &token_count(300, 0, 30, 0)),
-        &mut state,
-    )
-    .unwrap();
-    assert_eq!(real.totals.output_tokens, 30);
+    assert!(records_of(lines, format_of(UsageProvider::Claude)).is_none());
 }

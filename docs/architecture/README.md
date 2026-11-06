@@ -609,6 +609,19 @@ source (the Overview card prints the bare status in a provider chip, the Usage s
 and no surface shows its message), and the commonest incomplete read is a live transcript, which
 counts what it holds.
 
+What one provider's transcripts look like is its transcript format, one module each under
+`usage/transcripts/` (`claude.rs`, `codex.rs`, `muse.rs`): the directories they are in
+(`TranscriptDirs`: the one a summary reports, and any more, such as Codex's archive), its markers
+(a line is parsed as JSON only if it contains one), the parse of a line with what the format
+remembers within one file (Codex carries the session from `session_meta`, the model from
+`turn_context` and its fork-copy suppression from line to line, so those are among its markers)
+and the key of the copy group a record belongs to. `usage/transcripts.rs` picks the format with
+one exhaustive `match` on `UsageProvider` (`format_of`) and does the rest the same way for every
+provider: the marker check on each line, the walk for transcript files (`*.jsonl`, and Claude
+Code's `*.jsonl.superseded-<ms>` under every root, as before), `read_transcript` (a file's
+records, one per copy group within the file, which is what the scan cache keeps) and
+`richest_copies`. No other Usage code matches on the provider.
+
 Three reading rules carry the accuracy, each pinned by a test:
 
 - **One record per copy group, its richest copy, before anything is counted.** Claude Code writes
@@ -617,7 +630,13 @@ Three reading rules carry the accuracy, each pinned by a test:
   session copies messages into other transcripts too. A Codex rollout listed under both roots (a
   rename between the walks, or a stale entry after an incomplete walk) repeats its session's events
   at the same instants. `transcripts::richest_copies` collapses both over every file of the scan,
-  so the totals and the session counts follow the copy that is counted.
+  so the totals and the session counts follow the copy that is counted. Each format keys its
+  copies: Claude by `message.id`:`requestId`, Muse by the line's `id`, Codex by an event's
+  session, instant, model and tokens with how many times its file has held that event so far, so
+  a rollout's own repeats stay apart and only another file's copy of them collapses. A record
+  without a key (no message or request id, no line id, no Codex session) is never a copy, and
+  copies collapse only within one provider: a Muse line id that happens to equal a Claude
+  `message.id`:`requestId` key is two model calls, not one.
 - **Cache writes by lifetime.** A one-hour Claude cache write
   (`usage.cache_creation.ephemeral_1h_input_tokens`) is priced at LiteLLM's
   `cache_creation_input_token_cost_above_1hr`, 2x input when the table omits it; a five-minute
@@ -1018,6 +1037,7 @@ the code today; a change that moves one updates its row.
 | Known answer | `KnownAnswers` (`github/merge.rs`): one viewer and its `Known` answers per `Revision`; kept in the memo (`ReadMemoState`) and saved with the snapshot as `knownAnswers` (`github/snapshot.rs`); recalled, or seeded once from files saved before it, by `KnownAnswers::recall`, which `remembered_answers` (`github/mod.rs`) feeds from disk |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |
+| Transcript format | one module per provider under `usage/transcripts/`, chosen by `format_of` in `usage/transcripts.rs`, the only module that reaches them (`transcript_dirs`, `read_transcript`, `richest_copies`) |
 | Transcript source | `Sources` (`usage/files/sources.rs`), which owns the source index (`usage/files/sources/source_index.rs`) and the scan cache (`usage/files/sources/scan_cache.rs`), opened, read and finished only by `UsageFiles` (`usage/files.rs`) |
 | Usage window | `UsageWindow` (`usage/window.rs`), built by `UsageWindow::of` from `UsageSummaryInput`; asked by `UsageFiles::summary` (`usage/files.rs`) for its span, earliest transcript mtime and cache identity (keyed by `summary_key`, `usage/files/summary_cache.rs`), and by `UsageAggregator` (`usage/aggregate.rs`) for each instant's `Period` |
 | Watermark | `Watermark` (`usage/files/history.rs`), which never leaves `UsageFiles` (`usage/files.rs`) |

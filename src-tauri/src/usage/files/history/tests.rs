@@ -23,7 +23,7 @@ fn record(at: &str, overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
             reasoning_tokens: 5,
         },
         reported_cost_usd: None,
-        dedupe_key: None,
+        copy_key: None,
     };
     overrides(&mut record);
     record

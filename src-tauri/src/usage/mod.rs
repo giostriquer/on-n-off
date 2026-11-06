@@ -3,7 +3,6 @@ pub(crate) mod cache_io;
 mod files;
 mod folding;
 mod pricing;
-mod reader;
 mod summary;
 mod transcripts;
 mod window;

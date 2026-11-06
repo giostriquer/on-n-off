@@ -5,14 +5,14 @@ use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
 
-use super::scan_cache::{
-    dedupe_within_file, CachedFile, PruneOptions, ScanCache, USAGE_SCAN_CACHE_VERSION,
-};
+use super::scan_cache::{CachedFile, PruneOptions, ScanCache, USAGE_SCAN_CACHE_VERSION};
 use crate::provider_catalogue::UsageProvider;
 use crate::usage::cache_io::atomic_write;
 use crate::usage::files::history::Watermark;
-use crate::usage::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
-use crate::usage::transcripts::{UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::usage::transcripts::{
+    inventory_transcript_files, read_transcript, TranscriptFile, UsageRecord,
+    USAGE_TRANSCRIPT_PARSER_VERSION,
+};
 use crate::usage::window::Span;
 
 pub(crate) const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
@@ -394,10 +394,9 @@ impl SourceSnapshot {
         })
     }
 
-    pub(super) fn root_is_present(&self, root: &SourceRoot) -> bool {
-        let normalized = normalize_path(&root.path);
+    pub(super) fn root_is_present(&self, provider: UsageProvider, root: &Path) -> bool {
         self.roots
-            .get(&root_key(root.provider, &normalized))
+            .get(&root_key(provider, &normalize_path(root)))
             .is_some_and(|entry| entry.present)
     }
 
@@ -609,8 +608,7 @@ fn read_stable_records(
         || {
             #[cfg(test)]
             test_support::note_transcript_parse();
-            let records =
-                read_transcript_records(path, provider).map(|records| dedupe_within_file(&records));
+            let records = read_transcript(path, provider);
             #[cfg(test)]
             test_support::keep_writing_if_live(path);
             records

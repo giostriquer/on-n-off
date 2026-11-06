@@ -3,12 +3,10 @@ mod source_index;
 
 use std::path::{Path, PathBuf};
 
-use crate::paths::{claude_root_for, codex_root_for};
-
 use super::history::Watermark;
 use super::{Locked, ProviderRead};
 use crate::provider_catalogue::UsageProvider;
-use crate::usage::transcripts::{richest_copies, UsageRecord};
+use crate::usage::transcripts::{richest_copies, transcript_dirs, TranscriptDirs, UsageRecord};
 use crate::usage::window::Span;
 use scan_cache::{load_scan_cache, prune_and_save, scan_cache_path_for, ScanCache};
 use source_index::{
@@ -39,8 +37,8 @@ impl<'l> Sources<'l> {
     pub fn open(locked: &'l Locked, home: &Path, watermark: impl FnOnce() -> Watermark) -> Self {
         let scan_cache_path = scan_cache_path_for(home);
         let source_index = source_index_path_for(home);
-        let source_roots = source_roots_for(home);
-        let inventory = inventory_sources(&all_roots(&source_roots));
+        let dirs = dirs_for(home);
+        let inventory = inventory_sources(&all_roots(&dirs));
         let (snapshot, scan_cache, scan_cache_dirty, watermark) =
             match unchanged_snapshot(&source_index, &inventory) {
                 Some(snapshot) => (snapshot, None, false, None),
@@ -65,7 +63,7 @@ impl<'l> Sources<'l> {
             watermark,
             seen: SeenSources {
                 source_index,
-                source_roots,
+                dirs,
                 snapshot,
             },
         }
@@ -129,10 +127,14 @@ pub struct SourceRead {
 
 impl SourceRead {
     pub fn records(&self) -> Vec<&UsageRecord> {
-        richest_copies(self.files.iter().map(|file| file.records.as_slice()))
-            .into_iter()
-            .filter(|record| !self.watermark.is_folded(record.timestamp_ms))
-            .collect()
+        richest_copies(
+            self.files
+                .iter()
+                .map(|file| (file.provider, file.records.as_slice())),
+        )
+        .into_iter()
+        .filter(|record| !self.watermark.is_folded(record.timestamp_ms))
+        .collect()
     }
 
     pub fn files_read(&self, provider: UsageProvider) -> FilesRead {
@@ -159,7 +161,7 @@ pub struct FilesRead {
 
 pub struct SeenSources {
     source_index: PathBuf,
-    source_roots: Vec<(UsageProvider, Vec<SourceRoot>)>,
+    dirs: Vec<(UsageProvider, TranscriptDirs)>,
     snapshot: SourceSnapshot,
 }
 
@@ -168,79 +170,38 @@ impl SeenSources {
         &'a self,
         read: &'a SourceRead,
     ) -> impl Iterator<Item = ProviderRead<'a>> + 'a {
-        self.source_roots
-            .iter()
-            .map(move |(provider, roots)| ProviderRead {
-                provider: *provider,
-                dir: &roots[0].path,
-                files: roots
-                    .iter()
-                    .any(|root| self.snapshot.root_is_present(root))
-                    .then(|| read.files_read(*provider)),
-            })
+        self.dirs.iter().map(move |(provider, dirs)| ProviderRead {
+            provider: *provider,
+            dir: dirs.reported(),
+            files: dirs
+                .all()
+                .any(|dir| self.snapshot.root_is_present(*provider, dir))
+                .then(|| read.files_read(*provider)),
+        })
     }
 
     pub fn unchanged(&self, _locked: &Locked) -> bool {
         self.snapshot
             .persisted_generation_is_current(&self.source_index)
-            && self
-                .snapshot
-                .inventory_is_current(&all_roots(&self.source_roots))
+            && self.snapshot.inventory_is_current(&all_roots(&self.dirs))
     }
 }
 
-fn source_roots_for(home: &Path) -> Vec<(UsageProvider, Vec<SourceRoot>)> {
+fn dirs_for(home: &Path) -> Vec<(UsageProvider, TranscriptDirs)> {
     UsageProvider::all()
-        .map(|provider| {
-            let roots: Vec<SourceRoot> = transcript_dirs(provider, home)
-                .into_iter()
-                .map(|path| SourceRoot { provider, path })
-                .collect();
-            (provider, roots)
+        .map(|provider| (provider, transcript_dirs(provider, home)))
+        .collect()
+}
+
+fn all_roots(dirs: &[(UsageProvider, TranscriptDirs)]) -> Vec<SourceRoot> {
+    dirs.iter()
+        .flat_map(|(provider, dirs)| {
+            dirs.all().map(|path| SourceRoot {
+                provider: *provider,
+                path: path.to_path_buf(),
+            })
         })
         .collect()
-}
-
-fn transcript_dirs(provider: UsageProvider, home: &Path) -> Vec<PathBuf> {
-    match provider {
-        UsageProvider::Claude => vec![resolve_claude_transcript_dir(home)],
-        UsageProvider::Codex => vec![
-            resolve_codex_transcript_dir(home),
-            resolve_codex_archive_dir(home),
-        ],
-        UsageProvider::Muse => vec![resolve_muse_transcript_dir(home)],
-    }
-}
-
-fn all_roots(source_roots: &[(UsageProvider, Vec<SourceRoot>)]) -> Vec<SourceRoot> {
-    source_roots
-        .iter()
-        .flat_map(|(_, roots)| roots.iter().cloned())
-        .collect()
-}
-
-fn resolve_claude_transcript_dir(home: &Path) -> PathBuf {
-    let nested = claude_root_for(home).join("projects");
-    if nested.is_dir() {
-        return nested;
-    }
-    let flat = home.join("projects");
-    if flat.is_dir() {
-        return flat;
-    }
-    nested
-}
-
-fn resolve_codex_transcript_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("sessions")
-}
-
-fn resolve_codex_archive_dir(home: &Path) -> PathBuf {
-    codex_root_for(home).join("archived_sessions")
-}
-
-fn resolve_muse_transcript_dir(home: &Path) -> PathBuf {
-    crate::paths::muse_data_for(home).join("sessions")
 }
 
 #[cfg(all(test, unix))]

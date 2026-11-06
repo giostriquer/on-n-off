@@ -1,7 +1,7 @@
 use super::super::test_support::{record, transcript_path, write_records};
 use super::*;
 use crate::paths::scratch_dir;
-use crate::usage::transcripts::parse_claude_line;
+use crate::usage::transcripts::TokenTotals;
 
 fn roots(home: &Path) -> Vec<SourceRoot> {
     vec![SourceRoot {
@@ -47,8 +47,19 @@ fn incomplete_root_walk_retains_previous_entries_and_disables_hits() {
     let _ = std::fs::remove_dir_all(home);
 }
 
-fn parsed(output_tokens: u64) -> UsageRecord {
-    parse_claude_line(&record("2026-08-07T04:05:13.944Z", "msg-1", output_tokens)).unwrap()
+fn held(output_tokens: u64) -> UsageRecord {
+    UsageRecord {
+        provider: UsageProvider::Claude,
+        timestamp_ms: 0,
+        model: "claude-fable-5".into(),
+        session_id: "sources-session".into(),
+        totals: TokenTotals {
+            output_tokens,
+            ..TokenTotals::default()
+        },
+        reported_cost_usd: None,
+        copy_key: Some("msg-1:".into()),
+    }
 }
 
 fn outputs_of(read: TranscriptRead) -> Vec<u64> {
@@ -70,7 +81,7 @@ fn a_file_that_changes_during_both_parse_attempts_reads_as_moving_with_its_last_
         1,
         || {
             attempts.set(attempts.get() + 1);
-            Some(vec![parsed(attempts.get())])
+            Some(vec![held(attempts.get())])
         },
         || identities.borrow_mut().next(),
     );
@@ -87,7 +98,7 @@ fn a_size_change_alone_reads_as_moving() {
     let read = read_stable_records_with(
         1,
         1,
-        || Some(vec![parsed(20)]),
+        || Some(vec![held(20)]),
         || identities.borrow_mut().next(),
     );
     assert_eq!(outputs_of(read), [20]);
@@ -95,7 +106,7 @@ fn a_size_change_alone_reads_as_moving() {
 
 #[test]
 fn a_file_gone_after_a_parse_keeps_that_parse() {
-    let read = read_stable_records_with(1, 1, || Some(vec![parsed(20)]), || None);
+    let read = read_stable_records_with(1, 1, || Some(vec![held(20)]), || None);
     assert_eq!(outputs_of(read), [20]);
 }
 
@@ -107,7 +118,7 @@ fn a_failed_second_attempt_keeps_the_first_parse() {
         1,
         || {
             attempts.set(attempts.get() + 1);
-            (attempts.get() == 1).then(|| vec![parsed(20)])
+            (attempts.get() == 1).then(|| vec![held(20)])
         },
         || Some((2, 2)),
     );

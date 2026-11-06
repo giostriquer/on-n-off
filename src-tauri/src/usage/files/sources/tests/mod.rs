@@ -11,6 +11,7 @@ use crate::paths::scratch_dir;
 use crate::usage::files::lock;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 
+mod formats;
 mod read;
 mod watermark;
 
