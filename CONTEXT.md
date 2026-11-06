@@ -169,6 +169,18 @@ repository's default branch, that carries a commit you wrote or co-wrote, other 
 It is found from your pushes and listed under Mine, tagged with its author.
 _Avoid_: co-authored, shared, involved
 
+**Merge verdict**:
+The one merge state an open pull request shows: conflicts, queued, auto-merge, ready to merge,
+behind base, blocked, or none. Each read settles it once for every list.
+_Avoid_: merge badge, merge status
+
+**Known answer**:
+The last answer GitHub gave on whether one revision of a pull request (its head commit and target
+branch) merges without conflicts, as one GitHub account read it. A known conflict stands while
+GitHub recomputes that revision; a known clean answer does not. Either ends with a newer answer, a
+new revision, another account, or a read that no longer sees the pull request open.
+_Avoid_: retained conflict, remembered conflict
+
 ### Side notch
 
 **Rail cell**:

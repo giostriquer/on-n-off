@@ -50,11 +50,12 @@ struct Seen {
 
 impl Seen {
     fn of(pr: &GithubPrDto) -> Self {
+        let merge = merge::facts(pr);
         Self {
             ci: pr.ci,
             review: pr.review_decision,
-            conflicts: merge::conflicts_known(pr),
-            ready: merge::ready_known(pr),
+            conflicts: merge.conflicts,
+            ready: merge.ready,
         }
     }
 
@@ -71,7 +72,7 @@ impl Seen {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum EventKind {
+pub(crate) enum EventKind {
     CiFailed,
     CiPassed,
     CiGreenAgain,
@@ -326,6 +327,23 @@ fn load_state(path: &Path) -> MonitorState {
 
 fn save_state(path: &Path, state: &MonitorState) -> Result<(), String> {
     monitor::save_state(path, state)
+}
+
+#[cfg(test)]
+pub(crate) struct Watch(MonitorState);
+
+#[cfg(test)]
+impl Watch {
+    pub(crate) fn new() -> Self {
+        Self(MonitorState::default())
+    }
+
+    pub(crate) fn observe(&mut self, prs: &GithubPrsDto) -> Vec<EventKind> {
+        observe(&mut self.0, prs)
+            .into_iter()
+            .map(|event| event.kind)
+            .collect()
+    }
 }
 
 #[cfg(test)]

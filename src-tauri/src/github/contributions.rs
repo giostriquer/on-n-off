@@ -6,7 +6,6 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use super::merge;
 use super::parse::pull_request;
 use super::query::{in_scope, PR_FRAGMENT};
 use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData};
@@ -48,6 +47,8 @@ pub(super) trait Github {
 pub(super) struct Contributed {
     pub(super) open: Vec<GithubPrDto>,
     pub(super) merged: Vec<GithubPrDto>,
+    pub(super) unlisted: Vec<GithubPrDto>,
+    pub(super) earlier: HashSet<String>,
     pub(super) warnings: Vec<String>,
 }
 
@@ -191,33 +192,31 @@ impl Store {
         self.tracked.extend(lookup.discovered);
         for tracked in &mut self.tracked {
             if let Some(found) = lookup.found.get(&tracked.id) {
-                let mut pr = found.pr.clone();
-                if found.merged_at.is_none() {
-                    if let Some(previous) = &tracked.last {
-                        merge::keep_conflict(&mut pr, previous);
-                    }
-                }
                 tracked.head.clone_from(&found.head);
                 tracked.merged_at = found.merged_at.map(|at| tracked.merged_at.unwrap_or(at));
-                tracked.last = Some(pr);
+                tracked.last = Some(found.pr.clone());
             }
         }
     }
 
-    fn shown(&self, scopes: &[String]) -> (Vec<GithubPrDto>, Vec<GithubPrDto>) {
-        let mut open = Vec::new();
-        let mut merged = Vec::new();
-        for tracked in self.tracked.iter().filter(|tracked| tracked.verified) {
-            let Some(pr) = tracked.last.clone().filter(|pr| in_scope(&pr.repo, scopes)) else {
+    fn shown(&self, scopes: &[String], refreshed: &HashSet<String>) -> Contributed {
+        let mut shown = Contributed::default();
+        for tracked in &self.tracked {
+            let Some(pr) = tracked.last.clone() else {
                 continue;
             };
-            if tracked.merged_at.is_some() {
-                merged.push(pr);
-            } else {
-                open.push(pr);
+            if !refreshed.contains(&tracked.id) {
+                shown.earlier.insert(tracked.id.clone());
+            }
+            let listed = tracked.verified && in_scope(&pr.repo, scopes);
+            match (tracked.merged_at.is_some(), listed) {
+                (false, true) => shown.open.push(pr),
+                (true, true) => shown.merged.push(pr),
+                (false, false) => shown.unlisted.push(pr),
+                (true, false) => {}
             }
         }
-        (open, merged)
+        shown
     }
 }
 
@@ -226,35 +225,38 @@ pub(super) fn read(
     path: &Path,
     viewer: &str,
     scopes: &[String],
-    observed: &[GithubPrDto],
     now_secs: i64,
 ) -> Contributed {
     let mut store = load(path, viewer);
     let before = store.clone();
-    for pr in store
-        .tracked
-        .iter_mut()
-        .filter(|tracked| tracked.merged_at.is_none())
-        .filter_map(|tracked| tracked.last.as_mut())
-    {
-        merge::apply_observed(pr, observed);
-    }
     let mut warnings = Vec::new();
-    match github {
+    let refreshed = match github {
         Some(github) => refresh(github, &mut store, viewer, now_secs, &mut warnings),
-        None => store.forget_old(now_secs),
-    }
+        None => {
+            store.forget_old(now_secs);
+            HashSet::new()
+        }
+    };
     if store != before {
         if let Err(why) = save(path, &store) {
             warnings.push(format!("Your pushed branches were not remembered. {why}"));
         }
     }
-    let (open, merged) = store.shown(scopes);
     Contributed {
-        open,
-        merged,
         warnings,
+        ..store.shown(scopes, &refreshed)
     }
+}
+
+pub(super) fn recorded_open(path: &Path) -> Option<(String, Vec<GithubPrDto>)> {
+    let store = stored(path)?;
+    let open = store
+        .tracked
+        .into_iter()
+        .filter(|tracked| tracked.merged_at.is_none())
+        .filter_map(|tracked| tracked.last)
+        .collect();
+    Some((store.viewer, open))
 }
 
 pub(super) fn add_to(data: &mut GithubPrsData, open: Vec<GithubPrDto>, merged: Vec<GithubPrDto>) {
@@ -277,7 +279,7 @@ fn refresh(
     viewer: &str,
     now_secs: i64,
     warnings: &mut Vec<String>,
-) {
+) -> HashSet<String> {
     if now_secs - store.events_read_at >= EVENTS_EVERY_SECS {
         match read_pushes(github, viewer, store.newest_event) {
             Ok(pushes) => store.remember(pushes, now_secs),
@@ -286,7 +288,7 @@ fn refresh(
     }
     store.forget_old(now_secs);
     if store.branches.is_empty() && store.tracked.is_empty() {
-        return;
+        return HashSet::new();
     }
     let ids: Vec<String> = store
         .tracked
@@ -298,16 +300,21 @@ fn refresh(
         .and_then(|reply| parse_lookup(&reply, &store.branches, &ids, viewer, now_secs));
     match lookup {
         Ok(lookup) => {
+            let refreshed = lookup.found.keys().cloned().collect();
             store.reconcile(lookup);
             if let Err(why) = verify(github, store, viewer) {
                 warnings.push(format!(
                     "Your commits on pull requests were not checked. {why}"
                 ));
             }
+            refreshed
         }
-        Err(why) => warnings.push(format!(
-            "Pull requests on your pushed branches were not looked up. {why}"
-        )),
+        Err(why) => {
+            warnings.push(format!(
+                "Pull requests on your pushed branches were not looked up. {why}"
+            ));
+            HashSet::new()
+        }
     }
 }
 
@@ -522,23 +529,16 @@ fn timestamp(value: &Value) -> Option<i64> {
 }
 
 fn load(path: &Path, viewer: &str) -> Store {
-    let Some(mut store) = fs::read_to_string(path)
+    stored(path)
+        .filter(|store| store.viewer.eq_ignore_ascii_case(viewer))
+        .unwrap_or_else(|| Store::new(viewer))
+}
+
+fn stored(path: &Path) -> Option<Store> {
+    fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str::<Store>(&text).ok())
-        .filter(|store| {
-            store.schema_version == SCHEMA_VERSION && store.viewer.eq_ignore_ascii_case(viewer)
-        })
-    else {
-        return Store::new(viewer);
-    };
-    for pr in store
-        .tracked
-        .iter_mut()
-        .filter_map(|tracked| tracked.last.as_mut())
-    {
-        merge::restore(pr);
-    }
-    store
+        .filter(|store| store.schema_version == SCHEMA_VERSION)
 }
 
 fn save(path: &Path, store: &Store) -> Result<(), String> {

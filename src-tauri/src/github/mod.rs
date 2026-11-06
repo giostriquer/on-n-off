@@ -9,6 +9,7 @@ mod snapshot;
 #[cfg(test)]
 mod tests;
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -17,12 +18,13 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::Value;
 
 use crate::cli::AgentCli;
-use crate::dto::{GithubPrsData, GithubPrsDto, GithubStatus};
+use crate::dto::{GithubPrDto, GithubPrsData, GithubPrsDto, GithubStatus};
 use crate::http::{get_json, post_json, HttpError, RateLimitReset};
 use crate::paths;
 use crate::read_revision::{Reading, Revision, Source};
 use crate::settings::{self, AppSettings};
 use auth::{read_token_with, GhTokenMemo, TokenError, GH_TOKEN, TOKEN_DEADLINE};
+use merge::KnownAnswers;
 use query::{request_body, EVENTS_URL, GRAPHQL_URL};
 
 const LOW_BUDGET_POINTS: u64 = 50;
@@ -43,6 +45,7 @@ pub struct ReadMemo {
 #[derive(Default)]
 struct ReadMemoState {
     cached: Option<(i64, GithubPrsDto)>,
+    known_answers: Option<KnownAnswers>,
     paused_until: Option<i64>,
 }
 
@@ -51,6 +54,7 @@ impl ReadMemo {
         Self {
             state: Mutex::new(ReadMemoState {
                 cached: None,
+                known_answers: None,
                 paused_until: None,
             }),
             revision: Revision::new(),
@@ -164,7 +168,7 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
                     .cached
                     .as_ref()
                     .map(|(_, cached)| cached.data.clone())
-                    .or_else(|| snapshot::load(&snapshot_path));
+                    .or_else(|| snapshot::load(&snapshot_path).map(|snapshot| snapshot.data));
                 return (
                     stale_or(paused, remembered),
                     Reading::Unchanged(sources.read_memo.revision.current()),
@@ -172,31 +176,28 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
             }
         }
     }
-    match fetch(sources) {
-        Ok(mut dto) => {
-            let remembered = {
-                let state = sources.read_memo.state();
-                state.cached.as_ref().map(|(_, cached)| cached.data.clone())
-            }
-            .or_else(|| snapshot::load(&snapshot_path));
-            merge::keep_conflicts(&mut dto.data, remembered.as_ref());
-            if let Err(error) = snapshot::save(&snapshot_path, &dto.data) {
+    let known_answers = sources.read_memo.state().known_answers.take();
+    let mut known_answers =
+        known_answers.unwrap_or_else(|| remembered_answers(sources.home, &snapshot_path));
+    match fetch(sources, &mut known_answers) {
+        Ok(dto) => {
+            if let Err(error) = snapshot::save(&snapshot_path, &dto.data, &known_answers) {
                 eprintln!("could not remember the GitHub read: {error}");
             }
             let mut state = sources.read_memo.state();
             state.cached = Some((sources.now_secs, dto.clone()));
+            state.known_answers = Some(known_answers);
             let reading = Reading::Replaced(sources.read_memo.revision.bump());
             drop(state);
             (dto, reading)
         }
         Err((status, hint)) => {
-            let remembered = sources
-                .read_memo
-                .state()
-                .cached
-                .take()
-                .map(|(_, cached)| cached.data)
-                .or_else(|| snapshot::load(&snapshot_path));
+            let remembered = {
+                let mut state = sources.read_memo.state();
+                state.known_answers = Some(known_answers);
+                state.cached.take().map(|(_, cached)| cached.data)
+            }
+            .or_else(|| snapshot::load(&snapshot_path).map(|snapshot| snapshot.data));
             (
                 stale_or(problem(status, hint, sources.settings), remembered),
                 Reading::Unchanged(sources.read_memo.revision.current()),
@@ -205,7 +206,14 @@ fn read_prs_in(sources: &Sources<'_>, force: bool) -> (GithubPrsDto, Reading) {
     }
 }
 
-fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
+fn remembered_answers(home: &Path, snapshot_path: &Path) -> KnownAnswers {
+    KnownAnswers::recall(
+        snapshot::load(snapshot_path),
+        contributions::recorded_open(&paths::github_contributions_path_for(home)),
+    )
+}
+
+fn fetch(sources: &Sources<'_>, known_answers: &mut KnownAnswers) -> Result<GithubPrsDto, Failure> {
     let body = request_body(&sources.settings.github_scopes);
     let reply = post_with_token_retry(sources, &body)?;
     let parsed = parse::parse(&reply).map_err(|why| {
@@ -233,7 +241,8 @@ fn fetch(sources: &Sources<'_>) -> Result<GithubPrsDto, Failure> {
         ..parsed.data
     };
     let mut warnings = parsed.warnings;
-    add_contributions(sources, online, &mut data, &mut warnings);
+    let (unlisted, earlier) = add_contributions(sources, online, &mut data, &mut warnings);
+    known_answers.settle(&mut data, unlisted, &earlier);
     Ok(GithubPrsDto {
         status: GithubStatus::Ok,
         hint: None,
@@ -275,13 +284,13 @@ fn add_contributions(
     online: bool,
     data: &mut GithubPrsData,
     warnings: &mut Vec<String>,
-) {
+) -> (Vec<GithubPrDto>, HashSet<String>) {
     let Some(viewer) = data
         .viewer
         .clone()
         .filter(|login| settings::is_github_login(login))
     else {
-        return;
+        return (Vec::new(), HashSet::new());
     };
     let github: &dyn contributions::Github = sources;
     let found = contributions::read(
@@ -289,11 +298,11 @@ fn add_contributions(
         &paths::github_contributions_path_for(sources.home),
         &viewer,
         &sources.settings.github_scopes,
-        &merge::observed(data),
         sources.now_secs,
     );
     warnings.extend(found.warnings);
     contributions::add_to(data, found.open, found.merged);
+    (found.unlisted, found.earlier)
 }
 
 fn post_with_token_retry(sources: &Sources<'_>, body: &Value) -> Result<Value, Failure> {

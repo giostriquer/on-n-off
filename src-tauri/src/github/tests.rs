@@ -154,7 +154,7 @@ fn a_successful_read_fills_the_lists_and_remembers_them() {
     assert_eq!(dto.data.merged.items[0].id, "PR_merged1");
     assert_no_token(&dto, &harness.home, "gho_t");
     assert_eq!(
-        snapshot::load(&github_prs_path_for(&harness.home)),
+        snapshot::load(&github_prs_path_for(&harness.home)).map(|snapshot| snapshot.data),
         Some(dto.data)
     );
 }
@@ -735,7 +735,7 @@ fn a_pull_request_someone_else_opened_with_a_commit_of_yours_is_read_into_mine()
     .unwrap();
     assert!(!remembered.contains("gho_t"));
     assert_eq!(
-        snapshot::load(&github_prs_path_for(&harness.home)),
+        snapshot::load(&github_prs_path_for(&harness.home)).map(|snapshot| snapshot.data),
         Some(dto.data)
     );
 }

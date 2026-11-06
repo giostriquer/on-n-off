@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 
 use super::*;
@@ -11,7 +12,9 @@ fn a_verified_pr_is_never_checked_again_and_an_unverified_one_only_when_its_head
             &[json!([pr("PR_yes", "alice"), pr("PR_no", "bob")])],
         ))
         .reply(commits_reply(&[yours(), theirs()]));
-    assert_eq!(ids(&read_at(&first, &path, NOW).open), vec!["PR_yes"]);
+    let found = read_at(&first, &path, NOW);
+    assert_eq!(ids(&found.open), vec!["PR_yes"]);
+    assert_eq!(ids(&found.unlisted), vec!["PR_no"]);
 
     let both = json!([pr("PR_yes", "alice"), pr("PR_no", "bob")]);
     let quiet = FakeGithub::default().reply(lookup_reply(both.clone(), &[both]));
@@ -144,10 +147,10 @@ fn a_read_without_github_still_forgets_a_merge_older_than_fourteen_days() {
     read_at(&FakeGithub::default().reply(merged), &path, NOW + 30);
 
     assert_eq!(
-        ids(&read(None, &path, "octocat", &[], &[], NOW + 14 * DAY - 1).merged),
+        ids(&read(None, &path, "octocat", &[], NOW + 14 * DAY - 1).merged),
         vec!["PR_alice"]
     );
-    assert!(read(None, &path, "octocat", &[], &[], NOW + 14 * DAY)
+    assert!(read(None, &path, "octocat", &[], NOW + 14 * DAY)
         .merged
         .is_empty());
 }
@@ -166,13 +169,17 @@ fn a_failed_lookup_keeps_the_contributions_last_read_and_says_why() {
         json!([pr("PR_open", "alice"), merged_pr("PR_merging", NOW + 20)]),
         &[json!([])],
     ));
-    read_at(&merging, &path, NOW + 30);
+    assert!(read_at(&merging, &path, NOW + 30).earlier.is_empty());
 
     let failing = FakeGithub::default().failing_reply("Could not reach GitHub (HTTP 502).");
     let found = read_at(&failing, &path, NOW + 45);
 
     assert_eq!(ids(&found.open), vec!["PR_open"]);
     assert_eq!(ids(&found.merged), vec!["PR_merging"]);
+    assert_eq!(
+        found.earlier,
+        HashSet::from(["PR_open".to_string(), "PR_merging".to_string()])
+    );
     assert_eq!(
         found.warnings,
         vec![
@@ -192,6 +199,7 @@ fn a_reply_with_only_errors_is_a_failed_lookup() {
     let found = read_at(&github, &path, NOW + 30);
 
     assert_eq!(ids(&found.open), vec!["PR_alice"]);
+    assert_eq!(found.earlier, HashSet::from(["PR_alice".to_string()]));
     assert_eq!(
         found.warnings,
         vec![
@@ -199,6 +207,21 @@ fn a_reply_with_only_errors_is_a_failed_lookup() {
                 .to_string()
         ]
     );
+}
+
+#[test]
+fn a_pull_request_the_lookup_sent_unreadable_keeps_its_earlier_read() {
+    let path = store_path("contrib-unreadable-node");
+    found_alice(&path);
+    let mut node = pr("PR_alice", "alice");
+    node.as_object_mut().unwrap().remove("title");
+    let github = FakeGithub::default().reply(lookup_reply(json!([node]), &[json!([])]));
+
+    let found = read_at(&github, &path, NOW + 30);
+
+    assert_eq!(ids(&found.open), vec!["PR_alice"]);
+    assert_eq!(found.earlier, HashSet::from(["PR_alice".to_string()]));
+    assert_eq!(found.warnings, Vec::<String>::new());
 }
 
 #[test]
@@ -275,9 +298,10 @@ fn without_github_the_last_read_is_shown_and_nothing_is_read() {
     found_alice(&path);
     let before = fs::read_to_string(&path).unwrap();
 
-    let found = read(None, &path, "octocat", &[], &[], NOW + 60);
+    let found = read(None, &path, "octocat", &[], NOW + 60);
 
     assert_eq!(ids(&found.open), vec!["PR_alice"]);
+    assert_eq!(found.earlier, HashSet::from(["PR_alice".to_string()]));
     assert_eq!(found.warnings, Vec::<String>::new());
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
@@ -287,25 +311,13 @@ fn the_scope_applies_when_a_contribution_is_shown() {
     let path = store_path("contrib-scope");
     found_alice(&path);
 
-    let other = read(
-        None,
-        &path,
-        "octocat",
-        &["org:other".to_string()],
-        &[],
-        NOW + 1,
-    );
-    let acme = read(
-        None,
-        &path,
-        "octocat",
-        &["org:acme".to_string()],
-        &[],
-        NOW + 1,
-    );
+    let other = read(None, &path, "octocat", &["org:other".to_string()], NOW + 1);
+    let acme = read(None, &path, "octocat", &["org:acme".to_string()], NOW + 1);
 
     assert!(other.open.is_empty());
+    assert_eq!(ids(&other.unlisted), vec!["PR_alice"]);
     assert_eq!(ids(&acme.open), vec!["PR_alice"]);
+    assert!(acme.unlisted.is_empty());
 }
 
 #[test]
@@ -313,18 +325,11 @@ fn the_record_belongs_to_one_github_account_in_any_case() {
     let path = store_path("contrib-viewer");
     found_alice(&path);
 
-    let same = read(None, &path, "OctoCat", &[], &[], NOW + 1);
+    let same = read(None, &path, "OctoCat", &[], NOW + 1);
     assert_eq!(ids(&same.open), vec!["PR_alice"]);
 
     let other = FakeGithub::default();
-    let found = read(
-        Some(&other as &dyn Github),
-        &path,
-        "hubot",
-        &[],
-        &[],
-        NOW + 2,
-    );
+    let found = read(Some(&other as &dyn Github), &path, "hubot", &[], NOW + 2);
     assert!(found.open.is_empty());
     assert_eq!(*other.pages_asked.borrow(), vec![("hubot".to_string(), 1)]);
     assert_eq!(other.requests(), 0, "the other account's branches are gone");
@@ -347,10 +352,10 @@ fn an_unreadable_record_starts_from_nothing() {
 }
 
 #[test]
-fn a_contributions_conflict_survives_unknown_reads_but_not_a_resolved_or_merged_pr() {
-    use crate::dto::MergeKind;
+fn the_record_keeps_each_pull_requests_latest_read_as_github_sent_it() {
+    use crate::dto::{MergeKind, Mergeability};
 
-    let path = store_path("contrib-conflict-refresh");
+    let path = store_path("contrib-latest-read");
     let mut node = pr("PR_alice", "alice");
     node["mergeable"] = json!("CONFLICTING");
     node["mergeStateStatus"] = json!("DIRTY");
@@ -365,12 +370,15 @@ fn a_contributions_conflict_survives_unknown_reads_but_not_a_resolved_or_merged_
     node["mergeable"] = json!("UNKNOWN");
     node["mergeStateStatus"] = json!("UNKNOWN");
     let unknown = FakeGithub::default().reply(lookup_reply(json!([node.clone()]), &[json!([])]));
+    let found = read_at(&unknown, &path, NOW + 30);
+    assert_eq!(found.open[0].mergeable, Mergeability::Unknown);
+    assert_eq!(found.open[0].merge_kind, None);
+    let offline = read(None, &path, "octocat", &[], NOW + 40);
+    assert_eq!(offline.open, found.open);
     assert_eq!(
-        read_at(&unknown, &path, NOW + 30).open[0].merge_kind,
-        Some(MergeKind::Conflicts)
+        recorded_open(&path),
+        Some(("octocat".to_string(), found.open))
     );
-    let offline = read(None, &path, "octocat", &[], &[], NOW + 40);
-    assert_eq!(offline.open[0].merge_kind, Some(MergeKind::Conflicts));
 
     node["mergeable"] = json!("MERGEABLE");
     node["mergeStateStatus"] = json!("CLEAN");
@@ -380,11 +388,6 @@ fn a_contributions_conflict_survives_unknown_reads_but_not_a_resolved_or_merged_
         Some(MergeKind::Ready)
     );
 
-    node["mergeable"] = json!("CONFLICTING");
-    node["mergeStateStatus"] = json!("DIRTY");
-    let conflicting =
-        FakeGithub::default().reply(lookup_reply(json!([node.clone()]), &[json!([])]));
-    read_at(&conflicting, &path, NOW + 60);
     node["state"] = json!("MERGED");
     node["mergeable"] = json!("UNKNOWN");
     node["mergeStateStatus"] = json!("UNKNOWN");
@@ -392,4 +395,8 @@ fn a_contributions_conflict_survives_unknown_reads_but_not_a_resolved_or_merged_
     let found = read_at(&merged, &path, NOW + 70);
     assert!(found.open.is_empty());
     assert_eq!(found.merged[0].merge_kind, None);
+    assert_eq!(
+        recorded_open(&path),
+        Some(("octocat".to_string(), Vec::new()))
+    );
 }

@@ -484,6 +484,24 @@ pub struct GithubPrsData {
     pub rate_limit: Option<GithubRateLimitDto>,
 }
 
+impl GithubPrsData {
+    pub fn open_prs(&self) -> impl Iterator<Item = &GithubPrDto> + Clone {
+        self.mine
+            .items
+            .iter()
+            .chain(&self.review_requested.items)
+            .chain(&self.assigned.items)
+    }
+
+    pub fn open_prs_mut(&mut self) -> impl Iterator<Item = &mut GithubPrDto> {
+        self.mine
+            .items
+            .iter_mut()
+            .chain(&mut self.review_requested.items)
+            .chain(&mut self.assigned.items)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubPrsDto {

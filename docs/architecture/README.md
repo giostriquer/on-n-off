@@ -445,21 +445,53 @@ app run, re-read once on a 401, never persisted.
 The merge fields — `mergeable` for conflicts, `mergeStateStatus` for ready/blocked/behind,
 `mergeQueueEntry`, `autoMergeRequest` — are scalars and single objects on purpose, so the request
 costs about 2 rate-limit points. They are interpreted in exactly one place, `github/merge.rs`:
-`classify` fills `mergeKind` on the DTO, the screen only maps kinds to badges, and the monitor's
-`Seen` record takes its unknown-aware facts from the same module. Snapshots written before those
-fields existed load with `Unknown`/`false` defaults.
+`classify` gives each row its own verdict as `parse` reads it, `KnownAnswers::settle` settles the
+merge verdict (`mergeKind`) of every open row once per read, the screen only maps kinds to badges,
+and the monitor's `Seen` record takes its unknown-aware facts from `merge::facts`. Snapshots written
+before those fields existed load with `Unknown`/`false` defaults.
 
-GitHub can report `UNKNOWN` while recalculating mergeability after the base branch advances.
-Before replacing a successful read, `merge::keep_conflicts` carries forward a known conflict for
-that viewer's same PR id, head commit (`headRefOid`) and target branch. It retains only the displayed
-`mergeKind`; raw unknown mergeability, CI, review, title and other fields still refresh. It never
-carries forward a ready verdict. A current definite answer for the same PR revision takes precedence
-across the open lists and clears conflicting contribution history before that history is refreshed.
-A changed head or target, or a missing head id in an older snapshot, discards the remembered conflict.
-The saved snapshot preserves it across restart and failed reads. Contributed PRs apply the same
-rule before replacing their own stored read, but merged PRs do not.
-The badge and both native rings therefore keep a known conflict during recalculation and clear it
-once GitHub confirms it is gone.
+GitHub can report `UNKNOWN` while recalculating mergeability after the base branch advances, so a
+known answer is carried across reads. `KnownAnswers` is the one memory of them: one viewer and, per
+revision (PR id, head commit `headRefOid`, target branch, as `Revision::of` reads them), the last
+answer the PR's rows settled with (`mergeable` and `mergeStateStatus`). Each successful read calls
+`settle` once, after contributed PRs have joined Mine, over every open row
+(`GithubPrsData::open_prs`: Mine, Review requested, Assigned) and over the open PRs the
+contributions record tracks but does not list (out of scope, or not yet confirmed as yours). A
+contributed row is from an earlier read when this read did not look it up again: a low rate budget,
+a failed lookup, or a node the lookup could not read (`Contributed.earlier`).
+
+1. A row GitHub answered in this read (`mergeable` known, or `mergeStateStatus` DIRTY) keeps its
+   own verdict. Every such answer, from a listed or an unlisted row, is this read's answer for its
+   revision; two rows of one revision that answer differently each keep their own.
+2. A revision this read did not answer but that has a row from an earlier read takes the memory's
+   last raw answer for it, or, when the memory has none, that row's own earlier answer. An earlier
+   answer therefore never shows when a newer one was settled for the revision.
+3. Any row without its own answer in this read takes the revision's answer from 1 or 2,
+   `mergeable` and `mergeStateStatus` included, so the monitor sees it too and one revision shows
+   one verdict.
+4. Failing that, an unknown row shows Conflicts when the memory's last answer for its revision is
+   a conflict and was kept for the same viewer (compared case-insensitively, once per read). Only
+   `mergeKind` is carried; raw unknown mergeability, CI, review, title and other fields still
+   refresh. A clean answer is never carried to an unknown row this way.
+5. Otherwise it gets its own verdict, which also discards one an older file stored.
+
+The memory is then replaced by this read's settled answers: a conflict wins when rows of one
+revision disagree (so after a Review requested row says CONFLICTING and the contribution lookup
+says CLEAN in one read, a next read whose lookup fails shows the contribution, and tells the
+monitor, the conflict), a carried conflict stays, and anything else is forgotten — a revision every row
+left unknown without a known conflict, a new head or target, a missing head id, another viewer, a
+merge, or a PR the read no longer sees open. A read without a viewer keeps no answers. Because
+unlisted rows count, a contribution's known conflict is still known when an expanded scope starts
+listing it. The memory is saved with the snapshot (`knownAnswers` in `prs.json`, ignored by older
+versions), so it survives a restart, and a failed read shows the snapshot as it was saved.
+`KnownAnswers::recall` takes the saved memory; a `prs.json` saved before the memory existed seeds
+it once instead, before the next read rewrites `contributions.json`, with the conflicts its open
+rows and the record's open PRs (same viewer only) show. A conflict those files kept while GitHub
+said unknown is seeded without a raw answer: it is only ever carried as a Conflicts verdict (rule
+4), never copied into a row's `mergeable` or `mergeStateStatus`. The badge and both native rings therefore
+keep a known conflict during recalculation and clear it once GitHub confirms it is gone, and a
+contributed row whose lookup keeps failing shows the revision's latest answer, not its own older
+one.
 
 GitHub's search cannot find a pull request by who wrote its commits, so contributed pull requests
 come from your pushes instead (`github/contributions.rs`).
@@ -482,8 +514,8 @@ come from your pushes instead (`github/contributions.rs`).
   whose authors include you. Rebased commits keep their authors, so an "Update branch" never counts.
   A yes is final for the pull request, which then stays tracked even after its branch is forgotten.
 - **Record.** Tracked pull requests are dropped when closed and fourteen days after they merge. The
-  record, `~/.on-n-off/github/contributions.json`, keeps each one's last read, belongs to one GitHub
-  login and starts over for another.
+  record, `~/.on-n-off/github/contributions.json`, keeps each one's last read as GitHub sent it,
+  belongs to one GitHub login and starts over for another.
 
 Found pull requests join `mine`, marked `contributed`, and merged ones join `merged`, both under the
 same scope as the search. That is all the monitor, the notch and the screen see: the screen tags
@@ -888,6 +920,8 @@ the code today; a change that moves one updates its row.
 | Saved profile | `Profile` in the vault's `Database` (`accounts/store.rs`); listed and changed through `Accounts` (`accounts/mod.rs`), and listed for the Limits column in the provider's `Roster` (`accounts/roster.rs`, whose `Roster::of` the account list shares); its usage is polled in `accounts/usage.rs` by one path (`poll`, which attempts, holds and parks a login by its `Generation`) over where the login is kept (`Kept`): in the vault, through the provider's Limits reader (`Adapter::read_usage`: `read_saved_codex` in `limits/codex.rs`, `read_saved_muse`), or in its home (`Home::read_usage`: Claude Code's own report, `read_usage` in `limits/claude_cli.rs`, or Muse's key-mint read); the date its home's sign-in ends is `sign_in_end`, and its card carries `saved_profile` |
 | Login state | `LoginState` (`accounts/login_state.rs`), on each listed profile as `loginState` (`ProfileDto`, `accounts::list`), from where the login is kept (`usage::kept`), its `Deadline` (the native store's, a vault login's view, or a home's recorded `SignInEnd`), and, for a profile not signed in (`Standing`), what the saved poll parked (`usage::parked`, kept in memory with the poll's holds by each login's `Generation`, a home's being its `Home::login_stamp`, which reads no secret; `accounts/usage.rs`); the Limits column carries the same state on each entry's profile, stated when it is served (`Roster::in_column`, `accounts/roster.rs`), signed in for the served current card's account, the signed-in login dated only by the ends the account list last handed over and a saved one by those or its recorded `SignInEnd`, and its parked verdict looked up in memory for the login the roster listed (`usage::parked_for`, by `LoginKey`: the vault login's fingerprint or the home, with no stamp), never opening a login; read by the card model as `LimitCard.login` and presented by `signInPresentation` (`ui/src/features/limits/loginState.ts`); the account list reads itself again when an `ending` date passes (`untilSignInEnds`, `ui/src/lib/sharedReads/accounts.ts`) and hands its ends to the column (`Notify::listed`) |
 | Account change | `Store::change` (`accounts/store.rs`) with `ChangeKind::Account` (save, remove, use, sign out, in `accounts/mod.rs`), `ChangeKind::SignIn` (a sign-in's publication, `accounts/login.rs`) or `ChangeKind::Recovery` |
+| Merge verdict | `mergeKind` on `GithubPrDto` (`dto.rs`): a row's own verdict from `merge::classify` as `github/parse.rs` reads it, settled for every open row once per read by `KnownAnswers::settle` (`github/merge.rs`) from `read_prs_in`'s `fetch` (`github/mod.rs`); mapped to badges by `mergeBadge` (`ui/src/lib/githubFormat.ts`) and the notch's `badges` and `PrAttention` (`side_notch/model/frame.rs`); the monitor's facts from `merge::facts` (`github_monitor.rs`) |
+| Known answer | `KnownAnswers` (`github/merge.rs`): one viewer and its `Known` answers per `Revision`; kept in the memo (`ReadMemoState`) and saved with the snapshot as `knownAnswers` (`github/snapshot.rs`); recalled, or seeded once from files saved before it, by `KnownAnswers::recall`, which `remembered_answers` (`github/mod.rs`) feeds from disk |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |

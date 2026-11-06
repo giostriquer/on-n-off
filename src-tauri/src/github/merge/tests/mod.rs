@@ -1,3 +1,5 @@
+mod settle;
+
 use super::*;
 use crate::dto::GithubMergeQueueDto;
 
@@ -136,34 +138,36 @@ fn unknown_unstable_and_draft_states_say_nothing() {
 
 #[test]
 fn the_monitor_facts_are_none_only_while_github_has_not_computed_them() {
+    let conflicts = |pr: GithubPrDto| facts(&pr).conflicts;
+    let ready = |pr: GithubPrDto| facts(&pr).ready;
     assert_eq!(
-        conflicts_known(&with(|pr| pr.mergeable = Mergeability::Unknown)),
+        conflicts(with(|pr| pr.mergeable = Mergeability::Unknown)),
         None
     );
-    assert_eq!(conflicts_known(&pr()), Some(false));
+    assert_eq!(conflicts(pr()), Some(false));
     assert_eq!(
-        conflicts_known(&with(|pr| pr.mergeable = Mergeability::Conflicting)),
+        conflicts(with(|pr| pr.mergeable = Mergeability::Conflicting)),
         Some(true)
     );
     assert_eq!(
-        conflicts_known(&with(|pr| {
+        conflicts(with(|pr| {
             pr.mergeable = Mergeability::Unknown;
             pr.merge_state = MergeState::Dirty;
         })),
         Some(true)
     );
 
-    assert_eq!(ready_known(&pr()), None, "state unknown");
+    assert_eq!(ready(pr()), None, "state unknown");
     assert_eq!(
-        ready_known(&with(|pr| pr.merge_state = MergeState::Clean)),
+        ready(with(|pr| pr.merge_state = MergeState::Clean)),
         Some(true)
     );
     assert_eq!(
-        ready_known(&with(|pr| pr.merge_state = MergeState::Blocked)),
+        ready(with(|pr| pr.merge_state = MergeState::Blocked)),
         Some(false)
     );
     assert_eq!(
-        ready_known(&with(|pr| {
+        ready(with(|pr| {
             pr.merge_state = MergeState::Clean;
             pr.merge_queue = queued();
         })),
@@ -171,7 +175,7 @@ fn the_monitor_facts_are_none_only_while_github_has_not_computed_them() {
         "the queue owns it"
     );
     assert_eq!(
-        ready_known(&with(|pr| {
+        ready(with(|pr| {
             pr.merge_state = MergeState::Clean;
             pr.is_draft = true;
         })),
@@ -186,6 +190,11 @@ fn a_remembered_conflict_does_not_report_ready_while_mergeability_is_unknown() {
         pr.merge_state = MergeState::Clean;
         pr.merge_kind = Some(MergeKind::Conflicts);
     });
-    assert_eq!(conflicts_known(&retained), None);
-    assert_eq!(ready_known(&retained), Some(false));
+    assert_eq!(
+        facts(&retained),
+        MergeFacts {
+            conflicts: None,
+            ready: Some(false)
+        }
+    );
 }
