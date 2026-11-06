@@ -3,7 +3,7 @@ use crate::dto::AgentId;
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
 use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings};
-use crate::side_notch::win_paint::R;
+use crate::side_notch::plan::R;
 use std::time::Duration;
 
 fn display(id: &str, mirrored: bool) -> Display {

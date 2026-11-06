@@ -1,167 +1,25 @@
 use super::*;
-use crate::dto::{
-    GithubPrsDto, LimitWindowDto, LimitWindowKind, LimitsStatus, LimitsWorkspaceCreditsDto,
-    ProviderLimitsDto, Reading,
+use crate::dto::{AgentId, LimitWindowKind};
+use crate::side_notch::model::frame::{CellData, PrSegment, ProviderCell, RailData};
+use crate::side_notch::model::{Display, NotchSettings, ShowMode};
+use crate::side_notch::plan::tests::{
+    claude_with, data, display, now, session_only, settings, tagged_rows, window, PERSONAL, WORK,
 };
-use crate::side_notch::model::frame::{self, ProviderCell};
-use crate::side_notch::model::{Display, NotchProvider, NotchPullRequests, NotchSettings};
-use crate::side_notch::sessions::LiveSession;
+use crate::side_notch::plan::Hover;
+use chrono::{DateTime, Utc};
 
-mod content;
-mod geometry;
-mod layout;
 mod render;
 
-fn now() -> DateTime<Utc> {
-    "2026-09-03T10:30:00Z".parse().unwrap()
+fn plan(
+    settings: &NotchSettings,
+    displays: &[Display],
+    data: &RailData,
+    hover: Hover,
+    now: DateTime<Utc>,
+) -> Option<Plan> {
+    crate::side_notch::plan::plan(settings, displays, data, hover, now, &DirectWrite)
 }
 
-fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
-    Display {
-        id: id.into(),
-        name: "Test Display".into(),
-        x,
-        y,
-        width,
-        height,
-        work_y: y,
-        work_height: height,
-        scale,
-        mirrored: false,
-    }
-}
-fn signed_in(provider: AgentId, windows: Vec<LimitWindowDto>) -> ProviderLimitsDto {
-    crate::limits::signed_in_card(
-        provider,
-        "acct",
-        Reading {
-            windows,
-            ..Reading::default()
-        },
-    )
-}
-fn decided(
-    settings: NotchSettings,
-    reads: Vec<(AgentId, Option<NotchProvider>, Vec<LiveSession>)>,
-    pulls: Option<&GithubPrsDto>,
-) -> CellData {
-    frame::rail(&settings, reads, pulls, None)
-        .cells
-        .pop()
-        .expect("the model decided a cell")
-}
-fn projected(card: ProviderLimitsDto) -> ProviderCell {
-    let provider = card.provider;
-    let reading = NotchProvider::current(vec![card]).expect("a signed-in account");
-    let only = NotchSettings {
-        providers: vec![provider],
-        pull_requests: NotchPullRequests {
-            enabled: false,
-            ..NotchPullRequests::default()
-        },
-        ..settings()
-    };
-    match decided(only, vec![(provider, Some(reading), Vec::new())], None) {
-        CellData::Provider(cell) => cell,
-        CellData::PullRequests(_) => panic!("a provider cell"),
-    }
-}
-fn pr(number: u64, title: &str, repo: &str) -> serde_json::Value {
-    serde_json::json!({
-        "id": format!("n{number}"), "number": number, "title": title,
-        "url": format!("https://github.com/{repo}/pull/{number}"), "repo": repo,
-        "author": "octocat", "isDraft": false, "ci": "success", "headRef": "fix",
-        "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z"
-    })
-}
-fn pulls_read(
-    status: &str,
-    hint: Option<&str>,
-    total: usize,
-    rows: Vec<serde_json::Value>,
-) -> CellData {
-    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
-        "status": status, "hint": hint, "stale": false, "scope": [],
-        "mine": {"total": total, "items": rows},
-        "reviewRequested": {"total": 0, "items": []},
-        "assigned": {"total": 0, "items": []}
-    }))
-    .expect("a pull request read");
-    let only = NotchSettings {
-        providers: Vec::new(),
-        ..settings()
-    };
-    decided(only, Vec::new(), Some(&dto))
-}
-fn pulls(rows: Vec<serde_json::Value>) -> CellData {
-    let total = rows.len();
-    pulls_read("ok", None, total, rows)
-}
-fn session_window(percent: f64) -> LimitWindowDto {
-    LimitWindowDto {
-        id: "w".into(),
-        label: "Current session".into(),
-        kind: LimitWindowKind::Session,
-        used_percent: percent,
-        resets_at: None,
-        window_seconds: None,
-        observed_at: "2026-09-01T10:00:00Z".into(),
-        role: None,
-        starts_on_first_message: false,
-    }
-}
-fn session_only(provider: AgentId, percent: f64) -> ProviderCell {
-    projected(signed_in(provider, vec![session_window(percent)]))
-}
-fn settings() -> NotchSettings {
-    NotchSettings {
-        enabled: true,
-        display_id: Some("d1".into()),
-        ..NotchSettings::default()
-    }
-}
-fn data(cells: Vec<CellData>) -> RailData {
-    RailData {
-        settings: settings(),
-        cells,
-        action_error: None,
-    }
-}
-fn window(id: &str, label: &str, kind: LimitWindowKind, percent: f64) -> LimitWindowDto {
-    LimitWindowDto {
-        id: id.into(),
-        label: label.into(),
-        kind,
-        used_percent: percent,
-        resets_at: Some("2099-01-01T00:00:00Z".into()),
-        window_seconds: None,
-        observed_at: "2026-09-01T10:00:00Z".into(),
-        role: None,
-        starts_on_first_message: false,
-    }
-}
-fn claude_with(windows: Vec<LimitWindowDto>) -> ProviderCell {
-    projected(signed_in(AgentId::Claude, windows))
-}
-fn codex_member_card(share: LimitsWorkspaceCreditsDto) -> ProviderLimitsDto {
-    crate::limits::signed_in_card(
-        AgentId::Codex,
-        "acct",
-        Reading {
-            windows: vec![window(
-                "primary",
-                "Weekly · all models",
-                LimitWindowKind::Weekly,
-                31.0,
-            )],
-            workspace_credits: Some(share),
-            ..Reading::default()
-        },
-    )
-}
-fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderCell {
-    projected(codex_member_card(share))
-}
 fn popover_render(provider: ProviderCell) -> (Plan, tiny_skia::Pixmap) {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(

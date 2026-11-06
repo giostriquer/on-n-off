@@ -1,9 +1,13 @@
 use super::*;
+use crate::dto::AgentId;
 use crate::dto::GithubPrsDto;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading, WindowRole};
 use crate::side_notch::model::frame;
+use crate::side_notch::model::frame::{CellData, RailData};
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
+use crate::side_notch::plan::{plan, Hover};
 use crate::side_notch::sessions::LiveSession;
+use chrono::{DateTime, Utc};
 
 fn now() -> DateTime<Utc> {
     "2026-09-03T10:30:00Z".parse().unwrap()
@@ -208,7 +212,7 @@ fn visual_dump() {
         active: Some(0),
         ..Hover::default()
     };
-    let planned = plan(&s2, &scale2, &d2, hover2, now()).expect("scale2 popover");
+    let planned = plan(&s2, &scale2, &d2, hover2, now(), &DirectWrite).expect("scale2 popover");
     std::fs::write(
         format!("{out}/scale2-popover.png"),
         render(&planned).encode_png().unwrap(),
@@ -220,7 +224,7 @@ fn visual_dump() {
             active: Some(cell),
             ..Hover::default()
         };
-        let Some(planned) = plan(&settings, &displays, &data, hover, now()) else {
+        let Some(planned) = plan(&settings, &displays, &data, hover, now(), &DirectWrite) else {
             panic!("cell {cell} should plan");
         };
         let pix = render(&planned);
@@ -232,7 +236,15 @@ fn visual_dump() {
         let _ = cell;
     }
 
-    let planned = plan(&settings, &displays, &data, Hover::default(), now()).expect("rail");
+    let planned = plan(
+        &settings,
+        &displays,
+        &data,
+        Hover::default(),
+        now(),
+        &DirectWrite,
+    )
+    .expect("rail");
     std::fs::write(
         format!("{out}/rail.png"),
         render(&planned).encode_png().unwrap(),
@@ -256,6 +268,7 @@ fn visual_dump() {
                 ..Hover::default()
             },
             now(),
+            &DirectWrite,
         )
         .expect("cap");
         std::fs::write(
@@ -267,7 +280,15 @@ fn visual_dump() {
 
     let mut hover_settings = settings.clone();
     hover_settings.show = ShowMode::OnHover;
-    let planned = plan(&hover_settings, &displays, &data, Hover::default(), now()).expect("pill");
+    let planned = plan(
+        &hover_settings,
+        &displays,
+        &data,
+        Hover::default(),
+        now(),
+        &DirectWrite,
+    )
+    .expect("pill");
     std::fs::write(
         format!("{out}/pill.png"),
         render(&planned).encode_png().unwrap(),
@@ -290,6 +311,7 @@ fn visual_dump() {
             ..Hover::default()
         },
         now(),
+        &DirectWrite,
     )
     .expect("top rail");
     std::fs::write(
@@ -304,16 +326,16 @@ fn visual_dump() {
 fn specimen() {
     let out = concat!(env!("CARGO_MANIFEST_DIR"), "/../.tmp-visual");
     let _ = std::fs::create_dir_all(out);
-    let samples: &[(f32, text::Weight, &str)] = &[
-        (17.0, text::Weight::Medium, "27% 79% 100%"),
-        (13.0, text::Weight::Semibold, "Claude Usage"),
-        (12.0, text::Weight::Semibold, "Pull requests"),
-        (11.0, text::Weight::Semibold, "Weekly · all models"),
-        (11.0, text::Weight::Regular, "Antigravity has no limits."),
-        (10.5, text::Weight::Medium, "27% Used · working"),
-        (10.0, text::Weight::Regular, "Resets Mon 7:59 AM"),
-        (9.5, text::Weight::Semibold, "MINE"),
-        (9.5, text::Weight::Medium, "Ready"),
+    let samples: &[(f32, TextWeight, &str)] = &[
+        (17.0, TextWeight::Medium, "27% 79% 100%"),
+        (13.0, TextWeight::Semibold, "Claude Usage"),
+        (12.0, TextWeight::Semibold, "Pull requests"),
+        (11.0, TextWeight::Semibold, "Weekly · all models"),
+        (11.0, TextWeight::Regular, "Antigravity has no limits."),
+        (10.5, TextWeight::Medium, "27% Used · working"),
+        (10.0, TextWeight::Regular, "Resets Mon 7:59 AM"),
+        (9.5, TextWeight::Semibold, "MINE"),
+        (9.5, TextWeight::Medium, "Ready"),
     ];
     let (w, h, pitch, x, base) = (420u32, 26 * samples.len() as u32, 26.0f32, 12.0f32, 20.0f32);
     let mut pixmap = Pixmap::new(w, h).unwrap();

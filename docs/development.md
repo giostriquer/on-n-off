@@ -154,7 +154,7 @@ source carries no comments (see [Code comments](#code-comments)).
   every provider's actions in every card state.
 - What a quota window or workspace share reads at an instant (its reset cycle, used now, reached,
   its percent figure and text, its reset note, its meter level): `limits/window_at.rs`, which the limits
-  monitor and the Windows painter use, the painter with the clock its window passes in, never
+  monitor and the Windows notch plan use, the plan with the clock its window passes in, never
   `Utc::now()` of its own. The card restates it in `ui/src/lib/windowAt.ts` and the macOS helper in
   `NotchCore/Models.swift` and `Meter.swift`; all three read
   `src-tauri/src/limits/window_at/fixtures/window-cases.json`, whose rows name each surface's
@@ -186,6 +186,14 @@ source carries no comments (see [Code comments](#code-comments)).
   `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
   the Windows painter; change a measurement in both files and in the fixture both checks read,
   `rail-cases.json` ([why](architecture/side-notch.md#on-macos)).
+- Where the Windows notch draws and answers clicks: its plan (`side_notch/plan.rs`, the popover's
+  stacks in `plan/popover.rs`), compiled for Windows and for tests on every OS. The window asks it what
+  is under the pointer; the painter draws its rects, though it still works out a cell's ring arcs and
+  figure, the cap's pin and the popover's tail and corners itself. The plan measures text only
+  through `TextMetrics` (`plan/text.rs`), never DirectWrite itself: the window passes `DirectWrite`,
+  tests `FixedAdvance`. A moved rect is a moved Windows pixel: update `plan/fixtures/plans.json`
+  from the golden test's failure only when the move is meant
+  ([why](architecture/side-notch.md#the-windows-plan)).
 
 For new settings, use `Rocker`, `Segmented` and `SettingsCard` from
 `ui/src/components/`; do not introduce a parallel checkbox or switch.
@@ -237,7 +245,8 @@ comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler 
   `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::files::testing` counters,
-  `github/fixtures.rs` (with `FakeGithub`). Single-consumer helpers stay in that module's
+  `github/fixtures.rs` (with `FakeGithub`), and the notch plan's frames and settings in
+  `side_notch/plan/tests/mod.rs`, which the Windows painter's tests plan from. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.
 - Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`. For a

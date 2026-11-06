@@ -210,6 +210,12 @@ One slot of the side notch's rail: a selected provider's rings, or the pull requ
 order. A cell whose provider or pull requests have not been read yet keeps its slot and is checking.
 _Avoid_: tile, entry
 
+**Notch plan**:
+Where everything the Windows notch draws and answers clicks for sits, for one frame, hover state and
+instant: the window, the rail and its cells, the cap, the pill (the collapsed strip shown on hover),
+and the open popover with its items and hit zones. The macOS helper lays itself out in SwiftUI and has none.
+_Avoid_: layout (the rail's geometry, which the plan places from), plan alone
+
 ### Usage
 
 **Transcript source**:

@@ -2,7 +2,8 @@
 
 use super::model::frame::RailData;
 use super::model::{selected_display, NotchSettings, ShowMode};
-use super::win_paint::{self, Hover, Plan};
+use super::plan::{self, Hover, Plan, Zone};
+use super::win_paint::{self, DirectWrite};
 use crate::side_notch::model::Display;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
@@ -166,12 +167,13 @@ impl Machine {
         if !data.settings.enabled {
             return None;
         }
-        win_paint::plan(
+        plan::plan(
             &data.settings,
             &self.displays,
             data,
             self.hover,
             chrono::Utc::now(),
+            &DirectWrite,
         )
     }
 
@@ -217,7 +219,7 @@ impl Machine {
             self.hover.cap_hovered = on_cap;
             self.dirty = true;
         }
-        let cell = win_paint::rail_hit(&plan, x, y);
+        let cell = plan::rail_hit(&plan, x, y);
         if cell != self.hovered_cell {
             self.hovered_cell = cell;
             if self.pinned.is_some() {
@@ -301,7 +303,7 @@ impl Machine {
             };
             return vec![WinAction::SetShow(next)];
         }
-        if let Some(cell) = win_paint::rail_hit(&plan, x, y) {
+        if let Some(cell) = plan::rail_hit(&plan, x, y) {
             if self.pinned == Some(cell) {
                 self.pinned = None;
                 self.hover.active = None;
@@ -319,12 +321,12 @@ impl Machine {
         {
             let cell = self.hover.active;
             return match zone {
-                win_paint::Zone::OpenRow { url } => vec![WinAction::OpenUrl(url.clone())],
-                win_paint::Zone::CopyRow { url, title } => vec![WinAction::CopyReviewRequest {
+                Zone::OpenRow { url } => vec![WinAction::OpenUrl(url.clone())],
+                Zone::CopyRow { url, title } => vec![WinAction::CopyReviewRequest {
                     title: title.clone(),
                     url: url.clone(),
                 }],
-                win_paint::Zone::Footer => {
+                Zone::Footer => {
                     let footer = match cell {
                         Some(index) => {
                             match self.data.as_ref().and_then(|data| data.cells.get(index)) {

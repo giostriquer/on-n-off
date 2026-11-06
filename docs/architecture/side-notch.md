@@ -140,7 +140,7 @@ What stays with each drawer is what depends on the clock, since they redraw betw
 window's percent now, its reset note, a session's age, the percent under a provider's ring), and
 what is only style: provider names and marks, the inks of each tone, list titles and tags set in
 capitals, the CI dot's colour, "Nothing open." and "N of M". The rules for what a window reads at
-an instant are still one, `limits/window_at.rs`, which the Windows painter asks with the clock its
+an instant are still one, `limits/window_at.rs`, which the Windows plan asks with the clock its
 window passes in and NotchCore restates; both, and the card, read the cases in
 `limits/window_at/fixtures/window-cases.json` ([why](README.md#limits)). The review request copied from a row is
 still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
@@ -276,7 +276,7 @@ Things that are easy to get wrong:
   Both round every measurement to the display's pixel grid before adding them up, so a rail is
   exactly as long as its cells, their spacing and two ears, and lands on whole device pixels.
   The helper draws from the Swift copy. Rust's copy decides whether the rail has room (`save` and
-  the host's reads) and is what the Windows painter draws its silhouette, cells, cap and pill
+  the host's reads) and is what the Windows plan places the rail, its cells, the cap and the pill
   from. A change to `model.rs` alone therefore moves the Windows notch and the macOS room check,
   never the macOS helper. The expected numbers live once, in
   `macos/SideNotch/Tests/NotchCoreTests/rail-cases.json`, which `NotchCoreChecks` and
@@ -285,8 +285,9 @@ Things that are easy to get wrong:
   `null` where the rail hides; the metrics rows give every measurement of a right-edge rail and
   the first two cells on the right and top edges. To change a measurement, edit both files and
   the fixture. A change on one side only fails that side's check.
-  Popovers are not in `model.rs`: the Windows painter places them with its own copy of
-  `popoverFrame` (`popover_frame`) and lays out what is in them itself.
+  Popovers are not in `model.rs`: the Windows plan places them with its own copy of
+  `popoverFrame` (`popover_frame`) and lays out what is in them itself
+  ([the Windows plan](#the-windows-plan)).
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
@@ -322,9 +323,10 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
 non-activating Win32 window per selected display, on its own window class and message loop rather
 than a second tao event loop (`OS.md` says why), and presents it with `UpdateLayeredWindow`;
-`win_paint.rs` draws the rail (from `model.rs`'s metrics and frames, and the cells `model/frame.rs`
-decided), the marks and the popovers into a tiny-skia pixmap; `win_displays.rs` enumerates monitors;
-and `win_transport.rs` is the host's Windows transport, in-process channels where macOS has pipes.
+`plan.rs` works out where everything the window draws and answers clicks for sits
+([the plan](#the-windows-plan)); `win_paint.rs` draws a plan, the rail, the marks and the popovers,
+into a tiny-skia pixmap; `win_displays.rs` enumerates monitors; and `win_transport.rs` is the host's
+Windows transport, in-process channels where macOS has pipes.
 The display is chosen by device name rather than UUID, and the same rule holds — a disconnected or
 mirrored selection hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the
 settings card says so on older builds.
@@ -334,6 +336,63 @@ no tao event loop, the bare `WS_POPUP` style, per-pixel-alpha hit testing, the p
 the window's own mouse messages cannot replace, pixel alignment on fractional display scaling, and
 the screen poll that puts the notch back on top when Windows stacks it below an ordinary window.
 Read it before changing `win_window.rs`.
+
+### The Windows plan
+
+`side_notch/plan.rs` turns the settings, the displays, the frame `model/frame.rs` decided, the hover
+state and the clock into a `Plan`: the window, the rail, each cell's rect and what its rings and
+figure show (`cell_content`), the cap, the pill (the collapsed strip shown on hover), and the open
+popover's frame, card, tail and every item and hit zone in it. The rail and its cells come from `model.rs`'s metrics and frames, the
+popover's frame from `popover_frame`, and what is in the popover from `popover::contents`
+(`plan/popover.rs`), the one place that reads a cell's data to lay a popover out, which composes it
+in sections (a provider's quota blocks and session rows, a pull request list and its rows, the
+footer) at one `Scale` (the size and the display's pixel grid). The window asks the plan what is
+under the pointer (`rail_hit`, the popover's zones). The painter draws a plan's rects, but still works
+out some coordinates itself: a cell's ring arcs and figure position, the cap's pin, and the
+popover's tail and card corners.
+
+The plan is compiled for Windows and for tests on every OS (`cfg(any(target_os = "windows", test))`,
+as `RailMetrics::cell` is), so its tests run on a Mac. What ties it to Windows is text: the popover
+wraps, ellipsizes and places runs by their measured width. It measures through one seam,
+`TextMetrics` (`plan/text.rs`): a run's advance and the middle of its cap band, at a device-pixel
+size and a `TextWeight`. The window passes `DirectWrite` (`win_paint/text.rs`), the faces and
+advances the painter draws with, so what the plan measured is what is drawn; tests pass
+`FixedAdvance`, a fixed advance a character for each weight, heavier wider, rounded to whole pixels
+as DirectWrite rounds a run. `plan/tests/` plans with `FixedAdvance` on every OS; `win_paint/tests/`
+renders plans made with `DirectWrite`, on Windows only, from the same fixtures.
+
+The popover's spacing is a set of stacks (`Stack`, `plan/popover.rs`), each declaring the spacing
+between its items, as `PopoverView.swift` declares the helper's: the card (10 pt, inside 12 pt of
+padding), each quota block (5), the session list (8) and each session (2), each pull request list
+(6) and each row (2), and, across, a row's repository and badges (6). A nested stack writes through
+its parent's position, so there is nothing to hand back when it ends, and it knows its parent's
+spacing: a group's `last` item is followed by the parent's spacing, as a SwiftUI stack's last child
+is followed by its parent's. The session list, whose last item belongs to a session, ends with
+`close`, which trades its own spacing after that item for the card's. A stack adds an item's extent
+and the gap after it in one step, as the popover always added them, so no rect moved when the
+spacing became stacks. `plan/fixtures/plans.json` pins every rect of ten plans, every edge, size and
+display scale among them, to the bit, and `plan/tests/spacing.rs` names the spacing rules; a change
+to either moves the Windows notch's pixels. When it is meant, the golden test's failure prints the
+file's new contents.
+
+Where the Windows popover departs from the helper's stacks, the gap is written at that item:
+
+| Where | Windows | Helper |
+| --- | --- | --- |
+| After a provider's notice | 0 | 10 |
+| After the paused line | 4 | 10 |
+| After a pull request notice | 4 | 10 |
+| After a pull request list | 6 + 8 | 10 |
+| After an action error, before the footer | 0 | 10 |
+| The sessions divider | no height of its own | its line |
+| Repository to first badge, badge to badge | 8, 6 | 5, 5 |
+
+The header mark, the footer arrow and the CI dot are also placed on the cap band of the standard
+size's text (`cap_middle` is asked at 13, 10.5 and 10 points, unscaled) while the text is drawn at
+the chosen size, so at compact and large they sit slightly off it. On the top edge the card starts
+at the popover's top rather than below its tail (`placed.y + tail_space` adds the reserve only the
+left and right edges have), so the painter draws the tail up over the rail's bottom and the tail's
+length reserved under the card goes unused; the helper pads the top by the tail.
 
 **Typography is measured, not eyeballed.** The overlay sits next to the app's own window, so any
 mismatch in face, weight or antialiasing reads instantly as the wrong font. `win_paint/text.rs`

@@ -1,5 +1,6 @@
 #![allow(unsafe_code)]
 
+use crate::side_notch::plan::{TextMetrics, TextWeight};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use tiny_skia::Pixmap;
@@ -14,20 +15,11 @@ use windows::Win32::Graphics::DirectWrite::{
     DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL_SYMMETRIC,
 };
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) enum Weight {
-    Regular,
-    Medium,
-    Semibold,
-}
-
-impl Weight {
-    fn dwrite(self) -> DWRITE_FONT_WEIGHT {
-        match self {
-            Self::Regular => DWRITE_FONT_WEIGHT_NORMAL,
-            Self::Medium => DWRITE_FONT_WEIGHT_MEDIUM,
-            Self::Semibold => DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        }
+fn dwrite(weight: TextWeight) -> DWRITE_FONT_WEIGHT {
+    match weight {
+        TextWeight::Regular => DWRITE_FONT_WEIGHT_NORMAL,
+        TextWeight::Medium => DWRITE_FONT_WEIGHT_MEDIUM,
+        TextWeight::Semibold => DWRITE_FONT_WEIGHT_SEMI_BOLD,
     }
 }
 
@@ -55,7 +47,7 @@ struct Engine {
     factory: IDWriteFactory,
     collection: IDWriteFontCollection,
     family: &'static str,
-    faces: HashMap<Weight, Face>,
+    faces: HashMap<TextWeight, Face>,
     gamma: [u8; 256],
 }
 
@@ -88,7 +80,7 @@ impl Engine {
         }
     }
 
-    fn face(&mut self, weight: Weight) -> Option<&Face> {
+    fn face(&mut self, weight: TextWeight) -> Option<&Face> {
         if !self.faces.contains_key(&weight) {
             let face = self.load(weight)?;
             self.faces.insert(weight, face);
@@ -96,7 +88,7 @@ impl Engine {
         self.faces.get(&weight)
     }
 
-    fn load(&self, weight: Weight) -> Option<Face> {
+    fn load(&self, weight: TextWeight) -> Option<Face> {
         let face = self.installed_face(weight)?;
         let mut metrics = DWRITE_FONT_METRICS::default();
         unsafe { face.GetMetrics(&mut metrics) };
@@ -108,7 +100,7 @@ impl Engine {
         })
     }
 
-    fn installed_face(&self, weight: Weight) -> Option<IDWriteFontFace> {
+    fn installed_face(&self, weight: TextWeight) -> Option<IDWriteFontFace> {
         unsafe {
             let name = wide(self.family);
             let mut index = 0u32;
@@ -122,7 +114,7 @@ impl Engine {
             let family = self.collection.GetFontFamily(index).ok()?;
             family
                 .GetFirstMatchingFont(
-                    weight.dwrite(),
+                    dwrite(weight),
                     DWRITE_FONT_STRETCH_NORMAL,
                     DWRITE_FONT_STYLE_NORMAL,
                 )
@@ -193,7 +185,7 @@ fn shape(face: &Face, text: &str, size: f32) -> Option<(Vec<u16>, Vec<f32>)> {
     Some((glyphs, advances))
 }
 
-pub(super) fn ascent_px(size: f32, weight: Weight) -> f32 {
+pub(super) fn ascent_px(size: f32, weight: TextWeight) -> f32 {
     let size = size.max(1.0);
     with_engine(|engine| {
         let face = engine.face(weight)?;
@@ -202,28 +194,32 @@ pub(super) fn ascent_px(size: f32, weight: Weight) -> f32 {
     .unwrap_or_else(|| (size * 0.8).round())
 }
 
-pub(super) fn cap_middle_px(size: f32, weight: Weight) -> f32 {
-    let size = size.max(1.0);
-    with_engine(|engine| {
-        let face = engine.face(weight)?;
-        let scale = face.scale(size);
-        let baseline = (face.ascent * scale).round();
-        Some(baseline - face.cap_height * scale / 2.0)
-    })
-    .unwrap_or(size * 0.45)
-}
+pub struct DirectWrite;
 
-pub(super) fn measure_px(text: &str, size: f32, weight: Weight) -> f32 {
-    if text.is_empty() {
-        return 0.0;
+impl TextMetrics for DirectWrite {
+    fn measure_px(&self, text: &str, size: f32, weight: TextWeight) -> f32 {
+        if text.is_empty() {
+            return 0.0;
+        }
+        let size = size.max(1.0);
+        with_engine(|engine| {
+            let face = engine.face(weight)?;
+            let (_, advances) = shape(face, text, size)?;
+            Some(advances.iter().sum::<f32>().round())
+        })
+        .unwrap_or(0.0)
     }
-    let size = size.max(1.0);
-    with_engine(|engine| {
-        let face = engine.face(weight)?;
-        let (_, advances) = shape(face, text, size)?;
-        Some(advances.iter().sum::<f32>().round())
-    })
-    .unwrap_or(0.0)
+
+    fn cap_middle_px(&self, size: f32, weight: TextWeight) -> f32 {
+        let size = size.max(1.0);
+        with_engine(|engine| {
+            let face = engine.face(weight)?;
+            let scale = face.scale(size);
+            let baseline = (face.ascent * scale).round();
+            Some(baseline - face.cap_height * scale / 2.0)
+        })
+        .unwrap_or(size * 0.45)
+    }
 }
 
 pub(super) fn draw_px(
@@ -232,7 +228,7 @@ pub(super) fn draw_px(
     baseline: f32,
     text: &str,
     size: f32,
-    weight: Weight,
+    weight: TextWeight,
     color: [u8; 4],
 ) {
     if text.is_empty() {
@@ -271,10 +267,10 @@ pub(super) fn draw_px_right(
     baseline: f32,
     text: &str,
     size: f32,
-    weight: Weight,
+    weight: TextWeight,
     color: [u8; 4],
 ) {
-    let measured = measure_px(text, size, weight);
+    let measured = DirectWrite.measure_px(text, size, weight);
     draw_px(
         pixmap,
         x + width - measured,
@@ -355,53 +351,6 @@ fn rasterize(
 fn luminance(triple: [u8; 3]) -> u8 {
     let [r, g, b] = triple.map(u32::from);
     ((r * 54 + g * 183 + b * 19) >> 8) as u8
-}
-
-pub(super) fn wrap_px(
-    text: &str,
-    max_px: f32,
-    size: f32,
-    weight: Weight,
-    max_lines: usize,
-) -> Vec<String> {
-    if max_lines == 0 {
-        return Vec::new();
-    }
-    let mut words = text.split_whitespace().peekable();
-    let mut lines: Vec<String> = Vec::new();
-    let mut current = String::new();
-    while let Some(word) = words.peek() {
-        let candidate = if current.is_empty() {
-            (*word).to_string()
-        } else {
-            format!("{current} {word}")
-        };
-        if measure_px(&candidate, size, weight) <= max_px || current.is_empty() {
-            current = candidate;
-            words.next();
-        } else {
-            lines.push(std::mem::take(&mut current));
-            if lines.len() == max_lines {
-                break;
-            }
-        }
-    }
-    if !current.is_empty() || (lines.is_empty() && !text.trim().is_empty()) {
-        lines.push(current);
-    }
-    if lines.len() > max_lines {
-        lines.truncate(max_lines);
-    }
-    if words.peek().is_some() {
-        if let Some(last) = lines.last_mut() {
-            let mut cut = last.trim_end().to_string();
-            while !cut.is_empty() && measure_px(&format!("{cut}…"), size, weight) > max_px {
-                cut.pop();
-            }
-            *last = format!("{cut}…");
-        }
-    }
-    lines
 }
 
 fn blend(

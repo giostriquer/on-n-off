@@ -323,8 +323,10 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   cap centre, so the mac design's `HStack` and the app's `flex items-center` both land there.
   Segoe UI's ascent runs far above its cap line and its descender far below, so neither the
   line box nor the whole ink extent lands where the eye expects — centring on the ink drops a
-  header mark about a pixel and a half below its title. `text::cap_middle_px` gives the cap
-  offset from the real font metrics.
+  header mark about a pixel and a half below its title. The DirectWrite adapter's
+  `cap_middle_px` (`win_paint/text.rs`) gives the cap offset from the real font metrics. When no
+  face loads, nothing is measured or drawn and the metrics fall back to an ascent of 0.8 em and a
+  cap band of 0.7 em, so a mark still centres 0.35 em above the baseline.
 - **Typography is checked against the app engine, not by eye.**
   `win_paint::visual::specimen` renders every size and weight the notch draws on one sheet.
   Rebuild the same rows as HTML and render them with `msedge --headless`, once plain and

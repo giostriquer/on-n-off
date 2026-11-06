@@ -87,7 +87,7 @@ fn a_long_session_name_is_ellipsized_not_chopped() {
         status: crate::side_notch::sessions::SessionStatus::Working,
         last_active_at: "2026-09-03T10:00:00Z".into(),
     }];
-    let (planned, _) = popover_render(provider);
+    let planned = popover_plan(provider);
     let popover = planned.popover.as_ref().expect("the popover is open");
     let name = popover
         .entries
@@ -213,12 +213,6 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         seen >= 8,
         "the popovers really carried these runs: {seen} of 10"
     );
-    let plain = measure_weight("Open Limits", 11.0, TextWeight::Regular, 1.0);
-    let heavy = measure_weight("Open Limits", 11.0, TextWeight::Medium, 1.0);
-    assert!(
-        heavy > plain,
-        "a medium run is heavier than a regular one: {plain} vs {heavy}"
-    );
 }
 
 fn share(
@@ -237,7 +231,7 @@ fn share(
 }
 
 fn popover_texts(provider: ProviderCell) -> Vec<String> {
-    let (planned, _) = popover_render(provider);
+    let planned = popover_plan(provider);
     let popover = planned.popover.expect("the popover is open");
     popover
         .entries
@@ -249,12 +243,9 @@ fn popover_texts(provider: ProviderCell) -> Vec<String> {
         .collect()
 }
 
-fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, WindowAt, (Color, Color))> {
+fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, WindowAt)> {
     match cell_content(&CellData::Provider(provider), now()) {
-        CellContent::Provider { inner, .. } => inner.map(|(ring, quota)| {
-            let colors = inner_ring_colors(&ring);
-            (ring, quota, colors)
-        }),
+        CellContent::Provider { inner, .. } => inner,
         _ => panic!("wrong content kind"),
     }
 }
@@ -272,12 +263,8 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
         _ => panic!("wrong content kind"),
     }
     assert_eq!(
-        inner_ring(member).map(|(ring, at, colors)| (ring, at.used_now(), colors)),
-        Some((
-            InnerRing::WorkspaceShare,
-            Some(32.0),
-            (CREDITS_INK, CREDITS_TRACK),
-        ))
+        inner_ring(member).map(|(ring, at)| (ring, at.used_now())),
+        Some((InnerRing::WorkspaceShare, Some(32.0)))
     );
     assert_eq!(
         inner_ring(codex_member(share(
@@ -286,7 +273,7 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
             true,
             "2020-01-01T12:00:00Z"
         )))
-        .map(|(_, at, _)| at.used_now()),
+        .map(|(_, at)| at.used_now()),
         Some(Some(0.0)),
         "a share past its reset has renewed, as a window has"
     );
@@ -306,7 +293,7 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
             ..window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0)
         },
     ]);
-    let (ring, at, colors) = inner_ring(claude).expect("an inner ring");
+    let (ring, at) = inner_ring(claude).expect("an inner ring");
     assert_eq!(
         ring,
         InnerRing::Fable {
@@ -314,7 +301,6 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
         }
     );
     assert_eq!(at.used_now(), Some(13.0));
-    assert_eq!(colors, (FABLE_ORANGE, FABLE_TRACK));
 }
 
 #[test]
@@ -340,7 +326,7 @@ fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
         texts.contains(&"32% Used · 17,000 of 25,000 left".to_string()),
         "{texts:?}"
     );
-    let (planned, _) = popover_render(codex_member(share(
+    let planned = popover_plan(codex_member(share(
         "8000",
         32.0,
         false,
@@ -387,7 +373,7 @@ fn a_paused_account_with_only_a_share_says_its_values_are_last_observed() {
     paused.message = Some("Refresh failed.".into());
     paused.reading.windows.clear();
 
-    let (planned, _) = popover_render(projected(paused));
+    let planned = popover_plan(projected(paused));
     let inks = inks(&planned);
     assert!(
         inks.contains(&("Refresh failed.".to_string(), TRIP_RED)),
@@ -485,73 +471,13 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
     );
 }
 
-const WORK: Color = [96, 165, 250, 255];
-const PERSONAL: Color = [170, 155, 215, 255];
-
-fn pr_row(number: u64, repo: &str, in_organization: Option<bool>) -> serde_json::Value {
-    let mut row = pr(number, &format!("Fix #{number}"), repo);
-    row["inOrganization"] = serde_json::to_value(in_organization).unwrap();
-    row
-}
-
-fn longest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
-    let mut longest = 0;
-    for x in 0..pixmap.width() {
-        let mut run = 0;
-        for y in 0..pixmap.height() {
-            let hit = pixmap
-                .pixel(x, y)
-                .is_some_and(|px| [px.red(), px.green(), px.blue(), px.alpha()] == ink);
-            run = if hit { run + 1 } else { 0 };
-            longest = longest.max(run);
-        }
-    }
-    longest
-}
-
-fn bluish([r, g, b]: [f64; 3]) -> bool {
-    b > 100.0 && b > r * 1.4 && b > g * 1.15
-}
-
-fn lavender([r, g, b]: [f64; 3]) -> bool {
-    b > 100.0 && b > r && r > g * 1.05 && b > g * 1.2
-}
-
-fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -> usize {
-    let xs = rect.x.floor() as u32..(rect.x + rect.w).ceil() as u32;
-    let ys = rect.y.floor() as u32..(rect.y + rect.h).ceil() as u32;
-    ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
-        .filter(|&(x, y)| {
-            pixmap.pixel(x, y).is_some_and(|px| {
-                hue([
-                    f64::from(px.red()),
-                    f64::from(px.green()),
-                    f64::from(px.blue()),
-                ])
-            })
-        })
-        .count()
-}
-
 #[test]
 fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no_tag() {
-    let mut approved = pr_row(1, "acme/webapp", Some(true));
-    approved["reviewDecision"] = "APPROVED".into();
-    let pulls = pulls(vec![
-        approved,
-        pr_row(2, "octocat/dotfiles", Some(false)),
-        pr_row(3, "acme/webapp", None),
-        pr_row(
-            1234,
-            "octocat/a-repository-name-long-enough-to-run-into-the-ci-dot",
-            Some(false),
-        ),
-    ]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
         &settings(),
         &displays,
-        &data(vec![pulls]),
+        &data(vec![tagged_rows()]),
         Hover {
             active: Some(0),
             ..Hover::default()
@@ -670,27 +596,6 @@ fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no
             "and sits in the gutter, clear of the text"
         );
     }
-    let pixmap = render(&planned);
-    for ink in [WORK, PERSONAL] {
-        assert!(
-            longest_run(&pixmap, ink) >= 20,
-            "the painted popover shows an unbroken {ink:?} stripe"
-        );
-    }
-    let painted: Vec<(usize, usize)> = copies
-        .iter()
-        .map(|(_, rect)| {
-            (
-                hued_pixels(&pixmap, *rect, bluish),
-                hued_pixels(&pixmap, *rect, lavender),
-            )
-        })
-        .collect();
-    assert!(
-        painted[0].0 > 0 && painted[1].1 > 0 && painted[3].1 > 0,
-        "the copy icons are painted in their row's ink: {painted:?}"
-    );
-    assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
 }
 
 #[test]

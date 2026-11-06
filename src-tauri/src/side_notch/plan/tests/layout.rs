@@ -4,12 +4,20 @@ use crate::side_notch::model::NotchSize;
 #[test]
 fn values_snap_to_the_display_pixel_grid() {
     assert_eq!(
-        value(10.25, 1.0, 1.0),
+        Scale {
+            size: 1.0,
+            display: 1.0
+        }
+        .value(10.25),
         10.0,
         "1x displays snap to whole pixels"
     );
     assert_eq!(
-        value(76.0, 0.875, 1.5),
+        Scale {
+            size: 0.875,
+            display: 1.5
+        }
+        .value(76.0),
         100.0 / 1.5,
         "a compact cell on a 1.5x display is 100 px wide"
     );
@@ -224,54 +232,6 @@ fn pull_request_popovers_carry_open_copy_and_footer_zones() {
     ));
 }
 #[test]
-fn the_popover_tail_points_at_its_own_cell() {
-    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let cells: Vec<CellData> = (0..5)
-        .map(|index| {
-            CellData::Provider(session_only(
-                [
-                    AgentId::Claude,
-                    AgentId::Codex,
-                    AgentId::Antigravity,
-                    AgentId::Cursor,
-                    AgentId::Claude,
-                ][index],
-                40.0,
-            ))
-        })
-        .collect();
-    let last = cells.len() - 1;
-    let planned = plan(
-        &settings(),
-        &displays,
-        &data(cells),
-        Hover {
-            active: Some(last),
-            ..Hover::default()
-        },
-        now(),
-    )
-    .expect("fits");
-    let popover = planned.popover.as_ref().expect("the popover is open");
-    assert!(
-        popover.card.y > 1.0,
-        "this case only bites once the card is pushed off the window's top edge: {}",
-        popover.card.y
-    );
-    let pixmap = render(&planned);
-    let x = (popover.card.x + popover.card.w + 2.0).round() as u32;
-    let rows: Vec<u32> = (0..pixmap.height())
-        .filter(|y| pixmap.pixel(x, *y).is_some_and(|px| px.alpha() > 0))
-        .collect();
-    assert!(!rows.is_empty(), "the tail draws beside the card");
-    let centre = f64::from(rows[0] + rows[rows.len() - 1]) / 2.0;
-    let cell = planned.cells[last].rect.mid_y();
-    assert!(
-        (centre - cell).abs() <= 2.0,
-        "the tail's apex tracks the cell it belongs to: tail {centre}, cell {cell}"
-    );
-}
-#[test]
 fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
     let pulls = pulls(vec![pr(7, "Fix the flaky resize test on Windows", "o/r")]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
@@ -341,7 +301,7 @@ fn popover_hit_zones_sit_on_the_thing_they_stand_for() {
 }
 #[test]
 fn the_footer_link_reads_label_then_arrow() {
-    let (planned, _) = popover_render(claude_with(vec![window(
+    let planned = popover_plan(claude_with(vec![window(
         "w",
         "Weekly - all models",
         LimitWindowKind::Weekly,
@@ -375,5 +335,94 @@ fn the_footer_link_reads_label_then_arrow() {
         "the arrow trails the label like the macOS FooterLink: label {} arrow {}",
         label.x,
         arrow.x
+    );
+}
+#[test]
+fn a_point_on_the_rail_names_the_cell_under_it() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let cells = vec![
+        CellData::Provider(session_only(AgentId::Claude, 42.0)),
+        CellData::Provider(session_only(AgentId::Codex, 42.0)),
+    ];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(cells),
+        Hover::default(),
+        now(),
+    )
+    .expect("fits");
+    let (first, second) = (planned.cells[0].rect, planned.cells[1].rect);
+    assert_eq!(rail_hit(&planned, second.mid_x(), second.mid_y()), Some(1));
+    assert_eq!(
+        rail_hit(&planned, second.x, second.y),
+        Some(1),
+        "a cell's own corner is in it"
+    );
+    assert_eq!(
+        rail_hit(&planned, first.mid_x(), first.y + first.h),
+        None,
+        "the spacing between two cells is in neither"
+    );
+    let cap = planned.cap.rect;
+    assert_eq!(
+        rail_hit(&planned, cap.mid_x(), cap.mid_y()),
+        None,
+        "the cap is no cell"
+    );
+}
+#[test]
+fn a_rect_holds_its_left_and_top_edges_but_not_its_right_and_bottom() {
+    let rect = R::new(10.0, 20.0, 30.0, 40.0);
+    assert!(rect.contains(10.0, 20.0), "its top left corner");
+    assert!(
+        rect.contains(39.5, 59.5),
+        "just inside its bottom right corner"
+    );
+    assert!(
+        !rect.contains(40.0, 30.0),
+        "its right edge is the next rect's"
+    );
+    assert!(
+        !rect.contains(20.0, 60.0),
+        "its bottom edge is the next rect's"
+    );
+    assert!(!rect.contains(9.5, 30.0) && !rect.contains(20.0, 19.5));
+}
+#[test]
+fn a_popover_near_the_far_edges_is_pulled_back_inside_the_margin() {
+    let panel = display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0);
+    let corner = R::new(1844.0, 1000.0, 76.0, 73.0);
+    let low = popover_frame(&corner, Edge::Right, (272.0, 400.0), &panel, 1.0);
+    assert_eq!(low.y, 1080.0 - 8.0 - 400.0, "kept above the bottom margin");
+    let across = popover_frame(&corner, Edge::Bottom, (272.0, 400.0), &panel, 1.0);
+    assert_eq!(
+        across.x,
+        1920.0 - 8.0 - 272.0,
+        "kept left of the right margin"
+    );
+}
+#[test]
+fn a_collapsed_rail_on_the_right_shows_its_strip_against_the_screen_edge() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let mut on_hover = settings();
+    on_hover.show = ShowMode::OnHover;
+    let planned = plan(
+        &on_hover,
+        &displays,
+        &data(vec![CellData::Provider(session_only(
+            AgentId::Claude,
+            42.0,
+        ))]),
+        Hover::default(),
+        now(),
+    )
+    .expect("fits");
+    let pill = planned.pill.expect("collapsed shows the strip");
+    assert_eq!(planned.window.x, 1920.0 - 76.0, "the window is the rail");
+    assert_eq!(
+        (pill.x + pill.w, pill.y + pill.h / 2.0),
+        (planned.window.w, planned.window.h / 2.0),
+        "the strip hugs the screen edge, centred along the rail, in window coordinates"
     );
 }

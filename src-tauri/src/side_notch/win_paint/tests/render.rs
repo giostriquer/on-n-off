@@ -369,3 +369,150 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     }
     assert!(red > 0, "the outer band conveys the conflict");
 }
+
+#[test]
+fn the_popover_tail_points_at_its_own_cell() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let cells: Vec<CellData> = (0..5)
+        .map(|index| {
+            CellData::Provider(session_only(
+                [
+                    AgentId::Claude,
+                    AgentId::Codex,
+                    AgentId::Antigravity,
+                    AgentId::Cursor,
+                    AgentId::Claude,
+                ][index],
+                40.0,
+            ))
+        })
+        .collect();
+    let last = cells.len() - 1;
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(cells),
+        Hover {
+            active: Some(last),
+            ..Hover::default()
+        },
+        now(),
+    )
+    .expect("fits");
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    assert!(
+        popover.card.y > 1.0,
+        "this case only bites once the card is pushed off the window's top edge: {}",
+        popover.card.y
+    );
+    let pixmap = render(&planned);
+    let x = (popover.card.x + popover.card.w + 2.0).round() as u32;
+    let rows: Vec<u32> = (0..pixmap.height())
+        .filter(|y| pixmap.pixel(x, *y).is_some_and(|px| px.alpha() > 0))
+        .collect();
+    assert!(!rows.is_empty(), "the tail draws beside the card");
+    let centre = f64::from(rows[0] + rows[rows.len() - 1]) / 2.0;
+    let cell = planned.cells[last].rect.mid_y();
+    assert!(
+        (centre - cell).abs() <= 2.0,
+        "the tail's apex tracks the cell it belongs to: tail {centre}, cell {cell}"
+    );
+}
+
+fn longest_run(pixmap: &tiny_skia::Pixmap, ink: Color) -> u32 {
+    let mut longest = 0;
+    for x in 0..pixmap.width() {
+        let mut run = 0;
+        for y in 0..pixmap.height() {
+            let hit = pixmap
+                .pixel(x, y)
+                .is_some_and(|px| [px.red(), px.green(), px.blue(), px.alpha()] == ink);
+            run = if hit { run + 1 } else { 0 };
+            longest = longest.max(run);
+        }
+    }
+    longest
+}
+
+fn bluish([r, g, b]: [f64; 3]) -> bool {
+    b > 100.0 && b > r * 1.4 && b > g * 1.15
+}
+
+fn lavender([r, g, b]: [f64; 3]) -> bool {
+    b > 100.0 && b > r && r > g * 1.05 && b > g * 1.2
+}
+
+fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -> usize {
+    let xs = rect.x.floor() as u32..(rect.x + rect.w).ceil() as u32;
+    let ys = rect.y.floor() as u32..(rect.y + rect.h).ceil() as u32;
+    ys.flat_map(|y| xs.clone().map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            pixmap.pixel(x, y).is_some_and(|px| {
+                hue([
+                    f64::from(px.red()),
+                    f64::from(px.green()),
+                    f64::from(px.blue()),
+                ])
+            })
+        })
+        .count()
+}
+
+#[test]
+fn each_row_paints_its_work_or_personal_ink_on_its_stripe_and_copy_icon() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    let planned = plan(
+        &settings(),
+        &displays,
+        &data(vec![tagged_rows()]),
+        Hover {
+            active: Some(0),
+            ..Hover::default()
+        },
+        now(),
+    )
+    .expect("fits");
+    let copies: Vec<R> = planned
+        .popover
+        .as_ref()
+        .expect("the popover is open")
+        .entries
+        .iter()
+        .filter_map(|(item, rect)| matches!(item, PopItem::CopyIcon { .. }).then_some(*rect))
+        .collect();
+    let pixmap = render(&planned);
+    for ink in [WORK, PERSONAL] {
+        assert!(
+            longest_run(&pixmap, ink) >= 20,
+            "the painted popover shows an unbroken {ink:?} stripe"
+        );
+    }
+    let painted: Vec<(usize, usize)> = copies
+        .iter()
+        .map(|rect| {
+            (
+                hued_pixels(&pixmap, *rect, bluish),
+                hued_pixels(&pixmap, *rect, lavender),
+            )
+        })
+        .collect();
+    assert!(
+        painted[0].0 > 0 && painted[1].1 > 0 && painted[3].1 > 0,
+        "the copy icons are painted in their row's ink: {painted:?}"
+    );
+    assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
+}
+
+#[test]
+fn each_inner_ring_paints_in_its_own_ink() {
+    assert_eq!(
+        inner_ring_colors(&InnerRing::WorkspaceShare),
+        (CREDITS_INK, CREDITS_TRACK)
+    );
+    assert_eq!(
+        inner_ring_colors(&InnerRing::Fable {
+            window_id: "fable".into()
+        }),
+        (FABLE_ORANGE, FABLE_TRACK)
+    );
+}
