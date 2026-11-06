@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
+import { makeWindow } from "$lib/usageFormat";
 import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
 import { UsageFocusReads } from "./usageFocusReads";
@@ -203,6 +204,55 @@ describe("Usage when the window shows again", () => {
   });
 });
 
+describe("Usage refresh", () => {
+  const spanDays = ({ sinceDay, untilDay }: { sinceDay: string; untilDay: string }) =>
+    (Date.parse(untilDay) - Date.parse(sinceDay)) / 86_400_000 + 1;
+  const reads = () => usageSummary.mock.calls.map(([input]) => [spanDays(input), input.force]);
+  const settled = () =>
+    waitFor(() => expect(screen.getByTestId("usage-screen")).toHaveAttribute("aria-busy", "false"));
+
+  it("reads forced on every press, even after the screen remounts, and leaves the next read unforced", async () => {
+    usageSummary.mockResolvedValue(summary());
+    const client = createMainWindowQueryClient();
+    const first = renderUsage(client);
+    await screen.findByRole("region", { name: "Usage totals" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    await waitFor(() => expect(reads()).toEqual([[30, false], [30, true]]));
+    await settled();
+    first.unmount();
+
+    renderUsage(client);
+    await screen.findByRole("region", { name: "Usage totals" });
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    await act(async () => undefined);
+    await settled();
+    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    await settled();
+
+    expect(reads()).toEqual([[30, false], [30, true], [30, true], [7, false]]);
+  });
+
+  it("refreshes the window on screen, not the 30 days the screen opened on", async () => {
+    usageSummary.mockImplementation((input: { sinceDay: string; untilDay: string; force: boolean }) =>
+      Promise.resolve(summary({ costUsd: input.force ? 77 : spanDays(input) })),
+    );
+    renderUsage(createMainWindowQueryClient());
+    await screen.findByRole("region", { name: "Usage totals" });
+    fireEvent.click(screen.getByRole("button", { name: "7 days" }));
+    await settled();
+    await waitFor(() => expectTotal("$7.00"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+    await act(async () => undefined);
+    await settled();
+
+    expect(reads()).toEqual([[30, false], [7, false], [7, true]]);
+    await waitFor(() => expectTotal("$77.00"));
+    const week = makeWindow(7);
+    expect(screen.getByRole("region", { name: `Usage chart ${week.sinceDay} to ${week.untilDay}` })).toBeInTheDocument();
+  });
+});
+
 describe("Usage loading continuity", () => {
   it("keeps the displayed totals and chart bounds while a different window loads", async () => {
     const first = deferred<UsageSummary>();
@@ -230,6 +280,24 @@ describe("Usage loading continuity", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
+  it("a failed window change keeps the last complete body with the error", async () => {
+    const first = deferred<UsageSummary>();
+    const next = deferred<UsageSummary>();
+    usageSummary.mockImplementationOnce(() => first.promise).mockImplementationOnce(() => next.promise);
+    renderUsage();
+
+    await act(async () => first.resolve(summary()));
+    await screen.findByRole("region", { name: "Usage totals" });
+    fireEvent.click(screen.getByRole("button", { name: "90 days" }));
+    await act(async () => next.reject(new Error("fixture window failed")));
+
+    expect(await screen.findByText(/fixture window failed/i)).toBeInTheDocument();
+    expectTotal("$12.50");
+    expect(screen.getByRole("region", { name: "Token metrics" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Usage chart 2026-07-17 to 2026-08-15" })).toBeInTheDocument();
+    expect(screen.getByTestId("usage-screen")).toHaveAttribute("aria-busy", "false");
+  });
+
   it("keeps the current body during a forced refresh", async () => {
     const first = deferred<UsageSummary>();
     const refreshed = deferred<UsageSummary>();
@@ -243,9 +311,11 @@ describe("Usage loading continuity", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
 
     expectTotal("$12.50");
+    expect(await screen.findByRole("status")).toHaveTextContent("Refreshing Jul 17 to Aug 15");
+    expectTotal("$12.50");
     expect(screen.getByRole("region", { name: "Token metrics" })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Usage chart 2026-07-17 to 2026-08-15" })).toBeInTheDocument();
-    expect(screen.getByRole("status")).toHaveTextContent("Refreshing Jul 17 to Aug 15");
+    expect(screen.getByRole("button", { name: "Refresh usage" })).toBeDisabled();
     await waitFor(() => expect(usageSummary.mock.calls[1]?.[0]).toMatchObject({ force: true }));
 
     await act(async () => refreshed.resolve(summary({ costUsd: 13.5 })));

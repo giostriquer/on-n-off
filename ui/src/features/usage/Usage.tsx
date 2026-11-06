@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, RefreshCw } from "lucide-react";
 import { displayError, parseInvokeError } from "$lib/error";
 import { USAGE_PROVIDERS, providerColor, providerLabel, providerNames } from "$lib/providers";
@@ -19,7 +19,7 @@ import type { UsageMetric } from "$lib/usageTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { Segmented } from "@/components/Segmented";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
-import { loadUsageWindow, type UsageQueryResult, usageWindowQuery } from "./usageQuery";
+import { refreshUsageWindow, type UsageQueryResult, usageWindowQuery } from "./usageReads";
 
 const WINDOWS = [
   { days: 1, label: "Past 24h" },
@@ -36,19 +36,11 @@ export function Usage() {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const [breakdown, setBreakdown] = useState<BreakdownMode>("model");
   const [openDays, setOpenDays] = useState<ReadonlySet<string>>(() => new Set());
-  const [forceRevision, setForceRevision] = useState(0);
-  const forceRef = useRef(false);
+  const client = useQueryClient();
   const lastCompleteRef = useRef<UsageQueryResult | null>(null);
   const activeWindow = makeWindow(windowDays);
 
-  const query = useQuery({
-    ...usageWindowQuery(windowDays, forceRevision, async () => {
-      const force = forceRef.current;
-      forceRef.current = false;
-      return loadUsageWindow(windowDays, force);
-    }),
-    placeholderData: keepPreviousData,
-  });
+  const query = useQuery({ ...usageWindowQuery(windowDays), placeholderData: keepPreviousData });
 
   useEffect(() => {
     void preloadUsageChart();
@@ -136,8 +128,7 @@ export function Usage() {
       : `Refreshing ${displayedWindow.fullTime ? "Full time · " : ""}${displayedRange}…`;
 
   function refresh() {
-    forceRef.current = true;
-    setForceRevision((n) => n + 1);
+    void refreshUsageWindow(client, windowDays);
   }
 
   return (

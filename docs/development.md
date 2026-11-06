@@ -48,6 +48,12 @@ source carries no comments (see [Code comments](#code-comments)).
   `ui/src/lib/sharedReads/`, never through a query key of your own, and force it only with that
   module's refresh. A new source needs the four changes
   [the guide lists](architecture/shared-reads.md#in-the-ui).
+- Usage in the UI: `ui/src/features/usage/usageReads.ts`, which declares every Usage key (the
+  windows on the `["usage"]` root, the folded-usage status beside them); never a key of your own,
+  and force a read only with its `refreshUsageWindow` ([why](architecture/README.md#usage)). The
+  root lives in the leaf module `usageKeys.ts`, the only thing the startup-mounted focus connector
+  (`usageFocusReads.ts`) imports from Usage, so the connector never pulls the read module into the
+  startup bundle.
 - `item_install/` never shells out to a provider CLI.
 - The banked reset alert rule: `reset_alert.rs`, which does no I/O; `limits_monitor.rs` only
   performs the plan it returns, through an `Io` trait its tests fake. A number the UI restates

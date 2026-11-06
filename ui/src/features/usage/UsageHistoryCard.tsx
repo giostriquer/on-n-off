@@ -1,26 +1,19 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { SettingRow, SettingsCard, cardButton, rowLabel } from "@/components/SettingsCard";
-import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import type { UsageHistoryStatus } from "$lib/usageTypes";
-import { USAGE_QUERY_ROOT } from "./usageFocusReads";
-
-const HISTORY_KEY = ["usage-history"];
+import { clearFoldedUsage, foldedUsageStatusQuery } from "./usageReads";
 
 const DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
 
 export function UsageHistoryCard() {
   const client = useQueryClient();
-  const status = useQuery({ queryKey: HISTORY_KEY, queryFn: () => api.usageHistoryStatus() });
+  const status = useQuery(foldedUsageStatusQuery());
   const [confirming, setConfirming] = useState(false);
   const clear = useMutation({
-    mutationFn: () => api.clearUsageHistory(),
-    onSuccess: (next) => {
-      client.setQueryData(HISTORY_KEY, next);
-      setConfirming(false);
-      void client.invalidateQueries({ queryKey: USAGE_QUERY_ROOT });
-    },
+    mutationFn: () => clearFoldedUsage(client),
+    onSuccess: () => setConfirming(false),
   });
   const current = status.data;
   const clearable = current !== undefined && current.state !== "empty";

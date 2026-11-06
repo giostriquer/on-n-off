@@ -186,6 +186,8 @@ initial bundle, and TanStack's observer stays in the screens' chunks.
   `forcedRead.test.tsx` also checks the disarm with no screen showing the read, on each window's
   own query client (`ui/src/lib/queryClients.ts`). The shell's Refresh and the popover's are
   `refreshLimits`, every limits source forced; the Pull requests screen's is `refreshGithubPrs`.
+  The Usage refresh button uses it too (`refreshUsageWindow`, `ui/src/features/usage/usageReads.ts`),
+  though Usage is not announced ([Usage](README.md#usage)).
   A forced read is tried once and not retried.
 - **Accounts has no forced read.** Its announcement covers two key families, the account lists
   with the remembering preference (`["accounts", …]`) and the Codex subscription dates

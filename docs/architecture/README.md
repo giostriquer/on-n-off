@@ -554,17 +554,45 @@ Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>
 overwriting it. Those are read too, so a turn a rewrite dropped still counts; the turns both copies
 hold collapse to one.
 
+One module reads Usage in the UI: `ui/src/features/usage/usageReads.ts`, modelled on the shared-read
+source modules ([shared reads](shared-reads.md#in-the-ui)) but not announced, since no Rust revision
+stands behind it. It declares every Usage key (the windows on the `["usage"]` root, and the
+folded-usage status beside them), builds the `usage_summary` input and forces a read. Screens pass
+its query options to `useQuery` and call its operations; they never write a key:
+
+- `usageWindowQuery(days, onRead?)`: one cache entry per window, `["usage", days]`, which the Usage
+  screen's 30 days and the Overview card share. Its read is unforced, computes the window when it
+  is made (so a cached Past 24h keeps the hour bounds it was read for), and runs `onRead` as it
+  starts: the Overview card's `markStartup("usage-start")`.
+- `refreshUsageWindow(client, days)`: the Usage refresh button, one forced read of that entry
+  through `readForced` (`ui/src/lib/sharedReads/forcedRead.ts`), tried once; a failure stays on the
+  entry, beside the figures it already had. The Overview therefore shows what a 30-day refresh
+  read, and the read after a refresh is unforced however the screen was mounted. A force carried in
+  a ref and a revision in the key, as before, was left armed by a refresh that a remount answered
+  from the cache, and forced the next read unasked. Two consequences of the shared entry and of
+  `readForced`, accepted as they are for the Limits and pull request refreshes:
+  - A failed 30-day refresh shows its error on the Overview card too, beside the figures it
+    already had, until the next unforced read of the window succeeds.
+  - After a refresh the entry keeps `readForced`'s options until a screen showing that window
+    renders again and puts its own back, so a read the cache starts in between (a focus re-read,
+    Clear's invalidation) is tried once, without retries. Restoring them in `readForced` itself is
+    a follow-up shared with those refreshes.
+- `foldedUsageStatusQuery()` and `clearFoldedUsage(client)`: Settings' Usage history card. Clearing
+  puts the status the clear returned in the cache and invalidates every Usage window, so a shown
+  window reads again, unforced, and a hidden one when it is next shown. The status key,
+  `["usage-history"]`, sits outside the `["usage"]` root, so the focus re-read below never reads it.
+
 The Usage screen and the Overview usage card read when they mount, on the Usage refresh button,
 and when the user comes back to the main window with figures older than its stale time
 (`createMainWindowQueryClient`, `ui/src/lib/queryClients.ts`). Closing the window only hides it,
 and switching to another app leaves it on screen, so a screen left on Usage stays mounted; without
 this it kept old figures until another screen was opened and Usage was opened again.
-`ui/src/features/usage/usageQuery.ts` owns the query factory (`usageWindowQuery`) and
-`usageFocusReads.ts` beside it owns the `["usage"]` key root and the focus connector, kept apart
-so the connector `App.tsx` mounts does not pull the usage loader and formatters into the startup
-bundle. Two signals mean "came back":
+`usageFocusReads.ts`, beside the read module, holds the focus connector `App.tsx` mounts. It imports
+only the `["usage"]` key root, from the leaf module `usageKeys.ts`, and never the read module:
+Rollup keeps a module in one chunk, so a connector importing `usageReads.ts` would pull the loader
+and the usage formatters into the startup bundle. Two signals mean "came back":
 
-- **The webview's `visibilitychange`**, which TanStack's focus manager hears. Every usage view
+- **The webview's `visibilitychange`**, which TanStack's focus manager hears. Every Usage window
   opts in through `usageWindowQuery`; the main window turns this off by default, so only reads
   that opt in (usage, Limits, PRs, accounts) re-read on it. WKWebView fires it when the window is
   hidden and shown again; WebView2 on Windows never reports the window hidden.
@@ -834,4 +862,4 @@ the code today; a change that moves one updates its row.
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
 | Watermark | `Watermark` (`usage/history.rs`) |
-| Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs` |
+| Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs`; its status read and cleared in the UI through `foldedUsageStatusQuery` and `clearFoldedUsage` (`ui/src/features/usage/usageReads.ts`) |

@@ -1,8 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
-
-export const USAGE_QUERY_ROOT = ["usage"] as const;
+import { USAGE_QUERY_ROOT } from "./usageKeys";
 
 export function connectUsageFocusReads(client: QueryClient): () => void {
   let disposed = false;

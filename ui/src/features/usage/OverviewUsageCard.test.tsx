@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { OverviewUsageCard } from "./OverviewUsageCard";
+import { Usage } from "./Usage";
 import { UsageFocusReads } from "./usageFocusReads";
 
 const usageSummary = vi.hoisted(() => vi.fn((_input?: { force: boolean }) => new Promise(() => undefined)));
@@ -224,6 +225,40 @@ describe("OverviewUsageCard", () => {
     expect(pricedRow.textContent).toContain("$1.00");
     expect(pricedRow.textContent).not.toContain("unpriced");
     expect(screen.getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
+  });
+
+  it("shows what a Refresh of the same 30 days on the Usage screen read, without reading again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
+      usageSummary.mockResolvedValueOnce(modelSummary).mockResolvedValueOnce({
+        ...modelSummary,
+        buckets: [{ ...modelSummary.buckets[0]!, model: "gpt-5.7-sol" }],
+      });
+      const client = createMainWindowQueryClient();
+      const usage = render(
+        <QueryClientProvider client={client}>
+          <Usage />
+        </QueryClientProvider>,
+      );
+      await screen.findByRole("region", { name: "Usage totals" });
+      fireEvent.click(screen.getByRole("button", { name: "Refresh usage" }));
+      await waitFor(() => expect(usageSummary.mock.calls.map(([input]) => input?.force)).toEqual([false, true]));
+      await waitFor(() => expect(screen.getByTestId("usage-screen")).toHaveAttribute("aria-busy", "false"));
+      usage.unmount();
+
+      render(
+        <QueryClientProvider client={client}>
+          <OverviewUsageCard />
+        </QueryClientProvider>,
+      );
+
+      expect(await screen.findByText("gpt-5.7-sol")).toBeTruthy();
+      expect(screen.queryByText("gpt-5.6-sol")).toBeNull();
+      expect(usageSummary).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([

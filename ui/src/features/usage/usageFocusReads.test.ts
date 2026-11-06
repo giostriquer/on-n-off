@@ -54,7 +54,7 @@ it("re-reads only the stale usage queries when the main window gains focus, neve
   const client = mountedClient();
   const usageRead = vi.fn(() => Promise.resolve("usage"));
   const limitsRead = vi.fn(() => Promise.resolve("limits"));
-  unsubscribers.push(observe(client, ["usage", 30, 0], usageRead), observe(client, ["limits", "claude"], limitsRead));
+  unsubscribers.push(observe(client, ["usage", 30], usageRead), observe(client, ["limits", "claude"], limitsRead));
   const disconnect = connectUsageFocusReads(client);
   await waitFor(() => expect(focusHandlers.size).toBe(1));
   await waitFor(() => expect(usageRead).toHaveBeenCalledTimes(1));
@@ -74,11 +74,11 @@ it("re-reads only the stale usage queries when the main window gains focus, neve
 it("leaves cached usage windows that no view shows alone when the main window gains focus", async () => {
   const client = mountedClient();
   const ninetyDayRead = vi.fn(() => Promise.resolve("90 days"));
-  const leftWindow = observe(client, ["usage", 90, 0], ninetyDayRead);
+  const leftWindow = observe(client, ["usage", 90], ninetyDayRead);
   await waitFor(() => expect(ninetyDayRead).toHaveBeenCalledTimes(1));
   leftWindow();
   const shownRead = vi.fn(() => Promise.resolve("30 days"));
-  unsubscribers.push(observe(client, ["usage", 30, 0], shownRead));
+  unsubscribers.push(observe(client, ["usage", 30], shownRead));
   const disconnect = connectUsageFocusReads(client);
   await waitFor(() => expect(focusHandlers.size).toBe(1));
   await waitFor(() => expect(shownRead).toHaveBeenCalledTimes(1));
@@ -88,7 +88,7 @@ it("leaves cached usage windows that no view shows alone when the main window ga
 
   await waitFor(() => expect(shownRead).toHaveBeenCalledTimes(2));
   expect(ninetyDayRead).toHaveBeenCalledTimes(1);
-  expect(client.getQueryData(["usage", 90, 0])).toBe("90 days");
+  expect(client.getQueryData(["usage", 90])).toBe("90 days");
   disconnect();
 });
 
@@ -99,10 +99,10 @@ it("joins a usage re-read already in flight instead of starting a second scan", 
     .fn<() => Promise<string>>()
     .mockResolvedValueOnce("first")
     .mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
-  unsubscribers.push(observe(client, ["usage", 30, 0], usageRead));
+  unsubscribers.push(observe(client, ["usage", 30], usageRead));
   const disconnect = connectUsageFocusReads(client);
   await waitFor(() => expect(focusHandlers.size).toBe(1));
-  await waitFor(() => expect(client.getQueryData(["usage", 30, 0])).toBe("first"));
+  await waitFor(() => expect(client.getQueryData(["usage", 30])).toBe("first"));
 
   vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
   await act(async () => document.dispatchEvent(new Event("visibilitychange", { bubbles: true })));
@@ -112,7 +112,7 @@ it("joins a usage re-read already in flight instead of starting a second scan", 
   expect(usageRead).toHaveBeenCalledTimes(2);
 
   await act(async () => finish("second"));
-  await waitFor(() => expect(client.getQueryData(["usage", 30, 0])).toBe("second"));
+  await waitFor(() => expect(client.getQueryData(["usage", 30])).toBe("second"));
   expect(usageRead).toHaveBeenCalledTimes(2);
   disconnect();
 });

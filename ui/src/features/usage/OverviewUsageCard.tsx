@@ -10,7 +10,7 @@ import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } fr
 import { UsageCost } from "./UsageCost";
 import type { UsageMetric } from "$lib/usageTypes";
 import { LazyUsageChart, preloadUsageChart } from "@/features/usage/LazyUsageChart";
-import { loadUsageWindow, usageWindowQuery } from "./usageQuery";
+import { usageWindowQuery } from "./usageReads";
 
 function OpenUsageLink({ className }: { className: string }) {
   return (
@@ -29,13 +29,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
   const [metric, setMetric] = useState<UsageMetric>("cost");
   const window = useMemo(() => makeWindow(30), []);
 
-  const query = useQuery({
-    ...usageWindowQuery(30, 0, () => {
-      markStartup("usage-start");
-      return loadUsageWindow(30);
-    }),
-    enabled: ready,
-  });
+  const query = useQuery({ ...usageWindowQuery(30, () => markStartup("usage-start")), enabled: ready });
 
   const summary = query.data?.summary ?? null;
   const displayedWindow = query.data?.window ?? window;
