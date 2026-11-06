@@ -3,7 +3,6 @@ use serde_json::{json, Value};
 use super::super::test_support::*;
 use super::super::*;
 use crate::paths::scratch_dir;
-use crate::usage::folding::{fold_history_in, FoldChecks};
 use crate::usage::pricing::{self, rates_cache_path};
 
 fn write_rates(home: &Path) {
@@ -131,7 +130,7 @@ fn write_fixture_home(home: &Path) {
         json!({ "input_tokens": 512, "cached_input_tokens": 0, "output_tokens": 32 }),
         "2026-08-18T09:30:01Z",
     );
-    fold_history_in(home, at("2026-08-21T12:00:00Z"), &mut FoldChecks::default()).unwrap();
+    fold_on(home, "2026-08-21T12:00:00Z");
     std::fs::remove_file(home.join(".claude/projects/proj/gone.jsonl")).unwrap();
 }
 

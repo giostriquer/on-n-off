@@ -194,7 +194,7 @@ fn prune_keeps_live_history_and_incomplete_roots() {
             ]),
             active_roots: vec!["/root".to_string(), "/pending".to_string()],
             walked_roots: vec!["/root".to_string()],
-            watermark: crate::usage::history::Watermark::NONE,
+            watermark: crate::usage::files::history::Watermark::NONE,
         },
     );
     assert_eq!(removed, 2);

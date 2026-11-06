@@ -1,8 +1,10 @@
 use super::super::test_support::*;
 use crate::paths::scratch_dir;
+use crate::usage::files::testing::{
+    reset_transcript_parse_count, summary_cache_path_for, transcript_parse_count,
+};
+use crate::usage::files::Step;
 use crate::usage::pricing;
-use crate::usage::sources::{reset_transcript_parse_count, transcript_parse_count};
-use crate::usage::summary_cache::summary_cache_path_for;
 
 #[test]
 fn a_forced_read_is_never_served_from_the_cache_but_stores_what_it_counted() {
@@ -56,7 +58,7 @@ fn a_read_that_could_not_read_a_transcript_is_not_stored() {
     read_offline(&home, august_input(false));
     let summary_path = summary_cache_path_for(&home);
     std::fs::remove_file(&summary_path).unwrap();
-    std::fs::remove_file(crate::usage::sources::scan_cache_file(&home)).unwrap();
+    std::fs::remove_file(crate::usage::files::testing::scan_cache_file(&home)).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
 
     let unread = read_offline(&home, august_input(false));
@@ -74,7 +76,9 @@ fn a_read_whose_transcripts_changed_before_it_stored_is_not_stored() {
     write_claude_transcript(&home);
 
     let read_home = home.clone();
-    let read = paused_before_publish(move || read_offline(&read_home, august_input(false)));
+    let read = paused_before(Step::Store, move || {
+        read_offline(&read_home, august_input(false))
+    });
     append_claude_record(&home, "msg_2", 25);
 
     assert_eq!(output_tokens(&read.resume()), 20);

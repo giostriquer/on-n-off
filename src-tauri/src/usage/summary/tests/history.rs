@@ -2,14 +2,13 @@ use super::super::test_support::*;
 use super::super::*;
 use crate::dto::{AgentId, UsageHistoryState};
 use crate::paths::scratch_dir;
-use crate::usage::folding::{clear_history_in, fold_history_in, history_status_in, FoldChecks};
-use crate::usage::history::{history_path_for, FoldedRow, HistoryStore, Watermark};
-use crate::usage::pricing;
-use crate::usage::sources::{
-    cached_record_count, reset_transcript_parse_count, source_index_file, transcript_parse_count,
-    with_live_transcript,
+use crate::usage::files::testing::{
+    cached_record_count, history_open_count, history_path_for, reset_history_open_count,
+    reset_scan_cache_decode_count, reset_transcript_parse_count, scan_cache_decode_count,
+    source_index_file, summary_cache_path_for, transcript_parse_count, HistoryStore, Watermark,
 };
-use crate::usage::summary_cache::summary_cache_path_for;
+use crate::usage::files::{FoldChecks, FoldedRow, Step};
+use crate::usage::pricing;
 
 const AFTER_AUGUST_FIRST_WEEK: &str = "2026-08-21T12:00:00Z";
 
@@ -18,7 +17,9 @@ fn fold(home: &Path) {
 }
 
 fn fold_with(home: &Path, checks: &mut FoldChecks) {
-    fold_history_in(home, at(AFTER_AUGUST_FIRST_WEEK), checks).unwrap();
+    UsageFiles::of(home)
+        .fold(at(AFTER_AUGUST_FIRST_WEEK), checks)
+        .unwrap();
 }
 
 fn folded_outputs(home: &Path) -> Vec<u64> {
@@ -174,108 +175,6 @@ fn records_after_the_watermark_are_read_from_their_transcript() {
 }
 
 #[test]
-fn a_transcript_still_being_written_does_not_hold_the_fold_back() {
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-live-writer");
-    write_claude_lines(
-        &home,
-        "a.jsonl",
-        &[claude_line("msg_1", "2026-08-07T04:05:13.944Z", 20)],
-    );
-    let path = home.join(".claude/projects/proj/a.jsonl");
-    let still_writing = claude_line("msg_2", "2026-08-21T11:00:00.000Z", 1);
-
-    with_live_transcript(&path, &still_writing, || fold(&home));
-
-    assert_eq!(folded_outputs(&home), [20]);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[cfg(unix)]
-#[test]
-fn folding_waits_until_every_directory_can_be_walked() {
-    use std::os::unix::fs::PermissionsExt;
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-locked-dir");
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = home.join(".claude/projects/locked");
-    std::fs::create_dir_all(&locked).unwrap();
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-
-    fold(&home);
-
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert_eq!(watermark(&home), Watermark::NONE);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[cfg(unix)]
-#[test]
-fn folding_waits_for_a_recent_transcript_that_cannot_be_read() {
-    use std::os::unix::fs::PermissionsExt;
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-locked-file");
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = write_record(&home, "b.jsonl", "2026-08-08T04:05:13.944Z", 300);
-    set_mtime(&locked, "2026-08-08T04:05:14Z");
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let mut checks = FoldChecks::default();
-
-    fold_with(&home, &mut checks);
-    fold_with(&home, &mut checks);
-
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(watermark(&home), Watermark::NONE);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[cfg(unix)]
-#[test]
-fn a_transcript_unreadable_for_a_week_past_the_cutoff_stops_holding_the_fold_back() {
-    use std::os::unix::fs::PermissionsExt;
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-long-unreadable");
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = write_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
-    set_mtime(&locked, "2026-08-06T23:59:59Z");
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let mut checks = FoldChecks::default();
-
-    fold_with(&home, &mut checks);
-    let after_one_check = watermark(&home);
-    fold_with(&home, &mut checks);
-
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-    assert_eq!(after_one_check, Watermark::NONE);
-    assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
-    assert_eq!(folded_outputs(&home), [20]);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[cfg(unix)]
-#[test]
-fn an_old_transcript_that_fails_to_read_once_is_waited_for() {
-    use std::os::unix::fs::PermissionsExt;
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-transient-unreadable");
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    let locked = write_record(&home, "b.jsonl", "2026-08-06T04:05:13.944Z", 300);
-    set_mtime(&locked, "2026-08-06T23:59:59Z");
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
-    let mut checks = FoldChecks::default();
-
-    fold_with(&home, &mut checks);
-    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
-    fold_with(&home, &mut checks);
-
-    assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
-    let mut outputs = folded_outputs(&home);
-    outputs.sort_unstable();
-    assert_eq!(outputs, [20, 300]);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[test]
 fn a_history_that_does_not_read_is_counted_around_and_never_written_over() {
     let _serial = pricing::lock_rates_state();
     let home = scratch_dir("usage-history-torn");
@@ -320,7 +219,7 @@ fn clearing_the_history_recounts_what_is_still_on_disk() {
     let before_clear = read_offline(&home, august_input(false));
     assert!(summary_cache_path_for(&home).exists());
 
-    clear_history_in(&home).unwrap();
+    UsageFiles::of(&home).clear().unwrap();
     let after_clear = read_offline(&home, august_input(false));
     fold(&home);
 
@@ -328,6 +227,88 @@ fn clearing_the_history_recounts_what_is_still_on_disk() {
     assert_eq!(output_tokens(&after_clear), 300);
     assert!(!after_clear.cache_hit);
     assert_eq!(folded_outputs(&home), [300]);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_summary_that_a_fold_overtook_before_it_locked_is_kept_for_that_fold_and_not_after_a_clear() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-fold-before-lock");
+    let gone = write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+
+    let read_home = home.clone();
+    let overtaken = paused_before(Step::Count, move || {
+        read_offline(&read_home, august_input(false))
+    });
+    fold(&home);
+    std::fs::remove_file(&gone).unwrap();
+    let overtaken = overtaken.resume();
+    let served = read_offline(&home, august_input(false));
+    UsageFiles::of(&home).clear().unwrap();
+    let after_clear = read_offline(&home, august_input(false));
+
+    assert_eq!(output_tokens(&overtaken), 320);
+    assert!(served.cache_hit);
+    assert_eq!(output_tokens(&served), 320);
+    assert_eq!(output_tokens(&after_clear), 300);
+    assert!(!after_clear.cache_hit);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_fold_waits_while_a_summary_holds_the_usage_files() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-fold-waits");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+
+    let read_home = home.clone();
+    let read = paused_before(Step::Read, move || {
+        read_offline(&read_home, august_input(false))
+    });
+    let (folded, fold_finished) = std::sync::mpsc::channel();
+    let fold_home = home.clone();
+    let folding = std::thread::spawn(move || {
+        fold(&fold_home);
+        folded.send(()).unwrap();
+    });
+    let finished_while_held = fold_finished
+        .recv_timeout(std::time::Duration::from_millis(300))
+        .is_ok();
+    let summary = read.resume();
+    let finished_after = finished_while_held || fold_finished.recv_timeout(PAUSE_LIMIT).is_ok();
+    folding.join().unwrap();
+
+    assert!(
+        !finished_while_held,
+        "the fold ran while the read held the lock"
+    );
+    assert!(finished_after, "the fold never finished");
+    assert_eq!(output_tokens(&summary), 20);
+    assert_eq!(watermark(&home).ms(), Some(at("2026-08-14T00:00:00Z")));
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_summary_counted_before_a_fold_does_not_replace_one_counted_after_it() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-fold-before-store");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+
+    let read_home = home.clone();
+    let before_fold = paused_before(Step::Store, move || {
+        read_offline(&read_home, august_input(false))
+    });
+    fold(&home);
+    let after_fold = read_offline(&home, august_input(false));
+    let before_fold = before_fold.resume();
+    let again = read_offline(&home, august_input(false));
+
+    assert_eq!(output_tokens(&before_fold), 320);
+    assert_eq!(output_tokens(&after_fold), 320);
+    assert!(again.cache_hit);
+    assert_eq!(output_tokens(&again), 320);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -344,6 +325,26 @@ fn a_summary_stored_before_a_fold_is_not_served_after_it() {
 
     assert!(!after_fold.cache_hit);
     assert_eq!(output_tokens(&after_fold), 20);
+    let _ = std::fs::remove_dir_all(&home);
+}
+
+#[test]
+fn a_summary_served_from_the_cache_reads_neither_the_history_nor_the_scan_cache() {
+    let _serial = pricing::lock_rates_state();
+    let home = scratch_dir("usage-history-served-unread");
+    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
+    write_record(&home, "b.jsonl", "2026-08-16T04:05:13.944Z", 300);
+    fold(&home);
+    read_offline(&home, august_input(false));
+    reset_history_open_count();
+    reset_scan_cache_decode_count();
+
+    let served = read_offline(&home, august_input(false));
+
+    assert!(served.cache_hit);
+    assert_eq!(output_tokens(&served), 320);
+    assert_eq!(history_open_count(), 0);
+    assert_eq!(scan_cache_decode_count(), 0);
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -370,40 +371,6 @@ fn a_superseded_transcript_keeps_the_turns_its_rewrite_dropped() {
 
     assert_eq!(output_tokens(&summary), 320);
     assert_eq!(record_count(&summary), 2);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
-#[test]
-fn history_status_says_how_far_back_usage_is_kept() {
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-status");
-    let empty = history_status_in(&home);
-    assert_eq!(empty.state, UsageHistoryState::Empty);
-    assert_eq!(
-        (empty.kept_since, empty.folded_through, empty.bytes),
-        (None, None, 0)
-    );
-
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    fold(&home);
-    let kept = history_status_in(&home);
-
-    assert_eq!(kept.state, UsageHistoryState::Kept);
-    assert_eq!(kept.kept_since.as_deref(), Some("2026-08-07T04:00:00.000Z"));
-    assert_eq!(
-        kept.folded_through.as_deref(),
-        Some("2026-08-14T00:00:00.000Z")
-    );
-    assert_eq!(
-        kept.bytes,
-        std::fs::metadata(history_path_for(&home)).unwrap().len()
-    );
-
-    std::fs::write(history_path_for(&home), "{ torn").unwrap();
-    assert_eq!(
-        history_status_in(&home).state,
-        UsageHistoryState::Unreadable
-    );
     let _ = std::fs::remove_dir_all(&home);
 }
 
@@ -472,22 +439,6 @@ fn a_message_whose_copies_straddle_the_watermark_counts_its_richest_copy_once() 
     let _ = std::fs::remove_dir_all(&home);
 }
 
-#[test]
-fn the_background_check_reads_nothing_else_until_a_fold_is_due() {
-    let _serial = pricing::lock_rates_state();
-    let home = scratch_dir("usage-history-idle-check");
-    write_record(&home, "a.jsonl", "2026-08-07T04:05:13.944Z", 20);
-    fold(&home);
-    std::fs::remove_file(source_index_file(&home)).unwrap();
-    reset_transcript_parse_count();
-
-    fold(&home);
-
-    assert!(!source_index_file(&home).exists());
-    assert_eq!(transcript_parse_count(), 0);
-    let _ = std::fs::remove_dir_all(&home);
-}
-
 #[cfg(unix)]
 #[test]
 fn a_history_file_that_cannot_be_opened_is_left_alone() {
@@ -501,13 +452,8 @@ fn a_history_file_that_cannot_be_opened_is_left_alone() {
     let before = std::fs::read_to_string(&history).unwrap();
     std::fs::set_permissions(&history, std::fs::Permissions::from_mode(0o000)).unwrap();
 
-    fold_history_in(
-        &home,
-        at("2026-08-30T12:00:00Z"),
-        &mut FoldChecks::default(),
-    )
-    .unwrap();
-    let status = history_status_in(&home);
+    fold_on(&home, "2026-08-30T12:00:00Z");
+    let status = UsageFiles::of(&home).status();
     let summary = read_offline(&home, august_input(false));
 
     let mode = std::fs::metadata(&history).unwrap().permissions().mode() & 0o777;
@@ -553,7 +499,7 @@ fn a_history_path_that_cannot_be_read_is_left_alone_on_every_platform() {
     std::fs::create_dir_all(&history).unwrap();
 
     fold(&home);
-    let status = history_status_in(&home);
+    let status = UsageFiles::of(&home).status();
     let summary = read_offline(&home, august_input(false));
 
     assert_eq!(status.state, UsageHistoryState::Unreadable);

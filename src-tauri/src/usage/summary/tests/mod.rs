@@ -2,13 +2,13 @@ use super::test_support::*;
 use super::*;
 use crate::dto::{AgentId, UsageCostSource, UsagePricingStatus, UsageSourceStatus};
 use crate::paths::scratch_dir;
-use crate::usage::pricing;
-use crate::usage::sources::{
+use crate::usage::files::testing::{
     cached_record_count, reset_scan_cache_decode_count, reset_transcript_parse_count,
-    scan_cache_decode_count, transcript_parse_count, USAGE_SCAN_CACHE_VERSION,
-    USAGE_SOURCE_INDEX_VERSION,
+    scan_cache_decode_count, summary_cache_path_for, transcript_parse_count,
+    USAGE_SCAN_CACHE_VERSION, USAGE_SOURCE_INDEX_VERSION, USAGE_SUMMARY_CACHE_VERSION,
 };
-use crate::usage::summary_cache::summary_cache_path_for;
+use crate::usage::files::Step;
+use crate::usage::pricing;
 
 mod cache;
 mod dto;
@@ -169,10 +169,7 @@ fn incompatible_and_partial_cache_documents_rebuild_together() {
     for (cache_name, expected_version) in [
         ("usage-source-index.json", USAGE_SOURCE_INDEX_VERSION),
         ("usage-scan-cache.json", USAGE_SCAN_CACHE_VERSION),
-        (
-            "usage-summary-cache.json",
-            super::super::summary_cache::USAGE_SUMMARY_CACHE_VERSION,
-        ),
+        ("usage-summary-cache.json", USAGE_SUMMARY_CACHE_VERSION),
     ] {
         let document: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(cache_root.join(cache_name)).unwrap())
@@ -204,7 +201,9 @@ fn older_generation_cannot_overwrite_newer_summary() {
     write_claude_transcript(&home);
 
     let older_home = home.clone();
-    let older = paused_before_publish(move || read_offline(&older_home, august_input(true)));
+    let older = paused_before(Step::Store, move || {
+        read_offline(&older_home, august_input(true))
+    });
 
     append_claude_record(&home, "msg_2", 25);
     let newer = read_offline(&home, august_input(false));

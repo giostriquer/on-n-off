@@ -3,7 +3,6 @@ use std::io::Write;
 use super::super::test_support::*;
 use super::super::*;
 use crate::paths::scratch_dir;
-use crate::usage::folding::{fold_history_in, FoldChecks};
 use crate::usage::pricing;
 
 fn in_zone(time_zone: &str, input: UsageSummaryInput) -> UsageSummaryInput {
@@ -108,12 +107,7 @@ fn folded_usage_on_a_local_day_east_of_utc_counts_in_that_days_window() {
     let home = scratch_dir("usage-window-folded-east");
     let path = write_single_claude_record(&home, "tokyo.jsonl", "2026-07-31T20:00:00.000Z", 20);
     set_mtime(&path, "2026-07-31T20:00:01Z");
-    fold_history_in(
-        &home,
-        at("2026-08-21T12:00:00Z"),
-        &mut FoldChecks::default(),
-    )
-    .unwrap();
+    fold_on(&home, "2026-08-21T12:00:00Z");
     std::fs::remove_file(&path).unwrap();
 
     let tokyo = read_offline(&home, in_zone("Asia/Tokyo", august_input(false)));
@@ -146,12 +140,7 @@ fn a_day_window_counts_folded_usage_across_its_days_whatever_instants_it_carries
     let home = scratch_dir("usage-window-day-with-instants");
     let folded = write_single_claude_record(&home, "folded.jsonl", "2026-08-07T04:05:13.944Z", 20);
     set_mtime(&folded, "2026-08-07T04:05:14Z");
-    fold_history_in(
-        &home,
-        at("2026-08-21T12:00:00Z"),
-        &mut FoldChecks::default(),
-    )
-    .unwrap();
+    fold_on(&home, "2026-08-21T12:00:00Z");
     std::fs::remove_file(&folded).unwrap();
     write_single_claude_record(&home, "live.jsonl", "2026-08-20T04:05:13.944Z", 25);
 

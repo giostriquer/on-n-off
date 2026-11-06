@@ -7,6 +7,7 @@ use chrono::DateTime;
 
 use super::*;
 use crate::dto::AgentId;
+use crate::usage::files::{with_pause_before, FoldChecks, Step};
 use crate::usage::pricing;
 
 pub(super) fn read_summary_in(
@@ -20,22 +21,23 @@ pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummar
     pricing::with_test_fetch(None, || read_summary_in(home, input)).unwrap()
 }
 
-const PUBLISH_PAUSE_LIMIT: Duration = Duration::from_secs(20);
+pub(super) const PAUSE_LIMIT: Duration = Duration::from_secs(20);
 
 pub(super) struct PausedRead<R> {
     resume: mpsc::Sender<()>,
     read: std::thread::JoinHandle<R>,
 }
 
-pub(super) fn paused_before_publish<R: Send + 'static>(
+pub(super) fn paused_before<R: Send + 'static>(
+    step: Step,
     read: impl FnOnce() -> R + Send + 'static,
 ) -> PausedRead<R> {
     let (reached, paused) = mpsc::channel();
     let (resume, resumed) = mpsc::channel();
-    let read = std::thread::spawn(move || with_before_publish_pause(reached, resumed, read));
+    let read = std::thread::spawn(move || with_pause_before(step, reached, resumed, read));
     paused
-        .recv_timeout(PUBLISH_PAUSE_LIMIT)
-        .expect("the read did not pause before publishing");
+        .recv_timeout(PAUSE_LIMIT)
+        .expect("the read did not pause");
     PausedRead { resume, read }
 }
 
@@ -44,6 +46,12 @@ impl<R> PausedRead<R> {
         self.resume.send(()).expect("the paused read is waiting");
         self.read.join().unwrap()
     }
+}
+
+pub(super) fn fold_on(home: &Path, iso: &str) {
+    UsageFiles::of(home)
+        .fold(at(iso), &mut FoldChecks::default())
+        .unwrap();
 }
 
 pub(super) fn write_claude_transcript(home: &Path) {

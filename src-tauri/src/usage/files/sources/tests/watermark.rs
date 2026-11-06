@@ -17,9 +17,7 @@ fn a_transcript_last_written_well_before_the_watermark_is_indexed_unread() {
     let path = write_long_folded(&home);
     reset_transcript_parse_count();
 
-    let sources = open(&home, watermark());
-    let complete = sources.is_complete();
-    sources.finish(watermark);
+    let (complete, _) = with_sources(&home, watermark(), |sources| sources.is_complete());
 
     assert!(complete);
     assert_eq!(transcript_parse_count(), 0);
@@ -35,10 +33,10 @@ fn a_transcript_last_written_well_before_the_watermark_signs_the_same_parsed_or_
     let index = source_index_path_for(&home);
     std::fs::remove_file(&index).unwrap();
 
-    let with_parse = signature(&home, watermark(), month_start(8), month_start(9));
+    let with_parse = signature(&home, watermark(), month(8));
     std::fs::remove_file(&index).unwrap();
     let _ = std::fs::remove_file(scan_cache_path_for(&home));
-    let without_parse = signature(&home, watermark(), month_start(8), month_start(9));
+    let without_parse = signature(&home, watermark(), month(8));
 
     assert_eq!(with_parse, without_parse);
     let _ = std::fs::remove_dir_all(home);
@@ -53,9 +51,7 @@ fn a_transcript_whose_newest_record_is_folded_is_not_read_however_recently_writt
     std::fs::remove_file(scan_cache_path_for(&home)).unwrap();
     reset_transcript_parse_count();
 
-    let mut sources = open(&home, watermark());
-    let read = sources.read(i64::MIN, watermark);
-    sources.finish(watermark);
+    let read = read_all(&home, watermark());
 
     assert_eq!(transcript_parse_count(), 0);
     assert!(read.records().is_empty());
@@ -79,9 +75,9 @@ fn finishing_with_a_later_watermark_drops_the_parses_it_folded() {
     write_records(&kept, &[record("2026-08-20T04:05:13.944Z", "msg-2", 30)]);
     open_and_finish(&home, Watermark::NONE);
 
-    let mut sources = open(&home, Watermark::NONE);
-    sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(watermark);
+    with_sources_finished_at(&home, Watermark::NONE, watermark(), |sources| {
+        sources.read(i64::MIN, || Watermark::NONE)
+    });
 
     assert_eq!(cached_record_count(&home, &folded), None);
     assert_eq!(cached_record_count(&home, &kept), Some(1));
@@ -108,9 +104,7 @@ fn a_read_counts_each_message_once_from_the_watermark_on() {
         ],
     );
 
-    let mut sources = open(&home, watermark());
-    let read = sources.read(i64::MIN, watermark);
-    sources.finish(watermark);
+    let read = read_all(&home, watermark());
 
     let outputs: Vec<u64> = read
         .records()
@@ -130,9 +124,9 @@ fn a_read_after_indexing_uses_the_watermark_the_index_was_brought_up_to_date_wit
         &[record("2026-08-20T04:05:13.944Z", "msg-2", 30)],
     );
 
-    let mut sources = open(&home, watermark());
-    let read = sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(watermark);
+    let (read, _) = with_sources(&home, watermark(), |sources| {
+        sources.read(i64::MIN, || Watermark::NONE)
+    });
 
     let outputs: Vec<u64> = read
         .records()

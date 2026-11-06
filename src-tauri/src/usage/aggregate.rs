@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use super::history::FoldedRow;
+use super::files::FoldedRow;
 use super::pricing::{cache_savings_usd, price_usage, RateTable};
 use super::transcripts::{TokenTotals, UsageRecord};
 use super::window::{Period, UsageWindow};

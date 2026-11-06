@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::UsageSummaryInput;
-use crate::usage::history::{FoldedRow, UsageHistory};
+use crate::usage::files::testing::UsageHistory;
+use crate::usage::files::FoldedRow;
 
 fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
     let mut r = UsageRecord {

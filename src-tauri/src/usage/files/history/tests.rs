@@ -1,5 +1,6 @@
 use super::*;
 use crate::paths::scratch_dir;
+use crate::usage::files::lock;
 
 fn ms(iso: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(iso)
@@ -334,7 +335,9 @@ fn history_from_a_newer_version_is_left_alone() {
     let mut store = HistoryStore::open(path.clone());
 
     assert_eq!(store.history(), None);
-    assert!(store.fold(&[], ms("2026-09-01T00:00:00Z"), 0).is_err());
+    assert!(store
+        .fold(&lock(), &[], ms("2026-09-01T00:00:00Z"), 0)
+        .is_err());
     assert_eq!(std::fs::read_to_string(&path).unwrap(), newer.to_string());
     let _ = std::fs::remove_dir_all(&root);
 }
@@ -378,6 +381,7 @@ fn a_fold_that_would_not_read_back_is_not_saved() {
     let mut store = HistoryStore::open(path.clone());
     store
         .fold(
+            &lock(),
             &[record("2026-08-07T04:01:00Z", |_| {})],
             ms("2026-08-10T00:00:00Z"),
             0,
@@ -390,6 +394,7 @@ fn a_fold_that_would_not_read_back_is_not_saved() {
     });
 
     let refused = store.fold(
+        &lock(),
         std::slice::from_ref(&impossible),
         ms("2026-08-15T00:00:00Z"),
         0,
@@ -410,7 +415,7 @@ fn clear_removes_the_history_and_every_copy_of_it() {
     save(&path, &history, false).unwrap();
     std::fs::write(root.join("unrelated.json"), "{}").unwrap();
 
-    clear_history(&path).unwrap();
+    clear_history(&lock(), &path).unwrap();
 
     let left: Vec<String> = std::fs::read_dir(&root)
         .unwrap()
@@ -444,9 +449,9 @@ fn the_room_taken_counts_the_file_and_every_copy_of_it() {
 #[test]
 fn the_fingerprint_changes_when_the_history_is_written_or_cleared() {
     let (root, path) = history_path("usage-history-fingerprint");
-    let none = history_fingerprint(&path);
+    let none = history_fingerprint(&lock(), &path);
     save(&path, &one_fold(), false).unwrap();
-    let first = history_fingerprint(&path);
+    let first = history_fingerprint(&lock(), &path);
     let mut longer = one_fold();
     longer.fold(
         &[record("2026-08-12T04:01:00Z", |_| {})],
@@ -454,12 +459,12 @@ fn the_fingerprint_changes_when_the_history_is_written_or_cleared() {
         0,
     );
     save(&path, &longer, false).unwrap();
-    let second = history_fingerprint(&path);
-    clear_history(&path).unwrap();
+    let second = history_fingerprint(&lock(), &path);
+    clear_history(&lock(), &path).unwrap();
 
     assert_ne!(none, first);
     assert_ne!(first, second);
-    assert_eq!(history_fingerprint(&path), none);
+    assert_eq!(history_fingerprint(&lock(), &path), none);
     let _ = std::fs::remove_dir_all(&root);
 }
 
@@ -478,7 +483,7 @@ fn kept_since_is_the_first_folded_slot() {
 }
 
 #[test]
-fn rows_between_takes_the_slots_starting_inside_the_window() {
+fn rows_in_takes_the_slots_starting_inside_the_span() {
     let history = folded(
         &[
             record("2026-08-06T23:59:00Z", |_| {}),
@@ -490,7 +495,10 @@ fn rows_between_takes_the_slots_starting_inside_the_window() {
     );
 
     let slots: Vec<i64> = history
-        .rows_between(ms("2026-08-07T00:00:00Z"), ms("2026-08-08T00:00:00Z"))
+        .rows_in(Span {
+            start_ms: ms("2026-08-07T00:00:00Z"),
+            end_ms: ms("2026-08-08T00:00:00Z"),
+        })
         .iter()
         .map(|row| row.slot_start_ms)
         .collect();
@@ -499,7 +507,10 @@ fn rows_between_takes_the_slots_starting_inside_the_window() {
         [ms("2026-08-07T00:00:00Z"), ms("2026-08-07T23:45:00Z")]
     );
     assert!(history
-        .rows_between(ms("2026-08-09T00:00:00Z"), ms("2026-08-01T00:00:00Z"))
+        .rows_in(Span {
+            start_ms: ms("2026-08-09T00:00:00Z"),
+            end_ms: ms("2026-08-01T00:00:00Z"),
+        })
         .is_empty());
 }
 

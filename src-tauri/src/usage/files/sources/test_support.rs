@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::usage::window::Span;
+
 pub(super) fn at(iso: &str) -> i64 {
     chrono::DateTime::parse_from_rfc3339(iso)
         .unwrap()
@@ -9,6 +11,13 @@ pub(super) fn at(iso: &str) -> i64 {
 
 pub(super) fn month_start(month: u32) -> i64 {
     at(&format!("2026-{month:02}-01T00:00:00Z"))
+}
+
+pub(super) fn month(month: u32) -> Span {
+    Span {
+        start_ms: month_start(month),
+        end_ms: month_start(month + 1),
+    }
 }
 
 pub(super) fn transcript_path(home: &Path, name: &str) -> PathBuf {

@@ -217,7 +217,7 @@ comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler 
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
   `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
-  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::sources` counters,
+  `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::files::testing` counters,
   `github/fixtures.rs`. Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.

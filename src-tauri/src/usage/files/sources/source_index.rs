@@ -10,9 +10,10 @@ use super::scan_cache::{
 };
 use crate::provider_catalogue::UsageProvider;
 use crate::usage::cache_io::atomic_write;
-use crate::usage::history::Watermark;
+use crate::usage::files::history::Watermark;
 use crate::usage::reader::{inventory_transcript_files, read_transcript_records, TranscriptFile};
 use crate::usage::transcripts::{UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::usage::window::Span;
 
 pub(crate) const USAGE_SOURCE_INDEX_VERSION: u32 = 3;
 
@@ -336,13 +337,13 @@ impl SourceSnapshot {
         self.complete && self.entries.values().all(|entry| entry.resolved)
     }
 
-    pub(super) fn signature(&self, window_start_ms: i64, window_end_ms: i64) -> String {
+    pub(super) fn signature(&self, span: Span) -> String {
         let mut hash = Fnv64::new();
         hash.add_u64(USAGE_SOURCE_INDEX_VERSION as u64);
         hash.add_u64(USAGE_TRANSCRIPT_PARSER_VERSION as u64);
         hash.add_u64(USAGE_SCAN_CACHE_VERSION as u64);
-        hash.add_i64(window_start_ms);
-        hash.add_i64(window_end_ms);
+        hash.add_i64(span.start_ms);
+        hash.add_i64(span.end_ms);
         for root in self.roots.values() {
             hash.add_bytes(root.provider.as_str().as_bytes());
             hash.add_bytes(root.path.as_bytes());
@@ -351,7 +352,7 @@ impl SourceSnapshot {
         for entry in self
             .entries
             .values()
-            .filter(|entry| entry_intersects_window(entry, window_start_ms, window_end_ms))
+            .filter(|entry| entry_intersects(entry, span))
         {
             hash.add_bytes(entry.provider.as_str().as_bytes());
             hash.add_bytes(entry.path.as_bytes());
@@ -710,9 +711,9 @@ fn record_bounds(records: &[UsageRecord]) -> (Option<i64>, Option<i64>) {
     (min, max)
 }
 
-fn entry_intersects_window(entry: &SourceEntry, start_ms: i64, end_ms: i64) -> bool {
+fn entry_intersects(entry: &SourceEntry, span: Span) -> bool {
     match (entry.min_record_ms, entry.max_record_ms) {
-        (Some(min), Some(max)) => max >= start_ms && min < end_ms,
+        (Some(min), Some(max)) => max >= span.start_ms && min < span.end_ms,
         _ => true,
     }
 }

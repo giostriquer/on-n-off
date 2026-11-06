@@ -19,16 +19,10 @@ fn a_live_transcript_is_left_pending_uncached_and_indexed_again_next_time() {
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
     let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
 
-    let pending = with_live_transcript(&path, &growth, || {
-        let sources = open(&home, Watermark::NONE);
-        let complete = sources.is_complete();
-        sources.finish(|| Watermark::NONE);
-        complete
-    });
+    let complete = || with_sources(&home, Watermark::NONE, |sources| sources.is_complete()).0;
+    let pending = with_live_transcript(&path, &growth, complete);
     let pending_cached = cached_record_count(&home, &path);
-    let settled = open(&home, Watermark::NONE);
-    let settled_complete = settled.is_complete();
-    settled.finish(|| Watermark::NONE);
+    let settled_complete = complete();
 
     assert!(!pending);
     assert_eq!(pending_cached, None);
@@ -50,16 +44,16 @@ fn a_transcript_changed_or_live_since_the_walk_counts_what_it_holds_uncached_and
         index_then_forget_parse(&home);
         let growth = record("2026-08-07T04:06:00.000Z", "msg-live", 5);
 
-        let mut sources = open(&home, Watermark::NONE);
-        append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
-        let read = if live {
-            with_live_transcript(&path, &growth, || {
+        let (read, _) = with_sources(&home, Watermark::NONE, |sources| {
+            append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
+            if live {
+                with_live_transcript(&path, &growth, || {
+                    sources.read(i64::MIN, || Watermark::NONE)
+                })
+            } else {
                 sources.read(i64::MIN, || Watermark::NONE)
-            })
-        } else {
-            sources.read(i64::MIN, || Watermark::NONE)
-        };
-        sources.finish(|| Watermark::NONE);
+            }
+        });
 
         let expected: &[u64] = if live { &[20, 30, 5] } else { &[20, 30] };
         assert_eq!(output_tokens(&read), expected, "live: {live}");
@@ -76,10 +70,10 @@ fn a_same_size_rewrite_since_the_walk_counts_uncached_and_not_final() {
     write_records(&path, &[record("2026-08-07T04:05:13.944Z", "msg-1", 20)]);
     index_then_forget_parse(&home);
 
-    let mut sources = open(&home, Watermark::NONE);
-    rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
-    let read = sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(|| Watermark::NONE);
+    let (read, _) = with_sources(&home, Watermark::NONE, |sources| {
+        rewrite_same_size_later(&path, &record("2026-08-07T04:05:13.944Z", "msg-1", 21));
+        sources.read(i64::MIN, || Watermark::NONE)
+    });
 
     assert_eq!(output_tokens(&read), [21]);
     assert!(!read.complete);
@@ -95,15 +89,13 @@ fn an_unreadable_transcript_counts_its_last_cached_parse_and_is_not_final() {
     open_and_finish(&home, Watermark::NONE);
     let stale = std::fs::read(scan_cache_path_for(&home)).unwrap();
     append_record(&path, &record("2026-08-07T04:05:30.000Z", "msg-2", 30));
-    let mut appended = open(&home, Watermark::NONE);
-    appended.read(i64::MIN, || Watermark::NONE);
-    appended.finish(|| Watermark::NONE);
+    read_all(&home, Watermark::NONE);
     std::fs::write(scan_cache_path_for(&home), stale).unwrap();
 
-    let mut sources = open(&home, Watermark::NONE);
-    std::fs::remove_file(&path).unwrap();
-    let read = sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(|| Watermark::NONE);
+    let (read, _) = with_sources(&home, Watermark::NONE, |sources| {
+        std::fs::remove_file(&path).unwrap();
+        sources.read(i64::MIN, || Watermark::NONE)
+    });
 
     assert_eq!(output_tokens(&read), [20]);
     assert!(!read.complete);
@@ -123,9 +115,7 @@ fn an_unchanged_transcript_missing_from_the_scan_cache_is_read_cached_and_final(
     index_then_forget_parse(&home);
     reset_transcript_parse_count();
 
-    let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(|| Watermark::NONE);
+    let read = read_all(&home, Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [20]);
     assert!(read.complete);
@@ -145,9 +135,7 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
     open_and_finish(&home, Watermark::NONE);
     std::fs::write(scan_cache_path_for(&home), stale).unwrap();
 
-    let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(i64::MIN, || Watermark::NONE);
-    sources.finish(|| Watermark::NONE);
+    let read = read_all(&home, Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [21], "not the stale parse");
     assert!(read.complete);
@@ -168,9 +156,9 @@ fn a_read_reads_the_transcripts_written_from_the_earliest_mtime_it_is_given() {
     set_mtime_ms(&edge, earliest_mtime_ms);
     set_mtime_ms(&earlier, earliest_mtime_ms - 1);
 
-    let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(earliest_mtime_ms, || Watermark::NONE);
-    sources.finish(|| Watermark::NONE);
+    let (read, _) = with_sources(&home, Watermark::NONE, |sources| {
+        sources.read(earliest_mtime_ms, || Watermark::NONE)
+    });
 
     assert_eq!(output_tokens(&read), [20]);
     let _ = std::fs::remove_dir_all(home);

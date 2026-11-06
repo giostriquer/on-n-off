@@ -4,8 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::dto::UsageSummaryDto;
 
-use super::cache_io::atomic_write;
-use super::window::CacheIdentity;
+use super::Locked;
+use crate::usage::cache_io::atomic_write;
+use crate::usage::window::CacheIdentity;
 
 pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 4;
 const MAX_ENTRIES: usize = 8;
@@ -74,7 +75,13 @@ pub fn load_summary_hit(
     Some(dto)
 }
 
-pub fn store_summary(path: &Path, key: &SummaryKey, source_signature: &str, dto: &UsageSummaryDto) {
+pub fn store_summary(
+    _locked: &Locked,
+    path: &Path,
+    key: &SummaryKey,
+    source_signature: &str,
+    dto: &UsageSummaryDto,
+) {
     let mut entries = load_entries(path);
     entries.retain(|entry| entry.group != key.group);
     let mut stored = dto.clone();

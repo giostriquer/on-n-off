@@ -5,9 +5,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use super::cache_io::atomic_write;
-use super::transcripts::{TokenTotals, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use super::Locked;
 use crate::provider_catalogue::UsageProvider;
+use crate::usage::cache_io::atomic_write;
+use crate::usage::transcripts::{TokenTotals, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
+use crate::usage::window::Span;
 
 pub const USAGE_HISTORY_VERSION: u32 = 1;
 
@@ -21,6 +23,21 @@ const LONG_CONTEXT_INPUT_TOKENS: u64 = 200_000;
 
 const REPORTED_FLAG: u8 = 1;
 const LONG_CONTEXT_FLAG: u8 = 2;
+
+#[cfg(test)]
+thread_local! {
+    static HISTORY_OPEN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_history_open_count() {
+    HISTORY_OPEN_COUNT.set(0);
+}
+
+#[cfg(test)]
+pub(crate) fn history_open_count() -> usize {
+    HISTORY_OPEN_COUNT.get()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Watermark(i64);
@@ -86,11 +103,13 @@ impl UsageHistory {
         &self.rows
     }
 
-    pub fn rows_between(&self, start_ms: i64, end_ms: i64) -> &[FoldedRow] {
+    pub fn rows_in(&self, span: Span) -> &[FoldedRow] {
         let first = self
             .rows
-            .partition_point(|row| row.slot_start_ms < start_ms);
-        let end = self.rows.partition_point(|row| row.slot_start_ms < end_ms);
+            .partition_point(|row| row.slot_start_ms < span.start_ms);
+        let end = self
+            .rows
+            .partition_point(|row| row.slot_start_ms < span.end_ms);
         &self.rows[first..end.max(first)]
     }
 
@@ -232,6 +251,8 @@ enum StoreState {
 
 impl HistoryStore {
     pub fn open(path: PathBuf) -> Self {
+        #[cfg(test)]
+        HISTORY_OPEN_COUNT.set(HISTORY_OPEN_COUNT.get() + 1);
         let state = load(&path);
         Self { path, state }
     }
@@ -250,6 +271,7 @@ impl HistoryStore {
 
     pub fn fold<'a>(
         &mut self,
+        _locked: &Locked,
         records: impl IntoIterator<Item = &'a UsageRecord>,
         cutoff_ms: i64,
         folded_at_ms: i64,
@@ -382,7 +404,7 @@ pub fn history_bytes(path: &Path) -> u64 {
         .sum()
 }
 
-pub fn clear_history(path: &Path) -> io::Result<()> {
+pub fn clear_history(_locked: &Locked, path: &Path) -> io::Result<()> {
     let copies = copies_of(path)?;
     for target in copies.iter().map(PathBuf::as_path).chain([path]) {
         match std::fs::remove_file(target) {
@@ -393,7 +415,7 @@ pub fn clear_history(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-pub fn history_fingerprint(path: &Path) -> String {
+pub fn history_fingerprint(_locked: &Locked, path: &Path) -> String {
     std::fs::metadata(path).map_or_else(
         |_| "none".to_string(),
         |metadata| {

@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::{UsagePricingDto, UsagePricingStatus, UsageSummaryDto, UsageSummaryInput};
 use crate::paths::scratch_dir;
+use crate::usage::files::lock;
 use crate::usage::window::UsageWindow;
 
 fn sample_dto() -> UsageSummaryDto {
@@ -65,7 +66,7 @@ fn round_trip_hit_requires_matching_source_signature() {
     let path = summary_cache_path_for(&home);
     let key = summary_key(&days("2026-08-01", "2026-08-13"), None, "none");
     let signature = "v1-a";
-    store_summary(&path, &key, signature, &sample_dto());
+    store_summary(&lock(), &path, &key, signature, &sample_dto());
     let hit = load_summary_hit(&path, &key, signature).expect("hit");
     assert!(hit.cache_hit);
     assert_eq!(hit.scan_duration_ms, 0);
@@ -123,7 +124,7 @@ fn a_stored_summary_replaces_the_entries_of_its_group() {
         &later_hours,
         &august_newer_rates,
     ] {
-        store_summary(&path, key, "sig", &sample_dto());
+        store_summary(&lock(), &path, key, "sig", &sample_dto());
     }
 
     let kept = |key: &SummaryKey| load_summary_hit(&path, key, "sig").is_some();

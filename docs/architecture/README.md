@@ -558,7 +558,7 @@ still echoes the zone it was asked for). The rest of the read asks the window, n
   most 14 hours before UTC midnight (UTC+14), so the 36 hours cover every zone with 22 to spare;
   it is the value the summary has always used, kept so the files a read scans, and its
   `scannedFiles`, do not change. This is the window's own allowance; the watermark keeps its own
-  36-hour slack in `usage/history.rs`.
+  36-hour slack in `usage/files/history.rs`.
 - **The period an instant counts in** (`period_of`): any instant in its span, on its local day in
   the window's zone, and for an hourly read in the hour it falls in, counted from the window's
   opening instant (`hourStart`), so an hour that crosses a local midnight gives two buckets with
@@ -570,13 +570,44 @@ still echoes the zone it was asked for). The rest of the read asks the window, n
   screen asks for the rolling last 24 hours, minute-aligned, and never asks for an older one again.
   Without the group, each hourly read in a new minute added an entry and pushed the day windows out.
 
-The summary and the background fold read transcripts the same way, through `usage/sources.rs`,
-under the one lock every read and write of the usage files takes. `Sources::open` walks the roots
-and brings the source index up to date, which is enough to answer the summary's cache check before
-any record is read. `Sources::read` then returns the records, from each transcript's cached parse
-where it still holds, and `Sources::finish` saves the scan cache, pruned with the watermark it is
-given, and releases the lock. Every path out of a read runs it, a summary served from the cache
-included, so what bringing the index up to date parsed is never parsed again.
+The files Usage keeps under `~/.on-n-off/` have one owner, `UsageFiles` (`usage/files.rs`): the
+lock every read and write of them takes, folded usage (`files/history.rs`), the transcript
+sources with their source index and scan cache (`files/sources.rs`) and the summary cache
+(`files/summary_cache.rs`). The three stores are its private children, so nothing else locks,
+opens or writes them, and the watermark, the history's open and the lock never leave it. Holding
+the lock is checked when it compiles: `lock()` returns a `Locked`, which nothing else can make,
+and opening the sources (which borrow it until they finish), checking that they are unchanged,
+reading the history's size and mtime for the summary key, storing a summary, folding the history
+and clearing it each take one. A test holds a summary inside its lock and checks that a fold waits
+for it. It offers whole
+operations: a summary of a window, a fold, a clear and the history's status.
+
+- **A summary** (`UsageFiles::summary`) takes the window, the price table's fetch time, whether
+  the read is forced, and the counting, which turns a `WindowCount` into the summary. Under the
+  lock it keys the summary cache (the window's cache identity, the table's fetch time and the
+  history's size and mtime, read there), and `Sources::open` walks the roots and brings the source
+  index up to date, which is enough to answer from the cache before any record is read; the
+  history is opened only when that needs the watermark. Otherwise it opens the history,
+  `Sources::read` returns the records from the window's earliest mtime, from each transcript's
+  cached parse where it still holds, and the lock is released for the counting. The
+  `WindowCount` gives the records at or after the watermark, the folded rows in the window's
+  span and, for each provider, its transcript directory and the files read there (none when the
+  directory does not exist). The summary is stored afterwards, under the lock again, only if the
+  count is still current (`WindowCount::is_current`, the one store rule): the read was final
+  (every transcript read and resolved), the history read, the source index and the transcripts
+  are as they were read, and the history still has the size and mtime it was counted with.
+- **A fold** (`UsageFiles::fold`) is the background fold's whole check (see Usage history).
+- **A clear** removes the history and its copies under the lock; **the status** reads the history
+  without it, since every file is replaced atomically and Settings should not wait behind a scan.
+
+`Sources::finish` saves the scan cache, pruned with the watermark it is given, on every path out
+of a read, a summary served from the cache included, so what bringing the index up to date parsed
+is never parsed again.
+
+A provider whose read was incomplete is still reported `ok`: the UI has no copy for a `partial`
+source (the Overview card prints the bare status in a provider chip, the Usage screen shows none,
+and no surface shows its message), and the commonest incomplete read is a live transcript, which
+counts what it holds.
 
 Three reading rules carry the accuracy, each pinned by a test:
 
@@ -597,7 +628,7 @@ Three reading rules carry the accuracy, each pinned by a test:
 
 A transcript still being written while it is read (a live session) counts what it holds at that
 moment instead of dropping out of the total. A read parses a file up to twice and reports whether
-its size and mtime held still (`TranscriptRead`, in `usage/sources/source_index.rs`):
+its size and mtime held still (`TranscriptRead`, in `usage/files/sources/source_index.rs`):
 
 - A file that held still but no longer matches the inventory counts what it holds now.
 - One that kept moving, or went away after a parse, counts the last parse that succeeded.
@@ -671,7 +702,7 @@ remount's, so it reuses the scan cache and the summary cache.
 #### Usage history
 
 Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so a count read only
-from transcripts shrinks as they go. `usage/history.rs` keeps what they held in
+from transcripts shrinks as they go. `usage/files/history.rs` keeps what they held in
 `~/.on-n-off/usage-history.json`. That file is user data, not a cache: once the transcripts are
 gone nothing can rebuild it.
 
@@ -687,17 +718,22 @@ gone nothing can rebuild it.
   are not counted twice. It moves forward only, to the UTC midnight a week before now, so a fold
   runs at most once a day. A transcript whose records all sit below it (or that was last written
   36 hours before it) leaves the scan cache and is never parsed again, even after an index rebuild.
-- **When it folds.** Only in `usage/folding.rs`'s background thread, 90 seconds after launch and
-  hourly after that, so usage is kept even if the screen is never opened; a Usage read only reads
-  the history. A fold needs every root walked and every transcript that may hold a record in range
-  read, now or from its cached parse; a transcript still being written counts what it holds,
-  since its records old enough to fold were written days ago. Otherwise it waits for the next
-  check. A transcript that cannot be read holds it back until it is a week past the cutoff and has
-  failed on two checks in a row: by then it never will read, and waiting longer would let the
-  provider delete the rest.
+- **When it folds.** Only in `usage/folding.rs`'s background thread, through `UsageFiles::fold`, 90
+  seconds after launch and hourly after that, so usage is kept even if the screen is never opened; a
+  Usage read only reads the history. A fold needs every root walked and every transcript that may
+  hold a record in range read, now or from its cached parse; a transcript still being written counts
+  what it holds, since its records old enough to fold were written days ago. Otherwise it waits for
+  the next check. A transcript that cannot be read holds it back until it is a week past the cutoff
+  and has failed on two checks in a row: by then it never will read, and waiting longer would let
+  the provider delete the rest.
 - **Summaries.** The summary cache key carries the history file's size and mtime, so a fold or a
   clear never serves a summary counted with the history before it, and a summary counted while
-  the file did not read is not stored.
+  the file did not read is not stored. They are read under the usage files' lock, before anything
+  is counted, so they describe the history the summary counts: read before the lock, a fold that
+  landed in between was counted under the key of the history before it (`history:none` for a
+  first fold), which a Clear brought back and served with the usage it forgot. A summary is
+  stored only while the history still has the size and mtime it was counted with: one counted
+  before a fold would otherwise replace, in its cache group, the summary counted after it.
 - **When the file does not read.** It is never written over: the previous good file is kept as
   `.bak` and read in its place, and the unreadable one is copied aside under a new name before
   the new file replaces it. A file a newer on-n-off wrote, or one with no readable backup, is left
@@ -982,7 +1018,7 @@ the code today; a change that moves one updates its row.
 | Known answer | `KnownAnswers` (`github/merge.rs`): one viewer and its `Known` answers per `Revision`; kept in the memo (`ReadMemoState`) and saved with the snapshot as `knownAnswers` (`github/snapshot.rs`); recalled, or seeded once from files saved before it, by `KnownAnswers::recall`, which `remembered_answers` (`github/mod.rs`) feeds from disk |
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |
-| Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
-| Usage window | `UsageWindow` (`usage/window.rs`), built by `UsageWindow::of` from `UsageSummaryInput`; asked by `usage/summary.rs` for its span, earliest transcript mtime and cache identity (keyed by `summary_key`, `usage/summary_cache.rs`), and by `UsageAggregator` (`usage/aggregate.rs`) for each instant's `Period` |
-| Watermark | `Watermark` (`usage/history.rs`) |
-| Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs`; its status read and cleared in the UI through `foldedUsageStatusQuery` and `clearFoldedUsage` (`ui/src/features/usage/usageReads.ts`) |
+| Transcript source | `Sources` (`usage/files/sources.rs`), which owns the source index (`usage/files/sources/source_index.rs`) and the scan cache (`usage/files/sources/scan_cache.rs`), opened, read and finished only by `UsageFiles` (`usage/files.rs`) |
+| Usage window | `UsageWindow` (`usage/window.rs`), built by `UsageWindow::of` from `UsageSummaryInput`; asked by `UsageFiles::summary` (`usage/files.rs`) for its span, earliest transcript mtime and cache identity (keyed by `summary_key`, `usage/files/summary_cache.rs`), and by `UsageAggregator` (`usage/aggregate.rs`) for each instant's `Period` |
+| Watermark | `Watermark` (`usage/files/history.rs`), which never leaves `UsageFiles` (`usage/files.rs`) |
+| Folded usage | `HistoryStore` (`usage/files/history.rs`), opened only by `UsageFiles` (`usage/files.rs`), which folds it (`UsageFiles::fold`, on the schedule of `usage/folding.rs`), clears it and reports its status; counted as `FoldedRow`s; its status read and cleared in the UI through `foldedUsageStatusQuery` and `clearFoldedUsage` (`ui/src/features/usage/usageReads.ts`) |

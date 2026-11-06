@@ -2,13 +2,14 @@ mod scan_cache;
 mod source_index;
 
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 
 use crate::paths::{claude_root_for, codex_root_for};
 
 use super::history::Watermark;
-use super::transcripts::{richest_copies, UsageRecord};
+use super::{Locked, ProviderRead};
 use crate::provider_catalogue::UsageProvider;
+use crate::usage::transcripts::{richest_copies, UsageRecord};
+use crate::usage::window::Span;
 use scan_cache::{load_scan_cache, prune_and_save, scan_cache_path_for, ScanCache};
 use source_index::{
     inventory_sources, prepare_sources, reconcile_inventory, source_index_path_for,
@@ -25,22 +26,8 @@ pub(crate) use source_index::{
     USAGE_SOURCE_INDEX_VERSION,
 };
 
-pub struct UsageFilesLock {
-    _guard: MutexGuard<'static, ()>,
-}
-
-pub fn lock_usage_files() -> UsageFilesLock {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    UsageFilesLock {
-        _guard: LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner),
-    }
-}
-
-pub struct Sources {
-    lock: UsageFilesLock,
+pub struct Sources<'l> {
+    _locked: &'l Locked,
     scan_cache_path: PathBuf,
     scan_cache: Option<ScanCache>,
     scan_cache_dirty: bool,
@@ -48,8 +35,8 @@ pub struct Sources {
     seen: SeenSources,
 }
 
-impl Sources {
-    pub fn open(lock: UsageFilesLock, home: &Path, watermark: impl FnOnce() -> Watermark) -> Self {
+impl<'l> Sources<'l> {
+    pub fn open(locked: &'l Locked, home: &Path, watermark: impl FnOnce() -> Watermark) -> Self {
         let scan_cache_path = scan_cache_path_for(home);
         let source_index = source_index_path_for(home);
         let source_roots = source_roots_for(home);
@@ -71,7 +58,7 @@ impl Sources {
                 }
             };
         Self {
-            lock,
+            _locked: locked,
             scan_cache_path,
             scan_cache,
             scan_cache_dirty,
@@ -88,8 +75,8 @@ impl Sources {
         self.seen.snapshot.is_complete()
     }
 
-    pub fn signature(&self, start_ms: i64, end_ms: i64) -> String {
-        self.seen.snapshot.signature(start_ms, end_ms)
+    pub fn signature(&self, span: Span) -> String {
+        self.seen.snapshot.signature(span)
     }
 
     pub fn walked_every_root(&self) -> bool {
@@ -129,7 +116,6 @@ impl Sources {
                 self.scan_cache_dirty,
             );
         }
-        drop(self.lock);
         self.seen
     }
 }
@@ -177,24 +163,24 @@ pub struct SeenSources {
     snapshot: SourceSnapshot,
 }
 
-pub struct ProviderSource<'a> {
-    pub provider: UsageProvider,
-    pub dir: &'a Path,
-    pub present: bool,
-}
-
 impl SeenSources {
-    pub fn providers(&self) -> impl Iterator<Item = ProviderSource<'_>> {
+    pub fn providers<'a>(
+        &'a self,
+        read: &'a SourceRead,
+    ) -> impl Iterator<Item = ProviderRead<'a>> + 'a {
         self.source_roots
             .iter()
-            .map(|(provider, roots)| ProviderSource {
+            .map(move |(provider, roots)| ProviderRead {
                 provider: *provider,
                 dir: &roots[0].path,
-                present: roots.iter().any(|root| self.snapshot.root_is_present(root)),
+                files: roots
+                    .iter()
+                    .any(|root| self.snapshot.root_is_present(root))
+                    .then(|| read.files_read(*provider)),
             })
     }
 
-    pub fn unchanged(&self, _lock: &UsageFilesLock) -> bool {
+    pub fn unchanged(&self, _locked: &Locked) -> bool {
         self.snapshot
             .persisted_generation_is_current(&self.source_index)
             && self
