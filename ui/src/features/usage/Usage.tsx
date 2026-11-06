@@ -19,7 +19,7 @@ import type { UsageMetric } from "$lib/usageTypes";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { Segmented } from "@/components/Segmented";
 import { LazyUsageChart, preloadUsageChart } from "./LazyUsageChart";
-import { loadUsageWindow, type UsageQueryResult } from "./usageQuery";
+import { loadUsageWindow, type UsageQueryResult, usageWindowQuery, useRereadUsageOnWindowFocus } from "./usageQuery";
 
 const WINDOWS = [
   { days: 1, label: "Past 24h" },
@@ -42,15 +42,14 @@ export function Usage() {
   const activeWindow = makeWindow(windowDays);
 
   const query = useQuery({
-    queryKey: ["usage", windowDays, forceRevision],
-    queryFn: async () => {
+    ...usageWindowQuery(windowDays, forceRevision, async () => {
       const force = forceRef.current;
       forceRef.current = false;
       return loadUsageWindow(windowDays, force);
-    },
+    }),
     placeholderData: keepPreviousData,
-    refetchOnWindowFocus: true,
   });
+  useRereadUsageOnWindowFocus();
 
   useEffect(() => {
     void preloadUsageChart();

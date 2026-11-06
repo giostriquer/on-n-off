@@ -6,8 +6,19 @@ import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
 
 const usageSummary = vi.hoisted(() => vi.fn());
+const focusHandlers = vi.hoisted(() => new Set<() => void>());
+const stopFocusListener = vi.hoisted(() => vi.fn());
+const onMainWindowFocused = vi.hoisted(() =>
+  vi.fn((handler: () => void) => {
+    focusHandlers.add(handler);
+    return Promise.resolve(() => {
+      focusHandlers.delete(handler);
+      stopFocusListener();
+    });
+  }),
+);
 
-vi.mock("$lib/api", () => ({ usageSummary }));
+vi.mock("$lib/api", () => ({ usageSummary, onMainWindowFocused }));
 vi.mock("./LazyUsageChart", () => ({
   LazyUsageChart: ({
     sinceDay,
@@ -131,6 +142,8 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
   usageSummary.mockReset();
+  focusHandlers.clear();
+  stopFocusListener.mockClear();
 });
 
 afterEach(() => {
@@ -164,22 +177,42 @@ describe("Usage providers", () => {
 });
 
 describe("Usage when the window shows again", () => {
-  it("reads again once the shown totals are older than the stale time", async () => {
+  const showWindow = () => document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+  const focusMainWindow = () => {
+    for (const handler of focusHandlers) handler();
+  };
+
+  it.each([
+    ["the webview becomes visible", showWindow],
+    ["the on-n-off window gains focus", focusMainWindow],
+  ])("reads again, unforced, when %s once the shown totals are older than the stale time", async (_, reveal) => {
     usageSummary.mockResolvedValueOnce(summary()).mockResolvedValueOnce(summary({ costUsd: 20 }));
     renderUsage(createMainWindowQueryClient());
     await screen.findByRole("region", { name: "Usage totals" });
     expectTotal("$12.50");
 
     vi.setSystemTime(new Date("2026-08-15T15:00:29.000Z"));
-    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => reveal());
     expect(usageSummary).toHaveBeenCalledTimes(1);
 
     vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
-    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    await act(async () => reveal());
 
     await waitFor(() => expectTotal("$20.00"));
     expect(usageSummary).toHaveBeenCalledTimes(2);
-    expect(usageSummary.mock.calls[1]?.[0]).toMatchObject({ force: false });
+    expect(usageSummary.mock.calls.map(([input]) => input.force)).toEqual([false, false]);
+  });
+
+  it("stops listening for window focus when Usage unmounts", async () => {
+    usageSummary.mockResolvedValue(summary());
+    const view = renderUsage(createMainWindowQueryClient());
+    await screen.findByRole("region", { name: "Usage totals" });
+    expect(focusHandlers.size).toBe(1);
+
+    view.unmount();
+
+    await waitFor(() => expect(stopFocusListener).toHaveBeenCalledTimes(1));
+    expect(focusHandlers.size).toBe(0);
   });
 });
 

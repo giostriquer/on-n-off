@@ -555,11 +555,22 @@ overwriting it. Those are read too, so a turn a rewrite dropped still counts; th
 hold collapse to one.
 
 The Usage screen and the Overview usage card read when they mount, on the Usage refresh button,
-and when the window shows again with figures older than the main window's 30-second stale time
-(`refetchOnWindowFocus` on both queries; the main window turns it off by default). Closing the
-window only hides it, so a screen left on Usage stays mounted. Without the read on show it kept
-the figures from before it was hidden until another screen was opened and Usage was opened again.
-That read is unforced, like a remount's, so it reuses the scan cache and the summary cache.
+and when the user comes back to the main window with figures older than its stale time
+(`createMainWindowQueryClient`, `ui/src/lib/queryClients.ts`). Closing the window only hides it,
+and switching to another app leaves it on screen, so a screen left on Usage stays mounted; without
+this it kept old figures until another screen was opened and Usage was opened again. Two signals
+mean "came back", both through `usageWindowQuery` and `useRereadUsageOnWindowFocus`
+(`ui/src/features/usage/usageQuery.ts`), which also own the `["usage"]` key root:
+
+- the webview's `visibilitychange`, which TanStack's focus manager hears. WKWebView fires it when
+  the window is hidden and shown again, but WebView2 on Windows never reports the window hidden;
+- Tauri's `tauri://focus` for the main window (`onMainWindowFocused` in `$lib/api`), on both
+  platforms, including a return from another app, which fires no `visibilitychange`.
+
+Either signal runs TanStack's own focus check on the active usage queries only (`query.onFocus()`),
+so a read starts only when the data is stale and joins one already in flight. The main window's
+other queries keep their own focus settings. The read is unforced, like a remount's, so it reuses
+the scan cache and the summary cache.
 
 #### Usage history
 

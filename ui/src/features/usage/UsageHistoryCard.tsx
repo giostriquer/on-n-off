@@ -4,6 +4,7 @@ import { SettingRow, SettingsCard, cardButton, rowLabel } from "@/components/Set
 import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import type { UsageHistoryStatus } from "$lib/usageTypes";
+import { USAGE_QUERY_ROOT } from "./usageQuery";
 
 const HISTORY_KEY = ["usage-history"];
 
@@ -18,7 +19,7 @@ export function UsageHistoryCard() {
     onSuccess: (next) => {
       client.setQueryData(HISTORY_KEY, next);
       setConfirming(false);
-      void client.invalidateQueries({ queryKey: ["usage"] });
+      void client.invalidateQueries({ queryKey: USAGE_QUERY_ROOT });
     },
   });
   const current = status.data;

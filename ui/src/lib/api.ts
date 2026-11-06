@@ -228,6 +228,10 @@ export function onOpenGithubWindow(handler: () => void): Promise<UnlistenFn> {
   return listen("open-github-window", () => handler());
 }
 
+export function onMainWindowFocused(handler: () => void): Promise<UnlistenFn> {
+  return listen("tauri://focus", () => handler(), { target: { kind: "Window", label: "main" } });
+}
+
 export function loadAppSettings(): Promise<AppSettings> {
   return invoke("load_app_settings");
 }
