@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider } from "@tanstack/react-router";
 import { SessionProvider, useAgentSession } from "@/features/session/SessionProvider";
-import { UsageFocusReads } from "@/features/usage/usageQuery";
+import { UsageFocusReads } from "@/features/usage/usageFocusReads";
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import { AppSettingsProvider, useAppSettings } from "$lib/useAppSettings";

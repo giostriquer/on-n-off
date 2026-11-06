@@ -559,8 +559,10 @@ and when the user comes back to the main window with figures older than its stal
 (`createMainWindowQueryClient`, `ui/src/lib/queryClients.ts`). Closing the window only hides it,
 and switching to another app leaves it on screen, so a screen left on Usage stays mounted; without
 this it kept old figures until another screen was opened and Usage was opened again.
-`ui/src/features/usage/usageQuery.ts` owns the rule and the `["usage"]` key root. Two signals mean
-"came back":
+`ui/src/features/usage/usageQuery.ts` owns the query factory (`usageWindowQuery`) and
+`usageFocusReads.ts` beside it owns the `["usage"]` key root and the focus connector, kept apart
+so the connector `App.tsx` mounts does not pull the usage loader and formatters into the startup
+bundle. Two signals mean "came back":
 
 - **The webview's `visibilitychange`**, which TanStack's focus manager hears. Every usage view
   opts in through `usageWindowQuery`; the main window turns this off by default, so only reads

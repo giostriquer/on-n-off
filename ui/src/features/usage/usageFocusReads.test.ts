@@ -2,7 +2,7 @@ import { QueryObserver, type QueryClient } from "@tanstack/react-query";
 import { act, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
-import { connectUsageFocusReads } from "./usageQuery";
+import { connectUsageFocusReads } from "./usageFocusReads";
 
 const focusHandlers = vi.hoisted(() => new Set<() => void>());
 const stopListening = vi.hoisted(() => vi.fn());

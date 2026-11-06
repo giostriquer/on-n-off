@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
-import { UsageFocusReads } from "./usageQuery";
+import { UsageFocusReads } from "./usageFocusReads";
 
 const usageSummary = vi.hoisted(() => vi.fn());
 const focusHandlers = vi.hoisted(() => new Set<() => void>());
@@ -201,7 +201,6 @@ describe("Usage when the window shows again", () => {
     expect(usageSummary).toHaveBeenCalledTimes(2);
     expect(usageSummary.mock.calls.map(([input]) => input.force)).toEqual([false, false]);
   });
-
 });
 
 describe("Usage loading continuity", () => {
