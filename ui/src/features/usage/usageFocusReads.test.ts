@@ -73,9 +73,9 @@ it("re-reads only the stale usage queries when the main window gains focus, neve
 
 it("leaves cached usage windows that no view shows alone when the main window gains focus", async () => {
   const client = mountedClient();
-  const fullTimeRead = vi.fn(() => Promise.resolve("full time"));
-  const leftWindow = observe(client, ["usage", 36500, 0], fullTimeRead);
-  await waitFor(() => expect(fullTimeRead).toHaveBeenCalledTimes(1));
+  const ninetyDayRead = vi.fn(() => Promise.resolve("90 days"));
+  const leftWindow = observe(client, ["usage", 90, 0], ninetyDayRead);
+  await waitFor(() => expect(ninetyDayRead).toHaveBeenCalledTimes(1));
   leftWindow();
   const shownRead = vi.fn(() => Promise.resolve("30 days"));
   unsubscribers.push(observe(client, ["usage", 30, 0], shownRead));
@@ -87,8 +87,8 @@ it("leaves cached usage windows that no view shows alone when the main window ga
   await act(async () => focusMainWindow());
 
   await waitFor(() => expect(shownRead).toHaveBeenCalledTimes(2));
-  expect(fullTimeRead).toHaveBeenCalledTimes(1);
-  expect(client.getQueryData(["usage", 36500, 0])).toBe("full time");
+  expect(ninetyDayRead).toHaveBeenCalledTimes(1);
+  expect(client.getQueryData(["usage", 90, 0])).toBe("90 days");
   disconnect();
 });
 
