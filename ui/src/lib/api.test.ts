@@ -5,7 +5,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const open = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open }));
 const listen = vi.hoisted(() => vi.fn());
-vi.mock("@tauri-apps/api/event", () => ({ listen }));
+vi.mock("@tauri-apps/api/event", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/event")>()),
+  listen,
+}));
 
 import { cancelResetSpend, clearUsageHistory, onMainWindowFocused, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, usageHistoryStatus } from "./api";
 

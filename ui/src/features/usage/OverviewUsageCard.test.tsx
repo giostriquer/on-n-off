@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { OverviewUsageCard } from "./OverviewUsageCard";
+import { UsageFocusReads } from "./usageQuery";
 
 const usageSummary = vi.hoisted(() => vi.fn((_input?: { force: boolean }) => new Promise(() => undefined)));
 const preloadUsageChart = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -243,6 +244,7 @@ describe("OverviewUsageCard", () => {
       });
       render(
         <QueryClientProvider client={createMainWindowQueryClient()}>
+          <UsageFocusReads />
           <OverviewUsageCard />
         </QueryClientProvider>,
       );

@@ -10,7 +10,7 @@ import { formatDayRange, formatPercent, formatTokens, formatUsd, makeWindow } fr
 import { UsageCost } from "./UsageCost";
 import type { UsageMetric } from "$lib/usageTypes";
 import { LazyUsageChart, preloadUsageChart } from "@/features/usage/LazyUsageChart";
-import { loadUsageWindow, usageWindowQuery, useRereadUsageOnWindowFocus } from "./usageQuery";
+import { loadUsageWindow, usageWindowQuery } from "./usageQuery";
 
 function OpenUsageLink({ className }: { className: string }) {
   return (
@@ -36,7 +36,6 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
     }),
     enabled: ready,
   });
-  useRereadUsageOnWindowFocus();
 
   const summary = query.data?.summary ?? null;
   const displayedWindow = query.data?.window ?? window;

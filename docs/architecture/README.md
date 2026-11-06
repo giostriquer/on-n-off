@@ -558,19 +558,23 @@ The Usage screen and the Overview usage card read when they mount, on the Usage 
 and when the user comes back to the main window with figures older than its stale time
 (`createMainWindowQueryClient`, `ui/src/lib/queryClients.ts`). Closing the window only hides it,
 and switching to another app leaves it on screen, so a screen left on Usage stays mounted; without
-this it kept old figures until another screen was opened and Usage was opened again. Two signals
-mean "came back", both through `usageWindowQuery` and `useRereadUsageOnWindowFocus`
-(`ui/src/features/usage/usageQuery.ts`), which also own the `["usage"]` key root:
+this it kept old figures until another screen was opened and Usage was opened again.
+`ui/src/features/usage/usageQuery.ts` owns the rule and the `["usage"]` key root. Two signals mean
+"came back":
 
-- the webview's `visibilitychange`, which TanStack's focus manager hears. WKWebView fires it when
-  the window is hidden and shown again, but WebView2 on Windows never reports the window hidden;
-- Tauri's `tauri://focus` for the main window (`onMainWindowFocused` in `$lib/api`), on both
+- **The webview's `visibilitychange`**, which TanStack's focus manager hears. Every usage view
+  opts in through `usageWindowQuery`; the main window turns this off by default, so only reads
+  that opt in (usage, Limits, PRs, accounts) re-read on it. WKWebView fires it when the window is
+  hidden and shown again; WebView2 on Windows never reports the window hidden.
+- **Tauri's `tauri://focus` for the main window** (`onMainWindowFocused` in `$lib/api`), on both
   platforms, including a return from another app, which fires no `visibilitychange`.
+  `<UsageFocusReads />`, mounted once beside `<SharedReads />` in `App.tsx`, answers it by
+  re-reading the active `["usage"]` queries that are stale by the main window's stale time, and
+  no other read.
 
-Either signal runs TanStack's own focus check on the active usage queries only (`query.onFocus()`),
-so a read starts only when the data is stale and joins one already in flight. The main window's
-other queries keep their own focus settings. The read is unforced, like a remount's, so it reuses
-the scan cache and the summary cache.
+Both signals start a read only when the data is stale, and both join a read already in flight
+(`cancelRefetch: false`), so a show that fires both scans once. The read is unforced, like a
+remount's, so it reuses the scan cache and the summary cache.
 
 #### Usage history
 

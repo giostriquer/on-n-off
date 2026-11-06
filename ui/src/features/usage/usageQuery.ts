@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { queryOptions, useQueryClient } from "@tanstack/react-query";
+import { queryOptions, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { makeWindow, type UsageWindow } from "$lib/usageFormat";
 import type { UsageSummary } from "$lib/usageTypes";
@@ -33,16 +33,34 @@ export function usageWindowQuery(days: number, revision: number, read: () => Pro
   });
 }
 
-export function useRereadUsageOnWindowFocus(): void {
+export function connectUsageFocusReads(client: QueryClient): () => void {
+  let disposed = false;
+  let stop: (() => void) | undefined;
+  void api
+    .onMainWindowFocused(() => {
+      const staleTime = client.getDefaultOptions().queries?.staleTime;
+      void client.refetchQueries(
+        {
+          queryKey: USAGE_QUERY_ROOT,
+          type: "active",
+          predicate: (query) => query.isStaleByTime(typeof staleTime === "function" ? staleTime(query) : staleTime),
+        },
+        { cancelRefetch: false },
+      );
+    })
+    .then((unlisten) => {
+      if (disposed) unlisten();
+      else stop = unlisten;
+    })
+    .catch(() => undefined);
+  return () => {
+    disposed = true;
+    stop?.();
+  };
+}
+
+export function UsageFocusReads(): null {
   const client = useQueryClient();
-  useEffect(() => {
-    const listening = api.onMainWindowFocused(() => {
-      for (const query of client.getQueryCache().findAll({ queryKey: USAGE_QUERY_ROOT, type: "active" })) {
-        query.onFocus();
-      }
-    });
-    return () => {
-      void listening.then((stop) => stop());
-    };
-  }, [client]);
+  useEffect(() => connectUsageFocusReads(client), [client]);
+  return null;
 }

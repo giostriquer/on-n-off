@@ -9,6 +9,7 @@ import { App } from "./App";
 
 const announcements = vi.hoisted(() => new Set<(change: SharedReadChanged) => void>());
 const pendingResetSpends = vi.hoisted(() => vi.fn());
+const focusListeners = vi.hoisted(() => new Set<() => void>());
 
 vi.mock("$lib/api", () => ({
   loadAppSettings: () => Promise.resolve(DEFAULT_APP_SETTINGS),
@@ -16,6 +17,10 @@ vi.mock("$lib/api", () => ({
   onSharedReadChanged: (listener: (change: SharedReadChanged) => void) => {
     announcements.add(listener);
     return Promise.resolve(() => announcements.delete(listener));
+  },
+  onMainWindowFocused: (listener: () => void) => {
+    focusListeners.add(listener);
+    return Promise.resolve(() => focusListeners.delete(listener));
   },
 }));
 vi.mock("./router", () => ({ router: {} }));
@@ -42,4 +47,13 @@ it("keeps the main window told: a shared read another surface replaced is read a
   for (const listener of announcements) listener({ source: "limits:reset-spends" });
 
   await waitFor(() => expect(pendingResetSpends).toHaveBeenCalledTimes(2));
+});
+
+it("listens once for the main window regaining focus, for every usage view it may show", async () => {
+  pendingResetSpends.mockResolvedValue([]);
+  const view = render(<App />);
+
+  await waitFor(() => expect(focusListeners.size).toBe(1));
+  view.unmount();
+  await waitFor(() => expect(focusListeners.size).toBe(0));
 });

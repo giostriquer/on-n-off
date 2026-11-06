@@ -4,16 +4,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
+import { UsageFocusReads } from "./usageQuery";
 
 const usageSummary = vi.hoisted(() => vi.fn());
 const focusHandlers = vi.hoisted(() => new Set<() => void>());
-const stopFocusListener = vi.hoisted(() => vi.fn());
 const onMainWindowFocused = vi.hoisted(() =>
   vi.fn((handler: () => void) => {
     focusHandlers.add(handler);
     return Promise.resolve(() => {
       focusHandlers.delete(handler);
-      stopFocusListener();
     });
   }),
 );
@@ -129,6 +128,7 @@ function renderUsage(
 ) {
   return render(
     <QueryClientProvider client={client}>
+      <UsageFocusReads />
       <Usage />
     </QueryClientProvider>,
   );
@@ -143,7 +143,6 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
   usageSummary.mockReset();
   focusHandlers.clear();
-  stopFocusListener.mockClear();
 });
 
 afterEach(() => {
@@ -203,17 +202,6 @@ describe("Usage when the window shows again", () => {
     expect(usageSummary.mock.calls.map(([input]) => input.force)).toEqual([false, false]);
   });
 
-  it("stops listening for window focus when Usage unmounts", async () => {
-    usageSummary.mockResolvedValue(summary());
-    const view = renderUsage(createMainWindowQueryClient());
-    await screen.findByRole("region", { name: "Usage totals" });
-    expect(focusHandlers.size).toBe(1);
-
-    view.unmount();
-
-    await waitFor(() => expect(stopFocusListener).toHaveBeenCalledTimes(1));
-    expect(focusHandlers.size).toBe(0);
-  });
 });
 
 describe("Usage loading continuity", () => {

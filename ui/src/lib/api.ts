@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, TauriEvent, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   AgentId,
@@ -229,7 +229,7 @@ export function onOpenGithubWindow(handler: () => void): Promise<UnlistenFn> {
 }
 
 export function onMainWindowFocused(handler: () => void): Promise<UnlistenFn> {
-  return listen("tauri://focus", () => handler(), { target: { kind: "Window", label: "main" } });
+  return listen(TauriEvent.WINDOW_FOCUS, () => handler(), { target: { kind: "Window", label: "main" } });
 }
 
 export function loadAppSettings(): Promise<AppSettings> {
