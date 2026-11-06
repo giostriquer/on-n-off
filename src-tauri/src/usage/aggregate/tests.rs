@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::UsageSummaryInput;
 use crate::usage::history::{FoldedRow, UsageHistory};
 
 fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
@@ -24,7 +25,7 @@ fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
     r
 }
 
-fn sample_rates() -> Arc<RateTable> {
+fn sample_rates() -> RateTable {
     let mut table = RateTable::new();
     table.insert(
         "claude-fable-5".into(),
@@ -36,70 +37,49 @@ fn sample_rates() -> Arc<RateTable> {
             cache_creation_1h_cost_per_token: 2e-5,
         },
     );
-    Arc::new(table)
+    table
 }
 
-fn aggregate(records: &[UsageRecord], time_zone: &str, resolution: Resolution) -> AggregateResult {
-    let (since_time_ms, until_time_ms) = if resolution == Resolution::Hour {
-        (
-            Some(
-                chrono::DateTime::parse_from_rfc3339("2026-08-06T04:37:00.000Z")
-                    .unwrap()
-                    .timestamp_millis(),
-            ),
-            Some(
-                chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
-                    .unwrap()
-                    .timestamp_millis(),
-            ),
-        )
-    } else {
-        (None, None)
-    };
-    let mut agg = UsageAggregator::new(AggregateOptions {
+fn august(time_zone: &str) -> UsageWindow {
+    UsageWindow::of(&UsageSummaryInput {
+        since_day: "2026-08-01".into(),
+        until_day: "2026-08-31".into(),
+        time_zone: time_zone.into(),
+        resolution: Some("day".into()),
+        since_time: None,
+        until_time: None,
+        force: false,
+    })
+    .unwrap()
+}
+
+fn hours(time_zone: &str, since: &str, until: &str) -> UsageWindow {
+    UsageWindow::of(&UsageSummaryInput {
+        resolution: Some("hour".into()),
+        since_time: Some(since.into()),
+        until_time: Some(until.into()),
         time_zone: time_zone.into(),
         since_day: "2026-08-01".into(),
         until_day: "2026-08-31".into(),
-        resolution,
-        since_time_ms,
-        until_time_ms,
-        rates: sample_rates(),
-    })
-    .unwrap();
-    for r in records {
-        agg.add(r);
-    }
-    agg.finish()
-}
-
-#[test]
-fn hourly_requires_bounds() {
-    let result = UsageAggregator::new(AggregateOptions {
-        time_zone: "UTC".into(),
-        since_day: "2026-08-01".into(),
-        until_day: "2026-08-31".into(),
-        resolution: Resolution::Hour,
-        since_time_ms: None,
-        until_time_ms: None,
-        rates: sample_rates(),
-    });
-    match result {
-        Err(err) => assert!(err.contains("exact time bounds")),
-        Ok(_) => panic!("expected error"),
-    }
-}
-
-fn august_by_day() -> UsageAggregator {
-    UsageAggregator::new(AggregateOptions {
-        time_zone: "UTC".into(),
-        since_day: "2026-08-01".into(),
-        until_day: "2026-08-31".into(),
-        resolution: Resolution::Day,
-        since_time_ms: None,
-        until_time_ms: None,
-        rates: sample_rates(),
+        force: false,
     })
     .unwrap()
+}
+
+fn a_day_from_0437(time_zone: &str) -> UsageWindow {
+    hours(
+        time_zone,
+        "2026-08-06T04:37:00.000Z",
+        "2026-08-07T04:37:00.000Z",
+    )
+}
+
+fn aggregate(records: &[UsageRecord], window: &UsageWindow) -> AggregateResult {
+    read_with(window, |agg| {
+        for r in records {
+            agg.add(r);
+        }
+    })
 }
 
 #[test]
@@ -117,8 +97,7 @@ fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
             record(|r| r.model = "c-model".into()),
             record(|r| r.model = "a-model".into()),
         ],
-        "UTC",
-        Resolution::Day,
+        &august("UTC"),
     );
 
     let order: Vec<(UsageProvider, &str)> = result
@@ -139,7 +118,8 @@ fn a_days_buckets_list_their_providers_in_tab_order_then_their_models() {
 
 #[test]
 fn add_says_whether_the_record_was_counted() {
-    let mut agg = august_by_day();
+    let (window, rates) = (august("UTC"), sample_rates());
+    let mut agg = UsageAggregator::new(&window, &rates);
     assert!(agg.add(&record(|r| r.dedupe_key = Some("msg_1:".into()))));
     assert!(!agg.add(&record(|r| {
         r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
@@ -172,8 +152,7 @@ fn hourly_window_includes_its_start_and_excludes_its_end() {
             at(until - 1, 100),
             at(until, 1000),
         ],
-        "UTC",
-        Resolution::Hour,
+        &a_day_from_0437("UTC"),
     );
     let counted: u64 = result
         .buckets
@@ -186,15 +165,15 @@ fn hourly_window_includes_its_start_and_excludes_its_end() {
 
 #[test]
 fn buckets_by_timezone_day() {
-    let utc = aggregate(&[record(|_| {})], "UTC", Resolution::Day);
-    let la = aggregate(&[record(|_| {})], "America/Los_Angeles", Resolution::Day);
+    let utc = aggregate(&[record(|_| {})], &august("UTC"));
+    let la = aggregate(&[record(|_| {})], &august("America/Los_Angeles"));
     assert_eq!(utc.buckets[0].day, "2026-08-07");
     assert_eq!(la.buckets[0].day, "2026-08-06");
 }
 
 #[test]
 fn unknown_timezone_falls_back_to_utc() {
-    let result = aggregate(&[record(|_| {})], "Not/AZone", Resolution::Day);
+    let result = aggregate(&[record(|_| {})], &august("Not/AZone"));
     assert_eq!(result.buckets[0].day, "2026-08-07");
 }
 
@@ -210,7 +189,7 @@ fn hourly_buckets_anchor_to_window_start() {
             .unwrap()
             .timestamp_millis();
     });
-    let result = aggregate(&[a, b], "America/Los_Angeles", Resolution::Hour);
+    let result = aggregate(&[a, b], &a_day_from_0437("America/Los_Angeles"));
     let pairs: Vec<_> = result
         .buckets
         .iter()
@@ -233,8 +212,7 @@ fn out_of_window_day_dropped() {
                 .unwrap()
                 .timestamp_millis();
         })],
-        "UTC",
-        Resolution::Day,
+        &august("UTC"),
     );
     assert_eq!(result.buckets.len(), 0);
     assert_eq!(result.out_of_window, 1);
@@ -246,25 +224,9 @@ fn at(iso: &str) -> i64 {
         .timestamp_millis()
 }
 
-fn read_with(
-    time_zone: &str,
-    hours: Option<(i64, i64)>,
-    feed: impl FnOnce(&mut UsageAggregator),
-) -> AggregateResult {
-    let mut agg = UsageAggregator::new(AggregateOptions {
-        time_zone: time_zone.into(),
-        since_day: "2026-08-01".into(),
-        until_day: "2026-08-31".into(),
-        resolution: if hours.is_some() {
-            Resolution::Hour
-        } else {
-            Resolution::Day
-        },
-        since_time_ms: hours.map(|(since, _)| since),
-        until_time_ms: hours.map(|(_, until)| until),
-        rates: sample_rates(),
-    })
-    .unwrap();
+fn read_with(window: &UsageWindow, feed: impl FnOnce(&mut UsageAggregator)) -> AggregateResult {
+    let rates = sample_rates();
+    let mut agg = UsageAggregator::new(window, &rates);
     feed(&mut agg);
     agg.finish()
 }
@@ -338,12 +300,12 @@ fn folded_rows_read_like_the_records_they_hold_in_any_zone() {
         "America/St_Johns",
         "America/Los_Angeles",
     ] {
-        let from_records = read_with(zone, None, |agg| {
+        let from_records = read_with(&august(zone), |agg| {
             for record in &records {
                 agg.add(record);
             }
         });
-        let from_rows = read_with(zone, None, |agg| {
+        let from_rows = read_with(&august(zone), |agg| {
             for row in &rows {
                 agg.add_folded(row);
             }
@@ -357,13 +319,17 @@ fn folded_rows_read_like_the_records_they_hold_in_any_zone() {
 fn folded_rows_read_like_their_records_by_the_hour() {
     let records = history_sample();
     let rows = fold_all(&records);
-    let hours = Some((at("2026-08-07T18:00:00Z"), at("2026-08-08T02:30:00Z")));
-    let from_records = read_with("Asia/Kathmandu", hours, |agg| {
+    let window = hours(
+        "Asia/Kathmandu",
+        "2026-08-07T18:00:00Z",
+        "2026-08-08T02:30:00Z",
+    );
+    let from_records = read_with(&window, |agg| {
         for record in &records {
             agg.add(record);
         }
     });
-    let from_rows = read_with("Asia/Kathmandu", hours, |agg| {
+    let from_rows = read_with(&window, |agg| {
         for row in &rows {
             agg.add_folded(row);
         }
@@ -385,7 +351,7 @@ fn add_folded_says_whether_the_row_was_counted() {
         .find(|row| row.slot_start_ms == at("2026-07-31T10:00:00Z"))
         .unwrap();
 
-    read_with("UTC", None, |agg| {
+    read_with(&august("UTC"), |agg| {
         assert!(agg.add_folded(inside));
         assert!(!agg.add_folded(outside));
     });
@@ -393,7 +359,7 @@ fn add_folded_says_whether_the_row_was_counted() {
 
 #[test]
 fn a_bucket_adds_up_its_records_tokens_and_cache_savings() {
-    let result = aggregate(&[record(|_| {}), record(|_| {})], "UTC", Resolution::Day);
+    let result = aggregate(&[record(|_| {}), record(|_| {})], &august("UTC"));
     assert_eq!(result.buckets[0].totals.output_tokens, 100);
     assert!((result.buckets[0].cache_savings_usd - 0.018).abs() < 1e-12);
 }

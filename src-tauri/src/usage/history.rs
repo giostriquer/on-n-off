@@ -6,7 +6,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use super::cache_io::atomic_write;
-use super::reader::MTIME_SLACK_MS;
 use super::transcripts::{TokenTotals, UsageRecord, USAGE_TRANSCRIPT_PARSER_VERSION};
 use crate::provider_catalogue::UsageProvider;
 
@@ -16,6 +15,7 @@ pub const FOLD_AFTER_DAYS: i64 = 7;
 
 const SLOT_MS: i64 = 15 * 60 * 1000;
 pub const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
 
 const LONG_CONTEXT_INPUT_TOKENS: u64 = 200_000;
 

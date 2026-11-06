@@ -13,6 +13,7 @@ use crate::usage::summary_cache::summary_cache_path_for;
 mod cache;
 mod dto;
 mod history;
+mod window;
 
 #[test]
 fn cached_summary_is_invalidated_when_transcript_is_appended() {
@@ -202,24 +203,14 @@ fn older_generation_cannot_overwrite_newer_summary() {
     let home = scratch_dir("usage-summary-concurrent");
     write_claude_transcript(&home);
 
-    let reached = Arc::new(std::sync::Barrier::new(2));
-    let resume = Arc::new(std::sync::Barrier::new(2));
-    let old_reached = Arc::clone(&reached);
-    let old_resume = Arc::clone(&resume);
     let older_home = home.clone();
-    let older = std::thread::spawn(move || {
-        with_before_publish_pause(old_reached, old_resume, || {
-            read_offline(&older_home, august_input(true))
-        })
-    });
+    let older = paused_before_publish(move || read_offline(&older_home, august_input(true)));
 
-    reached.wait();
     append_claude_record(&home, "msg_2", 25);
     let newer = read_offline(&home, august_input(false));
     assert_eq!(output_tokens(&newer), 45);
-    resume.wait();
 
-    let older = older.join().unwrap();
+    let older = older.resume();
     assert_eq!(output_tokens(&older), 20);
     let final_hit = read_offline(&home, august_input(false));
     assert!(final_hit.cache_hit);

@@ -182,6 +182,11 @@ _Avoid_: tile, entry
 One transcript file a provider wrote, found by walking that provider's transcript directories.
 _Avoid_: log, session file
 
+**Usage window**:
+The days a usage summary counts, in the time zone it is read in, or for the last day the exact
+instants. Its periods are its days, or the hours from its opening instant.
+_Avoid_: range, date range
+
 **Watermark**:
 The instant before which usage is counted only from folded usage, never from transcripts.
 

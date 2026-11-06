@@ -2,11 +2,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::dto::{UsageSummaryDto, UsageSummaryInput};
+use crate::dto::UsageSummaryDto;
 
 use super::cache_io::atomic_write;
+use super::window::CacheIdentity;
 
-pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 3;
+pub const USAGE_SUMMARY_CACHE_VERSION: u32 = 4;
 const MAX_ENTRIES: usize = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -20,6 +21,7 @@ struct SummaryCacheFile {
 #[serde(rename_all = "camelCase")]
 struct SummaryCacheEntry {
     key: String,
+    group: String,
     source_signature: String,
     dto: UsageSummaryDto,
 }
@@ -28,37 +30,41 @@ pub fn summary_cache_path_for(home: &Path) -> PathBuf {
     home.join(".on-n-off").join("usage-summary-cache.json")
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryKey {
+    key: String,
+    group: String,
+}
+
 pub fn summary_key(
-    input: &UsageSummaryInput,
+    window: &CacheIdentity,
     rates_fetched_at_ms: Option<i64>,
     history_fingerprint: &str,
-) -> String {
-    format!(
-        "{}|rates:{}|history:{history_fingerprint}",
-        window_key(input),
-        rates_fetched_at_ms.unwrap_or(0)
-    )
+) -> SummaryKey {
+    SummaryKey {
+        key: format!(
+            "{}|rates:{}|history:{history_fingerprint}",
+            window.key(),
+            rates_fetched_at_ms.unwrap_or(0)
+        ),
+        group: window.group().to_string(),
+    }
 }
 
-fn window_key(input: &UsageSummaryInput) -> String {
-    format!(
-        "{}|{}|{}|{}|{}|{}",
-        input.resolution.as_deref().unwrap_or("day"),
-        input.since_day,
-        input.until_day,
-        input.time_zone,
-        input.since_time.as_deref().unwrap_or(""),
-        input.until_time.as_deref().unwrap_or(""),
-    )
-}
-
-pub fn load_summary_hit(path: &Path, key: &str, source_signature: &str) -> Option<UsageSummaryDto> {
+pub fn load_summary_hit(
+    path: &Path,
+    key: &SummaryKey,
+    source_signature: &str,
+) -> Option<UsageSummaryDto> {
     let raw = std::fs::read_to_string(path).ok()?;
     let file: SummaryCacheFile = serde_json::from_str(&raw).ok()?;
     if file.version != USAGE_SUMMARY_CACHE_VERSION {
         return None;
     }
-    let entry = file.entries.into_iter().find(|entry| entry.key == key)?;
+    let entry = file
+        .entries
+        .into_iter()
+        .find(|entry| entry.key == key.key)?;
     if entry.source_signature != source_signature {
         return None;
     }
@@ -68,15 +74,16 @@ pub fn load_summary_hit(path: &Path, key: &str, source_signature: &str) -> Optio
     Some(dto)
 }
 
-pub fn store_summary(path: &Path, key: &str, source_signature: &str, dto: &UsageSummaryDto) {
+pub fn store_summary(path: &Path, key: &SummaryKey, source_signature: &str, dto: &UsageSummaryDto) {
     let mut entries = load_entries(path);
-    entries.retain(|entry| entry.key != key);
+    entries.retain(|entry| entry.group != key.group);
     let mut stored = dto.clone();
     stored.cache_hit = false;
     entries.insert(
         0,
         SummaryCacheEntry {
-            key: key.to_string(),
+            key: key.key.clone(),
+            group: key.group.clone(),
             source_signature: source_signature.to_string(),
             dto: stored,
         },

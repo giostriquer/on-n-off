@@ -1,23 +1,12 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-
-use chrono::{SecondsFormat, TimeZone, Utc};
-use chrono_tz::Tz;
 
 use super::history::FoldedRow;
 use super::pricing::{cache_savings_usd, price_usage, RateTable};
 use super::transcripts::{TokenTotals, UsageRecord};
+use super::window::{Period, UsageWindow};
 use crate::provider_catalogue::UsageProvider;
 
 pub use super::pricing::CostSource;
-
-const HOUR_MS: i64 = 60 * 60 * 1000;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Resolution {
-    Day,
-    Hour,
-}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UsageBucket {
@@ -32,17 +21,6 @@ pub struct UsageBucket {
     pub records: u64,
     pub unpriced_records: u64,
     pub sessions: u64,
-}
-
-#[derive(Debug, Clone)]
-pub struct AggregateOptions {
-    pub time_zone: String,
-    pub since_day: String,
-    pub until_day: String,
-    pub resolution: Resolution,
-    pub since_time_ms: Option<i64>,
-    pub until_time_ms: Option<i64>,
-    pub rates: Arc<RateTable>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -72,70 +50,26 @@ struct Usage<'a> {
 
 #[derive(PartialEq, Eq, Hash)]
 struct BucketKey {
-    day: String,
-    hour_start: Option<String>,
+    period: Period,
     provider: UsageProvider,
     model: String,
 }
 
-pub struct UsageAggregator {
+pub struct UsageAggregator<'w> {
     buckets: HashMap<BucketKey, MutableBucket>,
-    zone: Tz,
-    hourly: Option<(i64, i64)>,
-    options: AggregateOptions,
+    window: &'w UsageWindow,
+    rates: &'w RateTable,
     out_of_window: u64,
 }
 
-impl UsageAggregator {
-    pub fn new(options: AggregateOptions) -> Result<Self, String> {
-        let hourly = match options.resolution {
-            Resolution::Hour => {
-                let since = options.since_time_ms.ok_or_else(|| {
-                    "Hourly usage aggregation requires exact time bounds".to_string()
-                })?;
-                let until = options.until_time_ms.ok_or_else(|| {
-                    "Hourly usage aggregation requires exact time bounds".to_string()
-                })?;
-                Some((since, until))
-            }
-            Resolution::Day => None,
-        };
-        let zone: Tz = options.time_zone.parse().unwrap_or(chrono_tz::UTC);
-        Ok(Self {
+impl<'w> UsageAggregator<'w> {
+    pub fn new(window: &'w UsageWindow, rates: &'w RateTable) -> Self {
+        Self {
             buckets: HashMap::new(),
-            zone,
-            hourly,
-            options,
+            window,
+            rates,
             out_of_window: 0,
-        })
-    }
-
-    fn bucket_key(&self, at_ms: i64, provider: UsageProvider, model: &str) -> Option<BucketKey> {
-        if let Some((since, until)) = self.hourly {
-            if at_ms < since || at_ms >= until {
-                return None;
-            }
         }
-
-        let day = day_in_zone(at_ms, self.zone);
-        if self.hourly.is_none()
-            && (day.as_str() < self.options.since_day.as_str()
-                || day.as_str() > self.options.until_day.as_str())
-        {
-            return None;
-        }
-
-        let hour_start = self.hourly.map(|(since, _)| {
-            let offset = ((at_ms - since) / HOUR_MS) * HOUR_MS;
-            ms_to_iso(since + offset)
-        });
-
-        Some(BucketKey {
-            day,
-            hour_start,
-            provider,
-            model: model.to_string(),
-        })
     }
 
     pub fn add(&mut self, record: &UsageRecord) -> bool {
@@ -171,9 +105,14 @@ impl UsageAggregator {
         usage: Usage<'_>,
         sessions: impl IntoIterator<Item = &'s str>,
     ) -> bool {
-        let Some(key) = self.bucket_key(usage.at_ms, usage.provider, usage.model) else {
+        let Some(period) = self.window.period_of(usage.at_ms) else {
             self.out_of_window += usage.records;
             return false;
+        };
+        let key = BucketKey {
+            period,
+            provider: usage.provider,
+            model: usage.model.to_string(),
         };
 
         let bucket = self.buckets.entry(key).or_insert_with(|| MutableBucket {
@@ -187,15 +126,14 @@ impl UsageAggregator {
         });
 
         let priced = price_usage(
-            &self.options.rates,
+            self.rates,
             usage.model,
             usage.totals,
             usage.reported_cost_usd,
         );
         bucket.totals = bucket.totals.add(usage.totals);
         bucket.cost_usd += priced.cost_usd;
-        bucket.cache_savings_usd +=
-            cache_savings_usd(&self.options.rates, usage.model, usage.totals);
+        bucket.cache_savings_usd += cache_savings_usd(self.rates, usage.model, usage.totals);
         bucket.records += usage.records;
         match priced.cost_source {
             CostSource::Unpriced => bucket.unpriced_records += usage.records,
@@ -215,8 +153,8 @@ impl UsageAggregator {
         for (key, bucket) in self.buckets {
             let cost_source = resolve_cost_source(&bucket);
             buckets.push(UsageBucket {
-                day: key.day,
-                hour_start: key.hour_start,
+                day: key.period.day(),
+                hour_start: key.period.hour_start(),
                 provider: key.provider,
                 model: key.model,
                 totals: bucket.totals,
@@ -251,20 +189,6 @@ fn resolve_cost_source(bucket: &MutableBucket) -> CostSource {
     } else {
         CostSource::ModelPriced
     }
-}
-
-fn day_in_zone(timestamp_ms: i64, zone: Tz) -> String {
-    let Some(utc) = Utc.timestamp_millis_opt(timestamp_ms).single() else {
-        return "1970-01-01".to_string();
-    };
-    utc.with_timezone(&zone).format("%Y-%m-%d").to_string()
-}
-
-fn ms_to_iso(ms: i64) -> String {
-    Utc.timestamp_millis_opt(ms)
-        .single()
-        .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Millis, true))
-        .unwrap_or_else(|| "1970-01-01T00:00:00.000Z".to_string())
 }
 
 #[cfg(test)]

@@ -7,7 +7,6 @@ use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use crate::paths::{claude_root_for, codex_root_for};
 
 use super::history::Watermark;
-use super::reader::MTIME_SLACK_MS;
 use super::transcripts::{richest_copies, UsageRecord};
 use crate::provider_catalogue::UsageProvider;
 use scan_cache::{load_scan_cache, prune_and_save, scan_cache_path_for, ScanCache};
@@ -97,7 +96,11 @@ impl Sources {
         self.seen.snapshot.walked_every_root()
     }
 
-    pub fn read(&mut self, from_ms: i64, watermark: impl FnOnce() -> Watermark) -> SourceRead {
+    pub fn read(
+        &mut self,
+        earliest_mtime_ms: i64,
+        watermark: impl FnOnce() -> Watermark,
+    ) -> SourceRead {
         let watermark = *self.watermark.get_or_insert_with(watermark);
         let scan_cache = self
             .scan_cache
@@ -105,7 +108,7 @@ impl Sources {
         let prepared = prepare_sources(
             &self.seen.snapshot,
             scan_cache,
-            from_ms.saturating_sub(MTIME_SLACK_MS),
+            earliest_mtime_ms,
             watermark,
         );
         self.scan_cache_dirty |= prepared.scan_cache_dirty;

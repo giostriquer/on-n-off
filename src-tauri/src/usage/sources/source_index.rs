@@ -419,7 +419,7 @@ impl SourceSnapshot {
 pub(super) fn prepare_sources(
     snapshot: &SourceSnapshot,
     scan_cache: &mut ScanCache,
-    window_start_ms: i64,
+    earliest_mtime_ms: i64,
     watermark: Watermark,
 ) -> PreparedSources {
     let mut files = Vec::new();
@@ -428,7 +428,7 @@ pub(super) fn prepare_sources(
     let mut unread_files = Vec::new();
 
     for entry in snapshot.entries.values().filter(|entry| {
-        entry.mtime_ms >= window_start_ms
+        entry.mtime_ms >= earliest_mtime_ms
             && !watermark.holds_only_folded(entry.mtime_ms, entry.max_record_ms)
     }) {
         let cached = scan_cache

@@ -508,6 +508,36 @@ priceable-looking model the table lacks lets the next scan re-fetch after an hou
 refresh button re-fetches at once. The summary cache key carries the table's fetch time, so a new
 table can never serve costs computed from an old one.
 
+A summary counts one usage window (`UsageWindow`, `usage/window.rs`), built once from the
+`usage_summary` input by `UsageWindow::of`, the only code that interprets that input's days, zone
+and instants. It refuses a `sinceDay` or `untilDay` that is not a `YYYY-MM-DD` calendar day,
+`sinceDay` after `untilDay`, and an hourly read without two valid instants at most 24 hours apart;
+any resolution but `hour` reads by the day, and a zone it does not know reads as UTC (the summary
+still echoes the zone it was asked for). The rest of the read asks the window, never the input:
+
+- **Its span** (`span`), the instants it covers: an hourly read's two instants, or a day read's
+  days in its zone, from the first instant of its opening day to the first instant of the day
+  after its closing day. At a midnight the clocks skip, a day starts when the clocks land; at one
+  they repeat, at the first pass. A day read ignores any `sinceTime`/`untilTime` it carries. The
+  span alone decides which instants count, what the source signature hashes and which folded rows
+  are read, so a summary served from the cache always covers what a fresh read would count.
+- **The earliest transcript mtime worth reading** (`earliest_mtime_ms`): 36 hours before an hourly
+  read's opening instant, or before a day read's opening day at UTC midnight. Local midnight is at
+  most 14 hours before UTC midnight (UTC+14), so the 36 hours cover every zone with 22 to spare;
+  it is the value the summary has always used, kept so the files a read scans, and its
+  `scannedFiles`, do not change. This is the window's own allowance; the watermark keeps its own
+  36-hour slack in `usage/history.rs`.
+- **The period an instant counts in** (`period_of`): any instant in its span, on its local day in
+  the window's zone, and for an hourly read in the hour it falls in, counted from the window's
+  opening instant (`hourStart`), so an hour that crosses a local midnight gives two buckets with
+  one `hourStart`. `UsageAggregator` takes the window and the price table, nothing else.
+- **Its cache identity** (`cache_identity`): what the summary echoes or counts by (days, zone,
+  and an hourly read's instants in milliseconds, so two spellings of an instant share an entry),
+  and its group. The summary cache keeps eight entries, and storing one replaces every entry of its
+  group: a day window is its own group, and every hourly window shares one, because the Usage
+  screen asks for the rolling last 24 hours, minute-aligned, and never asks for an older one again.
+  Without the group, each hourly read in a new minute added an entry and pushed the day windows out.
+
 The summary and the background fold read transcripts the same way, through `usage/sources.rs`,
 under the one lock every read and write of the usage files takes. `Sources::open` walks the roots
 and brings the source index up to date, which is enough to answer the summary's cache check before
@@ -861,5 +891,6 @@ the code today; a change that moves one updates its row.
 | Pull request context | `in_organization` on `GithubPrDto` (`dto.rs`), read from `isInOrganization` (`github/parse.rs`); named `PrContext::of` for both notches (`side_notch/model.rs`), decided once as each row's `tag` by the notch model, which also names the viewer's own personal repository without its owner (`pr_row` and `repo_label`, `side_notch/model/frame.rs`) and drawn by the helper's `PullRequestRow` (`PopoverView.swift`) and the Windows painter's `popover_entries` (`side_notch/win_paint.rs`) |
 | Rail cell | `CellData` (`side_notch/model/frame.rs`), decided for both notches by `frame::rail`; a checking cell has no `reading`; drawn by the helper from `Cell` (`NotchCore/Models.swift`, `NotchRailView` and `PopoverView.swift`) and by the Windows painter (`cell_content`, `popover_entries` in `side_notch/win_paint.rs`) |
 | Transcript source | `Sources` (`usage/sources.rs`), which owns the source index (`usage/sources/source_index.rs`) and the scan cache (`usage/sources/scan_cache.rs`) |
+| Usage window | `UsageWindow` (`usage/window.rs`), built by `UsageWindow::of` from `UsageSummaryInput`; asked by `usage/summary.rs` for its span, earliest transcript mtime and cache identity (keyed by `summary_key`, `usage/summary_cache.rs`), and by `UsageAggregator` (`usage/aggregate.rs`) for each instant's `Period` |
 | Watermark | `Watermark` (`usage/history.rs`) |
 | Folded usage | `HistoryStore` (`usage/history.rs`), folded by `usage/folding.rs`; its status read and cleared in the UI through `foldedUsageStatusQuery` and `clearFoldedUsage` (`ui/src/features/usage/usageReads.ts`) |

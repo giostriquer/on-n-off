@@ -1,12 +1,9 @@
 use std::cell::OnceCell;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-#[cfg(test)]
-use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use chrono::{DateTime, NaiveDate, SecondsFormat, TimeZone, Utc};
-use chrono_tz::Tz;
+use chrono::{SecondsFormat, TimeZone, Utc};
 
 use crate::dto::{
     AdapterError, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
@@ -14,17 +11,13 @@ use crate::dto::{
 };
 use crate::paths::user_home;
 
-use super::aggregate::{
-    AggregateOptions as AggOpts, CostSource, Resolution as AggResolution, UsageAggregator,
-    UsageBucket,
-};
+use super::aggregate::{CostSource, UsageAggregator, UsageBucket};
 use super::history::{history_fingerprint, history_path_for, HistoryStore};
 use super::pricing::{ensure_rates, LITELLM_RATES_URL};
 use super::sources::{lock_usage_files, Sources};
 use super::summary_cache::{load_summary_hit, store_summary, summary_cache_path_for, summary_key};
+use super::window::UsageWindow;
 use crate::provider_catalogue::UsageProvider as Provider;
-
-const MAX_HOURLY_WINDOW_MS: i64 = 24 * 60 * 60 * 1000;
 
 fn now_ms() -> i64 {
     SystemTime::now()
@@ -34,14 +27,17 @@ fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
+type PublishPause = (std::sync::mpsc::Sender<()>, std::sync::mpsc::Receiver<()>);
+
+#[cfg(test)]
 thread_local! {
-    static BEFORE_PUBLISH_PAUSE: std::cell::RefCell<Option<(std::sync::Arc<std::sync::Barrier>, std::sync::Arc<std::sync::Barrier>)>> = const { std::cell::RefCell::new(None) };
+    static BEFORE_PUBLISH_PAUSE: std::cell::RefCell<Option<PublishPause>> = const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(test)]
 fn with_before_publish_pause<R>(
-    reached: Arc<std::sync::Barrier>,
-    resume: Arc<std::sync::Barrier>,
+    reached: std::sync::mpsc::Sender<()>,
+    resume: std::sync::mpsc::Receiver<()>,
     action: impl FnOnce() -> R,
 ) -> R {
     BEFORE_PUBLISH_PAUSE.with(|pause| *pause.borrow_mut() = Some((reached, resume)));
@@ -54,8 +50,8 @@ fn with_before_publish_pause<R>(
 fn pause_before_publish_if_requested() {
     BEFORE_PUBLISH_PAUSE.with(|pause| {
         if let Some((reached, resume)) = pause.borrow().as_ref() {
-            reached.wait();
-            resume.wait();
+            let _ = reached.send(());
+            let _ = resume.recv();
         }
     });
 }
@@ -63,51 +59,12 @@ fn pause_before_publish_if_requested() {
 #[cfg(not(test))]
 fn pause_before_publish_if_requested() {}
 
-fn parse_iso_ms(value: &str) -> Option<i64> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|dt| dt.timestamp_millis())
-}
-
 fn cost_source_dto(source: CostSource) -> UsageCostSource {
     match source {
         CostSource::ProviderReported => UsageCostSource::ProviderReported,
         CostSource::ModelPriced => UsageCostSource::ModelPriced,
         CostSource::Unpriced => UsageCostSource::Unpriced,
     }
-}
-
-fn source_window_bounds(input: &UsageSummaryInput) -> (i64, i64) {
-    if let (Some(since), Some(until)) = (
-        input.since_time.as_deref().and_then(parse_iso_ms),
-        input.until_time.as_deref().and_then(parse_iso_ms),
-    ) {
-        return (since, until);
-    }
-
-    let Some(since_day) = NaiveDate::parse_from_str(&input.since_day, "%Y-%m-%d").ok() else {
-        return (i64::MIN, i64::MAX);
-    };
-    let Some(after_until) = NaiveDate::parse_from_str(&input.until_day, "%Y-%m-%d")
-        .ok()
-        .and_then(|day| day.succ_opt())
-    else {
-        return (i64::MIN, i64::MAX);
-    };
-    let zone: Tz = input.time_zone.parse().unwrap_or(chrono_tz::UTC);
-    let Some(start) = since_day
-        .and_hms_opt(0, 0, 0)
-        .and_then(|local| zone.from_local_datetime(&local).earliest())
-    else {
-        return (i64::MIN, i64::MAX);
-    };
-    let Some(end) = after_until
-        .and_hms_opt(0, 0, 0)
-        .and_then(|local| zone.from_local_datetime(&local).latest())
-    else {
-        return (i64::MIN, i64::MAX);
-    };
-    (start.timestamp_millis(), end.timestamp_millis())
 }
 
 fn bucket_to_dto(bucket: UsageBucket) -> UsageBucketDto {
@@ -153,47 +110,7 @@ fn read_summary_from(
     input: UsageSummaryInput,
     home: impl FnOnce() -> Result<PathBuf, AdapterError>,
 ) -> Result<UsageSummaryDto, AdapterError> {
-    if input.since_day > input.until_day {
-        return Err(AdapterError::message(format!(
-            "sinceDay '{}' is after untilDay '{}'",
-            input.since_day, input.until_day
-        )));
-    }
-
-    let resolution = match input.resolution.as_deref().unwrap_or("day") {
-        "hour" => AggResolution::Hour,
-        _ => AggResolution::Day,
-    };
-
-    let (since_time_ms, until_time_ms) = if resolution == AggResolution::Hour {
-        let since = input
-            .since_time
-            .as_deref()
-            .and_then(parse_iso_ms)
-            .ok_or_else(|| {
-                AdapterError::message(
-                    "Hourly usage requires valid sinceTime and untilTime instants",
-                )
-            })?;
-        let until = input
-            .until_time
-            .as_deref()
-            .and_then(parse_iso_ms)
-            .ok_or_else(|| {
-                AdapterError::message(
-                    "Hourly usage requires valid sinceTime and untilTime instants",
-                )
-            })?;
-        let duration = until - since;
-        if duration <= 0 || duration > MAX_HOURLY_WINDOW_MS {
-            return Err(AdapterError::message(
-                "Hourly usage window must be greater than zero and at most 24 hours",
-            ));
-        }
-        (Some(since), Some(until))
-    } else {
-        (None, None)
-    };
+    let window = UsageWindow::of(&input)?;
 
     let started = Instant::now();
     let started_ms = now_ms();
@@ -202,23 +119,18 @@ fn read_summary_from(
     let history_path = history_path_for(&home);
     let rates = ensure_rates(&home, started_ms, input.force);
     let key = summary_key(
-        &input,
+        &window.cache_identity(),
         rates.fetched_at_ms,
         &history_fingerprint(&history_path),
     );
-    let (signature_start_ms, signature_end_ms) = source_window_bounds(&input);
-    let since_ms = since_time_ms.unwrap_or_else(|| {
-        DateTime::parse_from_rfc3339(&format!("{}T00:00:00Z", input.since_day))
-            .map(|dt| dt.timestamp_millis())
-            .unwrap_or(0)
-    });
+    let span = window.span();
 
     let open_history = || HistoryStore::open(history_path.clone());
     let history = OnceCell::new();
     let mut transcripts = Sources::open(lock_usage_files(), &home, || {
         history.get_or_init(open_history).watermark()
     });
-    let source_signature = transcripts.signature(signature_start_ms, signature_end_ms);
+    let source_signature = transcripts.signature(span.start_ms, span.end_ms);
     if transcripts.is_complete() && !input.force {
         if let Some(hit) = load_summary_hit(&summary_path, &key, &source_signature) {
             transcripts.finish(|| history.get_or_init(open_history).watermark());
@@ -226,22 +138,10 @@ fn read_summary_from(
         }
     }
     let history = history.get_or_init(open_history);
-    let source_read = transcripts.read(since_ms, || history.watermark());
+    let source_read = transcripts.read(window.earliest_mtime_ms(), || history.watermark());
     let seen_sources = transcripts.finish(|| history.watermark());
 
-    let rates_arc = rates.table.clone();
-
-    let mut aggregator = UsageAggregator::new(AggOpts {
-        time_zone: input.time_zone.clone(),
-        since_day: input.since_day.clone(),
-        until_day: input.until_day.clone(),
-        resolution,
-        since_time_ms,
-        until_time_ms,
-        rates: rates_arc.clone(),
-    })
-    .map_err(AdapterError::message)?;
-
+    let mut aggregator = UsageAggregator::new(&window, &rates.table);
     let records = source_read.records();
     let mut session_ids: HashMap<Provider, HashSet<&str>> = HashMap::new();
     for record in records {
@@ -253,7 +153,7 @@ fn read_summary_from(
         }
     }
     let folded_rows = history.history().map_or(&[][..], |history| {
-        history.rows_between(signature_start_ms, signature_end_ms)
+        history.rows_between(span.start_ms, span.end_ms)
     });
     for row in folded_rows {
         if aggregator.add_folded(row) {
@@ -301,7 +201,7 @@ fn read_summary_from(
             status: rates.status.to_dto(),
             source: LITELLM_RATES_URL.into(),
             fetched_at,
-            known_models: rates_arc.len() as u64,
+            known_models: rates.table.len() as u64,
         },
         scan_duration_ms: started.elapsed().as_millis() as u64,
         cache_hit: false,

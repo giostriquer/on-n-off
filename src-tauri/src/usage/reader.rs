@@ -9,8 +9,6 @@ use super::transcripts::{
 };
 use crate::provider_catalogue::UsageProvider;
 
-pub const MTIME_SLACK_MS: i64 = 36 * 60 * 60 * 1000;
-
 #[derive(Debug, Clone)]
 pub struct TranscriptFile {
     pub path: PathBuf,

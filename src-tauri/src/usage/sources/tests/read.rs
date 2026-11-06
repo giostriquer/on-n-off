@@ -155,9 +155,9 @@ fn a_cached_parse_serves_only_while_both_size_and_mtime_match() {
 }
 
 #[test]
-fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
-    let home = scratch_dir("usage-sources-read-slack");
-    let from_ms = month_start(8);
+fn a_read_reads_the_transcripts_written_from_the_earliest_mtime_it_is_given() {
+    let home = scratch_dir("usage-sources-read-earliest-mtime");
+    let earliest_mtime_ms = month_start(8);
     let edge = transcript_path(&home, "edge.jsonl");
     let earlier = transcript_path(&home, "earlier.jsonl");
     write_records(&edge, &[record("2026-08-01T01:00:00.000Z", "msg-edge", 20)]);
@@ -165,11 +165,11 @@ fn a_read_from_an_instant_reads_transcripts_written_up_to_36_hours_before_it() {
         &earlier,
         &[record("2026-08-01T02:00:00.000Z", "msg-earlier", 30)],
     );
-    set_mtime_ms(&edge, from_ms - 36 * 60 * 60 * 1000);
-    set_mtime_ms(&earlier, from_ms - 36 * 60 * 60 * 1000 - 1);
+    set_mtime_ms(&edge, earliest_mtime_ms);
+    set_mtime_ms(&earlier, earliest_mtime_ms - 1);
 
     let mut sources = open(&home, Watermark::NONE);
-    let read = sources.read(from_ms, || Watermark::NONE);
+    let read = sources.read(earliest_mtime_ms, || Watermark::NONE);
     sources.finish(|| Watermark::NONE);
 
     assert_eq!(output_tokens(&read), [20]);

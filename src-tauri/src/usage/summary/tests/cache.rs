@@ -1,5 +1,4 @@
 use super::super::test_support::*;
-use super::super::*;
 use crate::paths::scratch_dir;
 use crate::usage::pricing;
 use crate::usage::sources::{reset_transcript_parse_count, transcript_parse_count};
@@ -74,20 +73,11 @@ fn a_read_whose_transcripts_changed_before_it_stored_is_not_stored() {
     let home = scratch_dir("usage-summary-changed-before-store");
     write_claude_transcript(&home);
 
-    let reached = Arc::new(std::sync::Barrier::new(2));
-    let resume = Arc::new(std::sync::Barrier::new(2));
-    let (read_reached, read_resume) = (Arc::clone(&reached), Arc::clone(&resume));
     let read_home = home.clone();
-    let read = std::thread::spawn(move || {
-        with_before_publish_pause(read_reached, read_resume, || {
-            read_offline(&read_home, august_input(false))
-        })
-    });
-    reached.wait();
+    let read = paused_before_publish(move || read_offline(&read_home, august_input(false)));
     append_claude_record(&home, "msg_2", 25);
-    resume.wait();
 
-    assert_eq!(output_tokens(&read.join().unwrap()), 20);
+    assert_eq!(output_tokens(&read.resume()), 20);
     assert!(!summary_cache_path_for(&home).exists());
     let _ = std::fs::remove_dir_all(&home);
 }

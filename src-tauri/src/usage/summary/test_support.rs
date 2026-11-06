@@ -1,6 +1,9 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
+
+use chrono::DateTime;
 
 use super::*;
 use crate::dto::AgentId;
@@ -15,6 +18,32 @@ pub(super) fn read_summary_in(
 
 pub(super) fn read_offline(home: &Path, input: UsageSummaryInput) -> UsageSummaryDto {
     pricing::with_test_fetch(None, || read_summary_in(home, input)).unwrap()
+}
+
+const PUBLISH_PAUSE_LIMIT: Duration = Duration::from_secs(20);
+
+pub(super) struct PausedRead<R> {
+    resume: mpsc::Sender<()>,
+    read: std::thread::JoinHandle<R>,
+}
+
+pub(super) fn paused_before_publish<R: Send + 'static>(
+    read: impl FnOnce() -> R + Send + 'static,
+) -> PausedRead<R> {
+    let (reached, paused) = mpsc::channel();
+    let (resume, resumed) = mpsc::channel();
+    let read = std::thread::spawn(move || with_before_publish_pause(reached, resumed, read));
+    paused
+        .recv_timeout(PUBLISH_PAUSE_LIMIT)
+        .expect("the read did not pause before publishing");
+    PausedRead { resume, read }
+}
+
+impl<R> PausedRead<R> {
+    pub(super) fn resume(self) -> R {
+        self.resume.send(()).expect("the paused read is waiting");
+        self.read.join().unwrap()
+    }
 }
 
 pub(super) fn write_claude_transcript(home: &Path) {
