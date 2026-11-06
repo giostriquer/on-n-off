@@ -168,57 +168,6 @@ pub struct ProjectDto {
     pub mcp_count: u32,
 }
 
-impl AgentTabDto {
-    pub fn skill(&self, id: &str) -> Option<&SkillDto> {
-        self.plugins
-            .iter()
-            .flat_map(|plugin| plugin.skills.iter())
-            .chain(self.user_skills.iter())
-            .find(|skill| skill.id == id)
-    }
-
-    pub fn ensure_togglable(&self, skill_id: &str) -> Result<(), AdapterError> {
-        match self.skill(skill_id) {
-            None => Err(AdapterError::message(format!(
-                "skill not found: {skill_id}"
-            ))),
-            Some(skill) if !skill.togglable => Err(AdapterError::message(format!(
-                "skill is not togglable: {skill_id}"
-            ))),
-            Some(_) => Ok(()),
-        }
-    }
-
-    pub fn ensure_plugin(&self, plugin_id: &str) -> Result<&PluginDto, AdapterError> {
-        self.plugins
-            .iter()
-            .find(|plugin| plugin.id == plugin_id)
-            .ok_or_else(|| AdapterError::message(format!("plugin not found: {plugin_id}")))
-    }
-
-    pub fn ensure_plugin_togglable(&self, plugin_id: &str) -> Result<&PluginDto, AdapterError> {
-        let plugin = self.ensure_plugin(plugin_id)?;
-        if !plugin.togglable {
-            return Err(AdapterError::message(format!(
-                "plugin is not togglable: {plugin_id}"
-            )));
-        }
-        Ok(plugin)
-    }
-
-    pub fn ensure_mcp_togglable(&self, mcp_id: &str) -> Result<(), AdapterError> {
-        match self.mcp_servers.iter().find(|server| server.id == mcp_id) {
-            None => Err(AdapterError::message(format!(
-                "mcp server not found: {mcp_id}"
-            ))),
-            Some(server) if !server.togglable => Err(AdapterError::message(format!(
-                "mcp server is not togglable: {mcp_id}"
-            ))),
-            Some(_) => Ok(()),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageSummaryInput {

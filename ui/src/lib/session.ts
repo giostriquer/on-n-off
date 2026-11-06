@@ -78,3 +78,13 @@ export function mergeEnrichedPluginMetadata(
     }),
   };
 }
+
+export function keepShownPluginMetadata(answer: AgentTabDto, shown: AgentTabDto | null): AgentTabDto {
+  if (!shown) {
+    return answer;
+  }
+  const unchanged = shown.plugins.filter((plugin) =>
+    answer.plugins.some((next) => next.id === plugin.id && next.version === plugin.version),
+  );
+  return mergeEnrichedPluginMetadata(answer, { ...shown, plugins: unchanged });
+}

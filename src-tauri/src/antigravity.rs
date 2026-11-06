@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
-use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::config_io::ConfigIo;
+use crate::change::{switch, Checked, Step};
+use crate::cli::{argv, AgentCli};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::mcp::parse_antigravity_json;
@@ -16,6 +15,8 @@ use crate::paths::{
 };
 use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill};
 use crate::sort::sort_tab;
+
+const ENABLEMENT: [&str; 3] = ["config.json", "plugins.json", "settings.json"];
 
 const SOURCE_CLI: &str = "cli";
 const SOURCE_CONFIG: &str = "config";
@@ -30,8 +31,6 @@ struct DiscoveredPlugin {
 
 pub struct AntigravityAdapter {
     gemini: Option<PathBuf>,
-    io: ConfigIo,
-    write: Mutex<()>,
     cli: AgentCli,
 }
 
@@ -39,8 +38,6 @@ impl AntigravityAdapter {
     pub fn new() -> Self {
         Self {
             gemini: crate::paths::gemini_root().ok(),
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
             cli: AgentCli::new(AgentId::Antigravity.binary_name()),
         }
     }
@@ -52,11 +49,8 @@ impl AntigravityAdapter {
 
     #[cfg(test)]
     pub fn at_with_cli(gemini: PathBuf, cli: AgentCli) -> Self {
-        let io = ConfigIo::at(gemini.join("_backups"));
         Self {
             gemini: Some(gemini),
-            io,
-            write: Mutex::new(()),
             cli,
         }
     }
@@ -96,13 +90,17 @@ impl AntigravityAdapter {
         }
     }
 
+    fn enablement_files(&self) -> Result<Vec<PathBuf>, AdapterError> {
+        let root = self.cli_root()?;
+        Ok(ENABLEMENT.iter().map(|name| root.join(name)).collect())
+    }
+
     fn enablement(&self) -> HashMap<String, bool> {
-        let Ok(root) = self.cli_root() else {
+        let Ok(files) = self.enablement_files() else {
             return HashMap::new();
         };
         let mut map = HashMap::new();
-        for name in ["config.json", "plugins.json", "settings.json"] {
-            let path = root.join(name);
+        for path in files {
             if let Ok(text) = fs::read_to_string(&path) {
                 merge_enablement(&mut map, &text);
             }
@@ -223,69 +221,47 @@ impl AgentAdapter for AntigravityAdapter {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(
-        &self,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let _plugin = self.list_tab()?.ensure_plugin_togglable(plugin_id)?;
-        let (name, _) = plugin_id_parts(plugin_id);
-        let action = if enabled { "enable" } else { "disable" };
-        let _ = self
-            .io
-            .backup_file(AgentId::Antigravity, &self.cli_root()?.join("config.json"));
-        self.cli.run(&["plugin", action, &name])?;
-        self.list_tab()
+    fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {
+        let enablement = self.enablement_files()?;
+        let cli = |runs| Step::cli(&self.cli, enablement.clone(), runs);
+        Ok(Some(match change {
+            Checked::Plugin { plugin, on } => {
+                let (name, _) = plugin_id_parts(&plugin.id);
+                cli(vec![argv(&["plugin", switch(*on), &name])])
+            }
+            Checked::Mcp { server, on } => {
+                let (id, on) = (server.id.clone(), *on);
+                Step::json(self.mcp_path()?, move |root| mcp_enabled(root, &id, on))
+            }
+            Checked::Install(source @ InstallSource::NpxSkills { .. }) => {
+                Step::npx(source.clone(), "antigravity")
+            }
+            Checked::Install(source) => {
+                cli(vec![argv(&["plugin", "install", &source.as_cli_source()])])
+            }
+            Checked::Uninstall(plugin) => {
+                let (name, _) = plugin_id_parts(&plugin.id);
+                cli(vec![argv(&["plugin", "uninstall", &name])])
+            }
+            Checked::Skill { .. } | Checked::Update(_) => return Ok(None),
+        }))
     }
+}
 
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
-        let path = self.mcp_path()?;
-        self.io
-            .patch_antigravity_mcp_enabled(AgentId::Antigravity, &path, mcp_id, enabled)?;
-        self.list_tab()
-    }
-
-    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = self.capabilities().admit(source)?;
-        if parsed.is_npx_skills() {
-            run_npx_skills(&parsed, "antigravity")?;
-            return self.list_tab();
-        }
-        let _ = self
-            .io
-            .backup_file(AgentId::Antigravity, &self.cli_root()?.join("config.json"));
-        self.cli
-            .run_args_timed(&parsed.agy_install_argv(), INSTALL_TIMEOUT)?;
-        self.list_tab()
-    }
-
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let plugin = self.list_tab()?.ensure_plugin(plugin_id)?.clone();
-        self.capabilities().uninstalls(&plugin)?;
-        let _ = self
-            .io
-            .backup_file(AgentId::Antigravity, &self.cli_root()?.join("config.json"));
-        self.cli
-            .run_args(&InstallSource::agy_uninstall_argv(plugin_id))?;
-        self.list_tab()
-    }
+fn mcp_enabled(root: &mut serde_json::Value, id: &str, on: bool) -> Result<(), AdapterError> {
+    let object = root
+        .as_object_mut()
+        .ok_or_else(|| AdapterError::message("mcp_config.json root must be an object"))?;
+    let servers = object
+        .get_mut("mcpServers")
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
+    let entry = servers
+        .get_mut(id)
+        .and_then(serde_json::Value::as_object_mut)
+        .ok_or_else(|| AdapterError::message(format!("mcp server not found: {id}")))?;
+    entry.insert("disabled".to_string(), serde_json::Value::Bool(!on));
+    Ok(())
 }
 
 fn antigravity_skill(plugin_id: Option<&str>, skill: ScannedSkill) -> SkillDto {

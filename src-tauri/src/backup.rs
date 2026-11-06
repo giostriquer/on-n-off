@@ -62,23 +62,9 @@ impl BackupStore {
     }
 
     fn prune(&self, dir: &Path, filename: &str) -> Result<(), AdapterError> {
-        let prefix = format!("{filename}.");
-        let mut backups: Vec<_> = fs::read_dir(dir)
-            .map_err(|error| {
-                AdapterError::write(error.to_string(), Some(dir.display().to_string()))
-            })?
-            .flatten()
-            .map(|entry| entry.path())
-            .filter(|path| {
-                path.file_name()
-                    .and_then(|name| name.to_str())
-                    .and_then(|name| name.strip_prefix(&prefix))
-                    .is_some_and(|stamp| {
-                        !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit())
-                    })
-            })
-            .collect();
-        backups.sort();
+        let mut backups = stamped(dir, filename).map_err(|error| {
+            AdapterError::write(error.to_string(), Some(dir.display().to_string()))
+        })?;
         while backups.len() > KEEP {
             let old = backups.remove(0);
             if old.is_dir() {
@@ -89,6 +75,27 @@ impl BackupStore {
         }
         Ok(())
     }
+}
+
+fn stamped(dir: &Path, filename: &str) -> std::io::Result<Vec<PathBuf>> {
+    let prefix = format!("{filename}.");
+    let mut backups: Vec<_> = fs::read_dir(dir)?
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .and_then(|name| name.strip_prefix(&prefix))
+                .is_some_and(|stamp| !stamp.is_empty() && stamp.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .collect();
+    backups.sort();
+    Ok(backups)
+}
+
+#[cfg(test)]
+pub fn kept(root: &Path, agent: AgentId, file: &str) -> Vec<PathBuf> {
+    stamped(&root.join(agent.key()), file).unwrap_or_default()
 }
 
 fn copy_recursive(from: &Path, to: &Path) -> Result<(), AdapterError> {

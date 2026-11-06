@@ -6,30 +6,28 @@ use crate::dto::{AdapterError, ErrorKind};
 use crate::install_source::InstallSource;
 use crate::process::{wait_with_deadline, CommandOutcome};
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(45);
 pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(180);
 const STDERR_LIMIT: usize = 400;
 
+pub fn argv(words: &[&str]) -> Vec<String> {
+    words.iter().map(|word| (*word).to_string()).collect()
+}
+
 pub struct AgentCli {
     binary: String,
-    timeout: Duration,
 }
 
 impl AgentCli {
     pub fn new(binary: impl Into<String>) -> Self {
         Self {
             binary: binary.into(),
-            timeout: DEFAULT_TIMEOUT,
         }
     }
 
+    #[cfg(test)]
     pub fn run(&self, args: &[&str]) -> Result<String, AdapterError> {
-        self.run_timed(args, self.timeout)
-    }
-
-    pub fn run_args(&self, args: &[String]) -> Result<String, AdapterError> {
-        let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-        self.run(&refs)
+        self.run_timed(args, DEFAULT_TIMEOUT)
     }
 
     pub fn run_args_timed(

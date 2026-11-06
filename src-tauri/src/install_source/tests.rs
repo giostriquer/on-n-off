@@ -60,87 +60,12 @@ fn accepts_existing_local_folder() {
 }
 
 #[test]
-fn claude_and_codex_argv_match_help() {
-    let plugin = InstallSource::Plugin("workbench@workshop".into());
-    assert_eq!(
-        plugin.claude_install_argv(),
-        [
-            "plugin",
-            "install",
-            "-s",
-            "user",
-            "-y",
-            "workbench@workshop"
-        ]
-    );
-    assert_eq!(
-        plugin.codex_install_argv(),
-        ["plugin", "add", "--json", "workbench@workshop"]
-    );
-    let git = InstallSource::GitHub {
-        owner: "acme".into(),
-        repo: "tools".into(),
-        ref_name: Some("main".into()),
-    };
-    assert_eq!(
-        git.claude_install_argv(),
-        [
-            "plugin",
-            "marketplace",
-            "add",
-            "--scope",
-            "user",
-            "acme/tools@main"
-        ]
-    );
-    assert_eq!(
-        git.codex_install_argv(),
-        [
-            "plugin",
-            "marketplace",
-            "add",
-            "--json",
-            "acme/tools",
-            "--ref",
-            "main"
-        ]
-    );
-    assert_eq!(
-        InstallSource::claude_uninstall_argv("workbench@workshop"),
-        [
-            "plugin",
-            "uninstall",
-            "-s",
-            "user",
-            "-y",
-            "workbench@workshop"
-        ]
-    );
-    assert_eq!(
-        InstallSource::codex_uninstall_argv("workbench@workshop"),
-        ["plugin", "remove", "--json", "workbench@workshop"]
-    );
+fn a_plugin_names_its_marketplace_and_npx_targets_the_agent() {
     assert_eq!(
         InstallSource::plugin_marketplace("workbench@workshop"),
         Some("workshop")
     );
     assert_eq!(InstallSource::plugin_marketplace("local-only"), None);
-    assert_eq!(
-        InstallSource::claude_marketplace_update_argv("workshop"),
-        ["plugin", "marketplace", "update", "workshop"]
-    );
-    assert_eq!(
-        InstallSource::claude_update_argv("workbench@workshop"),
-        ["plugin", "update", "-s", "user", "-y", "workbench@workshop"]
-    );
-    assert_eq!(
-        InstallSource::codex_marketplace_upgrade_argv("workshop"),
-        ["plugin", "marketplace", "upgrade", "--json", "workshop"]
-    );
-    assert_eq!(
-        InstallSource::codex_update_argv("workbench@workshop"),
-        ["plugin", "add", "--json", "workbench@workshop"]
-    );
     let npx = InstallSource::NpxSkills {
         source: "vercel-labs/agent-skills".into(),
         skill: Some("web-design".into()),

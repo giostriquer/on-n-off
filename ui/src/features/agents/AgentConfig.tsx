@@ -341,7 +341,7 @@ export function AgentConfig({
             />
             <Capability label="Plugin toggle" detail={pluginSwitch.how} ok={canSwitchPlugins(agent)} />
             <Capability label="MCP toggle" detail={mcpSwitch.how} ok={ready(agent, mcpSwitch)} />
-            <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
+            <Capability label="Safe writes" detail="backup of every config file a change touches · rollback of a failed patch" ok />
           </section>
 
           <section className="flex flex-col gap-3 rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] p-3.5" aria-label="Write behaviour">
@@ -351,13 +351,15 @@ export function AgentConfig({
             <div>
               <div className="text-[13px] font-semibold">Back up before write</div>
               <div className="mt-0.5 text-[12px] text-[var(--mute)]">
-                Copy the target file into ~/.on-n-off/backups. Always on.
+                Copy every config file a change touches into ~/.on-n-off/backups first. A change whose
+                backup fails is not made. Always on.
               </div>
             </div>
             <div>
               <div className="text-[13px] font-semibold">Roll back on failure</div>
               <div className="mt-0.5 text-[12px] text-[var(--mute)]">
-                Restore the previous file if a write fails. Always on.
+                Restore the previous file if an on-n-off patch fails or does not parse. A provider CLI’s
+                own writes are backed up, not rolled back.
               </div>
             </div>
             <div>

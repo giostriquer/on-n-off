@@ -876,7 +876,8 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | `cli_locate.rs` | A GUI app does not inherit a terminal's `PATH`. Builds one merged search list and hands it to spawned CLIs as their `PATH`. |
 | `process.rs` | Child-process draining with a hard deadline; stdout and stderr drained concurrently, or a full pipe deadlocks. A cancellable wait also hands its caller each stdout line while the command runs (a sign-in's page). |
 | `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server`. See below. |
-| `config_io.rs`, `backup.rs` | Every provider-config write: backup → atomic replace → validate → rollback. |
+| `change.rs` | The one path every config change takes, for every provider: one at a time, checked against the caller's view read locally, backed up, made by the adapter's step and answered with that view. See below. |
+| `config_io.rs`, `backup.rs` | The protected write a change uses: back up every file it touches, then replace a patched document atomically, validate it and restore it from that backup when it does not parse. |
 | `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
@@ -956,7 +957,7 @@ print as the macOS defaults; the install sheet's preview prints the adapter's ow
 ### Capabilities
 
 What on-n-off can change for a provider is declared once, by the adapter that changes it:
-`AgentAdapter::capabilities` in each adapter file, beside the methods that perform each change, as a
+`AgentAdapter::capabilities` in each adapter file, beside the step that makes each change, as a
 `Capabilities` (`capabilities.rs`). Each change (switching a plugin, a skill or an MCP server,
 install, uninstall, update) is performed by the provider's CLI (`cli`), by on-n-off patching a file
 (`file`) or refused (`refused`, with the reason the method answers and a screen shows); each comes
@@ -968,10 +969,13 @@ writes every field, so a new one does not compile until each adapter states it. 
 puts skills and subagents is not declared beside them: it is its `item_roots`, the code that
 places them.
 
-The trait's default change methods refuse with the declared refusal, so a provider that does not
-make a change only declares it refused (Cursor and Muse no longer override `set_mcp_enabled`), and
-every installing adapter takes its source through `Capabilities::admit`, which refuses a declared
-kind before anything runs. `AgentInfo::of` (`capabilities.rs`) builds the whole `AgentInfo` an
+The change path (Config changes, below) refuses a change the declaration refuses, with the declared
+reason, before it reads anything, and takes every install source through `Capabilities::admit`,
+which refuses a declared kind before anything runs, so a provider that does not make a change only
+declares it refused. An adapter whose step makes no step for a change it declares (`step` answers
+`None`) is answered with that declared change's refusal, "… is not implemented yet";
+`every_provider_checks_backs_up_and_answers_through_one_change_path` (`change/tests.rs`) makes every
+declared change of every provider on a seeded home, so it fails then. `AgentInfo::of` (`capabilities.rs`) builds the whole `AgentInfo` an
 adapter is listed with, through `AgentInfo::describe` from the declaration, whether the CLI was
 found (`cli_locate::provider_cli_found`) and the adapter's item roots; it is no trait method. It
 carries the declaration whole as `capabilities`, the item roots as `itemRoots`
@@ -982,11 +986,12 @@ readers: `installGit` and `installFolder` (install ready and the kind accepted),
 `file` change always, a `refused` one never.
 
 `capabilities/tests.rs` holds the agreement over `AgentId::ALL` in scratch homes
-(`adapter::scratch_adapter`): every declared change reaches a method that does not answer "not
-implemented" or a declared refusal, and every refused change and refused source kind answers
-exactly its declared reason and leaves the home as it was: each provider's home is seeded with the
-files its changes back up or patch, and every path and its bytes are compared, so a refusal that
-backs up first fails. An accepted `npx skills add` source is only checked
+(`adapter::scratch_adapter`): no declared change, asked through the change path, answers a declared
+refusal (in an empty home most stop at their missing target; the change path's table above is what
+reaches each step), and every refused change and refused source kind answers exactly its declared
+reason and leaves the home as it was: each provider's home is seeded with the files its changes
+back up or patch, and every path and its bytes are compared, so a refusal that backs up first
+fails. An accepted `npx skills add` source is only checked
 through `admit`: running it would start the real `npx`, which writes to the user's own home. The
 same file writes the fixture `src-tauri/src/capabilities/fixtures/agents.json` (each provider's
 declaration, the flags it derives with its CLI found and missing, and its item roots against a `~`
@@ -1009,6 +1014,49 @@ subagents can be picked for a scope (`takesSubagents`) and whether Skills lists 
 order the providers were chosen, `chosenAgents`). `overlayAgents` (`ui/src/lib/session.ts`) keeps
 every field Rust sends; until `list_agents` answers, or when it fails, every provider offers nothing
 (`NOTHING_OFFERED`).
+
+### Config changes
+
+Every config change (switching a plugin, a skill or an MCP server; installing, uninstalling or
+updating a plugin) takes one path, `Changes::make` (`change.rs`), whichever provider and command
+asks. The six change commands keep their names and their answer, an `AgentTabDto`, and take an
+optional `projectPath`: the scope the caller is viewing. In order:
+
+1. One change at a time per provider: `Changes`, one in `AppState`, holds a lock per provider.
+2. A change the adapter's capabilities refuse answers the declared reason before anything is read.
+3. The target is checked against the caller's view, read locally (`list_local_scope`, which never
+   reads the network): the plugin, skill or MCP server must be in it and switchable (`togglable`),
+   an uninstall must reach the plugin's source (`Capabilities::uninstalls`, for every provider), and
+   an install's source passes `Capabilities::admit`. "plugin not found: …" and "… is not
+   togglable: …" are its answers, so a row a project brings into its view is never switched.
+4. The adapter's step (`AgentAdapter::step`), handed its own copy of the row it acts on: argv run
+   through its CLI (an install or an update with the install deadline, any other change with the
+   default one), `npx skills add`, or a JSON or TOML document edit (`Step::json`, `Step::toml`),
+   with the files the change touches; or none, for a change the adapter does not make, which is
+   answered with the declared change's refusal. It is the only part that differs per provider, one
+   method in each adapter file.
+5. Every file the step touches is backed up (`ConfigIo::back_up`); a backup that fails refuses the
+   change. A document edit's own file is always among them, and its write (`ConfigIo::patch`)
+   refuses a file the change did not back up, replaces the file atomically, checks that it parses
+   and restores it from that backup when it does not. A provider CLI's own writes are backed up, never rolled back.
+6. The answer is the caller's view read again, locally, so a change reads no network. The UI stores
+   it as the tab (`mutate`, `masterCut` and `install` in `SessionProvider.tsx`), keeping the
+   upstream version and out-of-sync badge it already showed for every plugin whose installed
+   version the change left alone (`keepShownPluginMetadata`, `ui/src/lib/session.ts`), so they do
+   not flash; a plugin the change moved to another version shows the answer's own, read from the
+   marketplace copy the update just refreshed. A remote enrichment of the tab that was already on
+   its way when the answer came is laid only over the plugins whose installed version it still
+   matches (`enrichTab` checks the provider's answer count, which storing an answer moves on, and
+   then merges through `keepShownPluginMetadata`), so it cannot lay the versions read before the
+   change over the answer while every plugin the change left alone still gets its upstream; the
+   load generation is left alone, so a project list still loading is kept.
+
+`change/tests.rs` is one table over every provider in scratch homes, with a fake step: a made change
+backs up its files before the step runs and answers the local view of the caller's scope, read after
+the step; an unknown or unswitchable target, a declared refusal and a failed backup are refused
+without writing anything; and no change reads the network (`plugin_meta::with_fetch_text` panics,
+on fixtures whose enriched view would fetch). Which files each provider's changes touch is in
+PROVIDERS.md.
 
 ### JSON-line sessions
 
@@ -1075,6 +1123,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
+| Config change | `Changes::make` (`change.rs`), which every change command in `commands.rs` takes, with each adapter's `AgentAdapter::step` (its argv, document edit or `npx skills add`, and the files it touches); the backup and the protected document write are `ConfigIo` (`config_io.rs`); the UI stores the answer (`mutate` in `ui/src/features/session/SessionProvider.tsx`, through `keepShownPluginMetadata`) |
 | Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |

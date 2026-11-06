@@ -27,6 +27,7 @@ import { markStartup } from "$lib/startupTiming";
 import {
   LOCKED_AGENTS,
   emptyTab,
+  keepShownPluginMetadata,
   mergeEnrichedPluginMetadata,
   openIds,
   overlayAgents,
@@ -225,6 +226,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const extraProjectsRef = useRef(extraProjects);
   const inFlightRef = useRef<Record<AgentId, boolean>>(providerRecord(() => false));
   const loadGenerationRef = useRef<Record<AgentId, number>>(providerRecord(() => 0));
+  const answersRef = useRef<Record<AgentId, number>>(providerRecord(() => 0));
   const pendingLoadRef = useRef<Record<AgentId, boolean | null>>(providerRecord(() => null));
   const loadLoopRef = useRef<Record<AgentId, boolean>>(providerRecord(() => false));
   const loadTabRef = useRef<(agentId: AgentId, probe?: boolean) => Promise<void>>(async () => {});
@@ -331,13 +333,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [rememberExtra],
   );
 
-  const applyScopedTab = useCallback(async (agentId: AgentId, fallback: AgentTabDto) => {
-    try {
-      const next = await api.listPlugins(agentId, selectedScopeRef.current[agentId]);
-      setTabs((prev) => patchTab(prev, agentId, { dto: next }));
-    } catch {
-      setTabs((prev) => patchTab(prev, agentId, { dto: fallback }));
-    }
+  const storeAnswer = useCallback((agentId: AgentId, answer: AgentTabDto) => {
+    answersRef.current[agentId] += 1;
+    setTabs((prev) =>
+      patchTab(prev, agentId, { dto: keepShownPluginMetadata(answer, prev[agentId].dto), error: null }),
+    );
   }, []);
 
   const withLock = useCallback(async (agentId: AgentId, fn: () => Promise<void>) => {
@@ -361,15 +361,22 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const enrichTab = useCallback(
     async (agentId: AgentId, projectPath: string | null, generation: number) => {
+      const answers = answersRef.current[agentId];
       try {
         const enriched = await api.refresh(agentId, projectPath);
         if (loadGenerationRef.current[agentId] !== generation) {
           return;
         }
+        const answered = answersRef.current[agentId] !== answers;
         setTabs((prev) => {
           const local = prev[agentId].dto;
+          if (!local) {
+            return patchTab(prev, agentId, { dto: enriched });
+          }
           return patchTab(prev, agentId, {
-            dto: local ? mergeEnrichedPluginMetadata(local, enriched) : enriched,
+            dto: answered
+              ? keepShownPluginMetadata(local, enriched)
+              : mergeEnrichedPluginMetadata(local, enriched),
           });
         });
       } catch (error) {
@@ -564,13 +571,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   );
 
   const mutate = useCallback(
-    async (fn: () => Promise<AgentTabDto>, okNote?: { tag: TripEntry["tag"]; text: string }) => {
+    async (
+      fn: (agentId: AgentId, projectPath: string | null) => Promise<AgentTabDto>,
+      okNote?: { tag: TripEntry["tag"]; text: string },
+    ) => {
       const agentId = selectedRef.current;
       await withLock(agentId, async () => {
         try {
-          const next = await fn();
-          await applyScopedTab(agentId, next);
-          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          storeAnswer(agentId, await fn(agentId, selectedScopeRef.current[agentId]));
           if (okNote) {
             note(okNote.tag, okNote.text);
           }
@@ -581,13 +589,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       });
     },
-    [agentLabel, applyScopedTab, note, withLock],
+    [agentLabel, note, storeAnswer, withLock],
   );
 
   const togglePlugin = useCallback(
     (plugin: PluginDto, enabled: boolean) => {
       const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
-      void mutate(() => api.setPluginEnabled(selectedRef.current, plugin.id, enabled), {
+      void mutate((agentId, path) => api.setPluginEnabled(agentId, plugin.id, enabled, path), {
         tag: enabled ? "ON" : "OFF",
         text: `${plugin.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
       });
@@ -598,7 +606,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toggleSkill = useCallback(
     (skill: SkillDto, enabled: boolean) => {
       const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
-      void mutate(() => api.setSkillEnabled(selectedRef.current, skill.id, enabled), {
+      void mutate((agentId, path) => api.setSkillEnabled(agentId, skill.id, enabled, path), {
         tag: enabled ? "ON" : "OFF",
         text: `${skill.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
       });
@@ -609,7 +617,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const toggleMcp = useCallback(
     (server: McpServerDto, enabled: boolean) => {
       const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
-      void mutate(() => api.setMcpEnabled(selectedRef.current, server.id, enabled), {
+      void mutate((agentId, path) => api.setMcpEnabled(agentId, server.id, enabled, path), {
         tag: enabled ? "ON" : "OFF",
         text: `${server.name} ${enabled ? "enabled" : "cut"} for ${agent.displayName} · ${scopeSuffix()}`,
       });
@@ -654,26 +662,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       if (!dto) {
         return;
       }
+      const projectPath = selectedScopeRef.current[agentId];
       await withLock(agentId, async () => {
         let current = dto;
         try {
           for (const plugin of current.plugins) {
             if (plugin.togglable && plugin.enabled !== enabled) {
-              current = await api.setPluginEnabled(agentId, plugin.id, enabled);
+              current = await api.setPluginEnabled(agentId, plugin.id, enabled, projectPath);
             }
           }
           for (const skill of current.userSkills) {
             if (skill.togglable && skill.enabled !== enabled) {
-              current = await api.setSkillEnabled(agentId, skill.id, enabled);
+              current = await api.setSkillEnabled(agentId, skill.id, enabled, projectPath);
             }
           }
           for (const server of current.mcpServers) {
             if (server.togglable && server.enabled !== enabled) {
-              current = await api.setMcpEnabled(agentId, server.id, enabled);
+              current = await api.setMcpEnabled(agentId, server.id, enabled, projectPath);
             }
           }
-          await applyScopedTab(agentId, current);
-          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          storeAnswer(agentId, current);
           note(
             enabled ? "ON" : "TRIP",
             `master ${enabled ? "restored" : "cut"} for ${agentLabel(agentId)} · ${scopeSuffix(agentId)}`,
@@ -681,7 +689,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         } catch (error) {
           setTabs((prev) =>
             patchTab(prev, agentId, {
-              dto: current,
+              dto: keepShownPluginMetadata(current, prev[agentId].dto),
               error: displayError(parseInvokeError(error), agentLabel(agentId)),
             }),
           );
@@ -689,7 +697,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         }
       });
     },
-    [agentLabel, applyScopedTab, flags, note, scopeSuffix, withLock],
+    [agentLabel, flags, note, scopeSuffix, storeAnswer, withLock],
   );
 
   const install = useCallback(
@@ -699,9 +707,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       let ok = false;
       await withLock(agentId, async () => {
         try {
-          const next = await api.installPlugin(agentId, source);
-          await applyScopedTab(agentId, next);
-          setTabs((prev) => patchTab(prev, agentId, { error: null }));
+          storeAnswer(agentId, await api.installPlugin(agentId, source, selectedScopeRef.current[agentId]));
           setInstallOpen(false);
           note("INST", `${source} installed · enabled on ${agentLabel(agentId)}`);
           ok = true;
@@ -713,7 +719,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       });
       return ok;
     },
-    [agentLabel, applyScopedTab, note, withLock],
+    [agentLabel, note, storeAnswer, withLock],
   );
 
   const installItems = useCallback(
@@ -754,7 +760,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const updatePlugin = useCallback(
     (plugin: PluginDto) => {
       const agent = agentsRef.current.find((a) => a.id === selectedRef.current) ?? agentsRef.current[0];
-      void mutate(() => api.updatePlugin(selectedRef.current, plugin.id), {
+      void mutate((agentId, path) => api.updatePlugin(agentId, plugin.id, path), {
         tag: "SYNC",
         text: `${plugin.name} updated on ${agent.displayName}`,
       });
@@ -767,7 +773,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
     const target = uninstallTarget;
-    await mutate(() => api.uninstallPlugin(selectedRef.current, target.id), {
+    await mutate((agentId, path) => api.uninstallPlugin(agentId, target.id, path), {
       tag: "TRIP",
       text: `${target.name} uninstalled from ${agentLabel(selectedRef.current)}`,
     });

@@ -1,14 +1,13 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use serde::Deserialize;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
-use crate::cli::{AgentCli, INSTALL_TIMEOUT};
-use crate::config_io::ConfigIo;
+use crate::change::{switch, Checked, Step};
+use crate::cli::{argv, AgentCli};
 use crate::dto::{
     AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, McpServerDto, PluginDto, SkillDto,
 };
@@ -93,12 +92,27 @@ fn default_true() -> bool {
     true
 }
 
+struct Documents {
+    settings: PathBuf,
+    installed: PathBuf,
+    marketplaces: PathBuf,
+}
+
+impl Documents {
+    fn all(&self) -> Vec<PathBuf> {
+        let Self {
+            settings,
+            installed,
+            marketplaces,
+        } = self;
+        vec![settings.clone(), installed.clone(), marketplaces.clone()]
+    }
+}
+
 pub struct MuseAdapter {
     config: Option<PathBuf>,
     data: Option<PathBuf>,
     agents_skills: Option<PathBuf>,
-    io: ConfigIo,
-    write: Mutex<()>,
     cli: AgentCli,
 }
 
@@ -108,8 +122,6 @@ impl MuseAdapter {
             config: crate::paths::muse_config_root().ok(),
             data: crate::paths::muse_data_root().ok(),
             agents_skills: agents_skills_root().ok(),
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
             cli: AgentCli::new(AgentId::Muse.binary_name()),
         }
     }
@@ -121,13 +133,10 @@ impl MuseAdapter {
 
     #[cfg(test)]
     pub fn at_with_cli(home: PathBuf, cli: AgentCli) -> Self {
-        let io = ConfigIo::at(home.join("_backups"));
         Self {
             config: Some(crate::paths::muse_config_for(&home)),
             data: Some(crate::paths::muse_data_for(&home)),
             agents_skills: Some(home.join(".agents").join("skills")),
-            io,
-            write: Mutex::new(()),
             cli,
         }
     }
@@ -144,8 +153,17 @@ impl MuseAdapter {
             .ok_or_else(|| AdapterError::message("home directory not found"))
     }
 
+    fn documents(&self) -> Result<Documents, AdapterError> {
+        let plugins = self.data_root()?.join("plugins");
+        Ok(Documents {
+            settings: self.config_root()?.join("settings.json"),
+            installed: plugins.join("installed.json"),
+            marketplaces: plugins.join("marketplaces.json"),
+        })
+    }
+
     fn settings_text(&self) -> Result<Option<String>, AdapterError> {
-        let path = self.config_root()?.join("settings.json");
+        let path = self.documents()?.settings;
         if !path.exists() {
             return Ok(None);
         }
@@ -163,7 +181,7 @@ impl MuseAdapter {
     }
 
     fn installed(&self) -> Result<Vec<(String, InstalledRecord)>, AdapterError> {
-        let path = self.data_root()?.join("plugins").join("installed.json");
+        let path = self.documents()?.installed;
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -191,10 +209,10 @@ impl MuseAdapter {
 
     fn marketplace_hints(&self) -> HashMap<String, Vec<MarketplaceHint>> {
         let mut hints = HashMap::new();
-        let Ok(data) = self.data_root() else {
+        let (Ok(data), Ok(documents)) = (self.data_root(), self.documents()) else {
             return hints;
         };
-        let Ok(text) = fs::read_to_string(data.join("plugins").join("marketplaces.json")) else {
+        let Ok(text) = fs::read_to_string(documents.marketplaces) else {
             return hints;
         };
         let Ok(file) = serde_json::from_str::<MarketplacesFile>(&text) else {
@@ -473,106 +491,66 @@ impl AgentAdapter for MuseAdapter {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(
-        &self,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin_togglable(plugin_id)?;
-        self.backup_state()?;
-        let (name, _) = plugin_id_parts(plugin_id);
-        let action = if enabled { "enable" } else { "disable" };
-        self.cli.run(&["plugins", action, &name, "--json"])?;
-        self.list_tab()
-    }
-
-    fn set_skill_enabled(
-        &self,
-        skill_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let tab = self.list_tab()?;
-        tab.ensure_togglable(skill_id)?;
-        let scope = if tab
-            .skill(skill_id)
-            .is_some_and(|skill| skill.plugin_id.is_some())
-        {
-            "plugin"
-        } else {
-            "user"
-        };
-        self.backup_state()?;
-        let action = if enabled { "enable" } else { "disable" };
-        self.cli
-            .run(&["skills", action, skill_id, "--scope", scope, "--json"])?;
-        self.list_tab()
-    }
-
-    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = self.capabilities().admit(source)?;
-        self.backup_state()?;
-        self.cli
-            .run_args_timed(&parsed.muse_install_argv(), INSTALL_TIMEOUT)?;
-        self.list_tab()
-    }
-
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.backup_state()?;
-        self.cli
-            .run_args(&InstallSource::muse_uninstall_argv(plugin_id))?;
-        self.list_tab()
-    }
-
-    fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.backup_state()?;
-        match InstallSource::plugin_marketplace(plugin_id) {
-            Some(marketplace) => {
-                self.cli.run_args_timed(
-                    &InstallSource::muse_marketplace_update_argv(marketplace),
-                    INSTALL_TIMEOUT,
-                )?;
-                let source = InstallSource::Plugin(plugin_id.to_string());
-                self.cli
-                    .run_args_timed(&source.muse_install_argv(), INSTALL_TIMEOUT)?;
+    fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {
+        let documents = self.documents()?.all();
+        let cli = |runs| Step::cli(&self.cli, documents, runs);
+        let name = |id: &str| plugin_id_parts(id).0;
+        Ok(Some(match change {
+            Checked::Plugin { plugin, on } => cli(vec![argv(&[
+                "plugins",
+                switch(*on),
+                &name(&plugin.id),
+                "--json",
+            ])]),
+            Checked::Skill { skill, on } => {
+                let scope = if skill.plugin_id.is_some() {
+                    "plugin"
+                } else {
+                    "user"
+                };
+                cli(vec![argv(&[
+                    "skills",
+                    switch(*on),
+                    &skill.id,
+                    "--scope",
+                    scope,
+                    "--json",
+                ])])
             }
-            None => {
-                self.cli
-                    .run_args_timed(&InstallSource::muse_update_argv(plugin_id), INSTALL_TIMEOUT)?;
-            }
-        }
-        self.list_tab()
-    }
-}
-
-impl MuseAdapter {
-    fn backup_state(&self) -> Result<(), AdapterError> {
-        let settings = self.config_root()?.join("settings.json");
-        self.io.backup_file(AgentId::Muse, &settings)?;
-        let installed = self.data_root()?.join("plugins").join("installed.json");
-        self.io.backup_file(AgentId::Muse, &installed)?;
-        Ok(())
+            Checked::Install(InstallSource::LocalDir(path)) => cli(vec![argv(&[
+                "plugins",
+                "install",
+                &path.display().to_string(),
+                "--scope",
+                "user",
+                "--json",
+            ])]),
+            Checked::Install(source) => cli(vec![argv(&[
+                "plugins",
+                "install",
+                &source.as_cli_source(),
+                "--json",
+            ])]),
+            Checked::Uninstall(plugin) => cli(vec![argv(&[
+                "plugins",
+                "remove",
+                &name(&plugin.id),
+                "--json",
+            ])]),
+            Checked::Update(plugin) => match InstallSource::plugin_marketplace(&plugin.id) {
+                Some(marketplace) => cli(vec![
+                    argv(&["plugins", "marketplace", "update", marketplace, "--json"]),
+                    argv(&["plugins", "install", &plugin.id, "--json"]),
+                ]),
+                None => cli(vec![argv(&[
+                    "plugins",
+                    "update",
+                    &name(&plugin.id),
+                    "--json",
+                ])]),
+            },
+            Checked::Mcp { .. } => return Ok(None),
+        }))
     }
 }
 

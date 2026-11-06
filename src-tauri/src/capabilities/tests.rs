@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::adapter::scratch_adapter as adapter_at;
+use crate::change::{Changes, Request};
 use crate::dto::{AgentId, AgentTabDto};
 
 fn files_under(dir: &Path) -> Vec<PathBuf> {
@@ -127,32 +128,34 @@ fn every_change_an_adapter_declares_is_one_it_makes_and_every_refusal_is_declare
         let adapter = adapter_at(id, &home);
         let declared = adapter.capabilities();
         let refusals = refusals(&declared);
+        let changes = Changes::at(home.join("_backups"));
+        let change = |request| changes.make(&*adapter, request, None);
 
         let attempts = [
             (
                 "plugin switch",
                 &declared.plugin_switch,
-                adapter.set_plugin_enabled("acme@webapp", false),
+                change(Request::plugin("acme@webapp", false)),
             ),
             (
                 "skill switch",
                 &declared.skill_switch,
-                adapter.set_skill_enabled("acme", false),
+                change(Request::skill("acme", false)),
             ),
             (
                 "mcp switch",
                 &declared.mcp_switch,
-                adapter.set_mcp_enabled("acme", false),
+                change(Request::mcp("acme", false)),
             ),
             (
                 "uninstall",
                 &declared.uninstall,
-                adapter.uninstall_plugin("acme@webapp"),
+                change(Request::uninstall("acme@webapp")),
             ),
             (
                 "update",
                 &declared.update,
-                adapter.update_plugin("acme@webapp"),
+                change(Request::update("acme@webapp")),
             ),
         ];
         for (what, change, answer) in attempts {
@@ -170,7 +173,7 @@ fn every_change_an_adapter_declares_is_one_it_makes_and_every_refusal_is_declare
                     id,
                     &what,
                     &Change::refused("", reason),
-                    adapter.install_plugin(&source),
+                    change(Request::install(&source)),
                     &[],
                 ),
                 (true, None) if kind == SourceKind::MarketplaceSkill => {
@@ -180,7 +183,7 @@ fn every_change_an_adapter_declares_is_one_it_makes_and_every_refusal_is_declare
                     id,
                     &what,
                     &declared.install,
-                    adapter.install_plugin(&source),
+                    change(Request::install(&source)),
                     &refusals,
                 ),
             }
@@ -278,23 +281,25 @@ fn a_refused_change_leaves_the_home_as_it_was() {
         seed(id, &home);
         let adapter = adapter_at(id, &home);
         let declared = adapter.capabilities();
+        let changes = Changes::at(home.join("_backups"));
+        let change = |request| changes.make(&*adapter, request, None);
         let before = contents(&home);
         assert!(before.iter().any(|(_, bytes)| bytes.is_some()), "{id:?}");
         let refused = |change: &Change| matches!(change, Change::Refused { .. });
         if refused(&declared.plugin_switch) {
-            let _ = adapter.set_plugin_enabled("acme@webapp", true);
+            let _ = change(Request::plugin("acme@webapp", true));
         }
         if refused(&declared.skill_switch) {
-            let _ = adapter.set_skill_enabled("acme", true);
+            let _ = change(Request::skill("acme", true));
         }
         if refused(&declared.mcp_switch) {
-            let _ = adapter.set_mcp_enabled("acme", true);
+            let _ = change(Request::mcp("acme", true));
         }
         if refused(&declared.uninstall) {
-            let _ = adapter.uninstall_plugin("acme@webapp");
+            let _ = change(Request::uninstall("acme@webapp"));
         }
         if refused(&declared.update) {
-            let _ = adapter.update_plugin("acme@webapp");
+            let _ = change(Request::update("acme@webapp"));
         }
         let refused_kinds: Vec<SourceKind> = if refused(&declared.install) {
             SourceKind::ALL.to_vec()
@@ -303,7 +308,7 @@ fn a_refused_change_leaves_the_home_as_it_was() {
         };
         for kind in refused_kinds {
             for source in samples(kind, &home) {
-                let _ = adapter.install_plugin(&source);
+                let _ = change(Request::install(&source));
             }
         }
         let after = contents(&home);

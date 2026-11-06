@@ -10,7 +10,7 @@ vi.mock("@tauri-apps/api/event", async (importOriginal) => ({
   listen,
 }));
 
-import { cancelResetSpend, clearUsageHistory, onMainWindowFocused, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, usageHistoryStatus } from "./api";
+import { cancelResetSpend, clearUsageHistory, installPlugin, onMainWindowFocused, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, setMcpEnabled, setPluginEnabled, setSkillEnabled, uninstallPlugin, updatePlugin, usageHistoryStatus } from "./api";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -73,4 +73,47 @@ it("hears only the main window's own focus event, the one Tauri emits when that 
 
   listen.mock.calls[0]![1]({ event: "tauri://focus", id: 1, payload: null });
   expect(handler).toHaveBeenCalledTimes(1);
+});
+
+it.each([
+  {
+    command: "set_plugin_enabled",
+    send: (scope?: string | null) => setPluginEnabled("codex", "workbench@workshop", false, scope),
+    args: { agentId: "codex", pluginId: "workbench@workshop", enabled: false },
+  },
+  {
+    command: "set_skill_enabled",
+    send: (scope?: string | null) => setSkillEnabled("codex", "acme-notes", true, scope),
+    args: { agentId: "codex", skillId: "acme-notes", enabled: true },
+  },
+  {
+    command: "set_mcp_enabled",
+    send: (scope?: string | null) => setMcpEnabled("codex", "github", false, scope),
+    args: { agentId: "codex", mcpId: "github", enabled: false },
+  },
+  {
+    command: "install_plugin",
+    send: (scope?: string | null) => installPlugin("codex", "acme@webapp", scope),
+    args: { agentId: "codex", source: "acme@webapp" },
+  },
+  {
+    command: "uninstall_plugin",
+    send: (scope?: string | null) => uninstallPlugin("codex", "workbench@workshop", scope),
+    args: { agentId: "codex", pluginId: "workbench@workshop" },
+  },
+  {
+    command: "update_plugin",
+    send: (scope?: string | null) => updatePlugin("codex", "workbench@workshop", scope),
+    args: { agentId: "codex", pluginId: "workbench@workshop" },
+  },
+])("$command sends the scope in view, and null for the global view", async ({ command, send, args }) => {
+  await send("/Users/me/webapp");
+  await send(null);
+  await send();
+
+  expect(invoke.mock.calls).toEqual([
+    [command, { ...args, projectPath: "/Users/me/webapp" }],
+    [command, { ...args, projectPath: null }],
+    [command, { ...args, projectPath: null }],
+  ]);
 });

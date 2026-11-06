@@ -56,28 +56,35 @@ export function setPluginEnabled(
   agentId: AgentId,
   pluginId: string,
   enabled: boolean,
+  projectPath?: string | null,
 ): Promise<AgentTabDto> {
-  return invoke("set_plugin_enabled", { agentId, pluginId, enabled });
+  return invoke("set_plugin_enabled", { agentId, pluginId, enabled, projectPath: projectPath || null });
 }
 
 export function setSkillEnabled(
   agentId: AgentId,
   skillId: string,
   enabled: boolean,
+  projectPath?: string | null,
 ): Promise<AgentTabDto> {
-  return invoke("set_skill_enabled", { agentId, skillId, enabled });
+  return invoke("set_skill_enabled", { agentId, skillId, enabled, projectPath: projectPath || null });
 }
 
 export function setMcpEnabled(
   agentId: AgentId,
   mcpId: string,
   enabled: boolean,
+  projectPath?: string | null,
 ): Promise<AgentTabDto> {
-  return invoke("set_mcp_enabled", { agentId, mcpId, enabled });
+  return invoke("set_mcp_enabled", { agentId, mcpId, enabled, projectPath: projectPath || null });
 }
 
-export function installPlugin(agentId: AgentId, source: string): Promise<AgentTabDto> {
-  return invoke("install_plugin", { agentId, source });
+export function installPlugin(
+  agentId: AgentId,
+  source: string,
+  projectPath?: string | null,
+): Promise<AgentTabDto> {
+  return invoke("install_plugin", { agentId, source, projectPath: projectPath || null });
 }
 
 export function inspectMarketplace(
@@ -122,12 +129,20 @@ export async function pickCliBinary(): Promise<string | null> {
   return typeof picked === "string" ? picked : null;
 }
 
-export function uninstallPlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {
-  return invoke("uninstall_plugin", { agentId, pluginId });
+export function uninstallPlugin(
+  agentId: AgentId,
+  pluginId: string,
+  projectPath?: string | null,
+): Promise<AgentTabDto> {
+  return invoke("uninstall_plugin", { agentId, pluginId, projectPath: projectPath || null });
 }
 
-export function updatePlugin(agentId: AgentId, pluginId: string): Promise<AgentTabDto> {
-  return invoke("update_plugin", { agentId, pluginId });
+export function updatePlugin(
+  agentId: AgentId,
+  pluginId: string,
+  projectPath?: string | null,
+): Promise<AgentTabDto> {
+  return invoke("update_plugin", { agentId, pluginId, projectPath: projectPath || null });
 }
 
 export function refresh(agentId: AgentId, projectPath?: string | null): Promise<AgentTabDto> {

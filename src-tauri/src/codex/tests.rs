@@ -1,5 +1,7 @@
 use super::*;
+use crate::change::{argv_of, row, Changes, Request};
 use crate::cli_stub::CliStub;
+use crate::config_io::{patched, Edit};
 
 #[test]
 fn uppercase_git_marketplace_source_uses_the_clone_cache() {
@@ -178,8 +180,9 @@ fn toggling_skill_upserts_config_and_keeps_plugins() {
         .id
         .clone();
 
-    let tab = adapter
-        .set_skill_enabled(&loom_id, false)
+    let changes = Changes::beside(&root);
+    let tab = changes
+        .global(&adapter, Request::skill(&loom_id, false))
         .expect("toggle loom");
     let loom = tab
         .user_skills
@@ -193,8 +196,8 @@ fn toggling_skill_upserts_config_and_keeps_plugins() {
     assert!(text.contains("[[skills.config]]"));
     assert!(text.contains("loom-feed"));
 
-    let tab = adapter
-        .set_skill_enabled(&feed_id, true)
+    let tab = changes
+        .global(&adapter, Request::skill(&feed_id, true))
         .expect("toggle feed");
     let feed = tab
         .user_skills
@@ -215,8 +218,9 @@ fn toggling_skill_upserts_config_and_keeps_plugins() {
 fn toggling_plugin_patches_toml_enabled_only() {
     let (root, agents_skills) = fixture();
     let adapter = CodexAdapter::at(root.clone(), agents_skills);
-    let tab = adapter
-        .set_plugin_enabled("workbench@workshop", false)
+    let changes = Changes::beside(&root);
+    let tab = changes
+        .global(&adapter, Request::plugin("workbench@workshop", false))
         .expect("disable");
     let plugin = tab
         .plugins
@@ -240,11 +244,14 @@ fn toggling_plugin_patches_toml_enabled_only() {
 fn toggling_mcp_patches_toml_enabled_only() {
     let (root, agents_skills) = fixture();
     let adapter = CodexAdapter::at(root.clone(), agents_skills);
-    let err = adapter
-        .set_mcp_enabled("missing", false)
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::mcp("missing", false))
         .expect_err("missing");
     assert!(err.message.contains("mcp server not found"));
-    let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
+    let tab = changes
+        .global(&adapter, Request::mcp("github", false))
+        .expect("toggle");
     let github = tab
         .mcp_servers
         .iter()
@@ -256,7 +263,9 @@ fn toggling_mcp_patches_toml_enabled_only() {
     assert!(text.contains("[plugins.\"workbench@workshop\"]"), "{text}");
     assert!(text.contains("[[skills.config]]"), "{text}");
     assert!(text.contains("[mcp_servers.docs]"), "{text}");
-    let tab = adapter.set_mcp_enabled("docs", true).expect("on");
+    let tab = changes
+        .global(&adapter, Request::mcp("docs", true))
+        .expect("on");
     assert!(
         tab.mcp_servers
             .iter()
@@ -297,7 +306,10 @@ fn update_upgrades_marketplace_then_readds_plugin() {
             .log_args("args.txt", true)
             .cli(&root.join("_cli")),
     );
-    adapter.update_plugin("workbench@workshop").expect("update");
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::update("workbench@workshop"))
+        .expect("update");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin marketplace upgrade --json workshop"),
@@ -321,20 +333,25 @@ fn install_and_uninstall_use_official_argv() {
     let (root, agents_skills) = fixture();
     let adapter =
         CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 0, ""));
-    adapter.install_plugin("workbench@workshop").expect("add");
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::install("workbench@workshop"))
+        .expect("add");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin add --json workbench@workshop"),
         "{args}"
     );
-    adapter.install_plugin("acme/tools@main").expect("market");
+    changes
+        .global(&adapter, Request::install("acme/tools@main"))
+        .expect("market");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin marketplace add --json acme/tools --ref main"),
         "{args}"
     );
-    adapter
-        .uninstall_plugin("workbench@workshop")
+    changes
+        .global(&adapter, Request::uninstall("workbench@workshop"))
         .expect("remove");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
@@ -353,11 +370,216 @@ fn install_cli_failure_does_not_mutate_config() {
         agents_skills,
         codex_argv_stub(&root, 3, "nope"),
     );
-    let err = adapter.install_plugin("acme/tools").expect_err("cli");
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::install("acme/tools"))
+        .expect_err("cli");
     assert!(err.message.contains("nope"));
     assert_eq!(
         fs::read_to_string(root.join("config.toml")).unwrap(),
         before
+    );
+    let _ = fs::remove_dir_all(root.parent().unwrap());
+}
+
+#[test]
+fn every_change_backs_up_config_toml_once_before_it_is_made() {
+    let (root, agents_skills) = fixture();
+    let adapter =
+        CodexAdapter::at_with_cli(root.clone(), agents_skills, codex_argv_stub(&root, 0, ""));
+    let backups = root.join("_backups");
+    let kept = || crate::backup::kept(&backups, AgentId::Codex, "config.toml").len();
+    let loom = adapter
+        .list_tab()
+        .unwrap()
+        .user_skills
+        .into_iter()
+        .find(|skill| skill.name == "loom-feed")
+        .unwrap();
+
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::plugin("workbench@workshop", false))
+        .unwrap();
+    assert_eq!(kept(), 1);
+    changes
+        .global(&adapter, Request::skill(&loom.id, false))
+        .unwrap();
+    assert_eq!(kept(), 2);
+    changes
+        .global(&adapter, Request::mcp("github", false))
+        .unwrap();
+    assert_eq!(kept(), 3);
+    changes
+        .global(&adapter, Request::install("workbench@workshop"))
+        .unwrap();
+    changes
+        .global(&adapter, Request::uninstall("workbench@workshop"))
+        .unwrap();
+    changes
+        .global(&adapter, Request::update("workbench@workshop"))
+        .unwrap();
+    assert_eq!(kept(), 6);
+    let _ = fs::remove_dir_all(root.parent().unwrap());
+}
+
+fn toml_at(path: &Path) -> toml::Table {
+    toml::from_str(&fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn toml_upsert_skill_config_keeps_plugins_and_quotes_windows_paths() {
+    let root = crate::paths::scratch_dir("on-n-off-toml");
+    let path = root.join("config.toml");
+    let original = "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[projects.'E:\\\\dev\\\\on-n-off']\ntrust_level = \"trusted\"\n";
+    fs::write(&path, original).unwrap();
+    let skill = r"C:\Users\me\fake-home\.agents\skills\loom-feed\SKILL.md";
+    let with_skill = |enabled: bool| -> toml::Table {
+        toml::from_str(&format!(
+            "{original}\n[[skills.config]]\npath = '{skill}'\nenabled = {enabled}\n"
+        ))
+        .unwrap()
+    };
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| skill_enabled(doc, skill, false)),
+    )
+    .unwrap();
+    assert_eq!(toml_at(&path), with_skill(false));
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| skill_enabled(doc, skill, true)),
+    )
+    .unwrap();
+    assert_eq!(toml_at(&path), with_skill(true));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn toml_mcp_enable_only_flips_enabled() {
+    let root = crate::paths::scratch_dir("on-n-off-toml-mcp");
+    let path = root.join("config.toml");
+    let servers = |github: Option<bool>, docs: Option<bool>| {
+        let enabled =
+            |value: Option<bool>| value.map_or(String::new(), |on| format!("enabled = {on}\n"));
+        format!(
+            "[plugins.\"workbench@workshop\"]\nenabled = true\n\n[mcp_servers.github]\ncommand = \"npx\"\nargs = [\"-y\", \"@modelcontextprotocol/server-github\"]\nextra = 1\n{}\n[mcp_servers.docs]\nurl = \"https://docs.example/mcp\"\n{}",
+            enabled(github),
+            enabled(docs)
+        )
+    };
+    fs::write(&path, servers(None, Some(false))).unwrap();
+
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| mcp_enabled(doc, "github", false)),
+    )
+    .unwrap();
+    assert_eq!(
+        toml_at(&path),
+        toml::from_str(&servers(Some(false), Some(false))).unwrap()
+    );
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| mcp_enabled(doc, "docs", true)),
+    )
+    .unwrap();
+    assert_eq!(
+        toml_at(&path),
+        toml::from_str(&servers(Some(false), Some(true))).unwrap()
+    );
+    let err = patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| mcp_enabled(doc, "missing", false)),
+    )
+    .expect_err("missing");
+    assert!(err.message.contains("mcp server not found"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn toml_plugin_enable_only_flips_enabled() {
+    let root = crate::paths::scratch_dir("on-n-off-toml-plugin");
+    let path = root.join("config.toml");
+    let plugins = |workbench: bool| {
+        format!(
+            "[plugins.\"workbench@workshop\"]\nenabled = {workbench}\nextra = 1\n\n[plugins.\"toolkit@workshop\"]\nenabled = false\n"
+        )
+    };
+    fs::write(&path, plugins(true)).unwrap();
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| plugin_enabled(doc, "workbench@workshop", false)),
+    )
+    .unwrap();
+    assert_eq!(toml_at(&path), toml::from_str(&plugins(false)).unwrap());
+    patched(
+        AgentId::Codex,
+        &path,
+        Edit::toml(|doc| plugin_enabled(doc, "workbench@workshop", true)),
+    )
+    .unwrap();
+    assert_eq!(toml_at(&path), toml::from_str(&plugins(true)).unwrap());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn codex_steps_use_the_argv_its_help_documents() {
+    let (root, agents_skills) = fixture();
+    let adapter = CodexAdapter::at(root.clone(), agents_skills);
+    let plugin = row("workbench@workshop");
+    let git = InstallSource::GitHub {
+        owner: "acme".into(),
+        repo: "tools".into(),
+        ref_name: Some("main".into()),
+    };
+    assert_eq!(
+        argv_of(
+            &adapter,
+            &Checked::Install(InstallSource::Plugin(plugin.id.clone()))
+        ),
+        [["plugin", "add", "--json", "workbench@workshop"]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Install(git)),
+        [[
+            "plugin",
+            "marketplace",
+            "add",
+            "--json",
+            "acme/tools",
+            "--ref",
+            "main"
+        ]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Uninstall(plugin.clone())),
+        [["plugin", "remove", "--json", "workbench@workshop"]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Update(plugin.clone())),
+        [
+            argv(&["plugin", "marketplace", "upgrade", "--json", "workshop"]),
+            argv(&["plugin", "add", "--json", "workbench@workshop"])
+        ]
+    );
+    let npx = InstallSource::NpxSkills {
+        source: "acme/skills".into(),
+        skill: None,
+    };
+    assert_eq!(
+        adapter
+            .step(&Checked::Install(npx))
+            .unwrap()
+            .unwrap()
+            .npx_agent(),
+        Some("codex")
     );
     let _ = fs::remove_dir_all(root.parent().unwrap());
 }

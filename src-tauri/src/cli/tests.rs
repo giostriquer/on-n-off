@@ -1,9 +1,3 @@
-impl AgentCli {
-    pub fn with_timeout(self, timeout: Duration) -> Self {
-        Self { timeout, ..self }
-    }
-}
-
 use super::*;
 use crate::cli_stub::{CliStub, ANSWER_DEADLINE};
 use std::path::PathBuf;
@@ -40,8 +34,10 @@ fn timeout_kills_the_process() {
     let cli = CliStub::new("slow").sleep(7).cli(&stub_dir());
     let started = Instant::now();
     let err = cli
-        .with_timeout(Duration::from_millis(200))
-        .run(&["plugin", "enable", "x"])
+        .run_args_timed(
+            &argv(&["plugin", "enable", "x"]),
+            Duration::from_millis(200),
+        )
         .expect_err("timeout");
     assert!(err.message.to_lowercase().contains("timed out"));
     assert!(
@@ -57,8 +53,7 @@ fn drains_chatty_stdout_and_stderr_while_the_process_runs() {
         .chatty(5000)
         .stdout("complete")
         .cli(&stub_dir())
-        .with_timeout(ANSWER_DEADLINE)
-        .run(&[])
+        .run_args_timed(&[], ANSWER_DEADLINE)
         .expect("chatty child must not block on full output pipes");
     assert!(out.contains("complete"));
 }

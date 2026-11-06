@@ -22,14 +22,20 @@ source carries no comments (see [Code comments](#code-comments)).
   not compile. Only the notch helper still keeps its own list; `PROVIDERS.md` names it.
 - What on-n-off can change for a provider (switching plugins, skills and MCP servers; install,
   uninstall, update; the install sources it refuses; hooks) and the reason it refuses one: the
-  adapter's `capabilities()` (`capabilities.rs`), declared beside the methods that make each
-  change; where it puts skills and subagents is its `item_roots`. A refusal is never a method's own
-  message: the trait's default refuses with the declared reason, and an install source goes through
+  adapter's `capabilities()` (`capabilities.rs`), declared beside the step that makes each
+  change; where it puts skills and subagents is its `item_roots`. A refusal is never a step's own
+  message: the change path refuses with the declared reason, and an install source goes through
   `Capabilities::admit`. The UI gates every action and prints every notice from
   `AgentInfo.capabilities` and `AgentInfo.itemRoots`, through `ui/src/lib/capabilities.ts`, never
   from a provider match or the older flags (`installGit`, `installFolder`, `pluginToggle`,
   `readsHooks`, kept on the wire only); `capabilities/tests.rs` fails while a declaration and its
   adapter disagree ([why](architecture/README.md#capabilities)).
+- A config change (switching a plugin, skill or MCP server; install, uninstall, update):
+  `Changes::make` (`change.rs`), the one path every change command takes. An adapter contributes
+  only its step (`AgentAdapter::step`: argv, a JSON or TOML document edit or `npx skills add`, and
+  the files it touches), never a lock, a check, a backup or an answer of its own; `ConfigIo` is the
+  protected write the path uses, and the UI stores the answer it returns
+  ([why](architecture/README.md#config-changes)).
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly; only `ui/src/lib/api.ts`
   and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
   `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.

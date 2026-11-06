@@ -1,5 +1,7 @@
 use super::*;
+use crate::change::{argv_of, row, Changes, Request};
 use crate::cli_stub::CliStub;
+use crate::config_io::{patched, Edit};
 
 fn fixture() -> PathBuf {
     let root = crate::paths::scratch_dir("on-n-off-claude");
@@ -211,15 +213,19 @@ fn missing_inventory_is_empty_not_a_parse_error() {
 fn toggling_user_skill_patches_skill_overrides_and_refuses_plugin_skills() {
     let root = fixture();
     let adapter = ClaudeAdapter::at(root.clone());
-    let err = adapter
-        .set_skill_enabled("workbench@workshop:brainstorming", false)
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(
+            &adapter,
+            Request::skill("workbench@workshop:brainstorming", false),
+        )
         .expect_err("locked");
     assert!(err.message.contains("not togglable"));
     let settings = fs::read_to_string(root.join("settings.json")).unwrap();
     assert!(!settings.contains("brainstorming"));
 
-    let tab = adapter
-        .set_skill_enabled("statusline", true)
+    let tab = changes
+        .global(&adapter, Request::skill("statusline", true))
         .expect("toggle");
     assert!(tab.user_skills[0].enabled);
     let value: serde_json::Value =
@@ -239,11 +245,14 @@ fn toggling_user_skill_patches_skill_overrides_and_refuses_plugin_skills() {
 fn toggling_mcp_patches_claude_json_without_dropping_other_servers() {
     let root = fixture();
     let adapter = ClaudeAdapter::at(root.clone());
-    let err = adapter
-        .set_mcp_enabled("missing", false)
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::mcp("missing", false))
         .expect_err("missing");
     assert!(err.message.contains("mcp server not found"));
-    let tab = adapter.set_mcp_enabled("github", false).expect("toggle");
+    let tab = changes
+        .global(&adapter, Request::mcp("github", false))
+        .expect("toggle");
     let github = tab
         .mcp_servers
         .iter()
@@ -266,7 +275,9 @@ fn toggling_mcp_patches_claude_json_without_dropping_other_servers() {
         "https://docs.example/mcp"
     );
     assert_eq!(value["disabledMcpServers"], serde_json::json!(["github"]));
-    let tab = adapter.set_mcp_enabled("github", true).expect("on");
+    let tab = changes
+        .global(&adapter, Request::mcp("github", true))
+        .expect("on");
     assert!(
         tab.mcp_servers
             .iter()
@@ -307,8 +318,9 @@ fn plugin_disable_via_cli_refreshes_dto_and_backs_up() {
     })
     .to_string();
     let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_stub(&root, &after, 0, ""));
-    let tab = adapter
-        .set_plugin_enabled("workbench@workshop", false)
+    let changes = Changes::beside(&root);
+    let tab = changes
+        .global(&adapter, Request::plugin("workbench@workshop", false))
         .expect("disable");
     let plugin = tab
         .plugins
@@ -335,8 +347,9 @@ fn plugin_cli_failure_does_not_mutate_settings() {
     let root = fixture();
     let before = fs::read_to_string(root.join("settings.json")).unwrap();
     let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_stub(&root, "{}", 2, "nope"));
-    let err = adapter
-        .set_plugin_enabled("workbench@workshop", false)
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::plugin("workbench@workshop", false))
         .expect_err("cli");
     assert!(err.message.contains("nope"));
     assert_eq!(
@@ -359,15 +372,18 @@ fn claude_argv_stub(root: &Path, exit: i32, stderr: &str) -> AgentCli {
 fn install_plugin_id_and_git_source_use_official_argv() {
     let root = fixture();
     let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
-    adapter
-        .install_plugin("workbench@workshop")
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::install("workbench@workshop"))
         .expect("plugin");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin install -s user -y workbench@workshop"),
         "{args}"
     );
-    adapter.install_plugin("acme/tools").expect("git");
+    changes
+        .global(&adapter, Request::install("acme/tools"))
+        .expect("git");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin marketplace add --scope user acme/tools"),
@@ -381,7 +397,10 @@ fn install_cli_failure_does_not_mutate_settings() {
     let root = fixture();
     let before = fs::read_to_string(root.join("settings.json")).unwrap();
     let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 2, "denied"));
-    let err = adapter.install_plugin("acme/tools").expect_err("cli");
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::install("acme/tools"))
+        .expect_err("cli");
     assert!(err.message.contains("denied"));
     assert_eq!(
         fs::read_to_string(root.join("settings.json")).unwrap(),
@@ -399,7 +418,10 @@ fn update_refreshes_marketplace_then_plugin() {
             .log_args("args.txt", true)
             .cli(&root.join("_cli")),
     );
-    adapter.update_plugin("workbench@workshop").expect("update");
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::update("workbench@workshop"))
+        .expect("update");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
         args.contains("plugin marketplace update workshop"),
@@ -422,8 +444,9 @@ fn update_refreshes_marketplace_then_plugin() {
 fn uninstall_uses_official_argv_and_backs_up() {
     let root = fixture();
     let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
-    adapter
-        .uninstall_plugin("workbench@workshop")
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::uninstall("workbench@workshop"))
         .expect("uninstall");
     let args = fs::read_to_string(root.join("_cli/args.txt")).unwrap();
     assert!(
@@ -580,13 +603,238 @@ fn toggling_a_plugin_or_per_project_server_is_refused_without_a_write() {
     fs::write(root.join(".claude.json"), &config).unwrap();
     let adapter = ClaudeAdapter::at(root.clone());
 
+    let changes = Changes::beside(&root);
     for id in ["plugin:workbench:docs-search", "local:pad"] {
-        assert!(adapter.set_mcp_enabled(id, false).is_err(), "{id}");
+        assert!(
+            changes.global(&adapter, Request::mcp(id, false)).is_err(),
+            "{id}"
+        );
     }
 
     assert_eq!(
         fs::read_to_string(root.join(".claude.json")).unwrap(),
         config
     );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn every_change_backs_up_the_file_it_rewrites_once_before_it_is_made() {
+    let root = fixture();
+    let adapter = ClaudeAdapter::at_with_cli(root.clone(), claude_argv_stub(&root, 0, ""));
+    let backups = root.join("_backups");
+    let kept = |file: &str| crate::backup::kept(&backups, AgentId::Claude, file).len();
+
+    let changes = Changes::beside(&root);
+    changes
+        .global(&adapter, Request::skill("statusline", true))
+        .unwrap();
+    assert_eq!((kept("settings.json"), kept(".claude.json")), (1, 0));
+    changes
+        .global(&adapter, Request::mcp("github", false))
+        .unwrap();
+    assert_eq!((kept("settings.json"), kept(".claude.json")), (1, 1));
+    changes
+        .global(&adapter, Request::plugin("workbench@workshop", false))
+        .unwrap();
+    changes
+        .global(&adapter, Request::install("workbench@workshop"))
+        .unwrap();
+    changes
+        .global(&adapter, Request::uninstall("workbench@workshop"))
+        .unwrap();
+    changes
+        .global(&adapter, Request::update("workbench@workshop"))
+        .unwrap();
+    assert_eq!((kept("settings.json"), kept(".claude.json")), (5, 1));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn json_patch_only_changes_skill_overrides_and_keeps_unrelated_keys() {
+    let root = crate::paths::scratch_dir("on-n-off-json");
+    let path = root.join("settings.json");
+    fs::write(
+        &path,
+        r#"{
+  "model": "opus",
+  "enabledPlugins": { "workbench@workshop": true },
+  "skillOverrides": { "legacy": "name-only" }
+}"#,
+    )
+    .unwrap();
+    patched(
+        AgentId::Claude,
+        &path,
+        Edit::json(|root| skill_override(root, "statusline", false)),
+    )
+    .unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["model"], "opus");
+    assert_eq!(value["enabledPlugins"]["workbench@workshop"], true);
+    assert_eq!(value["skillOverrides"]["legacy"], "name-only");
+    assert_eq!(value["skillOverrides"]["statusline"], "off");
+    assert!(root
+        .join("backups/claude")
+        .read_dir()
+        .unwrap()
+        .next()
+        .is_some());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn json_mcp_toggle_sets_disabled_flag_and_list() {
+    let root = crate::paths::scratch_dir("on-n-off-json-mcp");
+    let path = root.join(".claude.json");
+    fs::write(
+        &path,
+        r#"{
+  "numStartups": 3,
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
+    "docs": { "type": "http", "url": "https://docs.example/mcp" }
+  }
+}"#,
+    )
+    .unwrap();
+    patched(
+        AgentId::Claude,
+        &path,
+        Edit::json(|root| mcp_enabled(root, "github", false)),
+    )
+    .unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["numStartups"], 3);
+    assert_eq!(
+        value["mcpServers"]["docs"]["url"],
+        "https://docs.example/mcp"
+    );
+    assert_eq!(value["mcpServers"]["github"]["disabled"], true);
+    assert_eq!(value["mcpServers"]["github"]["command"], "npx");
+    assert_eq!(value["disabledMcpServers"], serde_json::json!(["github"]));
+    patched(
+        AgentId::Claude,
+        &path,
+        Edit::json(|root| mcp_enabled(root, "github", true)),
+    )
+    .unwrap();
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(value["mcpServers"]["github"]["disabled"], false);
+    assert_eq!(value["disabledMcpServers"], serde_json::json!([]));
+    let err = patched(
+        AgentId::Claude,
+        &path,
+        Edit::json(|root| mcp_enabled(root, "missing", false)),
+    )
+    .expect_err("missing");
+    assert!(err.message.contains("mcp server not found"));
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn claude_steps_use_the_argv_its_help_documents() {
+    let root = crate::paths::scratch_dir("on-n-off-claude-argv");
+    let adapter = ClaudeAdapter::at(root.clone());
+    let plugin = row("workbench@workshop");
+    let git = InstallSource::GitHub {
+        owner: "acme".into(),
+        repo: "tools".into(),
+        ref_name: Some("main".into()),
+    };
+    assert_eq!(
+        argv_of(
+            &adapter,
+            &Checked::Install(InstallSource::Plugin(plugin.id.clone()))
+        ),
+        [[
+            "plugin",
+            "install",
+            "-s",
+            "user",
+            "-y",
+            "workbench@workshop"
+        ]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Install(git)),
+        [[
+            "plugin",
+            "marketplace",
+            "add",
+            "--scope",
+            "user",
+            "acme/tools@main"
+        ]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Uninstall(plugin.clone())),
+        [[
+            "plugin",
+            "uninstall",
+            "-s",
+            "user",
+            "-y",
+            "workbench@workshop"
+        ]]
+    );
+    assert_eq!(
+        argv_of(&adapter, &Checked::Update(plugin.clone())),
+        [
+            argv(&["plugin", "marketplace", "update", "workshop"]),
+            argv(&["plugin", "update", "-s", "user", "-y", "workbench@workshop"])
+        ]
+    );
+    let npx = InstallSource::NpxSkills {
+        source: "acme/skills".into(),
+        skill: None,
+    };
+    let step = adapter.step(&Checked::Install(npx)).unwrap().unwrap();
+    assert_eq!(step.npx_agent(), Some("claude-code"));
+    assert!(step.touches().is_empty());
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn a_cli_change_backs_up_every_document_the_plugins_are_read_from() {
+    let root = fixture();
+    let adapter = ClaudeAdapter::at(root.clone());
+    let documents = adapter.documents().unwrap().all();
+    let mut read = documents.clone();
+    read.sort();
+    let plugin = row("workbench@workshop");
+    for change in [
+        Checked::Plugin {
+            plugin: plugin.clone(),
+            on: false,
+        },
+        Checked::Install(InstallSource::Plugin("acme@webapp".into())),
+        Checked::Install(InstallSource::GitUrl(
+            "https://github.com/acme/webapp.git".into(),
+        )),
+        Checked::Uninstall(plugin.clone()),
+        Checked::Update(plugin.clone()),
+    ] {
+        let step = adapter.step(&change).unwrap().expect("a step");
+        let mut touched = step.touches().to_vec();
+        touched.sort();
+        assert_eq!(touched, read, "{change:?}");
+    }
+
+    let listed = adapter.list_local_tab().unwrap();
+    for document in documents {
+        let kept = fs::read(&document).unwrap();
+        fs::write(&document, "{}").unwrap();
+        assert_ne!(
+            adapter.list_local_tab().ok(),
+            Some(listed.clone()),
+            "the plugins are not read from {}",
+            document.display()
+        );
+        fs::write(&document, kept).unwrap();
+    }
     let _ = fs::remove_dir_all(root);
 }

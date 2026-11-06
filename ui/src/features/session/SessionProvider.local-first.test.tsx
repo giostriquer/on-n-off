@@ -94,49 +94,66 @@ const ENRICHED_TAB: AgentTabDto = {
 };
 const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => agentInfo(id));
 
-vi.mock("$lib/api", () => ({
-  featureFlags: () => Promise.resolve({ masterCut: false }),
-  loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
-  listAgents: () => {
-    state.events.push("agents");
-    return Promise.resolve(AGENTS);
-  },
-  listProjects: (agentId: AgentId) => {
-    state.events.push(`projects:${agentId}`);
-    return state.projectsHandler?.(agentId) ?? Promise.resolve([]);
-  },
-  inspectProject: (agentId: AgentId, path: string) => {
-    state.events.push(`inspect:${agentId}:${path}`);
-    return (
-      state.inspectHandler?.(agentId, path) ??
-      Promise.resolve({ id: path, label: path, path })
-    );
-  },
-  listLocalPlugins: (agentId: AgentId, path: string | null) => {
-    state.events.push(`local:${agentId}:${path ?? "global"}`);
-    return state.localHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
-  },
-  listPlugins: (agentId: AgentId, path: string | null) =>
-    state.localHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB),
-  refresh: (agentId: AgentId, path: string | null) => {
-    state.events.push(`refresh:${agentId}:${path ?? "global"}`);
-    return state.refreshHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
-  },
-  setPluginEnabled: (agentId: AgentId) => {
-    state.events.push(`mutate:${agentId}`);
+vi.mock("$lib/api", () => {
+  const change = (action: string, agentId: AgentId, path?: string | null) => {
+    state.events.push(`mutate:${action}:${agentId}:${path ?? "global"}`);
     return state.mutationHandler?.(agentId) ?? Promise.resolve(EMPTY_TAB);
-  },
-}));
+  };
+  return {
+    featureFlags: () => Promise.resolve({ masterCut: false }),
+    loadAppSettings: () => Promise.resolve({ ...DEFAULT_APP_SETTINGS, hiddenAgents: state.hiddenAgents } satisfies AppSettings),
+    listAgents: () => {
+      state.events.push("agents");
+      return Promise.resolve(AGENTS);
+    },
+    listProjects: (agentId: AgentId) => {
+      state.events.push(`projects:${agentId}`);
+      return state.projectsHandler?.(agentId) ?? Promise.resolve([]);
+    },
+    inspectProject: (agentId: AgentId, path: string) => {
+      state.events.push(`inspect:${agentId}:${path}`);
+      return (
+        state.inspectHandler?.(agentId, path) ??
+        Promise.resolve({ id: path, label: path, path })
+      );
+    },
+    listLocalPlugins: (agentId: AgentId, path: string | null) => {
+      state.events.push(`local:${agentId}:${path ?? "global"}`);
+      return state.localHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
+    },
+    listPlugins: (agentId: AgentId, path: string | null) => {
+      state.events.push(`list:${agentId}:${path ?? "global"}`);
+      return state.localHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
+    },
+    refresh: (agentId: AgentId, path: string | null) => {
+      state.events.push(`refresh:${agentId}:${path ?? "global"}`);
+      return state.refreshHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
+    },
+    setPluginEnabled: (agentId: AgentId, _pluginId: string, _enabled: boolean, path?: string | null) =>
+      change("plugin", agentId, path),
+    setSkillEnabled: (agentId: AgentId, _skillId: string, _enabled: boolean, path?: string | null) =>
+      change("skill", agentId, path),
+    setMcpEnabled: (agentId: AgentId, _mcpId: string, _enabled: boolean, path?: string | null) =>
+      change("mcp", agentId, path),
+    installPlugin: (agentId: AgentId, _source: string, path?: string | null) => change("install", agentId, path),
+    uninstallPlugin: (agentId: AgentId, _pluginId: string, path?: string | null) =>
+      change("uninstall", agentId, path),
+    updatePlugin: (agentId: AgentId, _pluginId: string, path?: string | null) => change("update", agentId, path),
+  };
+});
 
 function Probe() {
   const session = useAgentSession();
   const plugin = session.currentTab.dto?.plugins[0];
+  const skill = session.currentTab.dto?.userSkills[0];
+  const server = session.currentTab.dto?.mcpServers[0];
   return (
     <>
       <span data-testid="ready">{session.initialProviderReady ? "yes" : "no"}</span>
       <span data-testid="busy">{session.currentTab.inFlight ? "yes" : "no"}</span>
       <span data-testid="plugin-id">{plugin?.id ?? ""}</span>
       <span data-testid="plugin-version">{plugin?.version ?? ""}</span>
+      <span data-testid="plugin-upstream">{plugin?.upstream ?? ""}</span>
       <span data-testid="plugin-enabled">{String(plugin?.enabled ?? "")}</span>
       <span data-testid="plugin-skill">{plugin?.skills[0]?.description ?? ""}</span>
       <span data-testid="user-skills">
@@ -166,6 +183,24 @@ function Probe() {
         onClick={() => plugin && session.togglePlugin(plugin, !plugin.enabled)}
       >
         Mutate Codex
+      </button>
+      <button type="button" onClick={() => skill && session.toggleSkill(skill, !skill.enabled)}>
+        Switch skill
+      </button>
+      <button type="button" onClick={() => server && session.toggleMcp(server, !server.enabled)}>
+        Switch MCP
+      </button>
+      <button type="button" onClick={() => plugin && session.updatePlugin(plugin)}>
+        Update plugin
+      </button>
+      <button type="button" onClick={() => plugin && session.setUninstallTarget(plugin)}>
+        Pick uninstall
+      </button>
+      <button type="button" onClick={() => void session.confirmUninstall()}>
+        Confirm uninstall
+      </button>
+      <button type="button" onClick={() => void session.install("acme@webapp")}>
+        Install
       </button>
     </>
   );
@@ -387,7 +422,7 @@ describe("SessionProvider local-first startup", () => {
     await waitFor(() => expect(screen.getByTestId("ready")).toHaveTextContent("yes"));
 
     fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
-    await waitFor(() => expect(state.events).toContain("mutate:codex"));
+    await waitFor(() => expect(state.events).toContain("mutate:plugin:codex:global"));
     expect(screen.getByTestId("busy")).toHaveTextContent("yes");
     fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
     fireEvent.click(screen.getByRole("button", { name: "Refresh Codex" }));
@@ -401,6 +436,153 @@ describe("SessionProvider local-first startup", () => {
     await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
     expect(screen.getByTestId("scope-path")).toHaveTextContent("C:/fixture/new-scope");
     expect(screen.getByTestId("banner")).toBeEmptyDOMElement();
+  });
+
+  it("stores a change's answer for the scope in view, without listing again, keeping the badges it showed", async () => {
+    const remembered = "C:/fixture/remembered";
+    localStorage.setItem(`${SCOPE_KEY}.codex`, remembered);
+    const shown: AgentTabDto = {
+      ...LOCAL_TAB,
+      plugins: [{ ...LOCAL_TAB.plugins[0], upstream: "0.24.0", outOfSync: true }],
+    };
+    const answer: AgentTabDto = {
+      ...LOCAL_TAB,
+      plugins: [{ ...LOCAL_TAB.plugins[0], enabled: true }],
+      userSkills: [],
+    };
+    state.refreshHandler = (agentId) => Promise.resolve(agentId === "codex" ? shown : EMPTY_TAB);
+    state.mutationHandler = (agentId) => Promise.resolve(agentId === "codex" ? answer : EMPTY_TAB);
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    state.events.length = 0;
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+
+    await waitFor(() => expect(screen.getByTestId("plugin-enabled")).toHaveTextContent("true"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    expect(state.events).toContain(`mutate:plugin:codex:${remembered}`);
+    expect(state.events.filter((event) => /^(list|local|refresh):codex/.test(event))).toEqual([]);
+    expect(screen.getByTestId("user-skills")).toBeEmptyDOMElement();
+    expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0");
+  });
+
+  it.each([
+    { action: "plugin", clicks: ["Mutate Codex"] },
+    { action: "skill", clicks: ["Switch skill"] },
+    { action: "mcp", clicks: ["Switch MCP"] },
+    { action: "update", clicks: ["Update plugin"] },
+    { action: "uninstall", clicks: ["Pick uninstall", "Confirm uninstall"] },
+    { action: "install", clicks: ["Install"] },
+  ])("sends the remembered scope with the $action change", async ({ action, clicks }) => {
+    const remembered = "C:/fixture/remembered";
+    localStorage.setItem(`${SCOPE_KEY}.codex`, remembered);
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("scope-path")).toHaveTextContent(remembered));
+    await waitFor(() => expect(screen.getByTestId("plugin-id")).toHaveTextContent("workbench@workshop"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    state.events.length = 0;
+
+    for (const name of clicks) {
+      fireEvent.click(screen.getByRole("button", { name }));
+    }
+
+    await waitFor(() => expect(state.events).toContain(`mutate:${action}:codex:${remembered}`));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    expect(state.events.filter((event) => event.startsWith("mutate:"))).toEqual([
+      `mutate:${action}:codex:${remembered}`,
+    ]);
+  });
+
+  it("clears the error a failed change left once the next change answers", async () => {
+    let changes = 0;
+    state.mutationHandler = (agentId) => {
+      if (agentId !== "codex") {
+        return Promise.resolve(EMPTY_TAB);
+      }
+      changes += 1;
+      return changes === 1 ? Promise.reject(new Error("acme change failed")) : Promise.resolve(LOCAL_TAB);
+    };
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("ready")).toHaveTextContent("yes"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(screen.getByTestId("banner")).toHaveTextContent(/acme change failed/i));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+
+    await waitFor(() => expect(changes).toBe(2));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    expect(screen.getByTestId("banner")).toBeEmptyDOMElement();
+  });
+
+  it("takes the enriched installed version on a later load after a change answered", async () => {
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.23.0"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
+
+    await waitFor(() => expect(state.events).toContain("refresh:codex:C:/fixture/new-scope"));
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.23.0"));
+    expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0");
+  });
+
+  it("drops an enrichment that was in flight when a change answered, keeping the answer's versions", async () => {
+    const enrichment = deferred<AgentTabDto>();
+    state.refreshHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
+    const answer: AgentTabDto = {
+      ...LOCAL_TAB,
+      plugins: [{ ...LOCAL_TAB.plugins[0], version: "0.25.0", upstream: "0.25.0", outOfSync: false }],
+    };
+    state.mutationHandler = (agentId) => Promise.resolve(agentId === "codex" ? answer : EMPTY_TAB);
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.25.0"));
+    await act(async () => {
+      enrichment.resolve(ENRICHED_TAB);
+      await enrichment.promise;
+    });
+
+    expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.25.0");
+    expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.25.0");
+  });
+
+  it("still lays an in-flight enrichment over plugins a change left on the same version", async () => {
+    const enrichment = deferred<AgentTabDto>();
+    state.refreshHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
+    const answer: AgentTabDto = {
+      ...LOCAL_TAB,
+      plugins: [{ ...LOCAL_TAB.plugins[0], enabled: true }],
+    };
+    state.mutationHandler = (agentId) => Promise.resolve(agentId === "codex" ? answer : EMPTY_TAB);
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(screen.getByTestId("plugin-enabled")).toHaveTextContent("true"));
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    await act(async () => {
+      enrichment.resolve({
+        ...LOCAL_TAB,
+        plugins: [{ ...LOCAL_TAB.plugins[0], upstream: "0.24.0", outOfSync: true }],
+      });
+      await enrichment.promise;
+    });
+
+    await waitFor(() => expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0"));
+    expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.22.0");
+    expect(screen.getByTestId("plugin-enabled")).toHaveTextContent("true");
   });
 
   it("refreshes every visible provider from one Refresh and probes only the open tab", async () => {

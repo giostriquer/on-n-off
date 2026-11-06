@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
+use crate::change::{Changes, Request};
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, ColumnEntryDto, GithubPrsReplyDto,
     InstallItemsRequest, InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto,
@@ -25,6 +26,7 @@ pub struct AppState {
     antigravity: Arc<dyn AgentAdapter>,
     cursor: Arc<dyn AgentAdapter>,
     muse: Arc<dyn AgentAdapter>,
+    changes: Arc<Changes>,
     items: Result<Arc<ItemService>, AdapterError>,
 }
 
@@ -36,6 +38,7 @@ impl AppState {
             antigravity: Arc::new(crate::antigravity::AntigravityAdapter::new()),
             cursor: Arc::new(crate::cursor::CursorAdapter::new()),
             muse: Arc::new(crate::muse::MuseAdapter::new()),
+            changes: Arc::new(Changes::production()),
             items: ItemService::production().map(Arc::new),
         }
     }
@@ -264,18 +267,34 @@ pub async fn list_local_plugins(
     .await
 }
 
+async fn change(
+    state: &AppState,
+    agent_id: AgentId,
+    request: Request,
+    project_path: Option<String>,
+    operation: &'static str,
+) -> Result<AgentTabDto, AdapterError> {
+    let adapter = state.adapter(agent_id);
+    let changes = Arc::clone(&state.changes);
+    blocking(operation, move || {
+        changes.make(&*adapter, request, project_path.as_deref())
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn set_plugin_enabled(
     agent_id: AgentId,
     plugin_id: String,
     enabled: bool,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("plugin toggle", move || {
-        adapter.set_plugin_enabled(&plugin_id, enabled)
-    })
-    .await
+    let request = Request::SwitchPlugin {
+        id: plugin_id,
+        on: enabled,
+    };
+    change(&state, agent_id, request, project_path, "plugin toggle").await
 }
 
 #[tauri::command]
@@ -283,13 +302,14 @@ pub async fn set_skill_enabled(
     agent_id: AgentId,
     skill_id: String,
     enabled: bool,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("skill toggle", move || {
-        adapter.set_skill_enabled(&skill_id, enabled)
-    })
-    .await
+    let request = Request::SwitchSkill {
+        id: skill_id,
+        on: enabled,
+    };
+    change(&state, agent_id, request, project_path, "skill toggle").await
 }
 
 #[tauri::command]
@@ -297,46 +317,47 @@ pub async fn set_mcp_enabled(
     agent_id: AgentId,
     mcp_id: String,
     enabled: bool,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("MCP toggle", move || {
-        adapter.set_mcp_enabled(&mcp_id, enabled)
-    })
-    .await
+    let request = Request::SwitchMcp {
+        id: mcp_id,
+        on: enabled,
+    };
+    change(&state, agent_id, request, project_path, "MCP toggle").await
 }
 
 #[tauri::command]
 pub async fn install_plugin(
     agent_id: AgentId,
     source: String,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("plugin install", move || adapter.install_plugin(&source)).await
+    let request = Request::Install { source };
+    change(&state, agent_id, request, project_path, "plugin install").await
 }
 
 #[tauri::command]
 pub async fn uninstall_plugin(
     agent_id: AgentId,
     plugin_id: String,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("plugin uninstall", move || {
-        adapter.uninstall_plugin(&plugin_id)
-    })
-    .await
+    let request = Request::Uninstall { id: plugin_id };
+    change(&state, agent_id, request, project_path, "plugin uninstall").await
 }
 
 #[tauri::command]
 pub async fn update_plugin(
     agent_id: AgentId,
     plugin_id: String,
+    project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
-    blocking("plugin update", move || adapter.update_plugin(&plugin_id)).await
+    let request = Request::Update { id: plugin_id };
+    change(&state, agent_id, request, project_path, "plugin update").await
 }
 
 #[tauri::command]

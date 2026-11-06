@@ -1,4 +1,5 @@
 use super::*;
+use crate::change::{Changes, Request};
 use crate::cli_stub::CliStub;
 use crate::dto::AgentInfo;
 
@@ -73,6 +74,10 @@ impl Fixture {
 
     fn adapter(&self) -> MuseAdapter {
         MuseAdapter::at(self.home.clone())
+    }
+
+    fn changes(&self) -> Changes {
+        Changes::beside(&self.home)
     }
 }
 
@@ -195,8 +200,8 @@ fn mcp_toggle_is_refused() {
     let fixture = Fixture::new("mcp");
     fixture.write_settings(r#"{"mcpServers":{"docs":{"url":"https://docs.example/mcp"}}}"#);
     let error = fixture
-        .adapter()
-        .set_mcp_enabled("docs", false)
+        .changes()
+        .global(&fixture.adapter(), Request::mcp("docs", false))
         .expect_err("refused");
     assert_eq!(error.message, MCP_READ_ONLY);
 }
@@ -217,13 +222,15 @@ fn plugin_toggle_calls_muse_with_bare_name() {
     let fixture = Fixture::new("toggle");
     fixture.install_plugin("acme-tools", "1.0.0", true, None);
     let adapter = stubbed(&fixture, false);
-    adapter
-        .set_plugin_enabled("acme-tools@local", false)
+    fixture
+        .changes()
+        .global(&adapter, Request::plugin("acme-tools@local", false))
         .expect("toggle");
     assert_eq!(argv(&fixture).trim(), "plugins disable acme-tools --json");
 
-    let error = adapter
-        .set_plugin_enabled("missing@local", true)
+    let error = fixture
+        .changes()
+        .global(&adapter, Request::plugin("missing@local", true))
         .expect_err("unknown plugin");
     assert!(error.message.contains("plugin not found"), "{error:?}");
 }
@@ -235,11 +242,16 @@ fn skill_toggles_use_muse_scopes_and_ids() {
     write_skill(&fixture.config().join("skills"), "acme-notes", "Config");
 
     let adapter = stubbed(&fixture, true);
-    adapter
-        .set_skill_enabled("acme-notes", false)
+    fixture
+        .changes()
+        .global(&adapter, Request::skill("acme-notes", false))
         .expect("user toggle");
-    adapter
-        .set_skill_enabled("plugin:acme-tools:acme-review", true)
+    fixture
+        .changes()
+        .global(
+            &adapter,
+            Request::skill("plugin:acme-tools:acme-review", true),
+        )
         .expect("plugin toggle");
     assert_eq!(
         argv(&fixture)
@@ -269,8 +281,12 @@ fn plugin_mutation_preserves_both_state_files() {
         .iter()
         .map(|(name, path)| (*name, fs::read(path).unwrap()))
         .collect();
-    stubbed(&fixture, false)
-        .set_plugin_enabled("acme-tools@local", false)
+    fixture
+        .changes()
+        .global(
+            &stubbed(&fixture, false),
+            Request::plugin("acme-tools@local", false),
+        )
         .unwrap();
     let backups: Vec<_> = fs::read_dir(fixture.home.join("_backups").join("muse"))
         .unwrap()
@@ -298,7 +314,10 @@ fn backup_failure_prevents_cli_mutation() {
     fixture.install_plugin("acme-tools", "1.0.0", true, None);
     fixture.write_settings(r#"{"schema_version":1}"#);
     fs::write(fixture.home.join("_backups"), "blocked").unwrap();
-    let result = stubbed(&fixture, false).set_plugin_enabled("acme-tools@local", false);
+    let result = fixture.changes().global(
+        &stubbed(&fixture, false),
+        Request::plugin("acme-tools@local", false),
+    );
     assert!(result.is_err());
     assert!(argv(&fixture).is_empty(), "back up before invoking Muse");
 }
@@ -326,9 +345,13 @@ fn uninstall_and_local_update_use_bare_name() {
     let fixture = Fixture::new("uninstall");
     fixture.install_plugin("acme-tools", "1.0.0", true, None);
     let adapter = stubbed(&fixture, true);
-    adapter.update_plugin("acme-tools@local").expect("update");
-    adapter
-        .uninstall_plugin("acme-tools@local")
+    fixture
+        .changes()
+        .global(&adapter, Request::update("acme-tools@local"))
+        .expect("update");
+    fixture
+        .changes()
+        .global(&adapter, Request::uninstall("acme-tools@local"))
         .expect("uninstall");
     assert_eq!(
         argv(&fixture)
@@ -348,11 +371,13 @@ fn install_accepts_folder_and_marketplace_id_but_not_git() {
     let adapter = stubbed(&fixture, true);
     let folder = fixture.home.join("acme-plugin");
     fs::create_dir_all(&folder).unwrap();
-    adapter
-        .install_plugin(&folder.to_string_lossy())
+    fixture
+        .changes()
+        .global(&adapter, Request::install(&folder.to_string_lossy()))
         .expect("folder install");
-    adapter
-        .install_plugin("acme-tools@acme")
+    fixture
+        .changes()
+        .global(&adapter, Request::install("acme-tools@acme"))
         .expect("marketplace install");
     let folder_arg = if cfg!(windows) {
         format!("\"{}\"", folder.display())
@@ -370,8 +395,12 @@ fn install_accepts_folder_and_marketplace_id_but_not_git() {
         ]
     );
 
-    let error = adapter
-        .install_plugin("https://github.com/acme/webapp.git")
+    let error = fixture
+        .changes()
+        .global(
+            &adapter,
+            Request::install("https://github.com/acme/webapp.git"),
+        )
         .expect_err("git refused");
     assert!(error.message.contains("marketplace add"), "{error:?}");
 }
@@ -401,7 +430,10 @@ fn disabled_plugin_skills_are_not_live_or_actionable() {
         !skill.togglable,
         "Muse cannot select a disabled plugin's skills"
     );
-    assert!(adapter.set_skill_enabled(&skill.id, true).is_err());
+    assert!(fixture
+        .changes()
+        .global(&adapter, Request::skill(&skill.id, true))
+        .is_err());
     assert!(argv(&fixture).is_empty(), "refuse before calling the CLI");
 }
 
@@ -434,7 +466,10 @@ fn marketplace_matching_uses_source_before_selecting_same_named_plugin() {
     assert_eq!(plugin.id, "acme-tools@acme");
     assert_eq!(plugin.upstream, "2.0.0");
     assert!(plugin.out_of_sync);
-    adapter.update_plugin(&plugin.id).unwrap();
+    fixture
+        .changes()
+        .global(&adapter, Request::update(&plugin.id))
+        .unwrap();
     assert_eq!(
         argv(&fixture)
             .lines()
@@ -463,4 +498,86 @@ fn reenabling_a_plugin_preserves_its_skill_activation() {
         "keep the explicit off state"
     );
     assert!(enabled.plugins[0].skills[0].togglable);
+}
+
+#[test]
+fn a_marketplace_plugin_updates_its_marketplace_then_installs_again() {
+    let fixture = Fixture::new("marketplace-update");
+    fixture.install_plugin("acme-tools", "1.0.0", true, None);
+    let plugins_dir = fixture.data().join("plugins");
+    let snapshot = plugins_dir.join("marketplaces/acme/snapshot.json");
+    fs::create_dir_all(snapshot.parent().unwrap()).unwrap();
+    fs::write(
+        &snapshot,
+        r#"{"plugins":[{"name":"acme-tools","version":"2.0.0"}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        plugins_dir.join("marketplaces.json"),
+        r#"{"marketplaces":{"acme":{"source":{"path":"/srv/acme"},"snapshot_path":"plugins/marketplaces/acme/snapshot.json"}}}"#,
+    )
+    .unwrap();
+    fixture
+        .changes()
+        .global(&stubbed(&fixture, true), Request::update("acme-tools@acme"))
+        .expect("update");
+    assert_eq!(
+        argv(&fixture)
+            .lines()
+            .map(str::trim_end)
+            .collect::<Vec<_>>(),
+        [
+            "plugins marketplace update acme --json",
+            "plugins install acme-tools@acme --json"
+        ]
+    );
+}
+
+#[test]
+fn a_cli_change_backs_up_every_document_the_plugins_and_skills_are_read_from() {
+    let fixture = Fixture::new("documents");
+    fixture.install_plugin("acme-tools", "1.0.0", true, Some("acme-review"));
+    fixture.write_settings(r#"{"schema_version":1}"#);
+    let plugins_dir = fixture.data().join("plugins");
+    fs::create_dir_all(plugins_dir.join("marketplaces/acme")).unwrap();
+    fs::write(
+        plugins_dir.join("marketplaces/acme/snapshot.json"),
+        r#"{"plugins":[{"name":"acme-tools","version":"2.0.0"}]}"#,
+    )
+    .unwrap();
+    fs::write(
+        plugins_dir.join("marketplaces.json"),
+        r#"{"marketplaces":{"acme":{"source":{"path":"/srv/acme"},"snapshot_path":"plugins/marketplaces/acme/snapshot.json"}}}"#,
+    )
+    .unwrap();
+    let adapter = fixture.adapter();
+    let documents = adapter.documents().unwrap().all();
+    let listed = adapter.list_tab().unwrap();
+    let plugin = listed.plugins[0].clone();
+    let skill = plugin.skills[0].clone();
+    for change in [
+        Checked::Plugin {
+            plugin: plugin.clone(),
+            on: false,
+        },
+        Checked::Skill { skill, on: false },
+        Checked::Install(InstallSource::Plugin("acme@webapp".into())),
+        Checked::Uninstall(plugin.clone()),
+        Checked::Update(plugin.clone()),
+    ] {
+        let step = adapter.step(&change).unwrap().expect("a step");
+        assert_eq!(step.touches(), documents.as_slice(), "{change:?}");
+    }
+
+    for document in documents {
+        let kept = fs::read(&document).unwrap();
+        fs::write(&document, r#"{"skills":{"activation":{"plugin":{"plugin://acme-tools/skills/acme-review/SKILL.md":"off"}}}}"#).unwrap();
+        assert_ne!(
+            adapter.list_tab().ok(),
+            Some(listed.clone()),
+            "the plugins and skills are not read from {}",
+            document.display()
+        );
+        fs::write(&document, kept).unwrap();
+    }
 }

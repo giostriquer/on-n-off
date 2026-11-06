@@ -23,6 +23,14 @@ CLI makes it, on-n-off edits a file, or it is refused and why; the install sourc
 whether it installs subagents and reads hooks.
 _Avoid_: toggles, support, features (a Limits card's features are another thing)
 
+**Config change**:
+One change on-n-off makes to a provider's configuration for the user: switching a plugin, a skill or
+an MCP server on or off, or installing, uninstalling or updating a plugin. Every provider's is made
+the same way: one at a time, refused unless the provider's capabilities allow it and the item is one
+the view the user is looking at can switch, made only once the configuration files it touches are
+backed up, and answered with that view as read from disk.
+_Avoid_: mutation, toggle (a switch is one kind), write
+
 ### Limits
 
 **Quota window**:

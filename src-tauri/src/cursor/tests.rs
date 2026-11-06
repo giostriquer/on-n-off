@@ -1,4 +1,5 @@
 use super::*;
+use crate::change::{Changes, Request};
 use crate::dto::AgentInfo;
 
 fn write_skill(dir: &Path, name: &str, description: &str) {
@@ -145,8 +146,9 @@ fn mcp_toggle_is_refused_and_leaves_the_file_alone() {
     let original = r#"{"mcpServers":{"github":{"command":"npx","args":["-y","gh"]}}}"#;
     fs::write(root.join("mcp.json"), original).unwrap();
     let adapter = CursorAdapter::at(root.clone());
-    let err = adapter
-        .set_mcp_enabled("github", false)
+    let changes = Changes::beside(&root);
+    let err = changes
+        .global(&adapter, Request::mcp("github", false))
         .expect_err("Cursor MCP servers are read-only here");
     assert!(err.message.contains("Cursor"), "{}", err.message);
     assert!(err.message.contains("agent mcp"), "{}", err.message);

@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use serde::Deserialize;
+use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
 
 use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
-use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::config_io::ConfigIo;
+use crate::change::{Checked, Step};
+use crate::cli::{argv, AgentCli};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
@@ -86,8 +86,6 @@ fn looks_like_path(source: &str) -> bool {
 pub struct CodexAdapter {
     root: Option<PathBuf>,
     agents_skills: PathBuf,
-    io: ConfigIo,
-    write: Mutex<()>,
     cli: AgentCli,
 }
 
@@ -96,8 +94,6 @@ impl CodexAdapter {
         Self {
             root: codex_root().ok(),
             agents_skills: agents_skills_root().unwrap_or_else(|_| PathBuf::new()),
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
             cli: AgentCli::new(AgentId::Codex.binary_name()),
         }
     }
@@ -113,12 +109,9 @@ impl CodexAdapter {
 
     #[cfg(test)]
     pub fn at_with_cli(root: PathBuf, agents_skills: PathBuf, cli: AgentCli) -> Self {
-        let io = ConfigIo::at(root.join("_backups"));
         Self {
             root: Some(root),
             agents_skills,
-            io,
-            write: Mutex::new(()),
             cli,
         }
     }
@@ -345,109 +338,128 @@ impl AgentAdapter for CodexAdapter {
         )
     }
 
-    fn set_skill_enabled(
-        &self,
-        skill_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_togglable(skill_id)?;
-        self.io.patch_toml_skill_enabled(
-            AgentId::Codex,
-            &self.root()?.join("config.toml"),
-            skill_id,
-            enabled,
-        )?;
-        self.list_tab()
+    fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {
+        let config = self.root()?.join("config.toml");
+        let cli = |runs| Step::cli(&self.cli, vec![config.clone()], runs);
+        Ok(Some(match change {
+            Checked::Plugin { plugin, on } => {
+                let (id, on) = (plugin.id.clone(), *on);
+                Step::toml(config, move |doc| plugin_enabled(doc, &id, on))
+            }
+            Checked::Skill { skill, on } => {
+                let (path, on) = (skill.id.clone(), *on);
+                Step::toml(config, move |doc| skill_enabled(doc, &path, on))
+            }
+            Checked::Mcp { server, on } => {
+                let (id, on) = (server.id.clone(), *on);
+                Step::toml(config, move |doc| mcp_enabled(doc, &id, on))
+            }
+            Checked::Install(source @ InstallSource::NpxSkills { .. }) => {
+                Step::npx(source.clone(), "codex")
+            }
+            Checked::Install(InstallSource::Plugin(id)) => {
+                cli(vec![argv(&["plugin", "add", "--json", id])])
+            }
+            Checked::Install(InstallSource::GitHub {
+                owner,
+                repo,
+                ref_name: Some(ref_name),
+            }) => cli(vec![argv(&[
+                "plugin",
+                "marketplace",
+                "add",
+                "--json",
+                &format!("{owner}/{repo}"),
+                "--ref",
+                ref_name,
+            ])]),
+            Checked::Install(source) => cli(vec![argv(&[
+                "plugin",
+                "marketplace",
+                "add",
+                "--json",
+                &source.as_cli_source(),
+            ])]),
+            Checked::Uninstall(plugin) => {
+                cli(vec![argv(&["plugin", "remove", "--json", &plugin.id])])
+            }
+            Checked::Update(plugin) => cli(InstallSource::plugin_marketplace(&plugin.id)
+                .map(|marketplace| {
+                    argv(&["plugin", "marketplace", "upgrade", "--json", marketplace])
+                })
+                .into_iter()
+                .chain([argv(&["plugin", "add", "--json", &plugin.id])])
+                .collect()),
+        }))
     }
+}
 
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
-        self.io.patch_toml_mcp_enabled(
-            AgentId::Codex,
-            &self.root()?.join("config.toml"),
-            mcp_id,
-            enabled,
-        )?;
-        self.list_tab()
-    }
+fn plugin_enabled(doc: &mut DocumentMut, id: &str, on: bool) -> Result<(), AdapterError> {
+    let plugins = doc
+        .get_mut("plugins")
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| AdapterError::message("plugins table missing"))?;
+    let entry = plugins
+        .get_mut(id)
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| AdapterError::message(format!("plugin not in config: {id}")))?;
+    entry["enabled"] = value(on);
+    Ok(())
+}
 
-    fn set_plugin_enabled(
-        &self,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io.patch_toml_plugin_enabled(
-            AgentId::Codex,
-            &self.root()?.join("config.toml"),
-            plugin_id,
-            enabled,
-        )?;
-        self.list_tab()
-    }
+fn mcp_enabled(doc: &mut DocumentMut, id: &str, on: bool) -> Result<(), AdapterError> {
+    let servers = doc
+        .get_mut("mcp_servers")
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| AdapterError::message("mcp_servers table missing"))?;
+    let entry = servers
+        .get_mut(id)
+        .and_then(Item::as_table_mut)
+        .ok_or_else(|| AdapterError::message(format!("mcp server not found: {id}")))?;
+    entry["enabled"] = value(on);
+    Ok(())
+}
 
-    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = self.capabilities().admit(source)?;
-        if parsed.is_npx_skills() {
-            run_npx_skills(&parsed, "codex")?;
-            return self.list_tab();
+fn skill_enabled(doc: &mut DocumentMut, skill_path: &str, on: bool) -> Result<(), AdapterError> {
+    let tables = skills_config(doc)?;
+    let key = normalize_skill_path(skill_path);
+    for table in tables.iter_mut() {
+        let Some(existing) = table.get("path").and_then(Item::as_str) else {
+            continue;
+        };
+        if normalize_skill_path(existing) == key {
+            table["enabled"] = value(on);
+            return Ok(());
         }
-        self.io
-            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
-        self.cli
-            .run_args_timed(&parsed.codex_install_argv(), INSTALL_TIMEOUT)?;
-        self.list_tab()
     }
+    let mut table = Table::new();
+    table["path"] = value(skill_path);
+    table["enabled"] = value(on);
+    tables.push(table);
+    Ok(())
+}
 
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io
-            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
-        self.cli
-            .run_args(&InstallSource::codex_uninstall_argv(plugin_id))?;
-        self.list_tab()
+fn skills_config(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables, AdapterError> {
+    if doc.get("skills").and_then(Item::as_table).is_none() {
+        let mut skills = Table::new();
+        skills.set_implicit(true);
+        skills["config"] = Item::ArrayOfTables(ArrayOfTables::new());
+        doc.insert("skills", Item::Table(skills));
+    } else if !doc
+        .get("skills")
+        .and_then(|skills| skills.get("config"))
+        .is_some_and(Item::is_array_of_tables)
+    {
+        let skills = doc
+            .get_mut("skills")
+            .and_then(Item::as_table_mut)
+            .ok_or_else(|| AdapterError::message("skills must be a table"))?;
+        skills["config"] = Item::ArrayOfTables(ArrayOfTables::new());
     }
-
-    fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io
-            .backup_file(AgentId::Codex, &self.root()?.join("config.toml"))?;
-        if let Some(marketplace) = InstallSource::plugin_marketplace(plugin_id) {
-            self.cli.run_args_timed(
-                &InstallSource::codex_marketplace_upgrade_argv(marketplace),
-                INSTALL_TIMEOUT,
-            )?;
-        }
-        self.cli.run_args_timed(
-            &InstallSource::codex_update_argv(plugin_id),
-            INSTALL_TIMEOUT,
-        )?;
-        self.list_tab()
-    }
+    doc.get_mut("skills")
+        .and_then(|skills| skills.get_mut("config"))
+        .and_then(Item::as_array_of_tables_mut)
+        .ok_or_else(|| AdapterError::message("skills.config must be an array of tables"))
 }
 
 fn skill_enable_map(config: &CodexConfig) -> HashMap<String, bool> {

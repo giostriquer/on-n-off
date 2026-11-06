@@ -1,14 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 
 use serde::Deserialize;
+use serde_json::Value as JsonValue;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
-use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::config_io::ConfigIo;
+use crate::change::{switch, Checked, Step};
+use crate::cli::{argv, AgentCli};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::paths::{claude_root, plugin_id_parts};
@@ -77,11 +77,26 @@ fn default_true() -> bool {
     true
 }
 
+struct Documents {
+    settings: PathBuf,
+    installed: PathBuf,
+    marketplaces: PathBuf,
+}
+
+impl Documents {
+    fn all(&self) -> Vec<PathBuf> {
+        let Self {
+            settings,
+            installed,
+            marketplaces,
+        } = self;
+        vec![settings.clone(), installed.clone(), marketplaces.clone()]
+    }
+}
+
 pub struct ClaudeAdapter {
     root: Option<PathBuf>,
     claude_json: Option<PathBuf>,
-    io: ConfigIo,
-    write: Mutex<()>,
     cli: AgentCli,
 }
 
@@ -94,8 +109,6 @@ impl ClaudeAdapter {
         Self {
             root,
             claude_json,
-            io: ConfigIo::production(),
-            write: Mutex::new(()),
             cli: AgentCli::new(AgentId::Claude.binary_name()),
         }
     }
@@ -108,12 +121,9 @@ impl ClaudeAdapter {
     #[cfg(test)]
     pub fn at_with_cli(root: PathBuf, cli: AgentCli) -> Self {
         let claude_json = root.join(".claude.json");
-        let io = ConfigIo::at(root.join("_backups"));
         Self {
             root: Some(root),
             claude_json: Some(claude_json),
-            io,
-            write: Mutex::new(()),
             cli,
         }
     }
@@ -124,8 +134,18 @@ impl ClaudeAdapter {
             .ok_or_else(|| AdapterError::message("home directory not found"))
     }
 
+    fn documents(&self) -> Result<Documents, AdapterError> {
+        let root = self.root()?;
+        let plugins = root.join("plugins");
+        Ok(Documents {
+            settings: root.join("settings.json"),
+            installed: plugins.join("installed_plugins.json"),
+            marketplaces: plugins.join("known_marketplaces.json"),
+        })
+    }
+
     fn settings(&self) -> Result<ClaudeSettings, AdapterError> {
-        let path = self.root()?.join("settings.json");
+        let path = self.documents()?.settings;
         if !path.exists() {
             return Ok(ClaudeSettings::default());
         }
@@ -142,7 +162,7 @@ impl ClaudeAdapter {
     }
 
     fn installed(&self) -> Result<Vec<(String, PathBuf, Option<String>)>, AdapterError> {
-        let path = self.root()?.join("plugins").join("installed_plugins.json");
+        let path = self.documents()?.installed;
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -187,11 +207,11 @@ impl ClaudeAdapter {
     }
 
     fn marketplace_roots(&self) -> HashMap<String, (PathBuf, String)> {
-        let Ok(root) = self.root() else {
+        let (Ok(root), Ok(documents)) = (self.root(), self.documents()) else {
             return HashMap::new();
         };
         let mut roots = HashMap::new();
-        let known_path = root.join("plugins").join("known_marketplaces.json");
+        let known_path = documents.marketplaces;
         if let Ok(text) = fs::read_to_string(&known_path) {
             if let Ok(known) = serde_json::from_str::<HashMap<String, KnownMarketplace>>(&text) {
                 for (name, entry) in known {
@@ -338,107 +358,114 @@ impl AgentAdapter for ClaudeAdapter {
         )
     }
 
-    fn set_skill_enabled(
-        &self,
-        skill_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_togglable(skill_id)?;
-        self.io.patch_json_skill_override(
-            AgentId::Claude,
-            &self.root()?.join("settings.json"),
-            skill_id,
-            enabled,
-        )?;
-        self.list_tab()
+    fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {
+        let documents = self.documents()?;
+        let settings = documents.settings.clone();
+        let inventory = || documents.all();
+        Ok(Some(match change {
+            Checked::Plugin { plugin, on } => Step::cli(
+                &self.cli,
+                inventory(),
+                vec![argv(&["plugin", switch(*on), "-s", "user", &plugin.id])],
+            ),
+            Checked::Skill { skill, on } => {
+                let (name, on) = (skill.id.clone(), *on);
+                Step::json(settings, move |root| skill_override(root, &name, on))
+            }
+            Checked::Mcp { server, on } => {
+                let (id, on) = (server.id.clone(), *on);
+                let path = self
+                    .claude_json
+                    .clone()
+                    .ok_or_else(|| AdapterError::message("home directory not found"))?;
+                Step::json(path, move |root| mcp_enabled(root, &id, on))
+            }
+            Checked::Install(source @ InstallSource::NpxSkills { .. }) => {
+                Step::npx(source.clone(), "claude-code")
+            }
+            Checked::Install(InstallSource::Plugin(id)) => Step::cli(
+                &self.cli,
+                inventory(),
+                vec![argv(&["plugin", "install", "-s", "user", "-y", id])],
+            ),
+            Checked::Install(source) => Step::cli(
+                &self.cli,
+                inventory(),
+                vec![argv(&[
+                    "plugin",
+                    "marketplace",
+                    "add",
+                    "--scope",
+                    "user",
+                    &source.as_cli_source(),
+                ])],
+            ),
+            Checked::Uninstall(plugin) => Step::cli(
+                &self.cli,
+                inventory(),
+                vec![argv(&[
+                    "plugin",
+                    "uninstall",
+                    "-s",
+                    "user",
+                    "-y",
+                    &plugin.id,
+                ])],
+            ),
+            Checked::Update(plugin) => Step::cli(
+                &self.cli,
+                inventory(),
+                InstallSource::plugin_marketplace(&plugin.id)
+                    .map(|marketplace| argv(&["plugin", "marketplace", "update", marketplace]))
+                    .into_iter()
+                    .chain([argv(&["plugin", "update", "-s", "user", "-y", &plugin.id])])
+                    .collect(),
+            ),
+        }))
     }
+}
 
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_mcp_togglable(mcp_id)?;
-        let path = self
-            .claude_json
-            .as_ref()
-            .ok_or_else(|| AdapterError::message("home directory not found"))?;
-        self.io
-            .patch_json_mcp_enabled(AgentId::Claude, path, mcp_id, enabled)?;
-        self.list_tab()
-    }
+fn skill_override(root: &mut JsonValue, name: &str, on: bool) -> Result<(), AdapterError> {
+    let object = root
+        .as_object_mut()
+        .ok_or_else(|| AdapterError::message("settings.json root must be an object"))?;
+    let overrides = object
+        .entry("skillOverrides")
+        .or_insert_with(|| JsonValue::Object(serde_json::Map::new()));
+    let overrides = overrides
+        .as_object_mut()
+        .ok_or_else(|| AdapterError::message("skillOverrides must be an object"))?;
+    overrides.insert(
+        name.to_string(),
+        JsonValue::String(if on { "on" } else { "off" }.to_string()),
+    );
+    Ok(())
+}
 
-    fn set_plugin_enabled(
-        &self,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        let settings = self.root()?.join("settings.json");
-        self.io.backup_file(AgentId::Claude, &settings)?;
-        let action = if enabled { "enable" } else { "disable" };
-        self.cli.run(&["plugin", action, "-s", "user", plugin_id])?;
-        self.list_tab()
+fn mcp_enabled(root: &mut JsonValue, id: &str, on: bool) -> Result<(), AdapterError> {
+    let object = root
+        .as_object_mut()
+        .ok_or_else(|| AdapterError::message("claude.json root must be an object"))?;
+    let servers = object
+        .get_mut("mcpServers")
+        .and_then(JsonValue::as_object_mut)
+        .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
+    let entry = servers
+        .get_mut(id)
+        .and_then(JsonValue::as_object_mut)
+        .ok_or_else(|| AdapterError::message(format!("mcp server not found: {id}")))?;
+    entry.insert("disabled".to_string(), JsonValue::Bool(!on));
+    let list = object
+        .entry("disabledMcpServers")
+        .or_insert_with(|| JsonValue::Array(Vec::new()));
+    let list = list
+        .as_array_mut()
+        .ok_or_else(|| AdapterError::message("disabledMcpServers must be an array"))?;
+    list.retain(|item| item.as_str() != Some(id));
+    if !on {
+        list.push(JsonValue::String(id.to_string()));
     }
-
-    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = self.capabilities().admit(source)?;
-        if parsed.is_npx_skills() {
-            run_npx_skills(&parsed, "claude-code")?;
-            return self.list_tab();
-        }
-        self.io
-            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
-        self.cli
-            .run_args_timed(&parsed.claude_install_argv(), INSTALL_TIMEOUT)?;
-        self.list_tab()
-    }
-
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io
-            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
-        self.cli
-            .run_args(&InstallSource::claude_uninstall_argv(plugin_id))?;
-        self.list_tab()
-    }
-
-    fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _guard = self
-            .write
-            .lock()
-            .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        self.list_tab()?.ensure_plugin(plugin_id)?;
-        self.io
-            .backup_file(AgentId::Claude, &self.root()?.join("settings.json"))?;
-        if let Some(marketplace) = InstallSource::plugin_marketplace(plugin_id) {
-            self.cli.run_args_timed(
-                &InstallSource::claude_marketplace_update_argv(marketplace),
-                INSTALL_TIMEOUT,
-            )?;
-        }
-        self.cli.run_args_timed(
-            &InstallSource::claude_update_argv(plugin_id),
-            INSTALL_TIMEOUT,
-        )?;
-        self.list_tab()
-    }
+    Ok(())
 }
 
 fn plugin_default_enabled(install_path: &Path) -> bool {

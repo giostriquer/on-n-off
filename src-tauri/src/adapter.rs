@@ -3,6 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::capabilities::Capabilities;
+use crate::change::{Checked, Step};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, ProjectDto};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -113,42 +114,9 @@ pub trait AgentAdapter: Send + Sync {
         Ok(tab)
     }
 
-    fn set_plugin_enabled(
-        &self,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _ = (plugin_id, enabled);
-        Err(self.capabilities().plugin_switch.refusal())
-    }
-
-    fn set_skill_enabled(
-        &self,
-        skill_id: &str,
-        enabled: bool,
-    ) -> Result<AgentTabDto, AdapterError> {
-        let _ = (skill_id, enabled);
-        Err(self.capabilities().skill_switch.refusal())
-    }
-
-    fn set_mcp_enabled(&self, mcp_id: &str, enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        let _ = (mcp_id, enabled);
-        Err(self.capabilities().mcp_switch.refusal())
-    }
-
-    fn install_plugin(&self, source: &str) -> Result<AgentTabDto, AdapterError> {
-        let _ = source;
-        Err(self.capabilities().install.refusal())
-    }
-
-    fn uninstall_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _ = plugin_id;
-        Err(self.capabilities().uninstall.refusal())
-    }
-
-    fn update_plugin(&self, plugin_id: &str) -> Result<AgentTabDto, AdapterError> {
-        let _ = plugin_id;
-        Err(self.capabilities().update.refusal())
+    fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {
+        let _ = change;
+        Ok(None)
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {

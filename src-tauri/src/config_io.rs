@@ -1,16 +1,57 @@
 use std::fs::{self, File};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value as JsonValue;
-use toml_edit::{value, ArrayOfTables, DocumentMut, Item, Table};
+use toml_edit::DocumentMut;
 
 use crate::backup::BackupStore;
 use crate::dto::{AdapterError, AgentId};
-use crate::paths::normalize_skill_path;
 
 pub struct ConfigIo {
     backups: BackupStore,
+}
+
+pub struct Backups(Vec<(PathBuf, Option<PathBuf>)>);
+
+impl Backups {
+    fn of(&self, path: &Path) -> Result<Option<&Path>, AdapterError> {
+        self.0
+            .iter()
+            .find(|(file, _)| file == path)
+            .map(|(_, backup)| backup.as_deref())
+            .ok_or_else(|| {
+                AdapterError::write(
+                    "Not backed up before the write.",
+                    Some(path.display().to_string()),
+                )
+            })
+    }
+}
+
+type JsonEdit<'a> = Box<dyn FnOnce(&mut JsonValue) -> Result<(), AdapterError> + 'a>;
+type TomlEdit<'a> = Box<dyn FnOnce(&mut DocumentMut) -> Result<(), AdapterError> + 'a>;
+
+pub enum Edit<'a> {
+    Json(JsonEdit<'a>),
+    Toml(TomlEdit<'a>),
+}
+
+impl<'a> Edit<'a> {
+    pub fn json(edit: impl FnOnce(&mut JsonValue) -> Result<(), AdapterError> + 'a) -> Self {
+        Self::Json(Box::new(edit))
+    }
+
+    pub fn toml(edit: impl FnOnce(&mut DocumentMut) -> Result<(), AdapterError> + 'a) -> Self {
+        Self::Toml(Box::new(edit))
+    }
+}
+
+#[cfg(test)]
+pub fn patched(agent: AgentId, path: &Path, edit: Edit<'_>) -> Result<(), AdapterError> {
+    let io = ConfigIo::at(path.parent().unwrap().join("backups"));
+    let backups = io.back_up(agent, &[path.to_path_buf()])?;
+    io.patch(path, &backups, edit)
 }
 
 impl ConfigIo {
@@ -61,172 +102,31 @@ impl ConfigIo {
         Self::new().unwrap_or_else(|_| Self::at(std::env::temp_dir().join("on-n-off-backups")))
     }
 
-    pub fn patch_json_skill_override(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        skill_name: &str,
-        enabled: bool,
-    ) -> Result<(), AdapterError> {
-        self.patch_json(agent, path, |root| {
-            let object = root
-                .as_object_mut()
-                .ok_or_else(|| AdapterError::message("settings.json root must be an object"))?;
-            let overrides = object
-                .entry("skillOverrides")
-                .or_insert_with(|| JsonValue::Object(serde_json::Map::new()));
-            let overrides = overrides
-                .as_object_mut()
-                .ok_or_else(|| AdapterError::message("skillOverrides must be an object"))?;
-            overrides.insert(
-                skill_name.to_string(),
-                JsonValue::String(if enabled { "on" } else { "off" }.to_string()),
-            );
-            Ok(())
-        })
+    pub fn back_up(&self, agent: AgentId, files: &[PathBuf]) -> Result<Backups, AdapterError> {
+        files
+            .iter()
+            .map(|file| Ok((file.clone(), self.backups.backup(agent, file)?)))
+            .collect::<Result<Vec<_>, AdapterError>>()
+            .map(Backups)
     }
 
-    pub fn backup_file(
+    pub fn patch(
         &self,
-        agent: AgentId,
         path: &Path,
-    ) -> Result<Option<std::path::PathBuf>, AdapterError> {
-        self.backups.backup(agent, path)
-    }
-
-    pub fn patch_json_mcp_enabled(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        mcp_id: &str,
-        enabled: bool,
+        backups: &Backups,
+        edit: Edit<'_>,
     ) -> Result<(), AdapterError> {
-        self.patch_json(agent, path, |root| {
-            let object = root
-                .as_object_mut()
-                .ok_or_else(|| AdapterError::message("claude.json root must be an object"))?;
-            let servers = object
-                .get_mut("mcpServers")
-                .and_then(JsonValue::as_object_mut)
-                .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
-            let entry = servers
-                .get_mut(mcp_id)
-                .and_then(JsonValue::as_object_mut)
-                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
-            entry.insert("disabled".to_string(), JsonValue::Bool(!enabled));
-            let list = object
-                .entry("disabledMcpServers")
-                .or_insert_with(|| JsonValue::Array(Vec::new()));
-            let list = list
-                .as_array_mut()
-                .ok_or_else(|| AdapterError::message("disabledMcpServers must be an array"))?;
-            list.retain(|item| item.as_str() != Some(mcp_id));
-            if !enabled {
-                list.push(JsonValue::String(mcp_id.to_string()));
-            }
-            Ok(())
-        })
-    }
-
-    pub fn patch_antigravity_mcp_enabled(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        mcp_id: &str,
-        enabled: bool,
-    ) -> Result<(), AdapterError> {
-        self.patch_json(agent, path, |root| {
-            let object = root
-                .as_object_mut()
-                .ok_or_else(|| AdapterError::message("mcp_config.json root must be an object"))?;
-            let servers = object
-                .get_mut("mcpServers")
-                .and_then(JsonValue::as_object_mut)
-                .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
-            let entry = servers
-                .get_mut(mcp_id)
-                .and_then(JsonValue::as_object_mut)
-                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
-            entry.insert("disabled".to_string(), JsonValue::Bool(!enabled));
-            Ok(())
-        })
-    }
-
-    pub fn patch_toml_plugin_enabled(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        plugin_id: &str,
-        enabled: bool,
-    ) -> Result<(), AdapterError> {
-        self.patch_toml(agent, path, |doc| {
-            let plugins = doc
-                .get_mut("plugins")
-                .and_then(Item::as_table_mut)
-                .ok_or_else(|| AdapterError::message("plugins table missing"))?;
-            let entry = plugins
-                .get_mut(plugin_id)
-                .and_then(Item::as_table_mut)
-                .ok_or_else(|| {
-                    AdapterError::message(format!("plugin not in config: {plugin_id}"))
-                })?;
-            entry["enabled"] = value(enabled);
-            Ok(())
-        })
-    }
-
-    pub fn patch_toml_mcp_enabled(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        mcp_id: &str,
-        enabled: bool,
-    ) -> Result<(), AdapterError> {
-        self.patch_toml(agent, path, |doc| {
-            let servers = doc
-                .get_mut("mcp_servers")
-                .and_then(Item::as_table_mut)
-                .ok_or_else(|| AdapterError::message("mcp_servers table missing"))?;
-            let entry = servers
-                .get_mut(mcp_id)
-                .and_then(Item::as_table_mut)
-                .ok_or_else(|| AdapterError::message(format!("mcp server not found: {mcp_id}")))?;
-            entry["enabled"] = value(enabled);
-            Ok(())
-        })
-    }
-
-    pub fn patch_toml_skill_enabled(
-        &self,
-        agent: AgentId,
-        path: &Path,
-        skill_path: &str,
-        enabled: bool,
-    ) -> Result<(), AdapterError> {
-        self.patch_toml(agent, path, |doc| {
-            let tables = ensure_skills_config(doc)?;
-            let key = normalize_skill_path(skill_path);
-            for table in tables.iter_mut() {
-                let Some(existing) = table.get("path").and_then(Item::as_str) else {
-                    continue;
-                };
-                if normalize_skill_path(existing) == key {
-                    table["enabled"] = value(enabled);
-                    return Ok(());
-                }
-            }
-            let mut table = Table::new();
-            table["path"] = value(skill_path);
-            table["enabled"] = value(enabled);
-            tables.push(table);
-            Ok(())
-        })
+        let backup = backups.of(path)?;
+        match edit {
+            Edit::Json(edit) => self.patch_json(path, backup, edit),
+            Edit::Toml(edit) => self.patch_toml(path, backup, edit),
+        }
     }
 
     fn patch_json(
         &self,
-        agent: AgentId,
         path: &Path,
+        backup: Option<&Path>,
         patch: impl FnOnce(&mut JsonValue) -> Result<(), AdapterError>,
     ) -> Result<(), AdapterError> {
         let original = read_or_empty(path)?;
@@ -244,15 +144,15 @@ impl ConfigIo {
                 AdapterError::write(error.to_string(), Some(path.display().to_string()))
             })?
         );
-        self.commit(agent, path, &original, &rendered, |text| {
+        self.commit(path, backup, &original, &rendered, |text| {
             serde_json::from_str::<JsonValue>(text).map(|_| ())
         })
     }
 
     fn patch_toml(
         &self,
-        agent: AgentId,
         path: &Path,
+        backup: Option<&Path>,
         patch: impl FnOnce(&mut DocumentMut) -> Result<(), AdapterError>,
     ) -> Result<(), AdapterError> {
         let original = read_or_empty(path)?;
@@ -265,30 +165,25 @@ impl ConfigIo {
         };
         patch(&mut doc)?;
         let rendered = doc.to_string();
-        self.commit(agent, path, &original, &rendered, |text| {
+        self.commit(path, backup, &original, &rendered, |text| {
             text.parse::<DocumentMut>().map(|_| ())
         })
     }
 
     fn commit<E>(
         &self,
-        agent: AgentId,
         path: &Path,
+        backup: Option<&Path>,
         original: &str,
         rendered: &str,
         parse: impl Fn(&str) -> Result<(), E>,
     ) -> Result<(), AdapterError> {
-        let backup = if path.exists() {
-            self.backups.backup(agent, path)?
-        } else {
-            None
-        };
         if let Err(error) = atomic_replace(path, rendered) {
-            rollback(&self.backups, backup.as_deref(), path, original);
+            rollback(&self.backups, backup, path, original);
             return Err(error);
         }
         if parse(&fs::read_to_string(path).unwrap_or_default()).is_err() {
-            rollback(&self.backups, backup.as_deref(), path, original);
+            rollback(&self.backups, backup, path, original);
             return Err(AdapterError::write(
                 "Write failed. Restored the previous file.",
                 Some(path.display().to_string()),
@@ -296,29 +191,6 @@ impl ConfigIo {
         }
         Ok(())
     }
-}
-
-fn ensure_skills_config(doc: &mut DocumentMut) -> Result<&mut ArrayOfTables, AdapterError> {
-    if doc.get("skills").and_then(Item::as_table).is_none() {
-        let mut skills = Table::new();
-        skills.set_implicit(true);
-        skills["config"] = Item::ArrayOfTables(ArrayOfTables::new());
-        doc.insert("skills", Item::Table(skills));
-    } else if !doc
-        .get("skills")
-        .and_then(|skills| skills.get("config"))
-        .is_some_and(Item::is_array_of_tables)
-    {
-        let skills = doc
-            .get_mut("skills")
-            .and_then(Item::as_table_mut)
-            .ok_or_else(|| AdapterError::message("skills must be a table"))?;
-        skills["config"] = Item::ArrayOfTables(ArrayOfTables::new());
-    }
-    doc.get_mut("skills")
-        .and_then(|skills| skills.get_mut("config"))
-        .and_then(Item::as_array_of_tables_mut)
-        .ok_or_else(|| AdapterError::message("skills.config must be an array of tables"))
 }
 
 fn read_or_empty(path: &Path) -> Result<String, AdapterError> {
