@@ -18,6 +18,7 @@ import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { flagOn, mergeFlags } from "$lib/flags";
 import { visibleAgentIds } from "$lib/appSettings";
+import { canInstall as agentInstalls } from "$lib/capabilities";
 import { PROVIDER_IDS, isAgentId, providerPaths, providerRecord } from "$lib/providers";
 import { useAppSettings } from "$lib/useAppSettings";
 import type { FilteredTab } from "$lib/filterTab";
@@ -808,7 +809,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     [currentTab.expanded, filtered],
   );
   const banner = bannerMessage(currentAgent, currentTab.error);
-  const canInstall = currentAgent.cliOk && currentAgent.installGit && !currentTab.inFlight;
+  const canInstall = agentInstalls(currentAgent) && !currentTab.inFlight;
   const { counts, drift, allOn } = catalogInventory;
   const live = catalogFilterView.live;
   const cliLine = currentAgent.cliOk

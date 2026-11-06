@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   catalogCounts,
-  canUninstallPlugin,
   configMcpCount,
   comparePluginThenName,
   driftRows,
@@ -235,14 +234,6 @@ describe("catalog", () => {
         mcpServers: tab.mcpServers.map((server) => ({ ...server, enabled: true })),
       }),
     ).toBe(true);
-  });
-
-  it("blocks uninstall for config and project plugins", () => {
-    expect(canUninstallPlugin({ ...tab.plugins[0], source: "workshop" })).toBe(true);
-    expect(canUninstallPlugin({ ...tab.plugins[0], source: "config" })).toBe(false);
-    expect(canUninstallPlugin({ ...tab.plugins[0], id: "project:ws@workspace", source: "workspace" })).toBe(
-      false,
-    );
   });
 
   it("counts only global items for the scope picker", () => {

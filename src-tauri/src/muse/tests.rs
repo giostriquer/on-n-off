@@ -1,5 +1,6 @@
 use super::*;
 use crate::cli_stub::CliStub;
+use crate::dto::AgentInfo;
 
 fn write_skill(dir: &Path, name: &str, description: &str) {
     fs::create_dir_all(dir.join(name)).unwrap();
@@ -89,7 +90,7 @@ fn empty_home_lists_nothing() {
     assert!(tab.user_skills.is_empty());
     assert!(tab.mcp_servers.is_empty());
     assert!(tab.hooks.is_empty());
-    let info = fixture.adapter().info();
+    let info = AgentInfo::of(&fixture.adapter());
     assert_eq!(info.id, AgentId::Muse);
     assert_eq!(info.display_name, "Muse");
 }
@@ -373,13 +374,6 @@ fn install_accepts_folder_and_marketplace_id_but_not_git() {
         .install_plugin("https://github.com/acme/webapp.git")
         .expect_err("git refused");
     assert!(error.message.contains("marketplace add"), "{error:?}");
-}
-
-#[test]
-fn info_disables_git_install_only() {
-    let fixture = Fixture::new("info");
-    let info = fixture.adapter().info();
-    assert!(!info.install_git);
 }
 
 #[test]

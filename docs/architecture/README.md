@@ -108,7 +108,7 @@ comments.
 
 | Subsystem | What it does | Notable |
 | --- | --- | --- |
-| `{claude,codex,antigravity,cursor,muse}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference in behaviour belongs here; each provider's static facts are its row in `provider_catalogue.rs`. Layout per provider is in `PROVIDERS.md`. |
+| `{claude,codex,antigravity,cursor,muse}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference in behaviour belongs here; each provider's static facts are its row in `provider_catalogue.rs`, and what on-n-off can change for it is the adapter's own capabilities (`capabilities.rs`, below). Layout per provider is in `PROVIDERS.md`. |
 | `scanner.rs`, `plugin_meta.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. |
 | `usage/` | Token and cost aggregation from transcripts, and the usage kept after they are deleted | Read-only on agent homes. See below. |
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
@@ -812,8 +812,8 @@ file at build time and is the one place the UI learns a provider fact: `PROVIDER
 `hasSavedAccounts`. Every screen's provider list, the Limits columns, the Add account menu, the
 remembered tab, the mock's agent list and the Usage and Overview sentences that name the providers
 whose transcripts were looked for come from these. The Hooks screen's "Claude and Codex only" is
-still written out, because which providers read hooks is `readsHooks` on `AgentInfo`, a run-time
-fact.
+still written out, because which providers read hooks is `capabilities.readsHooks` on `AgentInfo`, an adapter's
+capability (below).
 
 The providers are keyed by their key in the fixture, so `tsc` can compare its keys with the
 `AgentId` union (`ui/src/lib/providersContract.test.ts`); orders are arrays, because JSON object
@@ -824,15 +824,72 @@ up in the same maps. A provider that gains or loses Limits in Rust changes those
 record keyed by one (the Limits shared-read table, the dev mock's limits state) stops compiling
 until it agrees. Facts Rust does not own are
 `Record<AgentId, …>` tables in the same module, so a provider without a row does not compile: its
-bar, icon and chart colours; how its plugins and MCP servers are switched (`providerToggles`, whose
-MCP row is either a toggle or read-only with the notice the MCP screen shows, and decides Agent
-Config's YES or NO); and the display paths Agent Config, the scope bar and the install sheet print
-(`providerPaths`). The icons themselves stay in `ProviderIcon.tsx`, an
+bar, icon and chart colours, and the display paths Agent Config and the scope bar print
+(`providerPaths`). What on-n-off can change for a provider is not one of them: it is the adapter's
+capabilities, carried on `AgentInfo` (Capabilities, below). The icons themselves stay in `ProviderIcon.tsx`, an
 exhaustive table too, because their SVG paths belong in the screens' chunks and the module is in
 the initial bundle. The display paths are the UI's description of where each provider keeps
 things; they are not resolved, so a Muse home moved by `XDG_*`, or Muse's Windows folders, still
-print as the macOS defaults. The notch helper (`ProviderId` in `NotchCore/Models.swift`) keeps its
-own list; `PROVIDERS.md` names it under "When adding a provider".
+print as the macOS defaults; the install sheet's preview prints the adapter's own item roots
+(`itemRoots`, below), which are resolved. The notch helper (`ProviderId` in
+`NotchCore/Models.swift`) keeps its own list; `PROVIDERS.md` names it under "When adding a provider".
+
+### Capabilities
+
+What on-n-off can change for a provider is declared once, by the adapter that changes it:
+`AgentAdapter::capabilities` in each adapter file, beside the methods that perform each change, as a
+`Capabilities` (`capabilities.rs`). Each change (switching a plugin, a skill or an MCP server,
+install, uninstall, update) is performed by the provider's CLI (`cli`), by on-n-off patching a file
+(`file`) or refused (`refused`, with the reason the method answers and a screen shows); each comes
+with `how`, the short text Agent Config prints. Beside them: the install source kinds the install
+refuses, each with its reason (`refusedSources`: a git marketplace, a folder, `name@marketplace` or
+`npx skills add`, parsed and classified once by `install_source.rs`), the plugin sources an
+uninstall reaches (`uninstallFrom`, all when absent), and whether it reads hooks. Every adapter
+writes every field, so a new one does not compile until each adapter states it. Where an adapter
+puts skills and subagents is not declared beside them: it is its `item_roots`, the code that
+places them.
+
+The trait's default change methods refuse with the declared refusal, so a provider that does not
+make a change only declares it refused (Cursor and Muse no longer override `set_mcp_enabled`), and
+every installing adapter takes its source through `Capabilities::admit`, which refuses a declared
+kind before anything runs. `AgentInfo::of` (`capabilities.rs`) builds the whole `AgentInfo` an
+adapter is listed with, through `AgentInfo::describe` from the declaration, whether the CLI was
+found (`cli_locate::provider_cli_found`) and the adapter's item roots; it is no trait method. It
+carries the declaration whole as `capabilities`, the item roots as `itemRoots`
+(`ItemPlaces::of`, beside `ItemRoots` in `adapter.rs`: each shown from `~` when under the home, the
+project ones relative to the project), and derives the older flags from the declaration for older
+readers: `installGit` and `installFolder` (install ready and the kind accepted), `pluginToggle`
+(the plugin switch ready) and `readsHooks`. A `cli` change is ready only when the CLI was found, a
+`file` change always, a `refused` one never.
+
+`capabilities/tests.rs` holds the agreement over `AgentId::ALL` in scratch homes
+(`adapter::scratch_adapter`): every declared change reaches a method that does not answer "not
+implemented" or a declared refusal, and every refused change and refused source kind answers
+exactly its declared reason and leaves the home as it was: each provider's home is seeded with the
+files its changes back up or patch, and every path and its bytes are compared, so a refusal that
+backs up first fails. An accepted `npx skills add` source is only checked
+through `admit`: running it would start the real `npx`, which writes to the user's own home. The
+same file writes the fixture `src-tauri/src/capabilities/fixtures/agents.json` (each provider's
+declaration, the flags it derives with its CLI found and missing, and its item roots against a `~`
+home for every provider but Muse, whose roots differ by OS), from which the dev mock and UI tests
+build `AgentInfo` (`ui/src/dev/agentFixtures.ts`, which supplies Muse's macOS item roots itself), and
+`ui/src/lib/capabilities.test.ts` holds the UI's gates to the flags Rust derives, for every provider
+with its CLI found and missing.
+
+In the UI every gate reads `capabilities` and `itemRoots` through `ui/src/lib/capabilities.ts`,
+never the older flags or a provider match: the INSTALL button (`canInstall`: some source kind it
+`installsFrom`, install ready and the kind accepted), the install sheet's folder picker
+(`installsFrom(agent, "folder")`) and its refusals, which show a refused source kind's reason in
+place of submitting it (`sourceRefusal`; adding a GitHub repository as a marketplace is the git
+marketplace kind, while copying its skills is not a source kind and stays offered), the plugin
+switch on Plugins and Overview (`canSwitchPlugins`), Update on Plugins and Overview (`canUpdate`),
+Uninstall (`canUninstallPlugin`), Agent Config's install, plugin and MCP rows, the MCP screen's
+notice (`mcpNotice`), the Hooks screen and its rail count (`capabilities.readsHooks`), whether
+subagents can be picked for a scope (`takesSubagents`) and whether Skills lists installed ones
+(`holdsSubagents`), both from the item roots, and the install sheet's preview (`previewPath`, in the
+order the providers were chosen, `chosenAgents`). `overlayAgents` (`ui/src/lib/session.ts`) keeps
+every field Rust sends; until `list_agents` answers, or when it fails, every provider offers nothing
+(`NOTHING_OFFERED`).
 
 ### JSON-line sessions
 
@@ -899,6 +956,7 @@ the code today; a change that moves one updates its row.
 
 | Term | Where it lives |
 | --- | --- |
+| Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
 | Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows painter (`side_notch/win_paint.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |

@@ -11,6 +11,7 @@ import type {
   MarketplaceEntry,
   MarketplaceInspect,
 } from "$lib/types";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const api = vi.hoisted(() => ({
   inspectMarketplace: vi.fn(),
@@ -20,16 +21,7 @@ vi.mock("$lib/api", () => ({
   inspectMarketplace: api.inspectMarketplace,
 }));
 
-const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => ({
-  id,
-  displayName: id[0].toUpperCase() + id.slice(1),
-  cliOk: true,
-  cliError: null,
-  installGit: id !== "cursor",
-  installFolder: id !== "cursor",
-  pluginToggle: id !== "cursor",
-  readsHooks: id === "claude" || id === "codex",
-}));
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => agentInfo(id));
 
 function entry(name: string, path: string, extra: Partial<MarketplaceEntry> = {}): MarketplaceEntry {
   return { name, description: "", path, dependsOn: [], externalRefs: [], usesPluginRoot: false, ...extra };
@@ -96,12 +88,10 @@ function renderSheet(overrides: Partial<Parameters<typeof InstallSheet>[0]> = {}
   const utils = render(
     <Providers>
       <InstallSheet
-        agentName="Claude"
+        agent={AGENTS[0]}
         busy={false}
         error={null}
-        installFolder
         visibleAgents={AGENTS}
-        currentAgentId="claude"
         projects={[{ id: "p", label: "app", path: "E:/dev/app" }]}
         currentScopePath={null}
         onCancel={() => {}}
@@ -118,6 +108,73 @@ function renderSheet(overrides: Partial<Parameters<typeof InstallSheet>[0]> = {}
 function typeSource(value: string) {
   fireEvent.change(screen.getByLabelText("Install source"), { target: { value } });
 }
+
+describe("InstallSheet refusing what the provider refuses", () => {
+  beforeEach(() => {
+    api.inspectMarketplace.mockReset();
+    api.inspectMarketplace.mockResolvedValue(INSPECT);
+  });
+
+  const muse = agentInfo("muse");
+  const museReason = muse.capabilities.refusedSources.gitMarketplace!;
+
+  it("opens for Muse and refuses only the sources Muse refuses, in Muse's words", async () => {
+    const { onInstall } = renderSheet({ agent: muse, visibleAgents: [...AGENTS, muse] });
+
+    typeSource("https://gitlab.com/acme/webapp.git");
+    expect(screen.getByRole("alert")).toHaveTextContent(museReason);
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+
+    typeSource("npx skills add acme/webapp");
+    expect(screen.getByRole("alert")).toHaveTextContent(muse.capabilities.refusedSources.marketplaceSkill!);
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+
+    typeSource("acme-tools@acme");
+    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(onInstall).toHaveBeenCalledWith("acme-tools@acme");
+    expect(screen.getByRole("button", { name: "Choose folder…" })).toBeEnabled();
+  });
+
+  it.each([
+    ["Claude with its CLI", agentInfo("claude"), true],
+    ["Claude without its CLI", agentInfo("claude", "missing"), false],
+    ["Cursor", agentInfo("cursor"), false],
+  ] as const)("offers %s's folder picker only when it installs from a folder", (_name, agent, offered) => {
+    renderSheet({ agent });
+    expect((screen.getByRole("button", { name: "Choose folder…" }) as HTMLButtonElement).disabled).toBe(!offered);
+    expect(screen.queryByText("This agent’s CLI can’t install from a folder.") === null).toBe(offered);
+  });
+
+  it("adds a GitHub repo as a marketplace for a provider that accepts git marketplaces", async () => {
+    const { onInstall } = renderSheet();
+    typeSource("mattpocock/skills");
+    expect(await screen.findByRole("radio", { name: /Install plugin/ })).toBeChecked();
+    expect(screen.queryByRole("alert")).toBeNull();
+    const install = screen.getByRole("button", { name: "Install" });
+    expect(install).toBeEnabled();
+    fireEvent.click(install);
+    expect(onInstall).toHaveBeenCalledWith("mattpocock/skills");
+  });
+
+  it("refuses adding a GitHub repo as a Muse marketplace but still copies its skills", async () => {
+    const { onInstall, onInstallItems } = renderSheet({ agent: muse, visibleAgents: [...AGENTS, muse] });
+    typeSource("mattpocock/skills");
+    expect(await screen.findByRole("radio", { name: /Install plugin/ })).toBeChecked();
+    expect(screen.getByRole("alert")).toHaveTextContent(museReason);
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Install" }));
+    expect(onInstall).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Install selected/ }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    const tree = screen.getByRole("group", { name: "mattpocock-skills" });
+    fireEvent.click(within(tree).getByRole("checkbox", { name: /tdd/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Install 1 item/ }));
+    await waitFor(() => expect(onInstallItems).toHaveBeenCalledTimes(1));
+    expect(onInstallItems.mock.calls[0][0].targets).toEqual([{ provider: "muse", scope: { kind: "global" } }]);
+  });
+});
 
 describe("InstallSheet marketplace browsing", () => {
   beforeEach(() => {

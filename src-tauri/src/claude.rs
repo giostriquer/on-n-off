@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -6,13 +6,11 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
+use crate::capabilities::{Capabilities, Change};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
-};
-use crate::install_source::{parse_install_source, InstallSource};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
+use crate::install_source::InstallSource;
 use crate::paths::{claude_root, plugin_id_parts};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
@@ -287,13 +285,22 @@ impl AgentAdapter for ClaudeAdapter {
     fn supports_accounts(&self) -> bool {
         true
     }
-    fn reads_hooks(&self) -> bool {
-        true
+    fn id(&self) -> AgentId {
+        AgentId::Claude
     }
-    fn info(&self) -> AgentInfo {
-        let mut info = agent_info(AgentId::Claude);
-        info.reads_hooks = self.reads_hooks();
-        info
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::cli("claude plugin enable/disable"),
+            skill_switch: Change::file("file patch · ~/.claude/settings.json skillOverrides"),
+            mcp_switch: Change::file("file patch · ~/.claude.json disabled"),
+            install: Change::cli("claude plugin install · marketplace add"),
+            refused_sources: BTreeMap::new(),
+            uninstall: Change::cli("claude plugin uninstall"),
+            uninstall_from: None,
+            update: Change::cli("claude plugin update"),
+            reads_hooks: true,
+        }
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
@@ -387,7 +394,7 @@ impl AgentAdapter for ClaudeAdapter {
             .write
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = parse_install_source(source)?;
+        let parsed = self.capabilities().admit(source)?;
         if parsed.is_npx_skills() {
             run_npx_skills(&parsed, "claude-code")?;
             return self.list_tab();

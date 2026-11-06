@@ -31,7 +31,7 @@ vi.mock("@/features/session/SessionProvider", () => ({
       currentAgent: {
         id: session.provider,
         displayName: session.displayName,
-        readsHooks: session.readsHooks,
+        capabilities: { readsHooks: session.readsHooks },
       },
       currentTab: { dto, filter: session.filter, inFlight: false, loading: false, error: null },
       filtered: filterTab(dto, session.filter),

@@ -8,6 +8,29 @@ export type AdapterError = {
   path: string | null;
 };
 
+export type Change =
+  | { by: "cli"; how: string }
+  | { by: "file"; how: string }
+  | { by: "refused"; how: string; reason: string };
+
+export type InstallSourceKind = "gitMarketplace" | "folder" | "marketplacePlugin" | "marketplaceSkill";
+
+export type Capabilities = {
+  pluginSwitch: Change;
+  skillSwitch: Change;
+  mcpSwitch: Change;
+  install: Change;
+  refusedSources: Partial<Record<InstallSourceKind, string>>;
+  uninstall: Change;
+  uninstallFrom: string[] | null;
+  update: Change;
+  readsHooks: boolean;
+};
+
+export type ItemPlace = { skills: string; agents: string | null };
+
+export type ItemPlaces = { global: ItemPlace | null; project: ItemPlace | null };
+
 export type AgentInfo = {
   id: AgentId;
   displayName: string;
@@ -17,6 +40,8 @@ export type AgentInfo = {
   installFolder: boolean;
   pluginToggle: boolean;
   readsHooks: boolean;
+  capabilities: Capabilities;
+  itemRoots: ItemPlaces;
 };
 
 export type SkillDto = {

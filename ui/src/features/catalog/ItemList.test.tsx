@@ -2,7 +2,8 @@ import userEvent from "@testing-library/user-event";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ItemList } from "./ItemList";
-import type { AgentTabDto } from "$lib/types";
+import type { AgentInfo, AgentTabDto, PluginDto } from "$lib/types";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const rockerRender = vi.hoisted(() => vi.fn());
 
@@ -44,8 +45,7 @@ describe("ItemList", () => {
       tab: largeSkills,
       items: [...byName.slice(100), ...byName.slice(0, 100)],
       expandedIds: new Set<string>(),
-      cliOk: true,
-      pluginToggle: true,
+      agent: agentInfo("claude"),
       onToggleExpand: vi.fn(),
       onTogglePlugin: vi.fn(),
       onToggleSkill,
@@ -96,8 +96,7 @@ describe("ItemList", () => {
         tab={{ plugins: items, userSkills: [], mcpServers: [] }}
         items={items}
         expandedIds={new Set()}
-        cliOk
-        pluginToggle
+        agent={agentInfo("claude")}
         onToggleExpand={vi.fn()}
         onTogglePlugin={vi.fn()}
         onToggleSkill={vi.fn()}
@@ -130,8 +129,7 @@ describe("ItemList", () => {
         tab={{ plugins: [current, stale], userSkills: [], mcpServers: [] }}
         items={[current, stale]}
         expandedIds={new Set()}
-        cliOk
-        pluginToggle
+        agent={agentInfo("claude")}
         onToggleExpand={vi.fn()}
         onTogglePlugin={vi.fn()}
         onToggleSkill={vi.fn()}
@@ -185,8 +183,7 @@ describe("ItemList managed items", () => {
         tab={tab}
         items={tab.userSkills}
         expandedIds={new Set()}
-        cliOk
-        pluginToggle
+        agent={agentInfo("claude")}
         onToggleExpand={vi.fn()}
         onTogglePlugin={vi.fn()}
         onToggleSkill={vi.fn()}
@@ -212,4 +209,47 @@ describe("ItemList managed items", () => {
     await user.click(screen.getByRole("button", { name: "Remove tdd" }));
     expect(onRemoveItem).toHaveBeenCalledWith(managed);
   });
+});
+
+describe("ItemList gates from the agent's declaration", () => {
+  const plugin: PluginDto = {
+    id: "acme@webapp",
+    name: "acme",
+    source: "webapp",
+    version: "1.0.0",
+    upstream: "1.1.0",
+    outOfSync: true,
+    enabled: true,
+    togglable: true,
+    skills: [],
+  };
+
+  it.each([
+    ["Claude with its CLI", agentInfo("claude"), { uninstall: true, update: true, toggle: true }],
+    ["Claude without its CLI", agentInfo("claude", "missing"), { uninstall: false, update: false, toggle: false }],
+    ["Cursor", agentInfo("cursor"), { uninstall: false, update: false, toggle: false }],
+    ["Codex without its CLI", agentInfo("codex", "missing"), { uninstall: false, update: false, toggle: true }],
+  ] as [string, AgentInfo, { uninstall: boolean; update: boolean; toggle: boolean }][])(
+    "offers %s's plugin actions only where it can make them",
+    (_name, agent, offered) => {
+      render(
+        <ItemList
+          kind="plugin"
+          tab={{ plugins: [plugin], userSkills: [], mcpServers: [] }}
+          items={[plugin]}
+          expandedIds={new Set([plugin.id])}
+          agent={agent}
+          onToggleExpand={vi.fn()}
+          onTogglePlugin={vi.fn()}
+          onToggleSkill={vi.fn()}
+          onUninstall={vi.fn()}
+          onUpdate={vi.fn()}
+        />,
+      );
+      const state = (name: string) => !(screen.getByRole("button", { name }) as HTMLButtonElement).disabled;
+      expect(state("Uninstall acme")).toBe(offered.uninstall);
+      expect(state("Update acme")).toBe(offered.update);
+      expect(state("acme on")).toBe(offered.toggle);
+    },
+  );
 });

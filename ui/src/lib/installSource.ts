@@ -1,3 +1,5 @@
+import type { InstallSourceKind } from "./types";
+
 export type InstallSource =
   | { kind: "git-url"; value: string }
   | { kind: "github"; owner: string; repo: string; ref?: string }
@@ -41,6 +43,20 @@ export function parseInstallSource(input: string): InstallSource | { error: stri
     };
   }
   return { error: INVALID };
+}
+
+export function sourceKind(parsed: InstallSource): InstallSourceKind {
+  switch (parsed.kind) {
+    case "git-url":
+    case "github":
+      return "gitMarketplace";
+    case "folder":
+      return "folder";
+    case "plugin":
+      return "marketplacePlugin";
+    case "npx-skills":
+      return "marketplaceSkill";
+  }
 }
 
 export type GithubRepo = { owner: string; repo: string; ref?: string };

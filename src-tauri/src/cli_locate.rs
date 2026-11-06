@@ -5,7 +5,7 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::time::Duration;
 
-use crate::dto::{AgentId, AgentInfo};
+use crate::dto::AgentId;
 use crate::paths::user_home;
 use crate::process::{wait_with_deadline, CommandOutcome};
 
@@ -413,28 +413,8 @@ fn parse_login_shell_path(output: &str) -> Option<Vec<PathBuf>> {
     (!dirs.is_empty()).then_some(dirs)
 }
 
-pub fn agent_info(id: AgentId) -> AgentInfo {
-    let cli_ok = resolve_provider_cli(id, id.binary_name()).is_some();
-    AgentInfo {
-        id,
-        display_name: id.display_name().to_string(),
-        cli_ok,
-        cli_error: if cli_ok {
-            None
-        } else {
-            Some(format!("{} CLI not found.", id.display_name()))
-        },
-        install_git: cli_ok,
-        install_folder: cli_ok,
-        plugin_toggle: match id {
-            AgentId::Claude => cli_ok,
-            AgentId::Codex => true,
-            AgentId::Antigravity => cli_ok,
-            AgentId::Cursor => false,
-            AgentId::Muse => cli_ok,
-        },
-        reads_hooks: false,
-    }
+pub fn provider_cli_found(id: AgentId) -> bool {
+    resolve_provider_cli(id, id.binary_name()).is_some()
 }
 
 #[cfg(test)]

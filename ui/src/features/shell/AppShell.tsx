@@ -240,7 +240,7 @@ export function AppShell() {
         <LeftRail
           screen={screen}
           counts={counts}
-          readsHooks={currentAgent.readsHooks}
+          readsHooks={currentAgent.capabilities.readsHooks}
           theme={theme}
           masterOn={allOn}
           masterNote={masterNote}
@@ -269,12 +269,10 @@ export function AppShell() {
 
       {installOpen ? (
         <LazyInstallSheet
-          agentName={currentAgent.displayName}
+          agent={currentAgent}
           busy={currentTab.inFlight || installBusy}
           error={installError}
-          installFolder={currentAgent.installFolder}
           visibleAgents={visibleAgents}
-          currentAgentId={currentAgent.id}
           projects={currentProjects}
           currentScopePath={currentScopePath}
           onCancel={() => {

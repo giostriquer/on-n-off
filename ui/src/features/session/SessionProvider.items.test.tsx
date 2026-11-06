@@ -4,6 +4,7 @@ import { SessionProvider, useAgentSession } from "./SessionProvider";
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId, AgentInfo, AgentTabDto, AppSettings, InstallItemsRequest, InstallItemsResult } from "$lib/types";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const state = vi.hoisted(() => ({
   listCalls: [] as AgentId[],
@@ -12,16 +13,7 @@ const state = vi.hoisted(() => ({
 }));
 
 const EMPTY_TAB: AgentTabDto = { plugins: [], userSkills: [], mcpServers: [] };
-const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => ({
-  id,
-  displayName: id,
-  cliOk: true,
-  cliError: null,
-  installGit: true,
-  installFolder: true,
-  pluginToggle: true,
-  readsHooks: id === "claude" || id === "codex",
-}));
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => agentInfo(id));
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::dto::AgentInfo;
 
 fn write_skill(dir: &Path, name: &str, description: &str) {
     fs::create_dir_all(dir.join(name)).unwrap();
@@ -37,7 +38,7 @@ fn empty_home_lists_nothing() {
     assert!(tab.plugins.is_empty());
     assert!(tab.user_skills.is_empty());
     assert!(tab.mcp_servers.is_empty());
-    let info = CursorAdapter::at(root.clone()).info();
+    let info = AgentInfo::of(&CursorAdapter::at(root.clone()));
     assert_eq!(info.id, AgentId::Cursor);
     assert_eq!(info.display_name, "Cursor");
     assert!(!info.plugin_toggle);

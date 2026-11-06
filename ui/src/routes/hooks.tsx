@@ -4,7 +4,7 @@ import { copy } from "$lib/copy";
 
 export function HooksRoute() {
   const session = useAgentSession();
-  const reads = session.currentAgent.readsHooks;
+  const reads = session.currentAgent.capabilities.readsHooks;
   return (
     <HookList
       tab={session.currentTab.dto ?? session.emptyTabDto()}

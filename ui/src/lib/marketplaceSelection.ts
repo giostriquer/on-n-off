@@ -1,4 +1,3 @@
-import { providerPaths } from "./providers";
 import type {
   AgentId,
   ItemDependency,
@@ -238,16 +237,6 @@ export function selectedItems(inspect: MarketplaceInspect, keys: ReadonlySet<str
   return picks;
 }
 
-export function agentsAllowed(providers: readonly AgentId[]): boolean {
-  return providers.includes("claude");
-}
-
 export function targetsFor(providers: readonly AgentId[], scope: ItemScope): ItemTarget[] {
   return providers.map((provider) => ({ provider, scope }));
-}
-
-export function previewPath(provider: AgentId, scope: ItemScope): string {
-  const paths = providerPaths(provider);
-  if (scope.kind === "global") return paths.userSkills;
-  return `${scope.projectPath.replace(/[\\/]+$/, "")}/${paths.projectSkills}`;
 }

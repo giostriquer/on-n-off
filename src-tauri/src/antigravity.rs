@@ -1,14 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
+use crate::capabilities::{Capabilities, Change};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ItemScope, PluginDto, SkillDto};
-use crate::install_source::{parse_install_source, InstallSource};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, PluginDto, SkillDto};
+use crate::install_source::InstallSource;
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{
     antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
@@ -138,8 +138,22 @@ impl AntigravityAdapter {
 }
 
 impl AgentAdapter for AntigravityAdapter {
-    fn info(&self) -> AgentInfo {
-        agent_info(AgentId::Antigravity)
+    fn id(&self) -> AgentId {
+        AgentId::Antigravity
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::cli("agy plugin enable/disable"),
+            skill_switch: Change::not_implemented("skill toggle"),
+            mcp_switch: Change::file("file patch · mcpServers.*.disabled"),
+            install: Change::cli("agy plugin install"),
+            refused_sources: BTreeMap::new(),
+            uninstall: Change::cli("agy plugin uninstall"),
+            uninstall_from: Some(vec![SOURCE_CLI.to_string()]),
+            update: Change::not_implemented("update"),
+            reads_hooks: false,
+        }
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
@@ -245,7 +259,7 @@ impl AgentAdapter for AntigravityAdapter {
             .write
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = parse_install_source(source)?;
+        let parsed = self.capabilities().admit(source)?;
         if parsed.is_npx_skills() {
             run_npx_skills(&parsed, "antigravity")?;
             return self.list_tab();
@@ -264,11 +278,7 @@ impl AgentAdapter for AntigravityAdapter {
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
         let plugin = self.list_tab()?.ensure_plugin(plugin_id)?.clone();
-        if plugin.source != SOURCE_CLI {
-            return Err(AdapterError::message(format!(
-                "plugin cannot be uninstalled here: {plugin_id}"
-            )));
-        }
+        self.capabilities().uninstalls(&plugin)?;
         let _ = self
             .io
             .backup_file(AgentId::Antigravity, &self.cli_root()?.join("config.json"));

@@ -5,6 +5,7 @@ import { ItemList } from "@/features/catalog/ItemList";
 import { AgentCard } from "@/features/catalog/ManagedItemStrip";
 import { useItemActions, useItemStatus } from "@/features/catalog/useItemStatus";
 import { useAgentSession } from "@/features/session/SessionProvider";
+import { holdsSubagents } from "$lib/capabilities";
 import { copy } from "$lib/copy";
 import { displayError, parseInvokeError } from "$lib/error";
 import { statusForSkill, upstreamLabel } from "$lib/itemStatus";
@@ -51,8 +52,7 @@ export function SkillsRoute() {
         items={session.filtered?.skills ?? []}
         filterQuery={session.currentTab.filter}
         expandedIds={session.expandedIds}
-        cliOk={session.currentAgent.cliOk}
-        pluginToggle={session.currentAgent.pluginToggle}
+        agent={session.currentAgent}
         busy={session.currentTab.inFlight}
         onToggleExpand={session.toggleExpand}
         onTogglePlugin={session.togglePlugin}
@@ -74,7 +74,7 @@ export function SkillsRoute() {
           </button>
         }
       />
-      {provider === "claude" && agents.length > 0 ? (
+      {holdsSubagents(session.currentAgent) && agents.length > 0 ? (
         <section className="flex flex-col gap-2 px-5 pb-[26px]" aria-label={copy.agentsSection}>
           <h3 className="m-0 text-[13px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
             {copy.agentsSection}

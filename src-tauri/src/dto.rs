@@ -66,6 +66,10 @@ pub struct AgentInfo {
     pub plugin_toggle: bool,
     #[serde(default)]
     pub reads_hooks: bool,
+    #[serde(default)]
+    pub capabilities: crate::capabilities::Capabilities,
+    #[serde(default)]
+    pub item_roots: crate::adapter::ItemPlaces,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

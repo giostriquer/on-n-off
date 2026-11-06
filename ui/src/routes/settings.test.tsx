@@ -11,6 +11,7 @@ import { AGENT_KEY, SessionProvider, useAgentSession } from "@/features/session/
 import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
 import { SettingsRoute } from "./settings";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const LOADED: AppSettings = {
   ...DEFAULT_APP_SETTINGS,
@@ -21,16 +22,7 @@ const LOADED: AppSettings = {
 
 const EMPTY_TAB: AgentTabDto = { plugins: [], userSkills: [], mcpServers: [] };
 
-const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor", "muse"] as const).map((id) => ({
-  id,
-  displayName: id === "claude" ? "Claude" : id === "codex" ? "Codex" : id,
-  cliOk: true,
-  cliError: null,
-  installGit: true,
-  installFolder: true,
-  pluginToggle: true,
-  readsHooks: false,
-}));
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor", "muse"] as const).map((id) => agentInfo(id));
 
 const api = vi.hoisted(() => ({
   loadAppSettings: vi.fn<() => Promise<AppSettings>>(),

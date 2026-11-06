@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { McpRoute } from "./mcp";
+import { agentInfo } from "@/dev/agentFixtures";
 import { emptyTabDto } from "$lib/catalog";
 import type { AgentId } from "$lib/types";
 
@@ -8,7 +9,7 @@ const session = vi.hoisted(() => ({ provider: "claude" as AgentId }));
 
 vi.mock("@/features/session/SessionProvider", () => ({
   useAgentSession: () => ({
-    currentAgent: { id: session.provider },
+    currentAgent: agentInfo(session.provider),
     currentTab: { dto: emptyTabDto(), filter: "", inFlight: false, loading: false, error: null },
     filtered: null,
     emptyTabDto,

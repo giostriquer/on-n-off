@@ -13,6 +13,7 @@ import {
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const state = vi.hoisted(() => ({
   refreshOrder: [] as AgentId[],
@@ -23,58 +24,7 @@ const state = vi.hoisted(() => ({
 }));
 
 const EMPTY_TAB: AgentTabDto = { plugins: [], userSkills: [], mcpServers: [] };
-const AGENTS: AgentInfo[] = [
-  {
-    id: "claude",
-    displayName: "Claude",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: true,
-  },
-  {
-    id: "codex",
-    displayName: "Codex",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: true,
-  },
-  {
-    id: "antigravity",
-    displayName: "Antigravity",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: false,
-  },
-  {
-    id: "cursor",
-    displayName: "Cursor",
-    cliOk: true,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "muse",
-    displayName: "Muse",
-    cliOk: true,
-    cliError: null,
-    installGit: false,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: false,
-  },
-];
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor", "muse"] as const).map((id) => agentInfo(id));
 
 const CODEX_TAB: AgentTabDto = {
   plugins: [
@@ -160,6 +110,7 @@ function SessionProbe() {
       <span data-testid="project-derivations">{projectDerivation.current.count}</span>
       <span data-testid="scope-label">{session.currentScopeLabel}</span>
       <span data-testid="cli-line">{session.cliLine}</span>
+      <span data-testid="can-install">{String(session.canInstall)}</span>
       <input
         aria-label="Session filter"
         value={session.currentTab.filter}
@@ -245,6 +196,25 @@ describe("SessionProvider startup", () => {
     await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
     expect(state.refreshOrder[0]).toBe(opened);
     expect(screen.getByTestId("selected-provider")).toHaveTextContent(opened);
+  });
+
+  it.each([
+    ["claude", "true"],
+    ["antigravity", "true"],
+    ["cursor", "false"],
+    ["muse", "true"],
+  ])("offers %s's install sheet only when its adapter installs something: %s", async (provider, offered) => {
+    localStorage.setItem(AGENT_KEY, provider);
+    render(
+      <SessionProvider>
+        <SessionProbe />
+      </SessionProvider>,
+      { wrapper: AppSettingsProvider },
+    );
+    await waitFor(() => expect(state.refreshOrder.length).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("cli-line")).toHaveTextContent(`${provider} · `));
+    expect(screen.getByTestId("selected-provider")).toHaveTextContent(provider);
+    expect(screen.getByTestId("can-install")).toHaveTextContent(offered);
   });
 
   it("names the selected provider and its home once its CLI is found", async () => {

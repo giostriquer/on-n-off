@@ -1,10 +1,11 @@
 import type { AppSettings, AgentInfo, AgentId, AgentTabDto, PendingResetSpend } from "$lib/types";
+import { agentInfo } from "./agentFixtures";
 import { SCENARIOS } from "./githubFixtures";
 import { hooksFor } from "./hooksFixtures";
 import { limitsScenario } from "./limitsFixtures";
 import { unknownScenario } from "./scenarioNames";
 import { defaultNotchSettings, type NotchSnapshot, type NotchSettings } from "$lib/notchTypes";
-import { PROVIDER_IDS, providerLabel } from "$lib/providers";
+import { PROVIDER_IDS } from "$lib/providers";
 import type { UsageBucket, UsageHistoryStatus, UsageSummary } from "$lib/usageTypes";
 import rustSettings from "../../../src-tauri/src/settings/fixtures/app-settings.json";
 
@@ -32,15 +33,15 @@ const vaultDenied = new Error("Could not unlock saved accounts.");
 let vaultLocked = scenario === "accountLocked";
 const pendingLogins = new Map<string, () => void>();
 
-const HEALTH: Record<AgentId, Omit<AgentInfo, "id" | "displayName">> = {
-  claude: { cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
-  codex: { cliOk: true, cliError: null, installGit: true, installFolder: true, pluginToggle: true, readsHooks: true },
-  antigravity: { cliOk: false, cliError: "Antigravity CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
-  cursor: { cliOk: false, cliError: "Cursor CLI not found.", installGit: false, installFolder: false, pluginToggle: false, readsHooks: false },
-  muse: { cliOk: true, cliError: null, installGit: false, installFolder: true, pluginToggle: true, readsHooks: false },
+const CLI: Record<AgentId, "found" | "missing"> = {
+  claude: "found",
+  codex: "found",
+  antigravity: "missing",
+  cursor: "missing",
+  muse: "found",
 };
 
-const AGENTS: AgentInfo[] = PROVIDER_IDS.map((id) => ({ id, displayName: providerLabel(id), ...HEALTH[id] }));
+const AGENTS: AgentInfo[] = PROVIDER_IDS.map((id) => agentInfo(id, CLI[id]));
 
 let settings: AppSettings = {
   hiddenAgents: params.has("allProviders") ? [] : ["antigravity", "cursor"],

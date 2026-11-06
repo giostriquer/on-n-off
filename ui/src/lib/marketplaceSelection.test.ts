@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  agentsAllowed,
   allKeys,
   checkWithDeps,
   dependencyGaps,
@@ -8,7 +7,6 @@ import {
   emptySelectionState,
   entryKey,
   pluginAdvisories,
-  previewPath,
   requiredClosure,
   selectedItems,
   toggleGroup,
@@ -133,30 +131,6 @@ describe("marketplaceSelection", () => {
     expect(on.keys.size).toBe(3);
     const off = toggleGroup(on, inspect, matt, "skill", false);
     expect([...off.keys]).toEqual([entryKey("gh", "skill", "skills/gamma")]);
-  });
-
-  it("only allows agents when Claude is a target and previews provider paths", () => {
-    expect(agentsAllowed(["codex"])).toBe(false);
-    expect(agentsAllowed(["codex", "claude"])).toBe(true);
-    expect(previewPath("claude", { kind: "global" })).toBe("~/.claude/skills");
-    expect(previewPath("antigravity", { kind: "global" })).toBe("~/.gemini/antigravity-cli/skills");
-    expect(previewPath("muse", { kind: "global" })).toBe("~/.config/muse/skills");
-    expect(previewPath("muse", { kind: "project", projectPath: "/home/me/app" })).toBe("/home/me/app/.agents/skills");
-    expect(previewPath("codex", { kind: "project", projectPath: "E:/dev/app" })).toBe("E:/dev/app/.codex/skills");
-    expect(previewPath("cursor", { kind: "project", projectPath: "/home/me/app" })).toBe(
-      "/home/me/app/.cursor/skills",
-    );
-  });
-
-  it.each([
-    ["claude", "~/.claude/skills", "/home/me/app/.claude/skills"],
-    ["codex", "~/.codex/skills", "/home/me/app/.codex/skills"],
-    ["antigravity", "~/.gemini/antigravity-cli/skills", "/home/me/app/.agents/skills"],
-    ["cursor", "~/.cursor/skills", "/home/me/app/.cursor/skills"],
-    ["muse", "~/.config/muse/skills", "/home/me/app/.agents/skills"],
-  ] as const)("previews where %s keeps a skill installed for the user or for a project", (provider, user, project) => {
-    expect(previewPath(provider, { kind: "global" })).toBe(user);
-    expect(previewPath(provider, { kind: "project", projectPath: "/home/me/app/" })).toBe(project);
   });
 
   it("closes over high-confidence dependencies transitively and records who required what", () => {

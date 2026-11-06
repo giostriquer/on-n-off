@@ -8,6 +8,7 @@ import { UpdateProvider } from "@/features/updater/UpdateProvider";
 import type { AgentInfo, AppSettings } from "$lib/types";
 import type { AppSettingsChange } from "$lib/appSettingsDocument";
 import type { UpdaterClient } from "@/features/updater/updaterClient";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const apiMocks = vi.hoisted(() => ({
   requestNotificationPermission: vi.fn<() => Promise<boolean>>(),
@@ -43,46 +44,10 @@ vi.mock("$lib/api", () => ({
 }));
 
 const agents: AgentInfo[] = [
-  {
-    id: "claude",
-    displayName: "Claude",
-    cliOk: false,
-    cliError: "Claude CLI not found.",
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: true,
-  },
-  {
-    id: "codex",
-    displayName: "Codex",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: true,
-  },
-  {
-    id: "antigravity",
-    displayName: "Antigravity",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-  {
-    id: "cursor",
-    displayName: "Cursor",
-    cliOk: false,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
+  agentInfo("claude", "missing"),
+  agentInfo("codex"),
+  { ...agentInfo("antigravity", "missing"), cliError: null },
+  { ...agentInfo("cursor", "missing"), cliError: null },
 ];
 
 const updaterClient: UpdaterClient = {

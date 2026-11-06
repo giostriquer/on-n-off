@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./AppShell";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const setFilter = vi.hoisted(() => vi.fn());
 const refreshAll = vi.hoisted(() => vi.fn());
@@ -14,16 +15,7 @@ const onOpenLimitsWindow = vi.hoisted(() =>
 );
 let openLimitsHandler: (() => void) | null = null;
 
-const agent = {
-  id: "codex" as const,
-  displayName: "Codex",
-  cliOk: true,
-  cliError: null,
-  installGit: true,
-  installFolder: true,
-  pluginToggle: true,
-  readsHooks: true,
-};
+const agent = agentInfo("codex");
 
 const session = {
   theme: "dark" as const,

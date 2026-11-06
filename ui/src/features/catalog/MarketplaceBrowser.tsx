@@ -1,8 +1,8 @@
 import { copy } from "$lib/copy";
 import { marketplaceCopy } from "$lib/marketplaceCopy";
 import { summarizeOutcomes } from "$lib/itemOutcomes";
+import { chosenAgents, takesSubagents } from "$lib/capabilities";
 import {
-  agentsAllowed,
   checkWithDeps,
   depKey,
   entryKey,
@@ -68,7 +68,7 @@ export function MarketplaceBrowser({
 }: MarketplaceBrowserProps) {
   const { action, keys, filter, providers, scope } = selection;
   const local = action !== "plugin";
-  const canAgents = agentsAllowed(providers);
+  const canAgents = takesSubagents(visibleAgents, providers, scope);
   const wantsAgents = inspect.plugins.some((plugin) => plugin.supported && plugin.agents.length > 0);
   const state: SelectionState = { keys, autoAdded: selection.autoAdded, declined: selection.declined };
   const names = entryNames(inspect);
@@ -142,7 +142,7 @@ export function MarketplaceBrowser({
             scope={scope}
             onChange={(next) => onChange({ scope: next })}
             projects={projects}
-            providers={providers}
+            targets={chosenAgents(visibleAgents, providers)}
             onPickFolder={onPickFolder}
             disabled={busy}
           />

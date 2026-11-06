@@ -4,6 +4,7 @@ import { AGENT_KEY, SCOPE_KEY, SessionProvider, useAgentSession } from "./Sessio
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { DEFAULT_APP_SETTINGS } from "$lib/appSettings";
 import type { AgentId, AgentInfo, AgentTabDto, AppSettings, ProjectDto } from "$lib/types";
+import { agentInfo } from "@/dev/agentFixtures";
 
 type Deferred<T> = {
   promise: Promise<T>;
@@ -91,48 +92,7 @@ const ENRICHED_TAB: AgentTabDto = {
   userSkills: [],
   mcpServers: [],
 };
-const AGENTS: AgentInfo[] = [
-  {
-    id: "claude",
-    displayName: "Claude",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: true,
-  },
-  {
-    id: "codex",
-    displayName: "Codex",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: true,
-  },
-  {
-    id: "antigravity",
-    displayName: "Antigravity",
-    cliOk: true,
-    cliError: null,
-    installGit: true,
-    installFolder: true,
-    pluginToggle: true,
-    readsHooks: false,
-  },
-  {
-    id: "cursor",
-    displayName: "Cursor",
-    cliOk: true,
-    cliError: null,
-    installGit: false,
-    installFolder: false,
-    pluginToggle: false,
-    readsHooks: false,
-  },
-];
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor"] as const).map((id) => agentInfo(id));
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),

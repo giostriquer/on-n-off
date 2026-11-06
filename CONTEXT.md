@@ -16,6 +16,13 @@ CLI, and which of Limits, Usage and saved accounts it has, beside the side notch
 of providers the Rust side and the UI keep is drawn from it; the notch helper still keeps its own.
 _Avoid_: registry, provider list
 
+**Capabilities**:
+What on-n-off can change for a provider, as the provider's own adapter states it: for each change
+(switching a plugin, a skill or an MCP server; install, uninstall, update), whether the provider's
+CLI makes it, on-n-off edits a file, or it is refused and why; the install sources it refuses; and
+whether it installs subagents and reads hooks.
+_Avoid_: toggles, support, features (a Limits card's features are another thing)
+
 ### Limits
 
 **Quota window**:

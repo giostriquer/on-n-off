@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -6,13 +6,11 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
+use crate::capabilities::{Capabilities, Change};
 use crate::cli::{run_npx_skills, AgentCli, INSTALL_TIMEOUT};
-use crate::cli_locate::agent_info;
 use crate::config_io::ConfigIo;
-use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto,
-};
-use crate::install_source::{parse_install_source, InstallSource};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
+use crate::install_source::InstallSource;
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
 use crate::paths::{
     agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
@@ -297,13 +295,22 @@ impl AgentAdapter for CodexAdapter {
     fn supports_accounts(&self) -> bool {
         true
     }
-    fn reads_hooks(&self) -> bool {
-        true
+    fn id(&self) -> AgentId {
+        AgentId::Codex
     }
-    fn info(&self) -> AgentInfo {
-        let mut info = agent_info(AgentId::Codex);
-        info.reads_hooks = self.reads_hooks();
-        info
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::file("file patch · [plugins.*.enabled]"),
+            skill_switch: Change::file("file patch · [[skills.config]]"),
+            mcp_switch: Change::file("file patch · [mcp_servers.*.enabled]"),
+            install: Change::cli("codex plugin add · marketplace add"),
+            refused_sources: BTreeMap::new(),
+            uninstall: Change::cli("codex plugin remove"),
+            uninstall_from: None,
+            update: Change::cli("codex plugin marketplace upgrade · add"),
+            reads_hooks: true,
+        }
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
@@ -396,7 +403,7 @@ impl AgentAdapter for CodexAdapter {
             .write
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = parse_install_source(source)?;
+        let parsed = self.capabilities().admit(source)?;
         if parsed.is_npx_skills() {
             run_npx_skills(&parsed, "codex")?;
             return self.list_tab();

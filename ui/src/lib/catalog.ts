@@ -72,14 +72,6 @@ function isCommitSha(value: string): boolean {
   return /^[a-f0-9]{7,40}$/i.test(value.trim());
 }
 
-export function canUninstallPlugin(plugin: PluginDto): boolean {
-  if (plugin.id.startsWith("project:")) {
-    return false;
-  }
-  const source = plugin.source.toLowerCase();
-  return source !== "config" && source !== "workspace";
-}
-
 export function pluginOutOfSync(plugin: PluginDto): boolean {
   if (typeof plugin.outOfSync === "boolean") {
     return plugin.outOfSync;

@@ -2,6 +2,7 @@ mod accounts;
 mod adapter;
 mod antigravity;
 mod backup;
+mod capabilities;
 mod claude;
 mod claude_mcp;
 mod cli;

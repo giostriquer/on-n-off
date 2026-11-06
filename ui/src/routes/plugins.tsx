@@ -10,8 +10,7 @@ export function PluginsRoute() {
       items={session.filtered?.plugins ?? []}
       filterQuery={session.currentTab.filter}
       expandedIds={session.expandedIds}
-      cliOk={session.currentAgent.cliOk}
-      pluginToggle={session.currentAgent.pluginToggle}
+      agent={session.currentAgent}
       busy={session.currentTab.inFlight}
       onToggleExpand={session.toggleExpand}
       onTogglePlugin={session.togglePlugin}

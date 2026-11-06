@@ -1,9 +1,11 @@
 import { Link } from "@tanstack/react-router";
 import { Rocker } from "@/components/Rocker";
 import { OverviewUsageCard } from "@/features/usage/OverviewUsageCard";
+import { canSwitchPlugins, canUpdate } from "$lib/capabilities";
 import { copy } from "$lib/copy";
 import { driftLine, formatPluginVersion, type CatalogCounts, type DriftRow, type LiveRow } from "$lib/catalog";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
+import type { AgentInfo } from "$lib/types";
 
 type OverviewProps = {
   counts: CatalogCounts;
@@ -11,11 +13,10 @@ type OverviewProps = {
   drift?: DriftRow[];
   log: TripEntry[];
   busy?: boolean;
-  pluginToggle?: boolean;
+  agent: AgentInfo;
   scopeLabel?: string;
   onToggle: (row: LiveRow, enabled: boolean) => void;
   onUpdate?: (pluginId: string) => void;
-  cliOk?: boolean;
   usageReady?: boolean;
 };
 
@@ -31,11 +32,10 @@ export function Overview({
   drift = [],
   log,
   busy = false,
-  pluginToggle = false,
+  agent,
   scopeLabel = "all projects",
   onToggle,
   onUpdate,
-  cliOk = false,
   usageReady = true,
 }: OverviewProps) {
   const gauges = [
@@ -103,7 +103,7 @@ export function Overview({
               <button
                 type="button"
                 className="h-[26px] shrink-0 border border-[var(--warn)] bg-transparent px-3 text-[11px] font-semibold tracking-[0.03em] text-[var(--warn)] uppercase disabled:opacity-45"
-                disabled={!cliOk || busy}
+                disabled={!canUpdate(agent) || busy}
                 aria-label={`Update ${row.name}`}
                 onClick={() => onUpdate?.(row.id)}
               >
@@ -143,7 +143,7 @@ export function Overview({
                     size="skill"
                     on={row.enabled}
                     busy={busy}
-                    disabled={row.kind === "plugin" && (!pluginToggle || !row.togglable)}
+                    disabled={row.kind === "plugin" && (!canSwitchPlugins(agent) || !row.togglable)}
                     ariaLabel={`${row.name} ${row.enabled ? "on" : "off"}`}
                     onToggle={() => onToggle(row, !row.enabled)}
                   />

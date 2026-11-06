@@ -17,10 +17,19 @@ source carries no comments (see [Code comments](#code-comments)).
 - A list of providers, or a fact about one (key, names, binaries, which screens it has): drawn
   from the provider catalogue (`provider_catalogue.rs`), never written out again in Rust. In the UI
   it comes from `ui/src/lib/providers.ts`, which derives it from the catalogue fixture Rust asserts
-  it writes. What only the UI states about a provider (its colours, the paths Agent Config, the
-  scope bar and the install sheet print, how its plugins and MCP servers are switched and the
-  notice where they cannot be) is a `Record<AgentId, …>` row in that module, so a provider without
-  one does not compile. Only the notch helper still keeps its own list; `PROVIDERS.md` names it.
+  it writes. What only the UI states about a provider (its colours, the paths Agent Config and the
+  scope bar print) is a `Record<AgentId, …>` row in that module, so a provider without one does
+  not compile. Only the notch helper still keeps its own list; `PROVIDERS.md` names it.
+- What on-n-off can change for a provider (switching plugins, skills and MCP servers; install,
+  uninstall, update; the install sources it refuses; hooks) and the reason it refuses one: the
+  adapter's `capabilities()` (`capabilities.rs`), declared beside the methods that make each
+  change; where it puts skills and subagents is its `item_roots`. A refusal is never a method's own
+  message: the trait's default refuses with the declared reason, and an install source goes through
+  `Capabilities::admit`. The UI gates every action and prints every notice from
+  `AgentInfo.capabilities` and `AgentInfo.itemRoots`, through `ui/src/lib/capabilities.ts`, never
+  from a provider match or the older flags (`installGit`, `installFolder`, `pluginToggle`,
+  `readsHooks`, kept on the wire only); `capabilities/tests.rs` fails while a declaration and its
+  adapter disagree ([why](architecture/README.md#capabilities)).
 - UI → Rust: `$lib/api`. Feature components never invoke Tauri directly; only `ui/src/lib/api.ts`
   and the updater client (`ui/src/features/updater/tauriUpdaterClient.ts`) import a
   `@tauri-apps/*` package, which `scripts/ipc-commands.test.mjs` checks.

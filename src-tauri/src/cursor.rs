@@ -1,10 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapter::{AgentAdapter, ItemRoots};
-use crate::cli_locate::agent_info;
-use crate::dto::{AdapterError, AgentId, AgentInfo, AgentTabDto, ItemScope, PluginDto, SkillDto};
+use crate::capabilities::{Capabilities, Change};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, PluginDto, SkillDto};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::{cursor_root, normalize_skill_path};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
@@ -12,7 +12,7 @@ use crate::sort::sort_tab;
 
 const SOURCE_LOCAL: &str = "local";
 
-pub const MCP_READ_ONLY: &str = "Cursor manages MCP servers itself: switch them in the Cursor app or with `agent mcp enable <name>` / `agent mcp disable <name>`; on-n-off only lists them.";
+pub const MCP_READ_ONLY: &str = "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.";
 
 #[derive(Debug, Clone)]
 struct DiscoveredPlugin {
@@ -100,12 +100,22 @@ impl CursorAdapter {
 }
 
 impl AgentAdapter for CursorAdapter {
-    fn info(&self) -> AgentInfo {
-        let mut info = agent_info(AgentId::Cursor);
-        info.install_git = false;
-        info.install_folder = false;
-        info.plugin_toggle = false;
-        info
+    fn id(&self) -> AgentId {
+        AgentId::Cursor
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::not_implemented("plugin enable"),
+            skill_switch: Change::not_implemented("skill toggle"),
+            mcp_switch: Change::refused("managed in Cursor · read-only here", MCP_READ_ONLY),
+            install: Change::not_implemented("install"),
+            refused_sources: BTreeMap::new(),
+            uninstall: Change::not_implemented("uninstall"),
+            uninstall_from: None,
+            update: Change::not_implemented("update"),
+            reads_hooks: false,
+        }
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
@@ -166,10 +176,6 @@ impl AgentAdapter for CursorAdapter {
         };
         sort_tab(&mut tab);
         Ok(tab)
-    }
-
-    fn set_mcp_enabled(&self, _mcp_id: &str, _enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        Err(AdapterError::message(MCP_READ_ONLY))
     }
 }
 

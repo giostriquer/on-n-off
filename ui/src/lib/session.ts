@@ -1,3 +1,4 @@
+import { NOTHING_OFFERED } from "./capabilities";
 import { PROVIDER_IDS, providerLabel } from "./providers";
 import type { AgentInfo, AgentTabDto } from "./types";
 
@@ -19,6 +20,8 @@ export const LOCKED_AGENTS: readonly AgentInfo[] = PROVIDER_IDS.map((id) => ({
   installFolder: false,
   pluginToggle: false,
   readsHooks: false,
+  capabilities: NOTHING_OFFERED,
+  itemRoots: { global: null, project: null },
 }));
 
 export function emptyTab(): TabState {
@@ -42,15 +45,7 @@ export function overlayAgents(health: AgentInfo[]): AgentInfo[] {
         cliError: "Agent health unavailable.",
       };
     }
-    return {
-      ...locked,
-      cliOk: hit.cliOk,
-      cliError: hit.cliError,
-      installGit: hit.installGit,
-      installFolder: hit.installFolder,
-      pluginToggle: hit.pluginToggle,
-      readsHooks: hit.readsHooks,
-    };
+    return { ...locked, ...hit, id: locked.id, displayName: locked.displayName };
   });
 }
 

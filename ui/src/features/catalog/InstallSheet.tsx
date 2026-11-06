@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { installsFrom, sourceRefusal } from "$lib/capabilities";
 import { copy } from "$lib/copy";
 import {
   githubRepoFromSource,
@@ -6,18 +7,17 @@ import {
   isValidInstallInput,
   parseInstallSource,
   resolvedInstallSource,
+  sourceKind,
 } from "$lib/installSource";
-import type { AgentId, AgentInfo, InstallItemsRequest, InstallItemsResult, ProjectDto } from "$lib/types";
+import type { AgentInfo, InstallItemsRequest, InstallItemsResult, ProjectDto } from "$lib/types";
 import { MarketplaceInstall } from "./MarketplaceInstall";
 import { SheetError, SheetFooter } from "./SheetChrome";
 
 type InstallSheetProps = {
-  agentName: string;
+  agent: AgentInfo;
   busy: boolean;
   error: string | null;
-  installFolder: boolean;
   visibleAgents: AgentInfo[];
-  currentAgentId: AgentId;
   projects: ProjectDto[];
   currentScopePath: string | null;
   onCancel: () => void;
@@ -27,12 +27,10 @@ type InstallSheetProps = {
 };
 
 export function InstallSheet({
-  agentName,
+  agent,
   busy,
   error,
-  installFolder,
   visibleAgents,
-  currentAgentId,
   projects,
   currentScopePath,
   onCancel,
@@ -43,20 +41,23 @@ export function InstallSheet({
   const [text, setText] = useState("");
   const parsed = parseInstallSource(text);
   const valid = isValidInstallInput(text);
-  const inlineError = text.trim() && "error" in parsed ? parsed.error : null;
+  const refusal = "error" in parsed ? null : sourceRefusal(agent, sourceKind(parsed));
+  const inlineError = text.trim() && "error" in parsed ? parsed.error : refusal;
   const hint = installHint(parsed);
   const repo = githubRepoFromSource(parsed);
+  const agentName = agent.displayName;
+  const fromFolder = installsFrom(agent, "folder");
 
   function submitPlugin() {
     const source = resolvedInstallSource(text);
-    if (!source || busy) {
+    if (!source || busy || refusal) {
       return;
     }
     onInstall(source);
   }
 
   async function pickFolder() {
-    if (!installFolder || busy) {
+    if (!fromFolder || busy) {
       return;
     }
     const dir = await onPickFolder();
@@ -103,12 +104,11 @@ export function InstallSheet({
               <MarketplaceInstall
                 key={`${repo.owner}/${repo.repo}@${repo.ref ?? ""}`}
                 repo={repo}
-                agentName={agentName}
+                agent={agent}
                 hint={hint}
                 busy={busy}
                 error={error}
                 visibleAgents={visibleAgents}
-                currentAgentId={currentAgentId}
                 projects={projects}
                 currentScopePath={currentScopePath}
                 onCancel={onCancel}
@@ -123,12 +123,12 @@ export function InstallSheet({
                   <button
                     type="button"
                     className="h-8 rounded-lg border border-[var(--hair)] bg-[var(--well)] px-3 text-[12px] text-[var(--silkscreen)] disabled:opacity-45"
-                    disabled={!installFolder || busy}
+                    disabled={!fromFolder || busy}
                     onClick={() => void pickFolder()}
                   >
                     {copy.folder}
                   </button>
-                  {!installFolder ? (
+                  {!fromFolder ? (
                     <span className="flex-1 text-[12px] text-[var(--mute)]">{copy.folderUnsupported}</span>
                   ) : null}
                 </div>
@@ -140,7 +140,7 @@ export function InstallSheet({
                 <SheetError message={error} />
                 <SheetFooter
                   submitLabel={busy ? copy.installing : copy.install}
-                  submitDisabled={!valid || busy}
+                  submitDisabled={!valid || busy || refusal !== null}
                   onCancel={onCancel}
                   onSubmit={submitPlugin}
                 />

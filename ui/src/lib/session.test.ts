@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { mergeEnrichedPluginMetadata } from "./session";
+import { agentInfo } from "@/dev/agentFixtures";
+import { NOTHING_OFFERED } from "./capabilities";
+import { PROVIDER_IDS } from "./providers";
+import { LOCKED_AGENTS, mergeEnrichedPluginMetadata, overlayAgents } from "./session";
 import type { AgentTabDto } from "./types";
 
 function tab(overrides: Partial<AgentTabDto["plugins"][number]> = {}): AgentTabDto {
@@ -83,5 +86,25 @@ describe("mergeEnrichedPluginMetadata", () => {
     const merged = mergeEnrichedPluginMetadata(local, remote);
 
     expect(merged.plugins[0]).toBe(local.plugins[0]);
+  });
+});
+
+describe("overlayAgents", () => {
+  it("keeps every field Rust sends for each provider, in tab order", () => {
+    const sent = [agentInfo("muse"), agentInfo("claude", "missing")];
+    const agents = overlayAgents(sent);
+    expect(agents.map((agent) => agent.id)).toEqual(PROVIDER_IDS);
+    expect(agents.find((agent) => agent.id === "muse")).toEqual(sent[0]);
+    expect(agents.find((agent) => agent.id === "claude")).toEqual(sent[1]);
+  });
+
+  it("offers nothing for a provider Rust did not describe", () => {
+    const codex = overlayAgents([agentInfo("muse")]).find((agent) => agent.id === "codex");
+    expect(codex).toEqual({
+      ...LOCKED_AGENTS.find((agent) => agent.id === "codex"),
+      cliOk: false,
+      cliError: "Agent health unavailable.",
+    });
+    expect(codex?.capabilities).toBe(NOTHING_OFFERED);
   });
 });

@@ -3,6 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 import type { AgentId, AgentInfo, AgentTabDto } from "$lib/types";
 import { AppSettingsProvider } from "$lib/useAppSettings";
 import { AGENT_KEY, SessionProvider, useAgentSession } from "./SessionProvider";
+import { agentInfo } from "@/dev/agentFixtures";
 
 const state = vi.hoisted(() => ({ loaded: [] as AgentId[] }));
 
@@ -12,16 +13,7 @@ vi.mock("$lib/appSettings", async (importOriginal) => {
 });
 
 const EMPTY_TAB: AgentTabDto = { plugins: [], userSkills: [], mcpServers: [] };
-const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor", "muse"] as const).map((id) => ({
-  id,
-  displayName: id,
-  cliOk: true,
-  cliError: null,
-  installGit: true,
-  installFolder: true,
-  pluginToggle: true,
-  readsHooks: false,
-}));
+const AGENTS: AgentInfo[] = (["claude", "codex", "antigravity", "cursor", "muse"] as const).map((id) => agentInfo(id));
 
 vi.mock("$lib/api", () => ({
   featureFlags: () => Promise.resolve({ masterCut: false }),

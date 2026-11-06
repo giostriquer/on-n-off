@@ -5,15 +5,15 @@ import { Segmented } from "@/components/Segmented";
 import { ManagedItemStrip, OriginTag } from "./ManagedItemStrip";
 import { SkillRow } from "./SkillRow";
 import { copy } from "$lib/copy";
+import { canSwitchPlugins, canUninstallPlugin, canUpdate } from "$lib/capabilities";
 import {
   formatPluginVersion,
-  canUninstallPlugin,
   pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
 } from "$lib/catalog";
 import { isProjectOrigin } from "$lib/project";
-import type { AgentTabDto, ItemStatus, PluginDto, SkillDto } from "$lib/types";
+import type { AgentInfo, AgentTabDto, ItemStatus, PluginDto, SkillDto } from "$lib/types";
 
 type Chip = "all" | "on" | "off" | "outdated";
 
@@ -23,8 +23,7 @@ type ItemListBaseProps = {
   tab: AgentTabDto;
   filterQuery?: string;
   expandedIds: Set<string>;
-  cliOk: boolean;
-  pluginToggle: boolean;
+  agent: AgentInfo;
   busy?: boolean;
   onToggleExpand: (pluginId: string) => void;
   onTogglePlugin: (plugin: PluginDto, enabled: boolean) => void;
@@ -137,8 +136,7 @@ export function ItemList({
   items,
   filterQuery = "",
   expandedIds,
-  cliOk,
-  pluginToggle,
+  agent,
   busy = false,
   onToggleExpand,
   onTogglePlugin,
@@ -248,7 +246,7 @@ export function ItemList({
                       <button
                         type="button"
                         className="mt-0.5 h-[26px] shrink-0 border border-[var(--warn)] bg-transparent px-3 text-[11px] font-semibold tracking-[0.03em] text-[var(--warn)] uppercase disabled:opacity-45"
-                        disabled={!cliOk || busy}
+                        disabled={!canUpdate(agent) || busy}
                         aria-label={`Update ${plugin.name}`}
                         onClick={() => onUpdate?.(plugin)}
                       >
@@ -260,7 +258,7 @@ export function ItemList({
                         size="plugin"
                         on={plugin.enabled}
                         busy={busy}
-                        disabled={!pluginToggle || !plugin.togglable}
+                        disabled={!canSwitchPlugins(agent) || !plugin.togglable}
                         ariaLabel={`${plugin.name} ${plugin.enabled ? "on" : "off"}`}
                         onToggle={() => onTogglePlugin(plugin, !plugin.enabled)}
                       />
@@ -279,7 +277,7 @@ export function ItemList({
                           type="button"
                           className="h-6 rounded-[11px] border border-[var(--hair)] bg-[var(--plate)] px-2.5 text-[10px] font-semibold tracking-[0.03em] text-[var(--trip)] uppercase disabled:opacity-45"
                           aria-label={`Uninstall ${plugin.name}`}
-                          disabled={!cliOk || busy || !canUninstallPlugin(plugin)}
+                          disabled={busy || !canUninstallPlugin(agent, plugin)}
                           onClick={() => onUninstall(plugin)}
                         >
                           Uninstall

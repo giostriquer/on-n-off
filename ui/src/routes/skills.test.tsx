@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SkillsRoute } from "./skills";
+import { agentInfo } from "@/dev/agentFixtures";
 import type { AgentId, ItemStatus } from "$lib/types";
 
 const api = vi.hoisted(() => ({
@@ -17,15 +18,7 @@ const session = vi.hoisted(() => ({
 vi.mock("$lib/api", () => api);
 vi.mock("@/features/session/SessionProvider", () => ({
   useAgentSession: () => ({
-    currentAgent: {
-      id: session.provider,
-      displayName: "Claude",
-      cliOk: true,
-      cliError: null,
-      installGit: true,
-      installFolder: true,
-      pluginToggle: true,
-    },
+    currentAgent: agentInfo(session.provider),
     currentScopePath: null,
     currentTab: { dto: null, inFlight: false, filter: "", loading: false, error: null },
     filtered: {
@@ -116,6 +109,13 @@ describe("SkillsRoute managed items", () => {
     expect(api.itemUpdateStatus).toHaveBeenLastCalledWith("claude", null, false);
     fireEvent.click(screen.getByRole("button", { name: /Check for updates/ }));
     await waitFor(() => expect(api.itemUpdateStatus).toHaveBeenLastCalledWith("claude", null, true));
+  });
+
+  it("shows no Subagents section for Claude when no subagent is installed", async () => {
+    api.itemUpdateStatus.mockResolvedValue([status({})]);
+    renderRoute();
+    await screen.findByText("update available → v1.3.0");
+    expect(screen.queryByRole("region", { name: "Subagents" })).toBeNull();
   });
 
   it("hides the Subagents section for other providers even when agent rows exist", async () => {

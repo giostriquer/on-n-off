@@ -1,6 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Overview } from "./Overview";
+import { agentInfo } from "@/dev/agentFixtures";
 
 vi.mock("@tanstack/react-router", () => ({
   Link: ({
@@ -70,7 +71,7 @@ describe("Overview", () => {
           },
         ]}
         log={[{ at: "14:02", tag: "ON", text: "workbench enabled for Claude · all projects" }]}
-        pluginToggle={true}
+        agent={agentInfo("claude")}
         onToggle={() => undefined}
       />,
     );
@@ -107,6 +108,7 @@ describe("Overview", () => {
         }}
         rows={[]}
         log={[]}
+        agent={agentInfo("claude", "missing")}
         onToggle={() => undefined}
       />,
     );
@@ -133,11 +135,42 @@ describe("Overview", () => {
         }}
         rows={rows}
         log={[]}
+        agent={agentInfo("claude", "missing")}
         onToggle={() => undefined}
       />,
     );
     for (const row of rows) {
       expect(screen.getByText(row.name)).toBeTruthy();
     }
+  });
+});
+
+describe("Overview gates from the agent's declaration", () => {
+  const counts = {
+    plugins: { on: 1, total: 1 },
+    skills: { on: 0, total: 0 },
+    mcp: { on: 0, total: 0 },
+    hooks: { on: 0, total: 0 },
+  };
+
+  it.each([
+    ["Claude with its CLI", "claude", "found", true, true],
+    ["Claude without its CLI", "claude", "missing", false, false],
+    ["Cursor", "cursor", "found", false, false],
+    ["Codex without its CLI", "codex", "missing", false, true],
+  ] as const)("offers %s's Update and plugin switch only where it can make them", (_name, id, cli, update, toggle) => {
+    render(
+      <Overview
+        counts={counts}
+        rows={[{ kind: "plugin", id: "acme@webapp", name: "acme", meta: "plugin · webapp", enabled: true, togglable: true }]}
+        drift={[{ kind: "plugin", id: "acme@webapp", name: "acme", version: "1.0.0", upstream: "1.1.0" }]}
+        log={[]}
+        agent={agentInfo(id, cli)}
+        onToggle={() => undefined}
+        onUpdate={() => undefined}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "Update acme" }) as HTMLButtonElement).disabled).toBe(!update);
+    expect((screen.getByRole("button", { name: "acme on" }) as HTMLButtonElement).disabled).toBe(!toggle);
   });
 });

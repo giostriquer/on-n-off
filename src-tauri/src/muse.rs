@@ -6,20 +6,25 @@ use std::sync::Mutex;
 use serde::Deserialize;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
+use crate::capabilities::{Capabilities, Change};
 use crate::cli::{AgentCli, INSTALL_TIMEOUT};
 use crate::config_io::ConfigIo;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ErrorKind, ItemScope, McpServerDto, PluginDto,
-    SkillDto,
+    AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, McpServerDto, PluginDto, SkillDto,
 };
-use crate::install_source::{parse_install_source, InstallSource};
+use crate::install_source::{InstallSource, SourceKind};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::agents_skills_root;
 use crate::paths::plugin_id_parts;
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
 use crate::sort::sort_tab;
 
-pub const MCP_READ_ONLY: &str = "Muse manages MCP servers itself: edit `mcpServers` in its settings.json or use `muse mcp login <server>`; on-n-off only lists them.";
+pub const MCP_READ_ONLY: &str = "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.";
+
+const MARKETPLACE_NEEDS_A_NAME: &str = "Muse marketplaces need a name: run `muse plugins marketplace add <name> <source>` in a terminal, then install <plugin>@<name> here.";
+
+const NO_NPX_SKILLS: &str =
+    "npx skills cannot target Muse; install the skill from a marketplace or a folder instead.";
 
 const SOURCE_LOCAL: &str = "local";
 const ACTIVATION_OFF: &str = "off";
@@ -336,10 +341,28 @@ impl AgentAdapter for MuseAdapter {
         true
     }
 
-    fn info(&self) -> AgentInfo {
-        let mut info = crate::cli_locate::agent_info(AgentId::Muse);
-        info.install_git = false;
-        info
+    fn id(&self) -> AgentId {
+        AgentId::Muse
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::cli("muse plugins enable/disable"),
+            skill_switch: Change::cli("muse skills enable/disable"),
+            mcp_switch: Change::refused("managed in Muse · read-only here", MCP_READ_ONLY),
+            install: Change::cli("muse plugins install"),
+            refused_sources: BTreeMap::from([
+                (
+                    SourceKind::GitMarketplace,
+                    MARKETPLACE_NEEDS_A_NAME.to_string(),
+                ),
+                (SourceKind::MarketplaceSkill, NO_NPX_SKILLS.to_string()),
+            ]),
+            uninstall: Change::cli("muse plugins remove"),
+            uninstall_from: None,
+            update: Change::cli("muse plugins update"),
+            reads_hooks: false,
+        }
     }
 
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
@@ -450,10 +473,6 @@ impl AgentAdapter for MuseAdapter {
         Ok(tab)
     }
 
-    fn set_mcp_enabled(&self, _mcp_id: &str, _enabled: bool) -> Result<AgentTabDto, AdapterError> {
-        Err(AdapterError::message(MCP_READ_ONLY))
-    }
-
     fn set_plugin_enabled(
         &self,
         plugin_id: &str,
@@ -502,20 +521,7 @@ impl AgentAdapter for MuseAdapter {
             .write
             .lock()
             .map_err(|_| AdapterError::message("write lock poisoned"))?;
-        let parsed = parse_install_source(source)?;
-        match &parsed {
-            InstallSource::LocalDir(_) | InstallSource::Plugin(_) => {}
-            InstallSource::NpxSkills { .. } => {
-                return Err(AdapterError::message(
-                    "npx skills cannot target Muse; install the skill from a marketplace or a folder instead.",
-                ));
-            }
-            InstallSource::GitUrl(_) | InstallSource::GitHub { .. } => {
-                return Err(AdapterError::message(
-                    "Muse marketplaces need a name: run `muse plugins marketplace add <name> <source>` in a terminal, then install <plugin>@<name> here.",
-                ));
-            }
-        }
+        let parsed = self.capabilities().admit(source)?;
         self.backup_state()?;
         self.cli
             .run_args_timed(&parsed.muse_install_argv(), INSTALL_TIMEOUT)?;

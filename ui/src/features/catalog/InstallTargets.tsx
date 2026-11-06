@@ -1,6 +1,6 @@
 import { Segmented } from "@/components/Segmented";
 import { copy } from "$lib/copy";
-import { previewPath } from "$lib/marketplaceSelection";
+import { previewPath } from "$lib/capabilities";
 import type { AgentId, AgentInfo, ItemScope, ProjectDto } from "$lib/types";
 
 const LABEL = "text-[10px] font-semibold tracking-[0.05em] text-[var(--mute)]";
@@ -42,14 +42,14 @@ export function ScopePicker({
   scope,
   onChange,
   projects,
-  providers,
+  targets,
   onPickFolder,
   disabled,
 }: {
   scope: ItemScope;
   onChange: (scope: ItemScope) => void;
   projects: ProjectDto[];
-  providers: readonly AgentId[];
+  targets: readonly AgentInfo[];
   onPickFolder: () => Promise<string | null>;
   disabled: boolean;
 }) {
@@ -116,10 +116,10 @@ export function ScopePicker({
           </>
         ) : null}
       </div>
-      {providers.length > 0 ? (
+      {targets.length > 0 ? (
         <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-[var(--mute)]">
-          {providers.map((provider) => (
-            <li key={provider}>{previewPath(provider, scope)}</li>
+          {targets.map((agent) => (
+            <li key={agent.id}>{previewPath(agent, scope)}</li>
           ))}
         </ul>
       ) : null}

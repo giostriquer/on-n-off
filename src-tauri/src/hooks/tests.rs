@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use super::*;
 use crate::adapter::AgentAdapter;
+use crate::dto::AgentInfo;
 
 fn ids(hooks: &[HookDto]) -> Vec<&str> {
     hooks.iter().map(|hook| hook.id.as_str()).collect()
@@ -321,10 +322,10 @@ fn only_the_providers_with_hook_files_say_they_read_hooks() {
     let antigravity = crate::antigravity::AntigravityAdapter::at(home.join(".gemini"));
     let cursor = crate::cursor::CursorAdapter::at(home.join(".cursor"));
 
-    assert!(claude.reads_hooks() && claude.info().reads_hooks);
-    assert!(codex.reads_hooks() && codex.info().reads_hooks);
-    assert!(!antigravity.reads_hooks() && !antigravity.info().reads_hooks);
-    assert!(!cursor.reads_hooks() && !cursor.info().reads_hooks);
+    assert!(claude.capabilities().reads_hooks && AgentInfo::of(&claude).reads_hooks);
+    assert!(codex.capabilities().reads_hooks && AgentInfo::of(&codex).reads_hooks);
+    assert!(!antigravity.capabilities().reads_hooks && !AgentInfo::of(&antigravity).reads_hooks);
+    assert!(!cursor.capabilities().reads_hooks && !AgentInfo::of(&cursor).reads_hooks);
 }
 
 #[test]

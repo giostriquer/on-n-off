@@ -159,7 +159,10 @@ pub async fn list_agents(
         .map(|id| state.adapter(id))
         .collect();
     blocking("provider health", move || {
-        Ok(adapters.into_iter().map(|adapter| adapter.info()).collect())
+        Ok(adapters
+            .iter()
+            .map(|adapter| AgentInfo::of(adapter.as_ref()))
+            .collect())
     })
     .await
 }

@@ -81,60 +81,12 @@ export function providerChartColor(id: AgentId, dark: boolean): string {
   return LOOK[id].chart[dark ? "dark" : "light"];
 }
 
-export type McpToggle =
-  | { readonly toggle: true; readonly detail: string }
-  | { readonly toggle: false; readonly detail: string; readonly notice: string };
-
-export type ProviderToggles = {
-  readonly plugin: string;
-  readonly mcp: McpToggle;
-};
-
-const TOGGLES: Readonly<Record<AgentId, ProviderToggles>> = {
-  claude: {
-    plugin: "claude plugin enable/disable",
-    mcp: { toggle: true, detail: "file patch · ~/.claude.json disabled" },
-  },
-  codex: {
-    plugin: "file patch · [plugins.*.enabled]",
-    mcp: { toggle: true, detail: "file patch · [mcp_servers.*.enabled]" },
-  },
-  antigravity: {
-    plugin: "agy plugin enable/disable",
-    mcp: { toggle: true, detail: "file patch · mcpServers.*.disabled" },
-  },
-  cursor: {
-    plugin: "not implemented yet",
-    mcp: {
-      toggle: false,
-      detail: "managed in Cursor · read-only here",
-      notice:
-        "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`.",
-    },
-  },
-  muse: {
-    plugin: "muse plugins enable/disable",
-    mcp: {
-      toggle: false,
-      detail: "managed in Muse · read-only here",
-      notice:
-        "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.",
-    },
-  },
-};
-
-export function providerToggles(id: AgentId): ProviderToggles {
-  return TOGGLES[id];
-}
-
 export type ProviderPaths = {
   readonly home: string;
   readonly pluginDirs: string;
   readonly skillDirs: string;
   readonly mcpConfig: string;
   readonly scopeConfig: string;
-  readonly userSkills: string;
-  readonly projectSkills: string;
 };
 
 const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
@@ -144,8 +96,6 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
     skillDirs: "~/.claude/plugins · user skills",
     mcpConfig: "~/.claude.json",
     scopeConfig: "~/.claude/settings.json",
-    userSkills: "~/.claude/skills",
-    projectSkills: ".claude/skills",
   },
   codex: {
     home: "~/.codex",
@@ -153,8 +103,6 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
     skillDirs: "~/.codex/skills · ~/.agents/skills",
     mcpConfig: "~/.codex/config.toml",
     scopeConfig: "~/.codex/config.toml",
-    userSkills: "~/.codex/skills",
-    projectSkills: ".codex/skills",
   },
   antigravity: {
     home: "~/.gemini",
@@ -162,8 +110,6 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
     skillDirs: "~/.gemini/antigravity-cli/skills · .agents/skills",
     mcpConfig: "~/.gemini/config/mcp_config.json",
     scopeConfig: "~/.gemini/antigravity-cli/",
-    userSkills: "~/.gemini/antigravity-cli/skills",
-    projectSkills: ".agents/skills",
   },
   cursor: {
     home: "~/.cursor",
@@ -171,8 +117,6 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
     skillDirs: "~/.cursor/skills · .cursor/skills",
     mcpConfig: "~/.cursor/mcp.json",
     scopeConfig: "~/.cursor/",
-    userSkills: "~/.cursor/skills",
-    projectSkills: ".cursor/skills",
   },
   muse: {
     home: "~/.local/share/muse",
@@ -180,8 +124,6 @@ const PATHS: Readonly<Record<AgentId, ProviderPaths>> = {
     skillDirs: "~/.config/muse/skills · ~/.agents/skills",
     mcpConfig: "~/.config/muse/settings.json",
     scopeConfig: "~/.config/muse/settings.json",
-    userSkills: "~/.config/muse/skills",
-    projectSkills: ".agents/skills",
   },
 };
 

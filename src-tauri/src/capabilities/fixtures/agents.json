@@ -1,0 +1,291 @@
+{
+  "claude": {
+    "capabilities": {
+      "pluginSwitch": {
+        "by": "cli",
+        "how": "claude plugin enable/disable"
+      },
+      "skillSwitch": {
+        "by": "file",
+        "how": "file patch · ~/.claude/settings.json skillOverrides"
+      },
+      "mcpSwitch": {
+        "by": "file",
+        "how": "file patch · ~/.claude.json disabled"
+      },
+      "install": {
+        "by": "cli",
+        "how": "claude plugin install · marketplace add"
+      },
+      "refusedSources": {},
+      "uninstall": {
+        "by": "cli",
+        "how": "claude plugin uninstall"
+      },
+      "uninstallFrom": null,
+      "update": {
+        "by": "cli",
+        "how": "claude plugin update"
+      },
+      "readsHooks": true
+    },
+    "cliFound": {
+      "pluginToggle": true,
+      "readsHooks": true,
+      "cliOk": true,
+      "cliError": null,
+      "installGit": true,
+      "installFolder": true
+    },
+    "cliMissing": {
+      "pluginToggle": false,
+      "readsHooks": true,
+      "cliOk": false,
+      "cliError": "Claude CLI not found.",
+      "installGit": false,
+      "installFolder": false
+    },
+    "itemRoots": {
+      "global": {
+        "skills": "~/.claude/skills",
+        "agents": "~/.claude/agents"
+      },
+      "project": {
+        "skills": ".claude/skills",
+        "agents": ".claude/agents"
+      }
+    }
+  },
+  "codex": {
+    "capabilities": {
+      "pluginSwitch": {
+        "by": "file",
+        "how": "file patch · [plugins.*.enabled]"
+      },
+      "skillSwitch": {
+        "by": "file",
+        "how": "file patch · [[skills.config]]"
+      },
+      "mcpSwitch": {
+        "by": "file",
+        "how": "file patch · [mcp_servers.*.enabled]"
+      },
+      "install": {
+        "by": "cli",
+        "how": "codex plugin add · marketplace add"
+      },
+      "refusedSources": {},
+      "uninstall": {
+        "by": "cli",
+        "how": "codex plugin remove"
+      },
+      "uninstallFrom": null,
+      "update": {
+        "by": "cli",
+        "how": "codex plugin marketplace upgrade · add"
+      },
+      "readsHooks": true
+    },
+    "cliFound": {
+      "pluginToggle": true,
+      "readsHooks": true,
+      "cliOk": true,
+      "cliError": null,
+      "installGit": true,
+      "installFolder": true
+    },
+    "cliMissing": {
+      "pluginToggle": true,
+      "readsHooks": true,
+      "cliOk": false,
+      "cliError": "Codex CLI not found.",
+      "installGit": false,
+      "installFolder": false
+    },
+    "itemRoots": {
+      "global": {
+        "skills": "~/.codex/skills",
+        "agents": null
+      },
+      "project": {
+        "skills": ".codex/skills",
+        "agents": null
+      }
+    }
+  },
+  "antigravity": {
+    "capabilities": {
+      "pluginSwitch": {
+        "by": "cli",
+        "how": "agy plugin enable/disable"
+      },
+      "skillSwitch": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "skill toggle is not implemented yet"
+      },
+      "mcpSwitch": {
+        "by": "file",
+        "how": "file patch · mcpServers.*.disabled"
+      },
+      "install": {
+        "by": "cli",
+        "how": "agy plugin install"
+      },
+      "refusedSources": {},
+      "uninstall": {
+        "by": "cli",
+        "how": "agy plugin uninstall"
+      },
+      "uninstallFrom": [
+        "cli"
+      ],
+      "update": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "update is not implemented yet"
+      },
+      "readsHooks": false
+    },
+    "cliFound": {
+      "pluginToggle": true,
+      "readsHooks": false,
+      "cliOk": true,
+      "cliError": null,
+      "installGit": true,
+      "installFolder": true
+    },
+    "cliMissing": {
+      "pluginToggle": false,
+      "readsHooks": false,
+      "cliOk": false,
+      "cliError": "Antigravity CLI not found.",
+      "installGit": false,
+      "installFolder": false
+    },
+    "itemRoots": {
+      "global": {
+        "skills": "~/.gemini/antigravity-cli/skills",
+        "agents": null
+      },
+      "project": {
+        "skills": ".agents/skills",
+        "agents": null
+      }
+    }
+  },
+  "cursor": {
+    "capabilities": {
+      "pluginSwitch": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "plugin enable is not implemented yet"
+      },
+      "skillSwitch": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "skill toggle is not implemented yet"
+      },
+      "mcpSwitch": {
+        "by": "refused",
+        "how": "managed in Cursor · read-only here",
+        "reason": "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`."
+      },
+      "install": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "install is not implemented yet"
+      },
+      "refusedSources": {},
+      "uninstall": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "uninstall is not implemented yet"
+      },
+      "uninstallFrom": null,
+      "update": {
+        "by": "refused",
+        "how": "not implemented yet",
+        "reason": "update is not implemented yet"
+      },
+      "readsHooks": false
+    },
+    "cliFound": {
+      "pluginToggle": false,
+      "readsHooks": false,
+      "cliOk": true,
+      "cliError": null,
+      "installGit": false,
+      "installFolder": false
+    },
+    "cliMissing": {
+      "pluginToggle": false,
+      "readsHooks": false,
+      "cliOk": false,
+      "cliError": "Cursor CLI not found.",
+      "installGit": false,
+      "installFolder": false
+    },
+    "itemRoots": {
+      "global": {
+        "skills": "~/.cursor/skills",
+        "agents": null
+      },
+      "project": {
+        "skills": ".cursor/skills",
+        "agents": null
+      }
+    }
+  },
+  "muse": {
+    "capabilities": {
+      "pluginSwitch": {
+        "by": "cli",
+        "how": "muse plugins enable/disable"
+      },
+      "skillSwitch": {
+        "by": "cli",
+        "how": "muse skills enable/disable"
+      },
+      "mcpSwitch": {
+        "by": "refused",
+        "how": "managed in Muse · read-only here",
+        "reason": "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`."
+      },
+      "install": {
+        "by": "cli",
+        "how": "muse plugins install"
+      },
+      "refusedSources": {
+        "gitMarketplace": "Muse marketplaces need a name: run `muse plugins marketplace add <name> <source>` in a terminal, then install <plugin>@<name> here.",
+        "marketplaceSkill": "npx skills cannot target Muse; install the skill from a marketplace or a folder instead."
+      },
+      "uninstall": {
+        "by": "cli",
+        "how": "muse plugins remove"
+      },
+      "uninstallFrom": null,
+      "update": {
+        "by": "cli",
+        "how": "muse plugins update"
+      },
+      "readsHooks": false
+    },
+    "cliFound": {
+      "pluginToggle": true,
+      "readsHooks": false,
+      "cliOk": true,
+      "cliError": null,
+      "installGit": false,
+      "installFolder": true
+    },
+    "cliMissing": {
+      "pluginToggle": false,
+      "readsHooks": false,
+      "cliOk": false,
+      "cliError": "Muse CLI not found.",
+      "installGit": false,
+      "installFolder": false
+    }
+  }
+}

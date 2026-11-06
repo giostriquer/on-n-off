@@ -6,9 +6,9 @@ import { displayError, parseInvokeError } from "$lib/error";
 import type { GithubRepo } from "$lib/installSource";
 import { summarizeOutcomes } from "$lib/itemOutcomes";
 import { ITEM_STATUS_KEY } from "$lib/itemStatus";
-import { agentsAllowed, allKeys, dependencyGaps, emptySelectionState, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
+import { sourceRefusal, takesSubagents } from "$lib/capabilities";
+import { allKeys, dependencyGaps, emptySelectionState, entryKey, selectedItems, targetsFor } from "$lib/marketplaceSelection";
 import type {
-  AgentId,
   AgentInfo,
   InstallItemsRequest,
   InstallItemsResult,
@@ -21,12 +21,11 @@ import { useMarketplaceInspect } from "./useMarketplaceInspect";
 
 export type MarketplaceInstallProps = {
   repo: GithubRepo;
-  agentName: string;
+  agent: AgentInfo;
   hint: string;
   busy: boolean;
   error: string | null;
   visibleAgents: AgentInfo[];
-  currentAgentId: AgentId;
   projects: ProjectDto[];
   currentScopePath: string | null;
   onCancel: () => void;
@@ -37,12 +36,11 @@ export type MarketplaceInstallProps = {
 
 export function MarketplaceInstall({
   repo,
-  agentName,
+  agent,
   hint,
   busy,
   error,
   visibleAgents,
-  currentAgentId,
   projects,
   currentScopePath,
   onCancel,
@@ -58,21 +56,23 @@ export function MarketplaceInstall({
     action: "plugin",
     ...emptySelectionState(),
     filter: "",
-    providers: [currentAgentId],
+    providers: [agent.id],
     scope: currentScopePath ? { kind: "project", projectPath: currentScopePath } : { kind: "global" },
   }));
   const [result, setResult] = useState<InstallItemsResult | null>(null);
   const [itemsError, setItemsError] = useState<string | null>(null);
 
+  const agentName = agent.displayName;
   const local = inspect !== null && selection.action !== "plugin";
+  const refused = local ? null : sourceRefusal(agent, "gitMarketplace");
   const picks: ItemPick[] = useMemo(() => {
     if (!inspect || !local) {
       return [];
     }
     const effective = selection.action === "all" ? new Set(allKeys(inspect)) : selection.keys;
-    const canAgents = agentsAllowed(selection.providers);
+    const canAgents = takesSubagents(visibleAgents, selection.providers, selection.scope);
     return selectedItems(inspect, effective).filter((pick) => pick.kind !== "agent" || canAgents);
-  }, [inspect, local, selection.action, selection.keys, selection.providers]);
+  }, [inspect, local, selection.action, selection.keys, selection.providers, selection.scope, visibleAgents]);
   const canSubmitItems = local && picks.length > 0 && selection.providers.length > 0 && !busy;
   const required =
     selection.action === "selected"
@@ -171,10 +171,10 @@ export function MarketplaceInstall({
           onOverwriteConflicts={overwriteConflicts}
         />
       ) : null}
-      <SheetError message={itemsError ?? error} />
+      <SheetError message={itemsError ?? error ?? refused} />
       <SheetFooter
         submitLabel={submitLabel}
-        submitDisabled={local ? !canSubmitItems : busy}
+        submitDisabled={local ? !canSubmitItems : busy || refused !== null}
         summary={summary}
         onCancel={onCancel}
         onSubmit={() => {

@@ -4,7 +4,8 @@ import { FolderPlus, Search } from "lucide-react";
 import { ProviderIcon } from "$lib/ProviderIcon";
 import { configMcpCount } from "$lib/catalog";
 import { sameProjectPath } from "$lib/project";
-import { providerBinary, providerPaths, providerToggles } from "$lib/providers";
+import { canSwitchPlugins, installsFrom, ready } from "$lib/capabilities";
+import { providerBinary, providerPaths } from "$lib/providers";
 import { tripTagClass, type TripEntry } from "$lib/tripLog";
 import type { AgentInfo, AgentTabDto, ProjectDto } from "$lib/types";
 
@@ -87,14 +88,16 @@ export function AgentConfig({
 }: AgentConfigProps) {
   const [query, setQuery] = useState("");
   const paths = providerPaths(agent.id);
-  const toggles = providerToggles(agent.id);
+  const { pluginSwitch, mcpSwitch } = agent.capabilities;
   const pluginCount = tab?.plugins.length ?? 0;
   const skillCount =
     (tab?.plugins.reduce((sum, plugin) => sum + plugin.skills.length, 0) ?? 0) +
     (tab?.userSkills.length ?? 0);
   const mcpCount = configMcpCount(tab);
+  const fromGit = installsFrom(agent, "gitMarketplace");
+  const fromFolder = installsFrom(agent, "folder");
   const installModes =
-    [agent.installGit ? "git/url" : null, agent.installFolder ? "folder" : null].filter(Boolean).join(" · ") ||
+    [fromGit ? "git/url" : null, fromFolder ? "folder" : null].filter(Boolean).join(" · ") ||
     "unavailable";
 
   const pathRows = [
@@ -330,14 +333,14 @@ export function AgentConfig({
             <header className="border-b border-[var(--hair)] py-2.5 text-[11px] font-semibold tracking-[0.05em] text-[var(--mute)] uppercase">
               Adapter capabilities
             </header>
-            <Capability label="Install from git/url" detail={installModes} ok={agent.installGit} />
+            <Capability label="Install from git/url" detail={installModes} ok={fromGit} />
             <Capability
               label="Install from folder"
-              detail={agent.installFolder ? "supported" : "not on this CLI"}
-              ok={agent.installFolder}
+              detail={fromFolder ? "supported" : "not on this CLI"}
+              ok={fromFolder}
             />
-            <Capability label="Plugin toggle" detail={toggles.plugin} ok={agent.pluginToggle} />
-            <Capability label="MCP toggle" detail={toggles.mcp.detail} ok={toggles.mcp.toggle} />
+            <Capability label="Plugin toggle" detail={pluginSwitch.how} ok={canSwitchPlugins(agent)} />
+            <Capability label="MCP toggle" detail={mcpSwitch.how} ok={ready(agent, mcpSwitch)} />
             <Capability label="Safe writes" detail="backup + rollback on every patch" ok />
           </section>
 

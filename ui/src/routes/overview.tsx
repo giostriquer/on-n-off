@@ -10,7 +10,7 @@ export function OverviewRoute() {
       drift={session.drift}
       log={session.log}
       busy={session.currentTab.inFlight}
-      pluginToggle={session.currentAgent.pluginToggle}
+      agent={session.currentAgent}
       scopeLabel={session.currentScopeLabel}
       onToggle={session.toggleLive}
       onUpdate={(pluginId) => {
@@ -19,7 +19,6 @@ export function OverviewRoute() {
           session.updatePlugin(plugin);
         }
       }}
-      cliOk={session.currentAgent.cliOk}
       usageReady={session.initialProviderReady}
     />
   );

@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 
+use serde::{Deserialize, Serialize};
+
 use crate::dto::AdapterError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,6 +18,25 @@ pub enum InstallSource {
         source: String,
         skill: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SourceKind {
+    GitMarketplace,
+    Folder,
+    MarketplacePlugin,
+    MarketplaceSkill,
+}
+
+#[cfg(test)]
+impl SourceKind {
+    pub const ALL: [Self; 4] = [
+        Self::GitMarketplace,
+        Self::Folder,
+        Self::MarketplacePlugin,
+        Self::MarketplaceSkill,
+    ];
 }
 
 pub fn parse_install_source(input: &str) -> Result<InstallSource, AdapterError> {
@@ -53,6 +74,15 @@ pub fn parse_install_source(input: &str) -> Result<InstallSource, AdapterError> 
 }
 
 impl InstallSource {
+    pub fn kind(&self) -> SourceKind {
+        match self {
+            Self::GitUrl(_) | Self::GitHub { .. } => SourceKind::GitMarketplace,
+            Self::LocalDir(_) => SourceKind::Folder,
+            Self::Plugin(_) => SourceKind::MarketplacePlugin,
+            Self::NpxSkills { .. } => SourceKind::MarketplaceSkill,
+        }
+    }
+
     pub fn as_cli_source(&self) -> String {
         match self {
             Self::GitUrl(url) => url.clone(),
