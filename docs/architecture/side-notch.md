@@ -150,6 +150,48 @@ A drawer never decides what a cell says. A new badge, notice or rule goes in `mo
 reaches both notches as data; a drawer only maps it to pixels. The helper draws the cells in the
 order it receives them, so rail order lives in `RAIL_ORDER` alone.
 
+## Live sessions
+
+A provider cell's sessions come from `sessions::read` (`sessions.rs`), which the host calls every
+ten seconds for each selected provider, off the supervisor thread. It is read-only and lists at
+most twelve sessions, the most recently active first; one exhaustive match picks each provider's
+reader, and each provider's facts are its Live sessions row in [PROVIDERS.md](../../PROVIDERS.md).
+Claude Code writes a file per running process that names its state, read by its own reader, which
+lists a row only while its pid is alive. Codex and Muse name no live state: each writes its
+transcripts into dated dirs (`sessions/YYYY/MM/DD`), and one reader, `sessions/rollouts.rs`, lists
+both from there. A provider is a small description beside it (`CODEX`, `MUSE`): its layout and its
+turn markers. A layout is either a rollout file a session, whose first line names its id, workspace
+and place (Codex), or a folder a session, named by its id, with the head keys that name its
+workspace and the registry of live sessions its host keeps (Muse); a folder session's place is
+always Terminal. The markers say which events start and end a turn and where a line names its
+kind. Each setting belongs to one layout, so a description cannot pair a registry with rollout
+files. The reader owns the rest, once for both:
+
+- **The walk.** The day dirs of yesterday, today and tomorrow by the UTC date. Both providers date
+  a session's dir by the local date it started on (observed 2026-11 for both, on a machine at UTC−3:
+  a session started at 22:20 local sits in that local day's dir, whose UTC date was the next), and
+  every zone's local today is one of those three UTC dates. Reading only the UTC today and
+  yesterday missed, east of UTC, every session started after local midnight until UTC midnight; west
+  of UTC tomorrow's dir never exists, so reading it costs one failed directory open. A session is a
+  candidate when its transcript was written in the last hour, or when the registry names it; only
+  the 48 most recently written candidates are read (each its first line or head, then its tail), so
+  a day of hundreds of rollouts costs at most 48 transcripts a read. A folder id is kept from the
+  newest day that holds it, and hidden folders are skipped.
+- **The name.** The registry's name and project when it has them; otherwise the project is the
+  workspace's folder name (Home without one) and the name `<project>-<last two id characters>`.
+- **The turn.** The last start or end event in the transcript's final 128 KiB decides a `Turn`:
+  open, closed, or unmarked when the tail has neither. An open turn written in the last 15 minutes
+  is working, and so is an unmarked one written in the last two, since a long answer can push the
+  turn's start out of the tail while it is still being written; anything else is idle.
+- **Last active.** The later of the transcript's and the registration's modification times; the
+  turn's age is the transcript's alone.
+
+`limits/codex_sessions.rs` reads the same Codex rollouts for a different purpose, a remembered
+window's newer observations, with a walk of its own: nine days back from the UTC today, in name
+order, every `token_count` event in a 256 KiB tail. The two share only the dated path, so they
+share no code. That walk still starts at the UTC today, so east of UTC it leaves out the newest
+local day's rollouts until UTC midnight.
+
 ## On macOS
 
 ```mermaid
@@ -158,7 +200,7 @@ flowchart LR
         cfg["config.rs<br/>~/.on-n-off/side-notch.json"]
         host["host.rs<br/><i>the one supervisor</i>"]
         pipe["transport.rs · protocol.rs<br/><i>the pipe transport</i>"]
-        sess["sessions.rs<br/><i>~/.claude/sessions/*.json +<br/>recent Codex rollouts, read-only</i>"]
+        sess["sessions.rs · sessions/rollouts.rs<br/><i>~/.claude/sessions/*.json +<br/>recent Codex and Muse rollouts, read-only</i>"]
         model["model.rs · model/frame.rs<br/><i>layout, mirrored ·<br/>what each cell shows</i>"]
     end
 
