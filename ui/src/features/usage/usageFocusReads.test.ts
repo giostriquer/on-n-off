@@ -71,6 +71,27 @@ it("re-reads only the stale usage queries when the main window gains focus, neve
   disconnect();
 });
 
+it("leaves cached usage windows that no view shows alone when the main window gains focus", async () => {
+  const client = mountedClient();
+  const fullTimeRead = vi.fn(() => Promise.resolve("full time"));
+  const leftWindow = observe(client, ["usage", 36500, 0], fullTimeRead);
+  await waitFor(() => expect(fullTimeRead).toHaveBeenCalledTimes(1));
+  leftWindow();
+  const shownRead = vi.fn(() => Promise.resolve("30 days"));
+  unsubscribers.push(observe(client, ["usage", 30, 0], shownRead));
+  const disconnect = connectUsageFocusReads(client);
+  await waitFor(() => expect(focusHandlers.size).toBe(1));
+  await waitFor(() => expect(shownRead).toHaveBeenCalledTimes(1));
+
+  vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
+  await act(async () => focusMainWindow());
+
+  await waitFor(() => expect(shownRead).toHaveBeenCalledTimes(2));
+  expect(fullTimeRead).toHaveBeenCalledTimes(1);
+  expect(client.getQueryData(["usage", 36500, 0])).toBe("full time");
+  disconnect();
+});
+
 it("joins a usage re-read already in flight instead of starting a second scan", async () => {
   const client = mountedClient();
   let finish!: (value: string) => void;
