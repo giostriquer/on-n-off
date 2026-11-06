@@ -1,6 +1,8 @@
+import { queryOptions } from "@tanstack/react-query";
 import * as api from "$lib/api";
 import { makeWindow, type UsageWindow } from "$lib/usageFormat";
 import type { UsageSummary } from "$lib/usageTypes";
+import { USAGE_QUERY_ROOT } from "./usageFocusReads";
 
 export type UsageQueryResult = {
   summary: UsageSummary;
@@ -19,4 +21,12 @@ export async function loadUsageWindow(days: number, force = false): Promise<Usag
     force,
   });
   return { summary, window };
+}
+
+export function usageWindowQuery(days: number, revision: number, read: () => Promise<UsageQueryResult>) {
+  return queryOptions({
+    queryKey: [...USAGE_QUERY_ROOT, days, revision] as const,
+    queryFn: read,
+    refetchOnWindowFocus: true,
+  });
 }

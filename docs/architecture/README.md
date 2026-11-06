@@ -554,6 +554,30 @@ Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>
 overwriting it. Those are read too, so a turn a rewrite dropped still counts; the turns both copies
 hold collapse to one.
 
+The Usage screen and the Overview usage card read when they mount, on the Usage refresh button,
+and when the user comes back to the main window with figures older than its stale time
+(`createMainWindowQueryClient`, `ui/src/lib/queryClients.ts`). Closing the window only hides it,
+and switching to another app leaves it on screen, so a screen left on Usage stays mounted; without
+this it kept old figures until another screen was opened and Usage was opened again.
+`ui/src/features/usage/usageQuery.ts` owns the query factory (`usageWindowQuery`) and
+`usageFocusReads.ts` beside it owns the `["usage"]` key root and the focus connector, kept apart
+so the connector `App.tsx` mounts does not pull the usage loader and formatters into the startup
+bundle. Two signals mean "came back":
+
+- **The webview's `visibilitychange`**, which TanStack's focus manager hears. Every usage view
+  opts in through `usageWindowQuery`; the main window turns this off by default, so only reads
+  that opt in (usage, Limits, PRs, accounts) re-read on it. WKWebView fires it when the window is
+  hidden and shown again; WebView2 on Windows never reports the window hidden.
+- **Tauri's `tauri://focus` for the main window** (`onMainWindowFocused` in `$lib/api`), on both
+  platforms, including a return from another app, which fires no `visibilitychange`.
+  `<UsageFocusReads />`, mounted once beside `<SharedReads />` in `App.tsx`, answers it by
+  re-reading the active `["usage"]` queries that are stale by the main window's stale time, and
+  no other read.
+
+Both signals start a read only when the data is stale, and both join a read already in flight
+(`cancelRefetch: false`), so a show that fires both scans once. The read is unforced, like a
+remount's, so it reuses the scan cache and the summary cache.
+
 #### Usage history
 
 Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so a count read only

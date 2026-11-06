@@ -4,8 +4,13 @@ const invoke = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/api/core", () => ({ invoke }));
 const open = vi.hoisted(() => vi.fn());
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open }));
+const listen = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/event", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@tauri-apps/api/event")>()),
+  listen,
+}));
 
-import { cancelResetSpend, clearUsageHistory, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, usageHistoryStatus } from "./api";
+import { cancelResetSpend, clearUsageHistory, onMainWindowFocused, pendingResetSpends, pickCliBinary, pickFolder, removeLimitsAccount, setLimitsAccountArchived, setLimitsArchived, usageHistoryStatus } from "./api";
 
 beforeEach(() => {
   invoke.mockReset();
@@ -56,4 +61,16 @@ it("removes, archives and unarchives a card by its account alone, one command ea
     ["set_limits_account_archived", { agentId: "claude", accountId: "user-a", archived: true }],
     ["set_limits_account_archived", { agentId: "muse", accountId: "email:you@example.com", archived: false }],
   ]);
+});
+
+it("hears only the main window's own focus event, the one Tauri emits when that window gains focus", async () => {
+  const stop = vi.fn();
+  listen.mockResolvedValueOnce(stop);
+  const handler = vi.fn();
+
+  expect(await onMainWindowFocused(handler)).toBe(stop);
+  expect(listen).toHaveBeenCalledWith("tauri://focus", expect.any(Function), { target: { kind: "Window", label: "main" } });
+
+  listen.mock.calls[0]![1]({ event: "tauri://focus", id: 1, payload: null });
+  expect(handler).toHaveBeenCalledTimes(1);
 });

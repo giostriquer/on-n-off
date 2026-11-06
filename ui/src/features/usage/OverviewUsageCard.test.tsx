@@ -1,14 +1,25 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { OverviewUsageCard } from "./OverviewUsageCard";
+import { UsageFocusReads } from "./usageFocusReads";
 
-const usageSummary = vi.hoisted(() => vi.fn(() => new Promise(() => undefined)));
+const usageSummary = vi.hoisted(() => vi.fn((_input?: { force: boolean }) => new Promise(() => undefined)));
 const preloadUsageChart = vi.hoisted(() => vi.fn(() => Promise.resolve()));
 const renderUsageChart = vi.hoisted(() => vi.fn((_props: unknown) => null));
+const focusHandlers = vi.hoisted(() => new Set<() => void>());
+const onMainWindowFocused = vi.hoisted(() =>
+  vi.fn((handler: () => void) => {
+    focusHandlers.add(handler);
+    return Promise.resolve(() => {
+      focusHandlers.delete(handler);
+    });
+  }),
+);
 
-vi.mock("$lib/api", () => ({ usageSummary }));
+vi.mock("$lib/api", () => ({ usageSummary, onMainWindowFocused }));
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, ...props }: React.ComponentProps<"a"> & { to: string }) => (
     <a href={to} {...props}>
@@ -27,6 +38,7 @@ beforeEach(() => {
   usageSummary.mockImplementation(() => new Promise(() => undefined));
   preloadUsageChart.mockClear();
   renderUsageChart.mockClear();
+  focusHandlers.clear();
 });
 
 const missingSummary: UsageSummary = {
@@ -212,5 +224,44 @@ describe("OverviewUsageCard", () => {
     expect(pricedRow.textContent).toContain("$1.00");
     expect(pricedRow.textContent).not.toContain("unpriced");
     expect(screen.getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
+  });
+
+  it.each([
+    ["the webview becomes visible", () => document.dispatchEvent(new Event("visibilitychange", { bubbles: true }))],
+    [
+      "the on-n-off window gains focus",
+      () => {
+        for (const handler of focusHandlers) handler();
+      },
+    ],
+  ])("reads again, unforced, when %s once its figures are older than the stale time", async (_, reveal) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
+      usageSummary.mockResolvedValueOnce(modelSummary).mockResolvedValueOnce({
+        ...modelSummary,
+        buckets: [{ ...modelSummary.buckets[0]!, model: "gpt-5.7-sol" }],
+      });
+      render(
+        <QueryClientProvider client={createMainWindowQueryClient()}>
+          <UsageFocusReads />
+          <OverviewUsageCard />
+        </QueryClientProvider>,
+      );
+      await screen.findByText("gpt-5.6-sol");
+
+      vi.setSystemTime(new Date("2026-08-15T15:00:29.000Z"));
+      await act(async () => reveal());
+      expect(usageSummary).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
+      await act(async () => reveal());
+
+      expect(await screen.findByText("gpt-5.7-sol")).toBeTruthy();
+      expect(usageSummary).toHaveBeenCalledTimes(2);
+      expect(usageSummary.mock.calls.map(([input]) => input?.force)).toEqual([false, false]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

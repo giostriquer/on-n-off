@@ -1,12 +1,23 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
+import { UsageFocusReads } from "./usageFocusReads";
 
 const usageSummary = vi.hoisted(() => vi.fn());
+const focusHandlers = vi.hoisted(() => new Set<() => void>());
+const onMainWindowFocused = vi.hoisted(() =>
+  vi.fn((handler: () => void) => {
+    focusHandlers.add(handler);
+    return Promise.resolve(() => {
+      focusHandlers.delete(handler);
+    });
+  }),
+);
 
-vi.mock("$lib/api", () => ({ usageSummary }));
+vi.mock("$lib/api", () => ({ usageSummary, onMainWindowFocused }));
 vi.mock("./LazyUsageChart", () => ({
   LazyUsageChart: ({
     sinceDay,
@@ -110,12 +121,14 @@ function summary({
   };
 }
 
-function renderUsage() {
-  const client = new QueryClient({
+function renderUsage(
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Number.POSITIVE_INFINITY } },
-  });
+  }),
+) {
   return render(
     <QueryClientProvider client={client}>
+      <UsageFocusReads />
       <Usage />
     </QueryClientProvider>,
   );
@@ -129,6 +142,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
   usageSummary.mockReset();
+  focusHandlers.clear();
 });
 
 afterEach(() => {
@@ -158,6 +172,34 @@ describe("Usage providers", () => {
     renderUsage();
 
     expect(await screen.findByText("No Claude, Codex or Muse session transcripts found on this machine.")).toBeInTheDocument();
+  });
+});
+
+describe("Usage when the window shows again", () => {
+  const showWindow = () => document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+  const focusMainWindow = () => {
+    for (const handler of focusHandlers) handler();
+  };
+
+  it.each([
+    ["the webview becomes visible", showWindow],
+    ["the on-n-off window gains focus", focusMainWindow],
+  ])("reads again, unforced, when %s once the shown totals are older than the stale time", async (_, reveal) => {
+    usageSummary.mockResolvedValueOnce(summary()).mockResolvedValueOnce(summary({ costUsd: 20 }));
+    renderUsage(createMainWindowQueryClient());
+    await screen.findByRole("region", { name: "Usage totals" });
+    expectTotal("$12.50");
+
+    vi.setSystemTime(new Date("2026-08-15T15:00:29.000Z"));
+    await act(async () => reveal());
+    expect(usageSummary).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
+    await act(async () => reveal());
+
+    await waitFor(() => expectTotal("$20.00"));
+    expect(usageSummary).toHaveBeenCalledTimes(2);
+    expect(usageSummary.mock.calls.map(([input]) => input.force)).toEqual([false, false]);
   });
 });
 
