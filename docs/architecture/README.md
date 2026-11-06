@@ -554,6 +554,13 @@ Claude Code sets a replaced transcript aside as `<session>.jsonl.superseded-<ms>
 overwriting it. Those are read too, so a turn a rewrite dropped still counts; the turns both copies
 hold collapse to one.
 
+The Usage screen and the Overview usage card read when they mount, on the Usage refresh button,
+and when the window shows again with figures older than the main window's 30-second stale time
+(`refetchOnWindowFocus` on both queries; the main window turns it off by default). Closing the
+window only hides it, so a screen left on Usage stays mounted. Without the read on show it kept
+the figures from before it was hidden until another screen was opened and Usage was opened again.
+That read is unforced, like a remount's, so it reuses the scan cache and the summary cache.
+
 #### Usage history
 
 Claude Code deletes transcripts after `cleanupPeriodDays` (30 by default), so a count read only

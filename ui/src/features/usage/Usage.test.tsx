@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { Usage } from "./Usage";
 
@@ -110,10 +111,11 @@ function summary({
   };
 }
 
-function renderUsage() {
-  const client = new QueryClient({
+function renderUsage(
+  client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: Number.POSITIVE_INFINITY } },
-  });
+  }),
+) {
   return render(
     <QueryClientProvider client={client}>
       <Usage />
@@ -158,6 +160,26 @@ describe("Usage providers", () => {
     renderUsage();
 
     expect(await screen.findByText("No Claude, Codex or Muse session transcripts found on this machine.")).toBeInTheDocument();
+  });
+});
+
+describe("Usage when the window shows again", () => {
+  it("reads again once the shown totals are older than the stale time", async () => {
+    usageSummary.mockResolvedValueOnce(summary()).mockResolvedValueOnce(summary({ costUsd: 20 }));
+    renderUsage(createMainWindowQueryClient());
+    await screen.findByRole("region", { name: "Usage totals" });
+    expectTotal("$12.50");
+
+    vi.setSystemTime(new Date("2026-08-15T15:00:29.000Z"));
+    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+    expect(usageSummary).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
+    await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+
+    await waitFor(() => expectTotal("$20.00"));
+    expect(usageSummary).toHaveBeenCalledTimes(2);
+    expect(usageSummary.mock.calls[1]?.[0]).toMatchObject({ force: false });
   });
 });
 

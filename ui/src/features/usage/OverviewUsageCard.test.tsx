@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createMainWindowQueryClient } from "$lib/queryClients";
 import type { UsageSummary } from "$lib/usageTypes";
 import { OverviewUsageCard } from "./OverviewUsageCard";
 
@@ -212,5 +213,34 @@ describe("OverviewUsageCard", () => {
     expect(pricedRow.textContent).toContain("$1.00");
     expect(pricedRow.textContent).not.toContain("unpriced");
     expect(screen.getByText("if billed at full API rate · 1 model has no price yet")).toBeTruthy();
+  });
+
+  it("reads again when the window shows once its figures are older than the stale time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date("2026-08-15T15:00:00.000Z"));
+      usageSummary.mockResolvedValueOnce(modelSummary).mockResolvedValueOnce({
+        ...modelSummary,
+        buckets: [{ ...modelSummary.buckets[0]!, model: "gpt-5.7-sol" }],
+      });
+      render(
+        <QueryClientProvider client={createMainWindowQueryClient()}>
+          <OverviewUsageCard />
+        </QueryClientProvider>,
+      );
+      await screen.findByText("gpt-5.6-sol");
+
+      vi.setSystemTime(new Date("2026-08-15T15:00:29.000Z"));
+      await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+      expect(usageSummary).toHaveBeenCalledTimes(1);
+
+      vi.setSystemTime(new Date("2026-08-15T15:00:31.000Z"));
+      await act(async () => window.dispatchEvent(new Event("visibilitychange")));
+
+      expect(await screen.findByText("gpt-5.7-sol")).toBeTruthy();
+      expect(usageSummary).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

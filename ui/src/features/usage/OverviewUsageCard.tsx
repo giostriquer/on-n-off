@@ -36,6 +36,7 @@ function OverviewUsageCardView({ ready = true }: { ready?: boolean }) {
       return loadUsageWindow(30);
     },
     enabled: ready,
+    refetchOnWindowFocus: true,
   });
 
   const summary = query.data?.summary ?? null;

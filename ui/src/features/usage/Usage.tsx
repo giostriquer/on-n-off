@@ -49,6 +49,7 @@ export function Usage() {
       return loadUsageWindow(windowDays, force);
     },
     placeholderData: keepPreviousData,
+    refetchOnWindowFocus: true,
   });
 
   useEffect(() => {
