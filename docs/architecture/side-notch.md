@@ -87,14 +87,18 @@ drew only the cells that had been read into the first slots of a rail sized for 
   limits are unavailable.", always muted where the card is red, and paused only over windows or a
   share. The read's status, message and standing never reach the drawers: the notice and the
   paused line are what they say.
-- **The pull request cell**: whether the read is readable (`ok`, or stale), the hint as its notice
-  when the read is not `ok` (amber over rows it still shows, muted when it shows none), and, only
-  when readable, the lists in their own order with their titles, at most 25 rows each and only rows
-  on github.com. The ring has one segment per pull request across the lists, at most 24, a passing
-  pull request with merge conflicts marked as such, and its figure (`label`) is the count of
-  distinct pull requests once the read is readable, a dash until then. The attention counts the
-  macOS cell speaks (conflicts, failing CI, changes requested, ready to merge) count each pull
-  request once too.
+- **The pull request cell**: what the read's standing says (`PrReadStanding::of`, which the frame
+  asks of the read; [why](README.md#pull-requests)): readable unless it is unavailable, its message
+  as the notice when it is not live, in the message's tone whether or not the last read's lists
+  still show: red for a problem the user must fix (no `gh`, signed out of it, a rejected login),
+  amber for one that passes (a rate limit, GitHub out of reach), as the Pull requests screen inks
+  its banner. The notch used to ink it amber over the last read's lists and muted over none, so a
+  signed-out `gh` read grey on the notch and red on the screen. Then, only when readable, the lists
+  in their own order with their titles, at most 25 rows each and only rows on github.com. The ring
+  has one segment per pull request across the lists, at most 24, a passing pull request with merge
+  conflicts marked as such, and its figure (`label`) is the count of distinct pull requests once the
+  read is readable, a dash until then. The attention counts the macOS cell speaks (conflicts,
+  failing CI, changes requested, ready to merge) count each pull request once too.
 
 - **Each row's badges** (Draft, Approved, Changes requested, Conflicts, Queued, Auto-merge, Ready to
   merge, Behind base, Blocked) and **its tag**, each a label and a tone. A tone names an ink, never

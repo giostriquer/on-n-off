@@ -7,7 +7,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
 
-use crate::dto::{CiState, GithubPrDto, GithubPrsDto, GithubStatus, ReviewDecision};
+use crate::dto::{CiState, GithubPrDto, GithubPrsDto, PrReadStanding, ReviewDecision};
 use crate::github::merge;
 use crate::monitor::{self, wait_for_wake_or_deadline};
 use crate::notifications::Sound;
@@ -182,7 +182,7 @@ async fn poll_once(
     let prs = async_runtime::spawn_blocking(|| crate::github::read_prs(false))
         .await
         .map_err(|error| format!("github worker failed: {error}"))?;
-    let failed = prs.status != GithubStatus::Ok;
+    let failed = !answered(&prs);
     let current = state.clone();
     let path = state_path.to_path_buf();
     let (next, events) = async_runtime::spawn_blocking(move || {
@@ -239,8 +239,12 @@ fn sound_for(kind: EventKind, after: Seen) -> Sound {
     }
 }
 
+fn answered(prs: &GithubPrsDto) -> bool {
+    PrReadStanding::of(prs) == PrReadStanding::Live
+}
+
 fn observe(state: &mut MonitorState, prs: &GithubPrsDto) -> Vec<Event> {
-    if prs.status != GithubStatus::Ok || prs.stale {
+    if !answered(prs) {
         return Vec::new();
     }
     let mut events = Vec::new();

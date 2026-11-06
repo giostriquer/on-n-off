@@ -164,6 +164,14 @@ source carries no comments (see [Code comments](#code-comments)).
   restate the rule, `Reading::has_observations` among it. The Limits column's legacy fold asks the
   same rule through `ProviderLimitsDto::stands_unavailable`. The cases they all check are
   `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
+- Whether the pull request read is live, last observed or unavailable, and the message and tone it
+  shows: its read standing, `PrReadStanding::of` (`github/standing.rs`), from the read as it leaves,
+  sent to the screen with it (`GithubPrsReplyDto`) and never stored. The screen's banner
+  (`prStanding.ts`), the notch's pull request cell (`frame::rail`) and the monitor's guard render or
+  ask it and never restate it from `status` or `stale`; a status's headline is the screen's only
+  words of its own. The UI's `GithubPrs` has no `stale` or `hint`, so `tsc` refuses a screen that
+  reads them. The cases are `github/standing/fixtures/standing-cases.json`, which also keeps the
+  UI's `GITHUB_STATUSES` equal to `GithubStatus` ([why](architecture/README.md#pull-requests)).
 - What a side notch cell shows: `frame::rail` (`side_notch/model/frame.rs`), for both notches. A
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together
@@ -226,7 +234,11 @@ comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler 
   `github/fixtures.rs` (with `FakeGithub`). Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.
-- Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`.
+- Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`. For a
+  new UI test of a fixture shared with Rust, prefer a typed module that parses it once over casts
+  in each test, as the pull request read's cases do (`ui/src/features/github/prStandingCases.ts`,
+  with `exactly` from `ui/src/testing/exactly.ts` refusing an object that holds other keys than its
+  type names). Older fixture tests still parse in their own file or cast; they are not migrated.
 
 ## Commands
 

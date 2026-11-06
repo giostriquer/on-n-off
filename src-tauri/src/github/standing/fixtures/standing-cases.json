@@ -1,0 +1,102 @@
+{
+  "cases": [
+    {
+      "name": "a read that answered",
+      "status": "ok", "hint": null, "stale": false, "rows": 1,
+      "standing": { "kind": "live" },
+      "screen": { "banner": null, "lastRead": false },
+      "notch": { "notice": null, "label": "1" }
+    },
+    {
+      "name": "a read that answered keeps a hint to itself",
+      "status": "ok", "hint": "Read a minute ago.", "stale": false, "rows": 1,
+      "standing": { "kind": "live" },
+      "screen": { "banner": null, "lastRead": false },
+      "notch": { "notice": null, "label": "1" }
+    },
+    {
+      "name": "no gh to read with",
+      "status": "ghMissing", "hint": "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh.", "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh.", "tone": "error" } },
+      "screen": { "banner": { "headline": "GitHub CLI not found", "hint": "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh.", "tone": "trip" }, "lastRead": false },
+      "notch": { "notice": { "text": "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh.", "tone": "red" }, "label": "—" }
+    },
+    {
+      "name": "no gh to read with, over the last read",
+      "status": "ghMissing", "hint": "Could not start `gh` (No such file or directory).", "stale": true, "rows": 1,
+      "standing": { "kind": "lastObserved", "message": { "text": "Could not start `gh` (No such file or directory).", "tone": "error" } },
+      "screen": { "banner": { "headline": "GitHub CLI not found", "hint": "Could not start `gh` (No such file or directory).", "tone": "trip" }, "lastRead": true },
+      "notch": { "notice": { "text": "Could not start `gh` (No such file or directory).", "tone": "red" }, "label": "1" }
+    },
+    {
+      "name": "gh signed out",
+      "status": "ghNotLoggedIn", "hint": "Sign in with `gh auth login` in a terminal, then refresh.", "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "error" } },
+      "screen": { "banner": { "headline": "Not signed in to GitHub", "hint": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "trip" }, "lastRead": false },
+      "notch": { "notice": { "text": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "red" }, "label": "—" }
+    },
+    {
+      "name": "gh signed out, over the last read",
+      "status": "ghNotLoggedIn", "hint": "Sign in with `gh auth login` in a terminal, then refresh.", "stale": true, "rows": 1,
+      "standing": { "kind": "lastObserved", "message": { "text": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "error" } },
+      "screen": { "banner": { "headline": "Not signed in to GitHub", "hint": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "trip" }, "lastRead": true },
+      "notch": { "notice": { "text": "Sign in with `gh auth login` in a terminal, then refresh.", "tone": "red" }, "label": "1" }
+    },
+    {
+      "name": "a rejected token",
+      "status": "tokenRejected", "hint": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "error" } },
+      "screen": { "banner": { "headline": "GitHub sign-in rejected", "hint": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "trip" }, "lastRead": false },
+      "notch": { "notice": { "text": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "red" }, "label": "—" }
+    },
+    {
+      "name": "a rejected token, over the last read",
+      "status": "tokenRejected", "hint": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "stale": true, "rows": 1,
+      "standing": { "kind": "lastObserved", "message": { "text": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "error" } },
+      "screen": { "banner": { "headline": "GitHub sign-in rejected", "hint": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "trip" }, "lastRead": true },
+      "notch": { "notice": { "text": "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "tone": "red" }, "label": "1" }
+    },
+    {
+      "name": "a rate limit",
+      "status": "rateLimited", "hint": "GitHub rate limit reached — polling resumes in 5 min.", "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "GitHub rate limit reached — polling resumes in 5 min.", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub rate limit reached", "hint": "GitHub rate limit reached — polling resumes in 5 min.", "tone": "warn" }, "lastRead": false },
+      "notch": { "notice": { "text": "GitHub rate limit reached — polling resumes in 5 min.", "tone": "amber" }, "label": "—" }
+    },
+    {
+      "name": "a rate limit, over the last read",
+      "status": "rateLimited", "hint": "GitHub rate limit reached — polling resumes in 2 min.", "stale": true, "rows": 1,
+      "standing": { "kind": "lastObserved", "message": { "text": "GitHub rate limit reached — polling resumes in 2 min.", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub rate limit reached", "hint": "GitHub rate limit reached — polling resumes in 2 min.", "tone": "warn" }, "lastRead": true },
+      "notch": { "notice": { "text": "GitHub rate limit reached — polling resumes in 2 min.", "tone": "amber" }, "label": "1" }
+    },
+    {
+      "name": "a rate limit, over a last read with nothing open",
+      "status": "rateLimited", "hint": "GitHub rate limit reached — polling resumes in 3 min.", "stale": true, "rows": 0,
+      "standing": { "kind": "lastObserved", "message": { "text": "GitHub rate limit reached — polling resumes in 3 min.", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub rate limit reached", "hint": "GitHub rate limit reached — polling resumes in 3 min.", "tone": "warn" }, "lastRead": true },
+      "notch": { "notice": { "text": "GitHub rate limit reached — polling resumes in 3 min.", "tone": "amber" }, "label": "0" }
+    },
+    {
+      "name": "GitHub out of reach",
+      "status": "network", "hint": "Could not reach GitHub (network error: Dns).", "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "Could not reach GitHub (network error: Dns).", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub unreachable", "hint": "Could not reach GitHub (network error: Dns).", "tone": "warn" }, "lastRead": false },
+      "notch": { "notice": { "text": "Could not reach GitHub (network error: Dns).", "tone": "amber" }, "label": "—" }
+    },
+    {
+      "name": "an unreadable reply, over the last read",
+      "status": "network", "hint": "GitHub sent an unreadable reply (Bad query).", "stale": true, "rows": 1,
+      "standing": { "kind": "lastObserved", "message": { "text": "GitHub sent an unreadable reply (Bad query).", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub unreachable", "hint": "GitHub sent an unreadable reply (Bad query).", "tone": "warn" }, "lastRead": true },
+      "notch": { "notice": { "text": "GitHub sent an unreadable reply (Bad query).", "tone": "amber" }, "label": "1" }
+    },
+    {
+      "name": "a failed read without words",
+      "status": "network", "hint": null, "stale": false, "rows": 0,
+      "standing": { "kind": "unavailable", "message": { "text": "GitHub did not answer.", "tone": "warning" } },
+      "screen": { "banner": { "headline": "GitHub unreachable", "hint": "GitHub did not answer.", "tone": "warn" }, "lastRead": false },
+      "notch": { "notice": { "text": "GitHub did not answer.", "tone": "amber" }, "label": "—" }
+    }
+  ]
+}

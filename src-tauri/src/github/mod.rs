@@ -7,8 +7,12 @@ pub(crate) mod merge;
 mod parse;
 mod query;
 mod snapshot;
+mod standing;
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use standing::cases as standing_cases;
 
 use std::collections::HashSet;
 use std::path::Path;

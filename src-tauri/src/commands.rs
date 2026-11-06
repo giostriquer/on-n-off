@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::dto::{
-    AdapterError, AgentId, AgentInfo, AgentTabDto, ColumnEntryDto, GithubPrsDto,
+    AdapterError, AgentId, AgentInfo, AgentTabDto, ColumnEntryDto, GithubPrsReplyDto,
     InstallItemsRequest, InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto,
     PendingResetSpendDto, ProjectDto, ResetCreditOutcome, UpdateItemMode, UsageHistoryStatusDto,
     UsageSummaryDto, UsageSummaryInput,
@@ -485,8 +485,11 @@ pub async fn set_limits_account_archived(
 }
 
 #[tauri::command]
-pub async fn read_github_prs(force: bool) -> Result<GithubPrsDto, AdapterError> {
-    blocking("github read", move || Ok(crate::github::read_prs(force))).await
+pub async fn read_github_prs(force: bool) -> Result<GithubPrsReplyDto, AdapterError> {
+    blocking("github read", move || {
+        Ok(GithubPrsReplyDto::of(crate::github::read_prs(force)))
+    })
+    .await
 }
 
 #[tauri::command]

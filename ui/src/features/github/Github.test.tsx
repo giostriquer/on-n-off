@@ -2,8 +2,9 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { GithubPr, GithubPrs, GithubStatus } from "$lib/githubTypes";
+import type { GithubPr, GithubPrs, GithubStatus, PrReadStanding } from "$lib/githubTypes";
 import { Github } from "./Github";
+import { PR_STANDING_CASES, standingFor } from "./prStandingCases";
 
 const readGithubPrs = vi.hoisted(() => vi.fn());
 const openUrl = vi.hoisted(() => vi.fn());
@@ -36,7 +37,6 @@ function pr(overrides: Partial<GithubPr> = {}): GithubPr {
 function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
   return {
     status: "ok",
-    stale: false,
     viewer: "octocat",
     fetchedAt: NOW,
     scope: ["org:acme"],
@@ -76,17 +76,15 @@ function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
   };
 }
 
-function problem(status: GithubStatus, hint: string, overrides: Partial<GithubPrs> = {}): GithubPrs {
+function problem(status: GithubStatus, standing: PrReadStanding | undefined): GithubPrs {
   return {
     status,
-    hint,
-    stale: false,
+    standing,
     scope: [],
     mine: { total: 0, items: [] },
     reviewRequested: { total: 0, items: [] },
     assigned: { total: 0, items: [] },
     merged: { total: 0, items: [] },
-    ...overrides,
   };
 }
 
@@ -218,7 +216,7 @@ describe("Github", () => {
     ["rateLimited", "GitHub rate limit reached", "GitHub rate limit reached — polling resumes in 5 min."],
     ["network", "GitHub unreachable", "Could not reach GitHub (network error: Dns)."],
   ])("explains a %s problem with the backend's hint", async (status, headline, hint) => {
-    readGithubPrs.mockResolvedValue(problem(status, hint));
+    readGithubPrs.mockResolvedValue(problem(status, standingFor(status, false, hint)));
     renderGithub();
 
     const banner = await screen.findByRole("alert");
@@ -227,12 +225,24 @@ describe("Github", () => {
     expect(within(section("Mine")).getByText("No open pull requests of yours.")).toBeTruthy();
   });
 
+  it.each(PR_STANDING_CASES.filter(({ screen: shown }) => shown.banner !== null))(
+    "draws $name in its read standing's ink",
+    async ({ status, standing, screen: shown }) => {
+      readGithubPrs.mockResolvedValue(problem(status, standing));
+      renderGithub();
+
+      const banner = await screen.findByRole("alert");
+      expect(banner.className).toContain(shown.banner?.tone === "trip" ? "text-[var(--trip)]" : "text-[var(--warn)]");
+      expect(banner.textContent).toBe(`${shown.banner?.headline} — ${shown.banner?.hint}`);
+      expect(screen.queryByText(/Showing the last read/) !== null).toBe(shown.lastRead);
+    },
+  );
+
   it("keeps showing the last read when a refresh fails", async () => {
     readGithubPrs.mockResolvedValue(
       okPrs({
         status: "network",
-        hint: "Could not reach GitHub (network error: Dns).",
-        stale: true,
+        standing: standingFor("network", true, "Could not reach GitHub (network error: Dns)."),
         fetchedAt: "2026-08-24T18:00:00Z",
       }),
     );

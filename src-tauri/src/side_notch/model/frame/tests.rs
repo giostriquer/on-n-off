@@ -581,18 +581,8 @@ fn pr_cell_of(dto: Option<&GithubPrsDto>) -> PrCell {
     }
 }
 
-fn reported_pulls(status: &str, hint: Option<&str>, stale: bool) -> GithubPrsDto {
-    serde_json::from_value(serde_json::json!({
-        "status": status, "hint": hint, "stale": stale, "scope": [],
-        "mine": {"total": 1, "items": [pr(1)]},
-        "reviewRequested": {"total": 0, "items": []},
-        "assigned": {"total": 0, "items": []}
-    }))
-    .unwrap()
-}
-
 #[test]
-fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_reads_hint() {
+fn the_pull_request_cell_says_what_its_read_standing_says_and_is_checking_until_read() {
     let checking = pr_cell_of(None);
     assert_eq!(checking.reading, None);
     assert_eq!(checking.label, "—", "no count before the first read");
@@ -604,53 +594,33 @@ fn the_pull_request_cell_says_it_is_checking_until_read_then_shows_a_failed_read
         })
     );
 
-    let stale = pr_cell_of(Some(&reported_pulls(
-        "rateLimited",
-        Some("Showing the pull requests read at 10:00."),
-        true,
-    )));
-    assert_eq!(
-        stale.notice,
-        Some(Notice {
-            text: "Showing the pull requests read at 10:00.".into(),
-            tone: Tone::Amber
-        }),
-        "a stale read warns over the rows it still shows"
-    );
-    assert_eq!(
-        stale.label, "1",
-        "the ring's figure is the count of what it still shows"
-    );
-    assert_eq!(stale.reading.expect("read").lists[0].items.len(), 1);
-
-    let unreadable = pr_cell_of(Some(&reported_pulls(
-        "ghNotLoggedIn",
-        Some("Sign in with the GitHub CLI."),
-        false,
-    )));
-    assert_eq!(
-        unreadable.notice,
-        Some(Notice {
-            text: "Sign in with the GitHub CLI.".into(),
-            tone: Tone::Muted
-        })
-    );
-    assert_eq!(unreadable.label, "—");
-    let reading = unreadable.reading.expect("read");
-    assert!(!reading.readable);
-    assert!(reading.lists.is_empty(), "an unreadable read shows no rows");
-    assert_eq!(reading.count, 0);
-
-    assert_eq!(
-        pr_cell_of(Some(&reported_pulls(
-            "ok",
-            Some("Read a minute ago."),
-            false
-        )))
-        .notice,
-        None,
-        "a read that is fine keeps its hint to itself"
-    );
+    for case in crate::github::standing_cases::fixture().cases {
+        let cell = pr_cell_of(Some(&case.read()));
+        assert_eq!(
+            serde_json::json!({ "notice": cell.notice, "label": cell.label }),
+            case.notch,
+            "{}",
+            case.name
+        );
+        let reading = cell.reading.expect("read");
+        let readable = !matches!(case.expected(), PrReadStanding::Unavailable { .. });
+        assert_eq!(reading.readable, readable, "{}", case.name);
+        if readable {
+            assert_eq!(
+                reading.count, case.rows as u64,
+                "{}: what it still shows",
+                case.name
+            );
+            assert_eq!(reading.lists[0].items.len(), case.rows, "{}", case.name);
+        } else {
+            assert!(
+                reading.lists.is_empty(),
+                "{}: an unreadable read shows no rows",
+                case.name
+            );
+            assert_eq!(reading.count, 0, "{}", case.name);
+        }
+    }
 }
 
 #[test]

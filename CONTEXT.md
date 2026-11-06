@@ -90,6 +90,13 @@ because the signed-in read is paused (it failed or reached no account it could r
 profile's refresh is paused, or it is a remembered reading; unavailable, when its read did not
 answer and it holds nothing. A paused or unavailable card carries the message every surface shows,
 in the error tone for a failed read. Before any read a card is checking.
+
+The pull request read has a read standing too, decided the same way for the screen and the notch:
+live when it answered, last observed when it failed and shows the last read's lists, unavailable
+when it failed with nothing remembered. Its message is in the error tone for a problem the user
+must fix (no `gh`, signed out of it, a rejected login) and the warning tone for one that passes (a
+rate limit, GitHub out of reach); no card's message takes the warning tone. Before its first read
+it is checking.
 _Avoid_: freshness, status (the read's own outcome), stale
 
 **Signed-in state**:

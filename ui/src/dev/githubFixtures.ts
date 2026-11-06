@@ -1,4 +1,4 @@
-import type { CiState, GithubPr, GithubPrs, GithubStatus, MergeKind, ReviewDecision } from "$lib/githubTypes";
+import type { CiState, GithubPr, GithubPrs, GithubStatus, MergeKind, PrStandingMessage, ReviewDecision } from "$lib/githubTypes";
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -67,7 +67,6 @@ const ASSIGNED: Seed[] = [{ n: 77, title: "Triage: flaky updater smoke on Window
 export function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
   return {
     status: "ok",
-    stale: false,
     viewer: "you",
     fetchedAt: new Date(NOW - 20_000).toISOString(),
     scope: ["org:acme", "repo:octo/tools"],
@@ -80,11 +79,10 @@ export function okPrs(overrides: Partial<GithubPrs> = {}): GithubPrs {
   };
 }
 
-export function problemPrs(status: GithubStatus, hint: string): GithubPrs {
+export function problemPrs(status: GithubStatus, hint: string, tone: PrStandingMessage["tone"]): GithubPrs {
   return {
     status,
-    hint,
-    stale: false,
+    standing: { kind: "unavailable", message: { text: hint, tone } },
     scope: [],
     mine: { total: 0, items: [] },
     reviewRequested: { total: 0, items: [] },
@@ -121,11 +119,15 @@ export const SCENARIOS: Record<string, () => GithubPrs | Promise<GithubPrs>> = {
       merged: { total: 0, items: [] },
     }),
   many: manyPrs,
-  stale: () => okPrs({ status: "network", hint: "Could not reach GitHub (network error: Dns).", stale: true }),
-  ghMissing: () => problemPrs("ghMissing", "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh."),
-  ghNotLoggedIn: () => problemPrs("ghNotLoggedIn", "Sign in with `gh auth login` in a terminal, then refresh."),
-  tokenRejected: () => problemPrs("tokenRejected", "GitHub rejected the `gh` login — run `gh auth login` again, then refresh."),
-  rateLimited: () => problemPrs("rateLimited", "GitHub rate limit reached — polling resumes in 5 min."),
-  network: () => problemPrs("network", "Could not reach GitHub (network error: Dns)."),
+  stale: () =>
+    okPrs({
+      status: "network",
+      standing: { kind: "lastObserved", message: { text: "Could not reach GitHub (network error: Dns).", tone: "warning" } },
+    }),
+  ghMissing: () => problemPrs("ghMissing", "Install the GitHub CLI (`gh`), sign in with `gh auth login`, then refresh.", "error"),
+  ghNotLoggedIn: () => problemPrs("ghNotLoggedIn", "Sign in with `gh auth login` in a terminal, then refresh.", "error"),
+  tokenRejected: () => problemPrs("tokenRejected", "GitHub rejected the `gh` login — run `gh auth login` again, then refresh.", "error"),
+  rateLimited: () => problemPrs("rateLimited", "GitHub rate limit reached — polling resumes in 5 min.", "warning"),
+  network: () => problemPrs("network", "Could not reach GitHub (network error: Dns).", "warning"),
   loading: () => new Promise<GithubPrs>(() => undefined),
 };

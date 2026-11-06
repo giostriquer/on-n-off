@@ -54,8 +54,8 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
     assert!(
-        inks(&planned).contains(&("Sign in with the GitHub CLI.".to_string(), MUTED_INK)),
-        "an unreadable read shows its hint, muted"
+        inks(&planned).contains(&("Sign in with the GitHub CLI.".to_string(), TRIP_RED)),
+        "an unreadable read shows its hint in its read standing's tone, red when signed out"
     );
     assert!(
         !popover.entries.iter().any(

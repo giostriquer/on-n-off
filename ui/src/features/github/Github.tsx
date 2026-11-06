@@ -3,18 +3,13 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, RefreshCw, Search, X } from "lucide-react";
 import { FOCUS_RING } from "$lib/a11y";
 import { displayError, parseInvokeError } from "$lib/error";
-import {
-  filterPrs,
-  groupPrsByRepo,
-  listCountLabel,
-  orderPrs,
-  statusHeadline,
-} from "$lib/githubFormat";
+import { filterPrs, groupPrsByRepo, listCountLabel, orderPrs } from "$lib/githubFormat";
 import type { GithubListId, GithubPr, GithubPrList, GithubPrs } from "$lib/githubTypes";
 import { formatAgo } from "$lib/timeFormat";
 import type { GithubPollSeconds } from "$lib/types";
 import { readCollapsed, writeCollapsed } from "./collapsed";
 import { PrRow } from "./PrRow";
+import { prBanner, showsLastRead, type PrBanner } from "./prStanding";
 import { githubPrsQuery, refreshGithubPrs } from "$lib/sharedReads/githubPrs";
 
 type GithubProps = {
@@ -33,9 +28,7 @@ const SECTIONS: { id: GithubListId; title: string; empty: string }[] = [
   { id: "assigned", title: "Assigned", empty: "Nothing assigned to you." },
 ];
 
-type Banner = { headline: string; hint: string; tone: "trip" | "warn" };
-
-function bannerFor(prs: GithubPrs | null, invokeError: unknown): Banner | null {
+function bannerFor(prs: GithubPrs | null, invokeError: unknown): PrBanner | null {
   if (invokeError) {
     return {
       headline: "GitHub unavailable",
@@ -43,12 +36,7 @@ function bannerFor(prs: GithubPrs | null, invokeError: unknown): Banner | null {
       tone: "trip",
     };
   }
-  if (!prs || prs.status === "ok") return null;
-  return {
-    headline: statusHeadline(prs.status),
-    hint: prs.hint ?? "",
-    tone: prs.status === "rateLimited" || prs.status === "network" ? "warn" : "trip",
-  };
+  return prs ? prBanner(prs) : null;
 }
 
 export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
@@ -114,7 +102,7 @@ export function Github({ pollSeconds, onOpenSettings }: GithubProps) {
         </p>
       ) : null}
 
-      {prs?.stale ? (
+      {prs && showsLastRead(prs) ? (
         <p className="m-0 rounded-[11px] bg-[var(--well)] px-3.5 py-[7px] font-mono text-[11px] text-[var(--warn)]">
           Showing the last read from {updated || "earlier"} — GitHub could not be refreshed.
         </p>

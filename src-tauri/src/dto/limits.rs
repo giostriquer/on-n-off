@@ -212,9 +212,9 @@ pub enum LastObserved {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct StandingMessage {
+pub struct StandingMessage<T = MessageTone> {
     pub text: String,
-    pub tone: MessageTone,
+    pub tone: T,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

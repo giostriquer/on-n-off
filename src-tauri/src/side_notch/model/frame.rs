@@ -1,7 +1,7 @@
 use super::{GithubList, NotchProvider, NotchSettings, PrContext};
 use crate::dto::{
-    AgentId, CiState, GithubPrDto, GithubPrsDto, GithubStatus, LastObserved, MergeKind,
-    MessageTone, ReadStanding, ReviewDecision, StandingMessage,
+    AgentId, CiState, GithubPrDto, GithubPrsDto, LastObserved, MergeKind, MessageTone,
+    PrMessageTone, PrReadStanding, ReadStanding, ReviewDecision, StandingMessage,
 };
 use crate::side_notch::sessions::LiveSession;
 use serde::Serialize;
@@ -200,13 +200,28 @@ fn paused(reading: &NotchProvider) -> Notice {
     }
 }
 
-fn notice_of(message: &StandingMessage) -> Notice {
+fn notice_of<T: Copy + Into<Tone>>(message: &StandingMessage<T>) -> Notice {
     Notice {
         text: message.text.clone(),
-        tone: match message.tone {
-            MessageTone::Error => Tone::Red,
-            MessageTone::Muted => Tone::Muted,
-        },
+        tone: message.tone.into(),
+    }
+}
+
+impl From<MessageTone> for Tone {
+    fn from(tone: MessageTone) -> Self {
+        match tone {
+            MessageTone::Error => Self::Red,
+            MessageTone::Muted => Self::Muted,
+        }
+    }
+}
+
+impl From<PrMessageTone> for Tone {
+    fn from(tone: PrMessageTone) -> Self {
+        match tone {
+            PrMessageTone::Error => Self::Red,
+            PrMessageTone::Warning => Self::Amber,
+        }
     }
 }
 
@@ -225,19 +240,13 @@ fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
             notice: Some(muted("Checking pull requests…".into())),
         };
     };
-    let reading = pr_reading(dto, selected);
-    let notice = dto
-        .hint
-        .clone()
-        .filter(|_| dto.status != GithubStatus::Ok)
-        .map(|text| Notice {
-            text,
-            tone: if reading.readable {
-                Tone::Amber
-            } else {
-                Tone::Muted
-            },
-        });
+    let standing = PrReadStanding::of(dto);
+    let (readable, notice) = match &standing {
+        PrReadStanding::Live => (true, None),
+        PrReadStanding::LastObserved { message } => (true, Some(notice_of(message))),
+        PrReadStanding::Unavailable { message } => (false, Some(notice_of(message))),
+    };
+    let reading = pr_reading(dto, readable, selected);
     PrCell {
         label: if reading.readable {
             reading.count.to_string()
@@ -249,8 +258,7 @@ fn pr_cell(dto: Option<&GithubPrsDto>, selected: &[GithubList]) -> PrCell {
     }
 }
 
-fn pr_reading(dto: &GithubPrsDto, selected: &[GithubList]) -> PrReading {
-    let readable = dto.status == GithubStatus::Ok || dto.stale;
+fn pr_reading(dto: &GithubPrsDto, readable: bool, selected: &[GithubList]) -> PrReading {
     let shown: Vec<(GithubList, u64, Vec<&GithubPrDto>)> = if readable {
         selected
             .iter()

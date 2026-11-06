@@ -1,10 +1,13 @@
-export type GithubStatus =
-  | "ok"
-  | "ghMissing"
-  | "ghNotLoggedIn"
-  | "tokenRejected"
-  | "rateLimited"
-  | "network";
+export const GITHUB_STATUSES = ["ok", "ghMissing", "ghNotLoggedIn", "tokenRejected", "rateLimited", "network"] as const;
+
+export type GithubStatus = (typeof GITHUB_STATUSES)[number];
+
+export type PrStandingMessage = { text: string; tone: "error" | "warning" };
+
+export type PrReadStanding =
+  | { kind: "live" }
+  | { kind: "lastObserved"; message: PrStandingMessage }
+  | { kind: "unavailable"; message: PrStandingMessage };
 
 export type CiState = "none" | "pending" | "success" | "failure" | "error";
 
@@ -57,7 +60,6 @@ export const GITHUB_LIST_IDS: readonly GithubListId[] = ["mine", "reviewRequeste
 
 export type GithubPrs = GithubPrsData & {
   status: GithubStatus;
-  hint?: string | null;
-  stale: boolean;
   warnings?: string[];
+  standing?: PrReadStanding;
 };

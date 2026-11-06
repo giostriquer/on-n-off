@@ -282,6 +282,37 @@ fn a_failed_or_stale_read_leaves_the_baseline_alone() {
 }
 
 #[test]
+fn only_a_read_that_stands_live_moves_the_baseline_or_counts_as_answered() {
+    for case in crate::github::standing_cases::fixture().cases {
+        let live = case.expected() == PrReadStanding::Live;
+        let mut state = MonitorState::default();
+        observe(&mut state, &read(vec![pr("a", CiState::Pending)]));
+        let events = observe(&mut state, &case.read_over(vec![pr("a", CiState::Failure)]));
+        assert_eq!(
+            kinds(&events),
+            if live {
+                vec![EventKind::CiFailed]
+            } else {
+                Vec::new()
+            },
+            "{}",
+            case.name
+        );
+        assert_eq!(
+            ci_of(&state, "a"),
+            Some(if live {
+                CiState::Failure
+            } else {
+                CiState::Pending
+            }),
+            "{}",
+            case.name
+        );
+        assert_eq!(answered(&case.read()), live, "{}", case.name);
+    }
+}
+
+#[test]
 fn draft_pull_requests_count_too() {
     let mut state = MonitorState::default();
     let mut draft = pr("a", CiState::Pending);

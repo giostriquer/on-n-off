@@ -4,15 +4,9 @@ import { hasLimits, isAgentId } from "$lib/providers";
 import standings from "../../../../src-tauri/src/limits/standing/fixtures/standing-cases.json";
 import { limitCards } from "./limitCards";
 import { CHECKING_LIMITS } from "./limitPresentation";
+import { exactly } from "../../testing/exactly";
 
 const NOW = Date.parse("2026-09-01T12:00:00Z");
-
-function exactly(value: unknown, keys: string[]): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`${JSON.stringify(value)} is not an object`);
-  const found = Object.keys(value).sort();
-  if (found.join() !== [...keys].sort().join()) throw new Error(`${JSON.stringify(value)} does not hold exactly ${keys.join(", ")}`);
-  return value as Record<string, unknown>;
-}
 
 function standingMessage(value: unknown): StandingMessage {
   const { text, tone } = exactly(value, ["text", "tone"]);

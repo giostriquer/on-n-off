@@ -442,6 +442,42 @@ their CI rollups and merge state. Problems come back as a `status` + `hint` on t
 last snapshot under `~/.on-n-off/github/`. Auth is borrowed from `gh auth token`, memoised per
 app run, re-read once on a 401, never persisted.
 
+What the read is worth now, its read standing, is one rule, `PrReadStanding::of`
+(`github/standing.rs`), worked out from the read as it leaves (`status`, `hint`, `stale`): live when
+the search answered; last observed when it failed and the read shows the last one's lists (from
+memory or `prs.json`, even when they hold nothing: no open pull request is something read);
+unavailable when it failed with nothing remembered. Its message is the read's hint, in the error
+tone for a problem the user must fix (`gh` missing, signed out of `gh`, a rejected token) and the
+warning tone for one that passes (a rate limit, GitHub out of reach). Only defensively, for a
+failure without a hint, which no read produces, does it say "GitHub did not answer.". The message
+is `PrStandingMessage`, a `StandingMessage` toned by `PrMessageTone` (error or warning), where a
+Limits card's is toned by `MessageTone` (error or muted), so a Limits card cannot carry the warning
+tone. The notch draws either through one `notice_of`, each tone type mapped to its inks once
+(`From<_> for Tone`, `frame.rs`).
+`read_github_prs` sends the read with its standing (`GithubPrsReplyDto`, the standing left out while
+live, as a Limits column entry carries a card's); the Rust consumers keep `GithubPrsDto` and ask the
+rule, so no value stores a standing that could disagree with its read. Every surface renders it and
+none decides it again: the screen's banner and its "Showing the last read" line (`prBanner` and
+`showsLastRead`, `ui/src/features/github/prStanding.ts`; the banner's headline stays the screen's
+own words for the status, `statusHeadline`), the notch's pull request cell (`frame::rail`: readable
+unless unavailable, the message as its notice in its tone), and the monitor, which observes a read
+and starts its failure backoff over only when the read stands live (`answered`,
+`github_monitor.rs`). They used to decide it three ways, and the notch inked the hint amber over the
+last read's lists and muted over none, where the screen inked a missing or signed-out `gh` and a
+rejected token red and a rate limit or GitHub out of reach amber.
+`github/standing/fixtures/standing-cases.json` is the one table: every status, alone and over the
+last read, and a rate limit over a last read with nothing open, each with the open pull requests the
+read holds (`rows`), its standing and what the screen and the notch cell show. The Rust tests assert
+each row's standing and that every `GithubStatus` has both rows, the frame and the monitor tests
+read it, and `prStanding.test.ts` checks each standing against the UI's `PrReadStanding` type, what
+the screen shows, and that `GITHUB_STATUSES`, the UI's copy of `GithubStatus`, names exactly the
+table's statuses; the dev mock's replies are checked against it too (`dev/githubFixtures.test.ts`,
+which names the scenes that send a remembered read rather than reading that off their standing).
+The UI tests read the table once, typed, through `ui/src/features/github/prStandingCases.ts`
+(`PR_STANDING_CASES`, and `standingFor(status, stale, hint)` for a reply a test builds). The UI's
+`GithubPrs` type leaves out `stale` and `hint`, which the reply still carries, so the type checker
+refuses a screen that would decide from them again.
+
 Every request a pull request read makes goes through one connection, the `Github` seam in
 `github/connection.rs`: the search, the contribution lookup and commit check (GraphQL) and the
 events pages (REST). Its production adapter, `HttpGithub`, alone holds what requests share across
@@ -1046,6 +1082,7 @@ the code today; a change that moves one updates its row.
 | Reset instant | `ResetInstant` (`limits/window.rs`, re-exported by `limits` with `cycle_turned_over` and `Observation`), parsed from a window's `resetsAt`; one cycle by `same_cycle_as`, later by `later_than`; compared by the limits monitor (`cycle_turned_over`), the banked reset alert (`reset_alert.rs`) and the Codex sessions merge (`limits/codex_sessions.rs`) |
 | Reading | `Reading` (`dto/limits.rs`), flattened into `ProviderLimitsDto` and the snapshot file; built by `limits/pipeline.rs` |
 | Read standing | `ReadStanding` and `LastObserved` (`dto/limits.rs`), decided by `ReadStanding::of` (`limits/standing.rs`) from the card as it leaves: sent on each Limits column entry (`ColumnEntryDto.standing`, by `ReadStanding::sent_with` as `limits::column` builds it) and asked by `NotchProvider::current` (`side_notch/model.rs`); rendered by `presentStanding` (`ui/src/features/limits/limitPresentation.ts`) for the card and the tray popover and by `frame::rail` (`side_notch/model/frame.rs`) for both notches; the cases all three check are `limits/standing/fixtures/standing-cases.json`, with the checking text (`CHECKING_LIMITS` in the UI) |
+| Read standing (pull requests) | `PrReadStanding` with its `PrStandingMessage` (`StandingMessage<PrMessageTone>`, `dto.rs`), decided by `PrReadStanding::of` (`github/standing.rs`) from the read as it leaves: sent by `read_github_prs` as `GithubPrsReplyDto.standing` and asked by the monitor (`answered`, `github_monitor.rs`); rendered by `prBanner` and `showsLastRead` (`ui/src/features/github/prStanding.ts`) for the screen and by `frame::rail` (`side_notch/model/frame.rs`) for both notches; the cases all three check are `github/standing/fixtures/standing-cases.json`, parsed for the UI tests by `ui/src/features/github/prStandingCases.ts` |
 | Headline window | a card's weekly window, first in the order `pipeline::kind_rank` gives every card (`limits/pipeline.rs`); chosen as `headlineWindow` (`ui/src/features/limits/limitPresentation.ts`) by the card model both Limits surfaces render (`limitCards.ts`), whose card action plan hands how long it has until it resets by itself (`resetsIn`) to the Use banked reset dialog (`ResetControls`, `cardActionPlan.ts`), and as `NotchProvider::headline_window_id` for both notches (`side_notch/model.rs`), which the Windows painter resolves with `NotchProvider::headline` and the helper with `Reading.headline` |
 | Figure | the optional fields `Reading::has_figures` lists, plus `subscription` and `reset_offer` |
 | Account details | `plan` on `Reading`, with the `plan_label` and `plan_capacity` `plan::describe` works out from it (`limits/plan.rs`); a `subscriptionStatus` in a snapshot an older version wrote is ignored when it loads |

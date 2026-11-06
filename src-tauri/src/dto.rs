@@ -519,6 +519,31 @@ pub struct GithubPrsDto {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PrReadStanding {
+    Live,
+    LastObserved { message: PrStandingMessage },
+    Unavailable { message: PrStandingMessage },
+}
+
+pub type PrStandingMessage = StandingMessage<PrMessageTone>;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum PrMessageTone {
+    Error,
+    Warning,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct GithubPrsReplyDto {
+    #[serde(flatten)]
+    pub read: GithubPrsDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standing: Option<PrReadStanding>,
+}
+
 mod limits;
 pub use limits::*;
 

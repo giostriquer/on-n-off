@@ -579,7 +579,7 @@ final class NotchTests {
         reading: PullRequestReading(
           readable: false, count: 0, segments: [],
           attention: Attention(conflicts: 0, failing: 0, changesRequested: 0, ready: 0), lists: []),
-        notice: Notice(text: "Sign in with the GitHub CLI.", tone: .muted)
+        notice: Notice(text: "Sign in with the GitHub CLI.", tone: .red)
       ).spoken, "Pull requests, Sign in with the GitHub CLI.")
     expectEqual(
       PullRequestCell(
