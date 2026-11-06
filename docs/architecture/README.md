@@ -442,6 +442,32 @@ their CI rollups and merge state. Problems come back as a `status` + `hint` on t
 last snapshot under `~/.on-n-off/github/`. Auth is borrowed from `gh auth token`, memoised per
 app run, re-read once on a 401, never persisted.
 
+Every request a pull request read makes goes through one connection, the `Github` seam in
+`github/connection.rs`: the search, the contribution lookup and commit check (GraphQL) and the
+events pages (REST). Its production adapter, `HttpGithub`, alone holds what requests share across
+reads (`HttpMemo`, one per app run): the `gh` token and its 401 re-read, the status a failure reads
+as (a rejected token, a rate limit, or GitHub out of reach) and the pause. The two ways a pause
+starts resume differently (`limited_until` and `low_budget_until`, side by side). A rate-limited
+reply pauses its budget until GitHub's reset, or one minute when the reset is unknown or already
+passed: GitHub just refused, so something must wait. A search reply reporting fewer than 50 points
+left pauses GraphQL until its `resetAt`, one minute when that is unreadable, and not at all when it
+is already passed by the local clock: the budget has renewed, so that read's contribution requests
+still go out (before the connection, such a reply skipped them for that read). A request made while
+its budget is paused is refused without being sent. GitHub budgets REST core and GraphQL apart, so
+the events pages have a pause of their own: a rate-limited page (a 403 that carries `Retry-After` or
+`x-ratelimit-remaining: 0`, or a 429) pauses only the events read until its reset, while the search
+and the contribution lookup carry on. Any other 403 keeps its status, never a rejected token
+(`http::get_json_with` with `Forbidden::RateLimitWhenSaid`, as the GraphQL POST classifies it).
+Every request, the events pages included, re-reads a rejected token once and forgets one rejected
+twice. An events or contribution failure is only a warning on the read; the search's failure is the
+read's. `read_prs_in` asks the connection whether reads are paused (`reads_paused`) before it
+fetches and keeps its memory window, the snapshot fallback and the shared-read rule that a failure
+reports `Unchanged`; a pause serves the remembered read as stale without discarding it. The
+contributions read asks too, and makes none of its requests while paused. Tests drive `read_prs_in`
+and the contributions read through the in-memory adapter (`FakeGithub`, `github/fixtures.rs`, which
+refuses a request while its budget is paused, as `HttpGithub` does), and `HttpGithub` against the
+loopback server.
+
 The merge fields — `mergeable` for conflicts, `mergeStateStatus` for ready/blocked/behind,
 `mergeQueueEntry`, `autoMergeRequest` — are scalars and single objects on purpose, so the request
 costs about 2 rate-limit points. They are interpreted in exactly one place, `github/merge.rs`:
@@ -457,8 +483,9 @@ answer the PR's rows settled with (`mergeable` and `mergeStateStatus`). Each suc
 `settle` once, after contributed PRs have joined Mine, over every open row
 (`GithubPrsData::open_prs`: Mine, Review requested, Assigned) and over the open PRs the
 contributions record tracks but does not list (out of scope, or not yet confirmed as yours). A
-contributed row is from an earlier read when this read did not look it up again: a low rate budget,
-a failed lookup, or a node the lookup could not read (`Contributed.earlier`).
+contributed row is from an earlier read when this read did not look it up again: the connection
+paused (a low or spent GraphQL budget), a failed lookup, or a node the lookup could not read
+(`Contributed.earlier`).
 
 1. A row GitHub answered in this read (`mergeable` known, or `mergeStateStatus` DIRTY) keeps its
    own verdict. Every such answer, from a listed or an unlisted row, is this read's answer for its
@@ -521,9 +548,10 @@ Found pull requests join `mine`, marked `contributed`, and merged ones join `mer
 same scope as the search. That is all the monitor, the notch and the screen see: the screen tags
 them with their author, and the monitor notifies on them, merges included, exactly as on authored
 ones. They come after the authored ones, so the notch, which shows the first 25 rows of Mine, leaves
-them out when 25 authored pull requests come first. When the lookup fails, or the read has just
-found fewer than 50 rate-limit points left and skips the extra requests, the record's last read is
-shown, so a transient error does not take them out of Mine, the notch or the monitor's baseline.
+them out when 25 authored pull requests come first. When the lookup fails, or the connection is
+paused (the read has just found fewer than 50 rate-limit points left) and the extra requests are
+skipped, the record's last read is shown, so a transient error does not take them out of Mine, the
+notch or the monitor's baseline.
 The record misses a branch you last pushed before GitHub's three pages of events reach back, a push
 to a fork's branch, commits of yours that someone else pushed, and commits of yours older than a
 pull request's last hundred.

@@ -153,7 +153,7 @@ fn ci_state(state: Option<&str>) -> CiState {
     }
 }
 
-fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
+pub(super) fn rate_limit(value: &Value) -> Option<GithubRateLimitDto> {
     Some(GithubRateLimitDto {
         remaining: value["remaining"].as_u64()?,
         reset_at: value["resetAt"].as_str()?.to_string(),

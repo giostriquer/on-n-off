@@ -93,7 +93,5 @@ impl GhTokenMemo {
     }
 }
 
-pub static GH_TOKEN: GhTokenMemo = GhTokenMemo::new();
-
 #[cfg(test)]
 mod tests;

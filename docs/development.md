@@ -51,6 +51,11 @@ source carries no comments (see [Code comments](#code-comments)).
 - The side notch's supervisor: `side_notch/host.rs`, on both platforms. A platform difference goes
   in its `Transport` (`transport.rs` for the macOS helper, `win_transport.rs` for the Windows
   window), never in a second loop ([why](architecture/side-notch.md#one-host-two-transports)).
+- A request the pull request read makes to GitHub: through its connection
+  (`github::connection::Github`), never `http` directly. Only the HTTP adapter (`HttpGithub`)
+  holds the `gh` token, the 401 re-read, how a failure is classified and the rate-limit pause;
+  tests drive the read through the in-memory one, `FakeGithub` (`github/fixtures.rs`)
+  ([why](architecture/README.md#pull-requests)).
 - A read shared by more than one surface: `read_revision.rs`. Announce a replacement, never a
   read, and answer an announcement unforced — either one broken makes it a loop
   ([why](architecture/shared-reads.md)). In the UI, read it through its source module in
@@ -218,7 +223,7 @@ comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler 
   `json_line_session::Script` (the scripted JSON-line peer),
   `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::files::testing` counters,
-  `github/fixtures.rs`. Single-consumer helpers stay in that module's
+  `github/fixtures.rs` (with `FakeGithub`). Single-consumer helpers stay in that module's
   own tests file; adapter test constructors stay in the adapter files, because `item_install`
   tests use them across domains.
 - Keep every test file under 1000 lines. Frontend tests stay co-located as `*.test.ts(x)`.

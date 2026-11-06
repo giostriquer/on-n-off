@@ -37,6 +37,36 @@ fn unauthorized_and_forbidden_are_unauthorized() {
 }
 
 #[test]
+fn a_get_that_says_when_a_403_is_a_rate_limit_keeps_any_other_403_as_a_status() {
+    let cases: [(&[&str], Result<serde_json::Value, HttpError>); 3] = [
+        (
+            &["X-RateLimit-Remaining: 0", "X-RateLimit-Reset: 1787000300"],
+            Err(HttpError::RateLimited(RateLimitReset::At(1_787_000_300))),
+        ),
+        (
+            &["Retry-After: 30"],
+            Err(HttpError::RateLimited(RateLimitReset::RetryAfter(30))),
+        ),
+        (&["X-RateLimit-Remaining: 12"], Err(HttpError::Status(403))),
+    ];
+    for (headers, expected) in cases {
+        let (url, request) = serve_once_capturing("403 Forbidden", headers, "{}");
+        assert_eq!(
+            get_json_with(&url, &[], Forbidden::RateLimitWhenSaid),
+            expected,
+            "{headers:?}"
+        );
+        request.join().unwrap();
+    }
+    let (url, request) = serve_once_capturing("401 Unauthorized", &[], "{}");
+    assert_eq!(
+        get_json_with(&url, &[], Forbidden::RateLimitWhenSaid),
+        Err(HttpError::Unauthorized)
+    );
+    request.join().unwrap();
+}
+
+#[test]
 fn a_throttled_get_is_rate_limited_until_its_retry_after() {
     for (headers, reset) in [
         (&["Retry-After: 30"][..], RateLimitReset::RetryAfter(30)),

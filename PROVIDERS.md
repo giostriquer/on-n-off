@@ -185,7 +185,9 @@ adapter assumes today (change the adapter and this file together).
   last good read, shown as stale when a refresh fails, with the merge answers it knows),
   `~/.on-n-off/github/contributions.json` (pushed branches and contributed PRs) and
   `~/.on-n-off/github/monitor.json` (the CI monitor's last-seen rollup per PR). Polling pauses
-  until GitHub's reset when a reply is rate limited or fewer than 50 points remain. The CI monitor
+  until GitHub's reset when a GraphQL reply is rate limited or fewer than 50 points remain. GitHub
+  budgets REST core apart, so a rate-limited events read pauses only the events read, and the rest
+  of each read carries on. The CI monitor
   watches the PRs Mine lists (the scoped first page of fifty authored ones, plus contributed ones),
   so PRs past that page or outside the scope are not watched. Public and private
   repositories the `gh` token can read; github.com only. **verified** (gh 2.97, macOS,

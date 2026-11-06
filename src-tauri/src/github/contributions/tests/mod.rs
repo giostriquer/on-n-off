@@ -1,64 +1,23 @@
 mod discovery;
 mod tracking;
 
-use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
 use super::*;
-use crate::github::fixtures::{commit, commits_reply, contribution_node, lookup_reply};
+use crate::github::fixtures::{commit, commits_reply, contribution_node, lookup_reply, FakeGithub};
 use crate::paths::scratch_dir;
 
 const NOW: i64 = 1_787_000_000;
 const DAY: i64 = 24 * 60 * 60;
 
-#[derive(Default)]
-struct FakeGithub {
-    pages: RefCell<VecDeque<Result<Value, String>>>,
-    replies: RefCell<VecDeque<Result<Value, String>>>,
-    pages_asked: RefCell<Vec<(String, u32)>>,
-    bodies: RefCell<Vec<Value>>,
+trait Asked {
+    fn branches_looked_up(&self, index: usize) -> Vec<String>;
+    fn ids_sent(&self, index: usize) -> Value;
 }
 
-impl FakeGithub {
-    fn page(self, events: Value) -> Self {
-        self.pages.borrow_mut().push_back(Ok(events));
-        self
-    }
-
-    fn failing_page(self, why: &str) -> Self {
-        self.pages.borrow_mut().push_back(Err(why.to_string()));
-        self
-    }
-
-    fn reply(self, reply: Value) -> Self {
-        self.replies.borrow_mut().push_back(Ok(reply));
-        self
-    }
-
-    fn failing_reply(self, why: &str) -> Self {
-        self.replies.borrow_mut().push_back(Err(why.to_string()));
-        self
-    }
-
-    fn body(&self, index: usize) -> Value {
-        self.bodies.borrow()[index].clone()
-    }
-
-    fn pages(&self) -> Vec<u32> {
-        self.pages_asked
-            .borrow()
-            .iter()
-            .map(|(_, page)| *page)
-            .collect()
-    }
-
-    fn requests(&self) -> usize {
-        self.bodies.borrow().len()
-    }
-
+impl Asked for FakeGithub {
     fn branches_looked_up(&self, index: usize) -> Vec<String> {
         let variables = self.body(index)["variables"].clone();
         (0..)
@@ -75,26 +34,6 @@ impl FakeGithub {
 
     fn ids_sent(&self, index: usize) -> Value {
         self.body(index)["variables"]["ids"].clone()
-    }
-}
-
-impl Github for FakeGithub {
-    fn graphql(&self, body: &Value) -> Result<Value, String> {
-        self.bodies.borrow_mut().push(body.clone());
-        self.replies
-            .borrow_mut()
-            .pop_front()
-            .unwrap_or_else(|| Err("no reply scripted".into()))
-    }
-
-    fn events(&self, viewer: &str, page: u32) -> Result<Value, String> {
-        self.pages_asked
-            .borrow_mut()
-            .push((viewer.to_string(), page));
-        self.pages
-            .borrow_mut()
-            .pop_front()
-            .unwrap_or_else(|| Ok(json!([])))
     }
 }
 
@@ -150,7 +89,7 @@ fn empty_lookup() -> Value {
 }
 
 fn read_at(github: &FakeGithub, path: &Path, now_secs: i64) -> Contributed {
-    read(Some(github as &dyn Github), path, "octocat", &[], now_secs)
+    read(github, path, "octocat", &[], now_secs)
 }
 
 fn ids(prs: &[GithubPrDto]) -> Vec<&str> {

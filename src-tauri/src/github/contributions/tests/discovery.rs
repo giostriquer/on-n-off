@@ -17,10 +17,7 @@ fn a_pr_someone_else_opened_on_a_branch_you_pushed_joins_once_it_carries_a_commi
     assert_eq!(found.open[0].author, "alice");
     assert!(found.open[0].contributed);
     assert!(found.merged.is_empty());
-    assert_eq!(
-        *github.pages_asked.borrow(),
-        vec![("octocat".to_string(), 1)]
-    );
+    assert_eq!(github.pages_asked(), vec![("octocat".to_string(), 1)]);
     assert_eq!(github.ids_sent(1), json!(["PR_alice"]));
 }
 
@@ -287,24 +284,46 @@ fn the_newest_event_read_survives_a_read_with_nothing_new() {
 
 #[test]
 fn a_failed_events_read_still_looks_up_the_branches_already_remembered() {
-    let path = store_path("contrib-events-failed");
-    let first = one_push().reply(empty_lookup());
-    read_at(&first, &path, NOW);
+    let cases = [
+        (
+            "failed",
+            FakeGithub::default().failing_page("Could not reach GitHub (HTTP 503)."),
+            "Could not reach GitHub (HTTP 503).",
+        ),
+        (
+            "paused",
+            FakeGithub::default().events_paused(),
+            "GitHub rate limit reached — your events are read again in 5 min.",
+        ),
+    ];
+    for (case, github, why) in cases {
+        let path = store_path(&format!("contrib-events-{case}"));
+        let first = one_push().reply(empty_lookup());
+        read_at(&first, &path, NOW);
 
-    let github = FakeGithub::default()
-        .failing_page("Could not reach GitHub (HTTP 503).")
-        .reply(empty_lookup());
-    let found = read_at(&github, &path, NOW + 60);
+        let github = github.reply(empty_lookup());
+        let found = read_at(&github, &path, NOW + 60);
 
-    assert_eq!(
-        found.warnings,
-        vec!["Your recent pushes were not read. Could not reach GitHub (HTTP 503).".to_string()]
-    );
-    assert_eq!(github.branches_looked_up(0), vec!["acme/app:fix/x"]);
+        assert_eq!(
+            found.warnings,
+            vec![format!("Your recent pushes were not read. {why}")],
+            "{case}"
+        );
+        assert_eq!(github.pages(), vec![1], "{case}");
+        assert_eq!(
+            github.branches_looked_up(0),
+            vec!["acme/app:fix/x"],
+            "{case}"
+        );
 
-    let retry = FakeGithub::default().reply(empty_lookup());
-    read_at(&retry, &path, NOW + 61);
-    assert_eq!(retry.pages(), vec![1], "a failed read is retried at once");
+        let retry = FakeGithub::default().reply(empty_lookup());
+        read_at(&retry, &path, NOW + 61);
+        assert_eq!(
+            retry.pages(),
+            vec![1],
+            "{case}: a failed read is retried at once"
+        );
+    }
 }
 
 #[test]

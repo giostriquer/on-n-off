@@ -140,19 +140,28 @@ fn a_merge_github_gives_no_time_is_dated_when_first_seen() {
 }
 
 #[test]
-fn a_read_without_github_still_forgets_a_merge_older_than_fourteen_days() {
+fn a_paused_read_still_forgets_a_merge_older_than_fourteen_days() {
     let path = store_path("contrib-merged-offline-age");
     found_alice(&path);
     let merged = lookup_reply(json!([merged_pr("PR_alice", NOW)]), &[json!([])]);
     read_at(&FakeGithub::default().reply(merged), &path, NOW + 30);
 
     assert_eq!(
-        ids(&read(None, &path, "octocat", &[], NOW + 14 * DAY - 1).merged),
+        ids(&read(
+            &FakeGithub::paused(),
+            &path,
+            "octocat",
+            &[],
+            NOW + 14 * DAY - 1
+        )
+        .merged),
         vec!["PR_alice"]
     );
-    assert!(read(None, &path, "octocat", &[], NOW + 14 * DAY)
-        .merged
-        .is_empty());
+    assert!(
+        read(&FakeGithub::paused(), &path, "octocat", &[], NOW + 14 * DAY)
+            .merged
+            .is_empty()
+    );
 }
 
 #[test]
@@ -293,17 +302,20 @@ fn at_most_ten_pull_requests_are_checked_per_read() {
 }
 
 #[test]
-fn without_github_the_last_read_is_shown_and_nothing_is_read() {
+fn while_reads_are_paused_the_last_read_is_shown_and_nothing_is_asked() {
     let path = store_path("contrib-offline");
     found_alice(&path);
     let before = fs::read_to_string(&path).unwrap();
+    let github = FakeGithub::paused();
 
-    let found = read(None, &path, "octocat", &[], NOW + 60);
+    let found = read(&github, &path, "octocat", &[], NOW + 60);
 
     assert_eq!(ids(&found.open), vec!["PR_alice"]);
     assert_eq!(found.earlier, HashSet::from(["PR_alice".to_string()]));
     assert_eq!(found.warnings, Vec::<String>::new());
     assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    assert_eq!(github.requests(), 0);
+    assert_eq!(github.pages_asked(), Vec::new());
 }
 
 #[test]
@@ -311,8 +323,20 @@ fn the_scope_applies_when_a_contribution_is_shown() {
     let path = store_path("contrib-scope");
     found_alice(&path);
 
-    let other = read(None, &path, "octocat", &["org:other".to_string()], NOW + 1);
-    let acme = read(None, &path, "octocat", &["org:acme".to_string()], NOW + 1);
+    let other = read(
+        &FakeGithub::paused(),
+        &path,
+        "octocat",
+        &["org:other".to_string()],
+        NOW + 1,
+    );
+    let acme = read(
+        &FakeGithub::paused(),
+        &path,
+        "octocat",
+        &["org:acme".to_string()],
+        NOW + 1,
+    );
 
     assert!(other.open.is_empty());
     assert_eq!(ids(&other.unlisted), vec!["PR_alice"]);
@@ -325,13 +349,13 @@ fn the_record_belongs_to_one_github_account_in_any_case() {
     let path = store_path("contrib-viewer");
     found_alice(&path);
 
-    let same = read(None, &path, "OctoCat", &[], NOW + 1);
+    let same = read(&FakeGithub::paused(), &path, "OctoCat", &[], NOW + 1);
     assert_eq!(ids(&same.open), vec!["PR_alice"]);
 
     let other = FakeGithub::default();
-    let found = read(Some(&other as &dyn Github), &path, "hubot", &[], NOW + 2);
+    let found = read(&other, &path, "hubot", &[], NOW + 2);
     assert!(found.open.is_empty());
-    assert_eq!(*other.pages_asked.borrow(), vec![("hubot".to_string(), 1)]);
+    assert_eq!(other.pages_asked(), vec![("hubot".to_string(), 1)]);
     assert_eq!(other.requests(), 0, "the other account's branches are gone");
 }
 
@@ -373,7 +397,7 @@ fn the_record_keeps_each_pull_requests_latest_read_as_github_sent_it() {
     let found = read_at(&unknown, &path, NOW + 30);
     assert_eq!(found.open[0].mergeable, Mergeability::Unknown);
     assert_eq!(found.open[0].merge_kind, None);
-    let offline = read(None, &path, "octocat", &[], NOW + 40);
+    let offline = read(&FakeGithub::paused(), &path, "octocat", &[], NOW + 40);
     assert_eq!(offline.open, found.open);
     assert_eq!(
         recorded_open(&path),

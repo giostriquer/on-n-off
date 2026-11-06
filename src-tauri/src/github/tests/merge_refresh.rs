@@ -4,7 +4,7 @@ use crate::github_monitor::{EventKind, Watch};
 use crate::side_notch::model::{frame, GithubList, NotchSettings};
 
 fn reply(mergeable: &str, state: &str) -> Value {
-    let mut value: Value = serde_json::from_str(REPLY).unwrap();
+    let mut value = super::reply();
     let mut pr = value["data"]["mine"]["nodes"][0].clone();
     pr["headRefOid"] = json!("head1");
     pr["baseRefName"] = json!("dev");
@@ -20,13 +20,18 @@ fn reply(mergeable: &str, state: &str) -> Value {
     value
 }
 
-fn read(harness: &Harness, cli: &AgentCli, reply: &Value, now: i64) -> GithubPrsDto {
-    let body = reply.to_string();
-    let (url, server) = serve_sequence(&[("200 OK", &[], &body)]);
-    let dto = harness.read(cli, &url, now, true);
-    assert_eq!(server.join().unwrap().len(), 1);
+fn read(harness: &Harness, reply: &Value, now: i64) -> GithubPrsDto {
+    let github = answering(reply.clone());
+    let dto = harness.read(&github, now, true);
+    assert_eq!(github.requests(), 1);
     assert_eq!(dto.status, GithubStatus::Ok);
     dto
+}
+
+fn answered(github: &FakeGithub, requests: usize, pages: &[u32]) {
+    assert_eq!(github.requests(), requests);
+    assert_eq!(github.pages(), pages);
+    assert_eq!(github.unanswered(), 0);
 }
 
 fn assert_conflicts(dto: &GithubPrsDto, expected: bool) {
@@ -71,12 +76,11 @@ fn assert_conflicts(dto: &GithubPrsDto, expected: bool) {
 #[test]
 fn unknown_refreshes_keep_the_conflict_badge_and_ring_until_github_resolves_them() {
     let harness = Harness::new("gh-conflict-refresh", &[], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
-    let first = read(&harness, &gh, &reply("CONFLICTING", "DIRTY"), NOW);
+    let first = read(&harness, &reply("CONFLICTING", "DIRTY"), NOW);
     assert_conflicts(&first, true);
 
     for step in 1..=2 {
-        let dto = read(&harness, &gh, &reply("UNKNOWN", "UNKNOWN"), NOW + step * 60);
+        let dto = read(&harness, &reply("UNKNOWN", "UNKNOWN"), NOW + step * 60);
         assert_conflicts(&dto, true);
         for pr in dto.data.open_prs() {
             assert_eq!(pr.mergeable, crate::dto::Mergeability::Unknown);
@@ -90,15 +94,15 @@ fn unknown_refreshes_keep_the_conflict_badge_and_ring_until_github_resolves_them
         );
     }
 
-    let still_conflicting = read(&harness, &gh, &reply("CONFLICTING", "DIRTY"), NOW + 180);
+    let still_conflicting = read(&harness, &reply("CONFLICTING", "DIRTY"), NOW + 180);
     assert_conflicts(&still_conflicting, true);
-    let resolved = read(&harness, &gh, &reply("MERGEABLE", "CLEAN"), NOW + 240);
+    let resolved = read(&harness, &reply("MERGEABLE", "CLEAN"), NOW + 240);
     assert_conflicts(&resolved, false);
     assert_eq!(
         resolved.data.mine.items[0].merge_kind,
         Some(MergeKind::Ready)
     );
-    let unknown = read(&harness, &gh, &reply("UNKNOWN", "UNKNOWN"), NOW + 300);
+    let unknown = read(&harness, &reply("UNKNOWN", "UNKNOWN"), NOW + 300);
     assert_conflicts(&unknown, false);
     assert_eq!(unknown.data.mine.items[0].merge_kind, None);
 }
@@ -106,8 +110,7 @@ fn unknown_refreshes_keep_the_conflict_badge_and_ring_until_github_resolves_them
 #[test]
 fn unknown_refresh_after_restart_or_failure_keeps_the_saved_conflict_and_fresh_fields() {
     let mut harness = Harness::new("gh-conflict-restart", &[], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
-    read(&harness, &gh, &reply("UNKNOWN", "DIRTY"), NOW);
+    read(&harness, &reply("UNKNOWN", "DIRTY"), NOW);
     harness.read_memo = ReadMemo::new();
     let mut unknown = reply("UNKNOWN", "BLOCKED");
     for list in ["mine", "review", "assigned"] {
@@ -116,10 +119,10 @@ fn unknown_refresh_after_restart_or_failure_keeps_the_saved_conflict_and_fresh_f
             ["state"] = json!("PENDING");
         unknown["data"][list]["nodes"][0]["updatedAt"] = json!("2026-08-24T21:00:00Z");
     }
-    assert_conflicts(&read(&harness, &gh, &unknown, NOW + 60), true);
-    let failed = harness.read(&gh, &refused_url(), NOW + 120, true);
+    assert_conflicts(&read(&harness, &unknown, NOW + 60), true);
+    let failed = harness.read(&unreachable(), NOW + 120, true);
     assert!(failed.stale);
-    let dto = read(&harness, &gh, &unknown, NOW + 180);
+    let dto = read(&harness, &unknown, NOW + 180);
     assert_conflicts(&dto, true);
     assert_eq!(dto.data.mine.items[0].title, "New title");
     assert_eq!(dto.data.mine.items[0].ci, CiState::Pending);
@@ -128,28 +131,21 @@ fn unknown_refresh_after_restart_or_failure_keeps_the_saved_conflict_and_fresh_f
 #[test]
 fn expanding_scope_keeps_a_contributions_known_conflict_when_other_lists_are_unknown() {
     let mut harness = Harness::new("gh-conflict-scope", &["org:other"], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
-    let mut search: Value = serde_json::from_str(REPLY).unwrap();
+    let mut search = super::reply();
     search["data"]["mine"] = json!({"issueCount":0,"nodes":[]});
     let mut node = fixtures::contribution_node("PR_shared", "alice", "acme/app", "OPEN");
     node["mergeable"] = json!("UNKNOWN");
     node["mergeStateStatus"] = json!("UNKNOWN");
     search["data"]["review"] = json!({"issueCount":1,"nodes":[node.clone()]});
-    let search_body = search.to_string();
     let mut conflicting = node.clone();
     conflicting["mergeable"] = json!("CONFLICTING");
     conflicting["mergeStateStatus"] = json!("DIRTY");
-    let events = pushed_to_shared_branch();
-    let lookup = fixtures::lookup_reply(json!([]), &[json!([conflicting])]).to_string();
-    let commits = your_commit();
-    let (url, server) = serve_sequence(&[
-        ("200 OK", &[], &search_body),
-        ("200 OK", &[], &events),
-        ("200 OK", &[], &lookup),
-        ("200 OK", &[], &commits),
-    ]);
-    let (first, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, true);
-    server.join().unwrap();
+    let github = answering(search.clone())
+        .page(pushed_to_shared_branch())
+        .reply(fixtures::lookup_reply(json!([]), &[json!([conflicting])]))
+        .reply(your_commit());
+    let first = harness.read(&github, NOW, true);
+    answered(&github, 3, &[1]);
     assert!(first.data.mine.items.is_empty());
     assert_eq!(
         first.data.review_requested.items[0].merge_kind,
@@ -161,12 +157,10 @@ fn expanding_scope_keeps_a_contributions_known_conflict_when_other_lists_are_unk
         if step == 2 {
             harness.read_memo = ReadMemo::new();
         }
-        let lookup = fixtures::lookup_reply(json!([node.clone()]), &[json!([])]).to_string();
-        let (url, server) =
-            serve_sequence(&[("200 OK", &[], &search_body), ("200 OK", &[], &lookup)]);
-        let (dto, _) =
-            harness.read_with_events(&gh, &url, &events_url(&url), NOW + step * 10, true);
-        server.join().unwrap();
+        let github = answering(search.clone())
+            .reply(fixtures::lookup_reply(json!([node.clone()]), &[json!([])]));
+        let dto = harness.read(&github, NOW + step * 10, true);
+        answered(&github, 2, &[]);
         assert_eq!(dto.data.open_prs().count(), 2);
         for pr in dto.data.open_prs() {
             assert_eq!(pr.merge_kind, Some(MergeKind::Conflicts), "step {step}");
@@ -196,38 +190,30 @@ fn expanding_scope_keeps_a_contributions_known_conflict_when_other_lists_are_unk
 #[test]
 fn a_known_conflict_outlives_a_restart_while_no_read_lists_it() {
     let mut harness = Harness::new("gh-conflict-unlisted-restart", &["org:other"], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
-    let mut search: Value = serde_json::from_str(REPLY).unwrap();
+    let mut search = super::reply();
     search["data"]["mine"] = json!({"issueCount":0,"nodes":[]});
-    let search = search.to_string();
     let mut node = fixtures::contribution_node("PR_shared", "alice", "acme/app", "OPEN");
     node["mergeable"] = json!("CONFLICTING");
     node["mergeStateStatus"] = json!("DIRTY");
-    let events = pushed_to_shared_branch();
-    let lookup = fixtures::lookup_reply(json!([]), &[json!([node.clone()])]).to_string();
-    let commits = your_commit();
-    let (url, server) = serve_sequence(&[
-        ("200 OK", &[], &search),
-        ("200 OK", &[], &events),
-        ("200 OK", &[], &lookup),
-        ("200 OK", &[], &commits),
-    ]);
-    let (first, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, true);
-    server.join().unwrap();
+    let github = answering(search.clone())
+        .page(pushed_to_shared_branch())
+        .reply(fixtures::lookup_reply(json!([]), &[json!([node.clone()])]))
+        .reply(your_commit());
+    let first = harness.read(&github, NOW, true);
+    answered(&github, 3, &[1]);
     assert!(first.data.mine.items.is_empty());
 
     node["mergeable"] = json!("UNKNOWN");
     node["mergeStateStatus"] = json!("UNKNOWN");
-    let lookup = fixtures::lookup_reply(json!([node]), &[json!([])]).to_string();
+    let lookup = fixtures::lookup_reply(json!([node]), &[json!([])]);
     for step in 1..=2 {
         if step == 2 {
             harness.read_memo = ReadMemo::new();
             harness.settings.github_scopes.clear();
         }
-        let (url, server) = serve_sequence(&[("200 OK", &[], &search), ("200 OK", &[], &lookup)]);
-        let (dto, _) =
-            harness.read_with_events(&gh, &url, &events_url(&url), NOW + step * 10, true);
-        server.join().unwrap();
+        let github = answering(search.clone()).reply(lookup.clone());
+        let dto = harness.read(&github, NOW + step * 10, true);
+        answered(&github, 2, &[]);
         let mine: Vec<_> = dto
             .data
             .mine
@@ -275,15 +261,14 @@ fn write_files_saved_before_the_conflict_memory(home: &Path) {
     .unwrap();
 }
 
-fn read_unknown_with_contribution(harness: &Harness, gh: &AgentCli, now: i64) -> GithubPrsDto {
-    let search = reply("UNKNOWN", "UNKNOWN").to_string();
+fn read_unknown_with_contribution(harness: &Harness, now: i64) -> GithubPrsDto {
     let mut node = fixtures::contribution_node("PR_shared", "alice", "acme/app", "OPEN");
     node["mergeable"] = json!("UNKNOWN");
     node["mergeStateStatus"] = json!("UNKNOWN");
-    let lookup = fixtures::lookup_reply(json!([node]), &[]).to_string();
-    let (url, server) = serve_sequence(&[("200 OK", &[], &search), ("200 OK", &[], &lookup)]);
-    let (dto, _) = harness.read_with_events(gh, &url, &refused_url(), now, true);
-    assert_eq!(server.join().unwrap().len(), 2);
+    let github =
+        answering(reply("UNKNOWN", "UNKNOWN")).reply(fixtures::lookup_reply(json!([node]), &[]));
+    let dto = harness.read(&github, now, true);
+    answered(&github, 2, &[]);
     assert_eq!(dto.status, GithubStatus::Ok);
     assert_eq!(dto.warnings, Vec::<String>::new());
     dto
@@ -292,10 +277,9 @@ fn read_unknown_with_contribution(harness: &Harness, gh: &AgentCli, now: i64) ->
 #[test]
 fn conflicts_retained_in_files_saved_before_the_memory_hold_through_unknown_reads() {
     let mut harness = Harness::new("gh-conflict-legacy-files", &[], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
     write_files_saved_before_the_conflict_memory(&harness.home);
 
-    let failed = harness.read(&gh, &refused_url(), NOW, true);
+    let failed = harness.read(&unreachable(), NOW, true);
     assert!(failed.stale);
     assert_eq!(
         failed.data.mine.items[0].merge_kind,
@@ -306,7 +290,7 @@ fn conflicts_retained_in_files_saved_before_the_memory_hold_through_unknown_read
         if step == 2 {
             harness.read_memo = ReadMemo::new();
         }
-        let dto = read_unknown_with_contribution(&harness, &gh, NOW + step * 20);
+        let dto = read_unknown_with_contribution(&harness, NOW + step * 20);
         let kinds: Vec<_> = dto
             .data
             .open_prs()
@@ -344,32 +328,25 @@ fn a_contributions_earlier_answer_never_beats_this_reads_answer_for_its_revision
         (("CONFLICTING", "DIRTY"), ("MERGEABLE", "CLEAN"), nothing),
     ] {
         let harness = Harness::new("gh-conflict-earlier-contribution", &[], 60);
-        let gh = gh(&harness.home.join("cli"), "gho_t");
         let mut node = fixtures::contribution_node("PR_shared", "alice", "acme/app", "OPEN");
         node["mergeable"] = json!(earlier.0);
         node["mergeStateStatus"] = json!(earlier.1);
-        let events = pushed_to_shared_branch();
-        let lookup = fixtures::lookup_reply(json!([]), &[json!([node.clone()])]).to_string();
-        let commits = your_commit();
-        let (url, server) = serve_sequence(&[
-            ("200 OK", &[], REPLY),
-            ("200 OK", &[], &events),
-            ("200 OK", &[], &lookup),
-            ("200 OK", &[], &commits),
-        ]);
-        harness.read_with_events(&gh, &url, &events_url(&url), NOW, true);
-        server.join().unwrap();
+        let github = answering(super::reply())
+            .page(pushed_to_shared_branch())
+            .reply(fixtures::lookup_reply(json!([]), &[json!([node.clone()])]))
+            .reply(your_commit());
+        harness.read(&github, NOW, true);
+        answered(&github, 3, &[1]);
 
-        let mut low: Value = serde_json::from_str(REPLY).unwrap();
+        let mut low = super::reply();
         low["data"]["rateLimit"] = json!({ "remaining": 10, "resetAt": rfc3339(NOW + 15) });
-        let mut answered = node.clone();
-        answered["mergeable"] = json!(now.0);
-        answered["mergeStateStatus"] = json!(now.1);
-        low["data"]["review"] = json!({"issueCount": 1, "nodes": [answered]});
-        let low = low.to_string();
-        let (url, server) = serve_sequence(&[("200 OK", &[], &low)]);
-        let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW + 10, true);
-        assert_eq!(server.join().unwrap().len(), 1);
+        let mut answer = node.clone();
+        answer["mergeable"] = json!(now.0);
+        answer["mergeStateStatus"] = json!(now.1);
+        low["data"]["review"] = json!({"issueCount": 1, "nodes": [answer]});
+        let github = FakeGithub::default().reply_leaving_paused(low);
+        let dto = harness.read(&github, NOW + 10, true);
+        answered(&github, 1, &[]);
         let expected = if now.0 == "CONFLICTING" {
             conflicts
         } else {
@@ -383,13 +360,11 @@ fn a_contributions_earlier_answer_never_beats_this_reads_answer_for_its_revision
 
         node["mergeable"] = json!("UNKNOWN");
         node["mergeStateStatus"] = json!("UNKNOWN");
-        let mut search: Value = serde_json::from_str(REPLY).unwrap();
+        let mut search = super::reply();
         search["data"]["review"] = json!({"issueCount": 1, "nodes": [node.clone()]});
-        let search = search.to_string();
-        let lookup = fixtures::lookup_reply(json!([node]), &[json!([])]).to_string();
-        let (url, server) = serve_sequence(&[("200 OK", &[], &search), ("200 OK", &[], &lookup)]);
-        let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW + 20, true);
-        assert_eq!(server.join().unwrap().len(), 2);
+        let github = answering(search).reply(fixtures::lookup_reply(json!([node]), &[json!([])]));
+        let dto = harness.read(&github, NOW + 20, true);
+        answered(&github, 2, &[]);
         assert_eq!(
             shared_rows(&dto),
             vec![then, then],
@@ -411,11 +386,11 @@ fn shared(answer: Answer) -> Value {
     node
 }
 
-fn search_with_review(answer: Answer) -> String {
-    let mut search: Value = serde_json::from_str(REPLY).unwrap();
+fn search_with_review(answer: Answer) -> Value {
+    let mut search = super::reply();
     search["data"]["mine"] = json!({"issueCount": 0, "nodes": []});
     search["data"]["review"] = json!({"issueCount": 1, "nodes": [shared(answer)]});
-    search.to_string()
+    search
 }
 
 fn watched_reads(
@@ -423,32 +398,21 @@ fn watched_reads(
     then: &[(Answer, Option<Answer>)],
 ) -> Vec<(Vec<Option<MergeKind>>, Vec<EventKind>)> {
     let harness = Harness::new("gh-conflict-failing-lookups", &[], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
     let mut watch = Watch::new();
-    let search = search_with_review(first);
-    let events = pushed_to_shared_branch();
-    let lookup = fixtures::lookup_reply(json!([]), &[json!([shared(first)])]).to_string();
-    let commits = your_commit();
-    let (url, server) = serve_sequence(&[
-        ("200 OK", &[], &search),
-        ("200 OK", &[], &events),
-        ("200 OK", &[], &lookup),
-        ("200 OK", &[], &commits),
-    ]);
-    let (dto, _) = harness.read_with_events(&gh, &url, &events_url(&url), NOW, true);
-    server.join().unwrap();
-    let mut reads = vec![dto];
-    let failure = json!({"errors": [{"message": "Something went wrong."}]}).to_string();
+    let github = answering(search_with_review(first))
+        .page(pushed_to_shared_branch())
+        .reply(fixtures::lookup_reply(json!([]), &[json!([shared(first)])]))
+        .reply(your_commit());
+    let mut reads = vec![harness.read(&github, NOW, true)];
+    answered(&github, 3, &[1]);
+    let failure = json!({"errors": [{"message": "Something went wrong."}]});
     for (step, (review, lookup)) in (1..).zip(then) {
-        let search = search_with_review(*review);
         let lookup = lookup.map_or(failure.clone(), |answer| {
-            fixtures::lookup_reply(json!([shared(answer)]), &[json!([])]).to_string()
+            fixtures::lookup_reply(json!([shared(answer)]), &[json!([])])
         });
-        let (url, server) = serve_sequence(&[("200 OK", &[], &search), ("200 OK", &[], &lookup)]);
-        let (dto, _) =
-            harness.read_with_events(&gh, &url, &events_url(&url), NOW + step * 10, true);
-        assert_eq!(server.join().unwrap().len(), 2);
-        reads.push(dto);
+        let github = answering(search_with_review(*review)).reply(lookup);
+        reads.push(harness.read(&github, NOW + step * 10, true));
+        answered(&github, 2, &[]);
     }
     reads
         .iter()
@@ -513,23 +477,20 @@ fn failing_contribution_lookups_never_bring_back_an_answer_older_than_the_last_o
 #[test]
 fn a_conflict_saved_before_the_memory_never_becomes_a_raw_answer_github_did_not_give() {
     let harness = Harness::new("gh-conflict-legacy-lookup-fails", &[], 60);
-    let gh = gh(&harness.home.join("cli"), "gho_t");
     write_files_saved_before_the_conflict_memory(&harness.home);
     let mut watch = Watch::new();
-    let failure = json!({"errors": [{"message": "Something went wrong."}]}).to_string();
-    let lookup = |answer: Answer| fixtures::lookup_reply(json!([shared(answer)]), &[]).to_string();
+    let failure = json!({"errors": [{"message": "Something went wrong."}]});
+    let lookup = |answer: Answer| fixtures::lookup_reply(json!([shared(answer)]), &[]);
     let reads = [
         (reply("UNKNOWN", "UNKNOWN"), failure),
         (reply("UNKNOWN", "UNKNOWN"), lookup(UNKNOWN)),
         (reply("MERGEABLE", "CLEAN"), lookup(CLEAN)),
     ];
     let mut seen = Vec::new();
-    for (step, (search, lookup)) in (1..).zip(&reads) {
-        let search = search.to_string();
-        let (url, server) = serve_sequence(&[("200 OK", &[], &search), ("200 OK", &[], lookup)]);
-        let (dto, _) =
-            harness.read_with_events(&gh, &url, &events_url(&url), NOW + step * 10, true);
-        assert_eq!(server.join().unwrap().len(), 2);
+    for (step, (search, lookup)) in (1..).zip(reads) {
+        let github = answering(search).reply(lookup);
+        let dto = harness.read(&github, NOW + step * 10, true);
+        answered(&github, 2, &[]);
         let shared: Vec<_> = dto
             .data
             .open_prs()

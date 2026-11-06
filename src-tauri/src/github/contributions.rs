@@ -6,15 +6,15 @@ use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
+use super::connection::Github;
 use super::parse::pull_request;
-use super::query::{in_scope, PR_FRAGMENT};
+use super::query::{in_scope, EVENTS_PER_PAGE, PR_FRAGMENT};
 use crate::dto::{GithubPrDto, GithubPrListDto, GithubPrsData};
 use crate::usage::cache_io::atomic_write;
 
 const SCHEMA_VERSION: u8 = 1;
 const EVENTS_EVERY_SECS: i64 = 60;
 const EVENT_PAGES: u32 = 3;
-pub(super) const EVENTS_PER_PAGE: usize = 100;
 const BRANCH_KEEP_SECS: i64 = 30 * 24 * 60 * 60;
 const MERGED_KEEP_SECS: i64 = 14 * 24 * 60 * 60;
 const MAX_BRANCHES: usize = 50;
@@ -37,11 +37,6 @@ query($ids: [ID!]!) {
     }
   }
 }";
-
-pub(super) trait Github {
-    fn graphql(&self, body: &Value) -> Result<Value, String>;
-    fn events(&self, viewer: &str, page: u32) -> Result<Value, String>;
-}
 
 #[derive(Debug, Default, PartialEq)]
 pub(super) struct Contributed {
@@ -221,7 +216,7 @@ impl Store {
 }
 
 pub(super) fn read(
-    github: Option<&dyn Github>,
+    github: &dyn Github,
     path: &Path,
     viewer: &str,
     scopes: &[String],
@@ -230,12 +225,11 @@ pub(super) fn read(
     let mut store = load(path, viewer);
     let before = store.clone();
     let mut warnings = Vec::new();
-    let refreshed = match github {
-        Some(github) => refresh(github, &mut store, viewer, now_secs, &mut warnings),
-        None => {
-            store.forget_old(now_secs);
-            HashSet::new()
-        }
+    let refreshed = if github.reads_paused().is_none() {
+        refresh(github, &mut store, viewer, now_secs, &mut warnings)
+    } else {
+        store.forget_old(now_secs);
+        HashSet::new()
     };
     if store != before {
         if let Err(why) = save(path, &store) {
@@ -297,6 +291,7 @@ fn refresh(
         .collect();
     let lookup = github
         .graphql(&lookup_body(&store.branches, &ids))
+        .map_err(|failure| failure.hint)
         .and_then(|reply| parse_lookup(&reply, &store.branches, &ids, viewer, now_secs));
     match lookup {
         Ok(lookup) => {
@@ -324,7 +319,9 @@ fn read_pushes(github: &dyn Github, viewer: &str, since: Option<u64>) -> Result<
         newest: None,
     };
     for page in 1..=EVENT_PAGES {
-        let reply = github.events(viewer, page)?;
+        let reply = github
+            .events(viewer, page)
+            .map_err(|failure| failure.hint)?;
         let events = reply
             .as_array()
             .ok_or_else(|| "GitHub sent an unexpected reply.".to_string())?;
@@ -488,7 +485,9 @@ fn verify(github: &dyn Github, store: &mut Store, viewer: &str) -> Result<(), St
     if due.is_empty() {
         return Ok(());
     }
-    let reply = github.graphql(&json!({ "query": VERIFY, "variables": { "ids": due } }))?;
+    let reply = github
+        .graphql(&json!({ "query": VERIFY, "variables": { "ids": due } }))
+        .map_err(|failure| failure.hint)?;
     let nodes = reply["data"]["nodes"]
         .as_array()
         .filter(|nodes| nodes.len() == due.len())

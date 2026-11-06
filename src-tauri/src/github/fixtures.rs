@@ -1,4 +1,15 @@
+use std::cell::RefCell;
+use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
+
 use serde_json::{json, Value};
+
+use super::connection::{rate_limited, Budget, Failure, Github};
+use crate::cli::AgentCli;
+use crate::cli_stub::CliStub;
+use crate::dto::GithubStatus;
+use crate::http::{head_header, CapturedRequest};
 
 pub(super) const REPLY: &str = r#"{
   "data": {
@@ -91,4 +102,148 @@ pub(super) fn commits_reply(per_pr: &[Vec<Value>]) -> Value {
         .map(|commits| json!({ "commits": { "nodes": commits } }))
         .collect();
     json!({ "data": { "nodes": nodes } })
+}
+
+pub(super) fn gh(dir: &Path, token: &str) -> AgentCli {
+    CliStub::new("gh")
+        .log_args("args.txt", true)
+        .stdout(token)
+        .cli(dir)
+}
+
+pub(super) fn gh_runs(dir: &Path) -> usize {
+    fs::read_to_string(dir.join("args.txt"))
+        .map(|log| log.lines().count())
+        .unwrap_or(0)
+}
+
+pub(super) fn authorization(request: &CapturedRequest) -> &str {
+    head_header(&request.head, "authorization").unwrap_or_default()
+}
+
+fn paused_five_minutes(budget: Budget) -> Failure {
+    rate_limited(budget, 300, 0)
+}
+
+struct Scripted {
+    answer: Result<Value, Failure>,
+    leaves_reads_paused: bool,
+}
+
+#[derive(Default)]
+pub(super) struct FakeGithub {
+    reads_paused: RefCell<Option<Failure>>,
+    events_paused: Option<Failure>,
+    replies: RefCell<VecDeque<Scripted>>,
+    pages: RefCell<VecDeque<Result<Value, Failure>>>,
+    bodies: RefCell<Vec<Value>>,
+    pages_asked: RefCell<Vec<(String, u32)>>,
+}
+
+impl FakeGithub {
+    pub(super) fn paused() -> Self {
+        let fake = Self::default();
+        *fake.reads_paused.borrow_mut() = Some(paused_five_minutes(Budget::Graphql));
+        fake
+    }
+
+    pub(super) fn events_paused(self) -> Self {
+        Self {
+            events_paused: Some(paused_five_minutes(Budget::Rest)),
+            ..self
+        }
+    }
+
+    fn script(self, answer: Result<Value, Failure>, leaves_reads_paused: bool) -> Self {
+        self.replies.borrow_mut().push_back(Scripted {
+            answer,
+            leaves_reads_paused,
+        });
+        self
+    }
+
+    pub(super) fn reply(self, reply: Value) -> Self {
+        self.script(Ok(reply), false)
+    }
+
+    pub(super) fn reply_leaving_paused(self, reply: Value) -> Self {
+        self.script(Ok(reply), true)
+    }
+
+    pub(super) fn failing_reply(self, why: &str) -> Self {
+        self.failing_with(Failure::new(GithubStatus::Network, why))
+    }
+
+    pub(super) fn failing_with(self, failure: Failure) -> Self {
+        self.script(Err(failure), false)
+    }
+
+    pub(super) fn page(self, events: Value) -> Self {
+        self.pages.borrow_mut().push_back(Ok(events));
+        self
+    }
+
+    pub(super) fn failing_page(self, why: &str) -> Self {
+        self.pages
+            .borrow_mut()
+            .push_back(Err(Failure::new(GithubStatus::Network, why)));
+        self
+    }
+
+    pub(super) fn body(&self, index: usize) -> Value {
+        self.bodies.borrow()[index].clone()
+    }
+
+    pub(super) fn requests(&self) -> usize {
+        self.bodies.borrow().len()
+    }
+
+    pub(super) fn pages_asked(&self) -> Vec<(String, u32)> {
+        self.pages_asked.borrow().clone()
+    }
+
+    pub(super) fn pages(&self) -> Vec<u32> {
+        self.pages_asked
+            .borrow()
+            .iter()
+            .map(|(_, page)| *page)
+            .collect()
+    }
+
+    pub(super) fn unanswered(&self) -> usize {
+        self.replies.borrow().len() + self.pages.borrow().len()
+    }
+}
+
+impl Github for FakeGithub {
+    fn reads_paused(&self) -> Option<Failure> {
+        self.reads_paused.borrow().clone()
+    }
+
+    fn graphql(&self, body: &Value) -> Result<Value, Failure> {
+        self.bodies.borrow_mut().push(body.clone());
+        if let Some(pause) = self.reads_paused() {
+            return Err(pause);
+        }
+        let Some(scripted) = self.replies.borrow_mut().pop_front() else {
+            return Err(Failure::new(GithubStatus::Network, "no reply scripted"));
+        };
+        if scripted.leaves_reads_paused {
+            *self.reads_paused.borrow_mut() = Some(paused_five_minutes(Budget::Graphql));
+        }
+        scripted.answer
+    }
+
+    fn events(&self, viewer: &str, page: u32) -> Result<Value, Failure> {
+        self.pages_asked
+            .borrow_mut()
+            .push((viewer.to_string(), page));
+        if let Some(pause) = &self.events_paused {
+            return Err(pause.clone());
+        }
+        self.pages
+            .borrow_mut()
+            .pop_front()
+            .unwrap_or_else(|| Ok(json!([])))
+    }
 }

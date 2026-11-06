@@ -4,6 +4,7 @@ pub(super) const GRAPHQL_URL: &str = "https://api.github.com/graphql";
 pub(super) const EVENTS_URL: &str = "https://api.github.com/users";
 pub(super) const PAGE_SIZE: u32 = 50;
 pub(super) const RECENT_MERGES: u32 = 10;
+pub(super) const EVENTS_PER_PAGE: usize = 100;
 
 const SEARCHES: &str = "\
 query($mine: String!, $review: String!, $direct: String!, $assigned: String!, $merged: String!, $first: Int!, $recent: Int!) {

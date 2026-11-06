@@ -62,6 +62,14 @@ fn parse_body(mut response: Reply) -> Result<Value, HttpError> {
 }
 
 pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError> {
+    get_json_with(url, headers, Forbidden::RejectedToken)
+}
+
+pub fn get_json_with(
+    url: &str,
+    headers: &[(&str, &str)],
+    forbidden: Forbidden,
+) -> Result<Value, HttpError> {
     let mut request = agent().get(url);
     if !headers
         .iter()
@@ -75,7 +83,7 @@ pub fn get_json(url: &str, headers: &[(&str, &str)]) -> Result<Value, HttpError>
     let response = request
         .call()
         .map_err(|error| HttpError::Network(error.to_string()))?;
-    finish(response, Forbidden::RejectedToken)
+    finish(response, forbidden)
 }
 
 pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpError> {
@@ -115,7 +123,7 @@ pub fn post_grant(url: &str, body: &Value) -> Result<Value, HttpError> {
     finish(response, Forbidden::PlainStatus)
 }
 
-enum Forbidden {
+pub enum Forbidden {
     RejectedToken,
     RateLimitWhenSaid,
     PlainStatus,
