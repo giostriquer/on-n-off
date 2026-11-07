@@ -23,13 +23,16 @@ source carries no comments (see [Code comments](#code-comments)).
 - What on-n-off can change for a provider (switching plugins, skills and MCP servers; install,
   uninstall, update; the install sources it refuses; hooks) and the reason it refuses one: the
   adapter's `capabilities()` (`capabilities.rs`), declared beside the step that makes each
-  change; where it puts skills and subagents is its `item_roots`. A refusal is never a step's own
-  message: the change path refuses with the declared reason, and an install source goes through
-  `Capabilities::admit`. The UI gates every action and prints every notice from
-  `AgentInfo.capabilities` and `AgentInfo.itemRoots`, through `ui/src/lib/capabilities.ts`, never
-  from a provider match or the older flags (`installGit`, `installFolder`, `pluginToggle`,
-  `readsHooks`, kept on the wire only); `capabilities/tests.rs` fails while a declaration and its
-  adapter disagree ([why](architecture/README.md#capabilities)).
+  change; where it puts skills and subagents is its `global_item_roots` and its project facts'
+  `items`. Which rows can be switched follows the declaration too (`Capabilities::restrict`, in
+  every `list_scope`): an adapter marks only what keeps one row from being switched. Only
+  `list_scope` is served; `list_tab`, whose rows are not restricted yet, is never handed to a
+  caller. A refusal is never a step's own message: the change path refuses with the declared
+  reason, and an install source goes through `Capabilities::admit`. The UI gates every action and
+  prints every notice from `AgentInfo.capabilities` and `AgentInfo.itemRoots`, through
+  `ui/src/lib/capabilities.ts`, never from a provider match or the older flags (`installGit`,
+  `installFolder`, `pluginToggle`, `readsHooks`, kept on the wire only); `capabilities/tests.rs`
+  fails while a declaration and its adapter disagree ([why](architecture/README.md#capabilities)).
 - A config change (switching a plugin, skill or MCP server; install, uninstall, update):
   `Changes::make` (`change.rs`), the one path every change command takes. An adapter contributes
   only its step (`AgentAdapter::step`: argv, a JSON or TOML document edit or `npx skills add`, and
@@ -170,6 +173,12 @@ source carries no comments (see [Code comments](#code-comments)).
   restate the rule, `Reading::has_observations` among it. The Limits column's legacy fold asks the
   same rule through `ProviderLimitsDto::stands_unavailable`. The cases they all check are
   `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
+- What a provider reads inside a project (its skill dirs and how they are read, workspace plugins,
+  MCP files, where it records its projects, where a project's items go): its adapter's
+  `projects()`, a `Projects` built without reading anything, never a `match` on `AgentId` in
+  `project.rs`, which builds the project view, a project's counts and the listed projects from it
+  for every provider ([why](architecture/README.md#project-view)). A file the adapter has a path
+  for (Claude's `.claude.json`) is read through that path, never through `paths::user_home`.
 - Whether a plugin is behind its marketplace, and which upstream it shows: `drift::read`
   (`drift.rs`), for every provider. The UI renders `outOfSync` and `upstream` as answered and never
   compares versions or recognises a commit SHA itself; an adapter only lists the installed version

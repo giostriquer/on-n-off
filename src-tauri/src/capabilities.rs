@@ -4,7 +4,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::{AgentAdapter, ItemPlaces};
-use crate::dto::{AdapterError, AgentInfo, PluginDto};
+use crate::dto::{AdapterError, AgentInfo, AgentTabDto, PluginDto};
 use crate::install_source::{parse_install_source, InstallSource, SourceKind};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -73,6 +73,10 @@ impl Change {
         )
     }
 
+    pub fn is_refused(&self) -> bool {
+        matches!(self, Self::Refused { .. })
+    }
+
     pub fn ready(&self, cli_found: bool) -> bool {
         match self {
             Self::Cli { .. } => cli_found,
@@ -101,6 +105,24 @@ impl Capabilities {
         match self.refused_sources.get(&parsed.kind()) {
             Some(reason) => Err(AdapterError::message(reason.clone())),
             None => Ok(parsed),
+        }
+    }
+
+    pub fn restrict(&self, tab: &mut AgentTabDto) {
+        let plugins = !self.plugin_switch.is_refused();
+        let skills = !self.skill_switch.is_refused();
+        let servers = !self.mcp_switch.is_refused();
+        for plugin in &mut tab.plugins {
+            plugin.togglable &= plugins;
+            for skill in &mut plugin.skills {
+                skill.togglable &= skills;
+            }
+        }
+        for skill in &mut tab.user_skills {
+            skill.togglable &= skills;
+        }
+        for server in &mut tab.mcp_servers {
+            server.togglable &= servers;
         }
     }
 

@@ -39,6 +39,14 @@ the view the user is looking at can switch, made only once the configuration fil
 backed up, and answered with that view as read from disk.
 _Avoid_: mutation, toggle (a switch is one kind), write
 
+**Project view**:
+What a provider's tabs show inside one project: the user's own plugins, skills and MCP servers with
+what the project brings beside them (its skills, its MCP servers, Antigravity's workspace plugins
+and the servers Claude keeps for that project), each marked the project's and never switched from
+on-n-off. Every provider's is built the same way, from what its adapter says it reads inside a
+project; the projects a provider lists are the ones it has recorded itself.
+_Avoid_: project scope (the scope bar's name for choosing one), workspace, overlay
+
 ### Limits
 
 **Quota window**:

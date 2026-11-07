@@ -350,7 +350,7 @@ impl Changes {
         let _turn = self.turn(id);
         let declared = adapter.capabilities();
         let change = request.declared(&declared);
-        if matches!(change, Change::Refused { .. }) {
+        if change.is_refused() {
             return Err(change.refusal());
         }
         let checked = request.check(&declared, || adapter.list_scope(view))?;

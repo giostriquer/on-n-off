@@ -75,7 +75,10 @@ adapter assumes today (change the adapter and this file together).
   server and installs from neither a git marketplace nor `npx skills add`. Where a provider puts
   subagents is its item roots (`AgentInfo.itemRoots`, Claude only). `installGit`, `installFolder`,
   `pluginToggle` and `readsHooks` on `AgentInfo` are derived from the declaration and kept for
-  older readers; the UI reads none of them.
+  older readers; the UI reads none of them. A row of a kind whose switch is refused is never
+  `togglable` (`Capabilities::restrict`, in every view), so an adapter marks only a single row's
+  own reason (an Antigravity plugin outside its CLI's folder, a Claude plugin's skill, a disabled
+  Muse plugin's skill, a server that is not the user's own).
 - Config changes (`change.rs`; the architecture guide's Config changes section): every provider's
   switch, install, uninstall and update takes one path, which checks the target against the
   caller's view read locally, backs up the files the change touches (refusing the change when a
@@ -102,14 +105,36 @@ adapter assumes today (change the adapter and this file together).
   those and that its listing reads each of them. **code** (what the adapters assume). An
   `npx skills add` install touches no config file and backs up nothing. A file that does not exist
   yet has nothing to back up.
-- Project scope: `project.rs` reads `.claude/`, `.codex/`, `.cursor/` inside a project for skills
-  and `.cursor/mcp.json` for project MCP.
+- Project view (`project.rs`; the architecture guide's Project view section): what a provider reads
+  inside a project is declared by its adapter's `projects()` and read the same way for every
+  provider. Every row a project brings is never switched; its skills and servers are marked
+  `project`, and its skills, servers and workspace plugins have ids prefixed `project:`, except an
+  Antigravity workspace plugin's own skills (follow-up below). A skill whose name the view already
+  shows is left out, and the first server of an id wins. The projects a provider lists are the
+  ones it records, read through the adapter's own path.
+
+  | | Skills, in order (the first is where a project's items go) | Workspace plugins | MCP, in order | Projects listed from |
+  |---|---|---|---|---|
+  | Claude | `.claude/skills`, `.agents/skills`; subagents `.claude/agents` | — | `.mcp.json`; the project's entry in `~/.claude.json` (`mcpServers`, and `disabledMcpServers`, which also turns off plugin servers) | `~/.claude.json` `projects` |
+  | Codex | `.codex/skills`, `.agents/skills` | — | `.mcp.json`; `.codex/config.toml` `mcp_servers` | `config.toml` `[projects]` |
+  | Antigravity | `.agents/skills`, its own scanner (loose `*.md` too) | `.agents/plugins`, `_agents/plugins` | `.mcp.json`; `.agents/mcp_config.json` | — |
+  | Cursor | `.cursor/skills` | — | `.mcp.json`; `.cursor/mcp.json` | — |
+  | Muse | `.agents/skills`, `.claude/skills`, `.codex/skills` | — | `.mcp.json` | — |
+
+  **code** (Muse's skill dirs **verified**, below). **Open question** (2026-11): every provider
+  reads the project's `.mcp.json` (Claude's format) as project MCP, as on-n-off always has; whether
+  Codex, Antigravity, Cursor and Muse read that file is not verified. It is kept until checked, and
+  dropping it for one provider is one line in its `projects()`. A server from a project's
+  `.cursor/mcp.json` keeps the file's `disabled`, while Cursor's own servers always read as on;
+  also not verified. **Follow-up**: an Antigravity workspace plugin's own skills keep their path
+  ids and name the plugin by its unprefixed id (`ws@workspace` under the plugin
+  `project:ws@workspace`), as they always have; whether to prefix them too is open.
 - Local items (`item_install/`): on-n-off can copy individual skills (and, for Claude, subagents)
   out of a GitHub marketplace repository without the provider CLI. It downloads one
   `codeload.github.com` tarball, writes the item under `AgentAdapter::item_roots(scope)` (skills:
   `~/.claude/skills`, `~/.codex/skills`, `~/.gemini/antigravity-cli/skills`, `~/.cursor/skills`,
   `~/.config/muse/skills`;
-  project scope: the first dir of `project_skill_dirs`; agents: `~/.claude/agents` /
+  project scope: the first skill dir of the Project view table; agents: `~/.claude/agents` /
   `.claude/agents`, Claude only), and records provenance (repo, ref, commit sha, plugin version,
   per-file sha256) in `~/.on-n-off/installed-items.json`. Item folders stay byte-identical to
   upstream — no sidecar files, no frontmatter edits — so "modified locally" is a pure hash

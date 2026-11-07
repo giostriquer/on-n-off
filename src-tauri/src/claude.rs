@@ -10,10 +10,11 @@ use crate::capabilities::{Capabilities, Change};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
 use crate::drift::Marketplace;
-use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::paths::{claude_root, plugin_id_parts};
-use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
+use crate::project::{relative, McpFile, ProjectRecord, Projects};
+use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
 #[derive(Debug, Deserialize)]
@@ -230,19 +231,25 @@ impl AgentAdapter for ClaudeAdapter {
         }
     }
 
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => {
-                let root = self.root()?;
-                Ok(ItemRoots {
-                    skills: root.join("skills"),
-                    agents: Some(root.join("agents")),
-                })
-            }
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Claude,
-            )),
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError> {
+        let root = self.root()?;
+        Ok(ItemRoots {
+            skills: root.join("skills"),
+            agents: Some(root.join("agents")),
+        })
+    }
+
+    fn projects(&self) -> Projects {
+        Projects {
+            items: ItemRoots {
+                skills: relative(&[".claude", "skills"]),
+                agents: Some(relative(&[".claude", "agents"])),
+            },
+            more_skills: vec![relative(&[".agents", "skills"])],
+            skill_files: SkillFiles::Folders,
+            plugins: None,
+            mcp: vec![McpFile::mcp_json()],
+            record: self.claude_json.clone().map(ProjectRecord::Claude),
         }
     }
 
@@ -314,17 +321,6 @@ impl AgentAdapter for ClaudeAdapter {
                 Marketplace::checkout(name, location, entry.origin())
             })
             .collect()
-    }
-
-    fn list_projects(&self) -> Vec<crate::dto::ProjectDto> {
-        let Ok(home) = crate::paths::user_home() else {
-            return Vec::new();
-        };
-        let text = fs::read_to_string(home.join(".claude.json")).unwrap_or_default();
-        crate::project::inspect_projects(
-            crate::project::parse_claude_projects(&text),
-            AgentId::Claude,
-        )
     }
 
     fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {

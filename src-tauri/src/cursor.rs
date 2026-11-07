@@ -4,10 +4,11 @@ use std::path::{Path, PathBuf};
 
 use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
-use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, PluginDto, SkillDto};
-use crate::mcp::parse_antigravity_json;
+use crate::dto::{AdapterError, AgentId, AgentTabDto, PluginDto, SkillDto};
+use crate::mcp::{parse_antigravity_json, McpFormat};
 use crate::paths::{cursor_root, normalize_skill_path};
-use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
+use crate::project::{relative, McpFile, Projects};
+use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
 const SOURCE_LOCAL: &str = "local";
@@ -59,7 +60,6 @@ impl CursorAdapter {
             .into_iter()
             .map(|mut server| {
                 server.enabled = true;
-                server.togglable = false;
                 server
             })
             .collect()
@@ -118,16 +118,27 @@ impl AgentAdapter for CursorAdapter {
         }
     }
 
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => Ok(ItemRoots {
-                skills: self.root()?.join("skills"),
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError> {
+        Ok(ItemRoots {
+            skills: self.root()?.join("skills"),
+            agents: None,
+        })
+    }
+
+    fn projects(&self) -> Projects {
+        Projects {
+            items: ItemRoots {
+                skills: relative(&[".cursor", "skills"]),
                 agents: None,
-            }),
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Cursor,
-            )),
+            },
+            more_skills: Vec::new(),
+            skill_files: SkillFiles::Folders,
+            plugins: None,
+            mcp: vec![
+                McpFile::mcp_json(),
+                McpFile::at(&[".cursor", "mcp.json"], McpFormat::AntigravityJson),
+            ],
+            record: None,
         }
     }
 
@@ -152,7 +163,7 @@ impl AgentAdapter for CursorAdapter {
                 upstream: String::new(),
                 out_of_sync: false,
                 enabled: true,
-                togglable: false,
+                togglable: true,
                 skills,
             });
         }
@@ -186,7 +197,7 @@ fn cursor_skill(plugin_id: Option<&str>, skill: ScannedSkill) -> SkillDto {
         name: skill.name,
         description: skill.description,
         enabled: true,
-        togglable: false,
+        togglable: true,
         origin: String::new(),
     }
 }

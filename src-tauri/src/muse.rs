@@ -9,14 +9,13 @@ use crate::capabilities::{Capabilities, Change};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
 use crate::drift::Marketplace;
-use crate::dto::{
-    AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, McpServerDto, PluginDto, SkillDto,
-};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::{InstallSource, SourceKind};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::agents_skills_root;
 use crate::paths::plugin_id_parts;
-use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill};
+use crate::project::{relative, McpFile, Projects};
+use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
 pub const MCP_READ_ONLY: &str = "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`.";
@@ -256,19 +255,6 @@ impl MuseAdapter {
         }
         hints
     }
-
-    fn mcp_servers(&self, settings_text: Option<&str>) -> Vec<McpServerDto> {
-        let Some(text) = settings_text else {
-            return Vec::new();
-        };
-        parse_antigravity_json(text)
-            .into_iter()
-            .map(|mut server| {
-                server.togglable = false;
-                server
-            })
-            .collect()
-    }
 }
 
 fn activation_map(settings_text: Option<&str>) -> HashMap<String, HashMap<String, String>> {
@@ -390,16 +376,27 @@ impl AgentAdapter for MuseAdapter {
         }
     }
 
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => Ok(ItemRoots {
-                skills: self.config_root()?.join("skills"),
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError> {
+        Ok(ItemRoots {
+            skills: self.config_root()?.join("skills"),
+            agents: None,
+        })
+    }
+
+    fn projects(&self) -> Projects {
+        Projects {
+            items: ItemRoots {
+                skills: relative(&[".agents", "skills"]),
                 agents: None,
-            }),
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Muse,
-            )),
+            },
+            more_skills: vec![
+                relative(&[".claude", "skills"]),
+                relative(&[".codex", "skills"]),
+            ],
+            skill_files: SkillFiles::Folders,
+            plugins: None,
+            mcp: vec![McpFile::mcp_json()],
+            record: None,
         }
     }
 
@@ -495,7 +492,10 @@ impl AgentAdapter for MuseAdapter {
         let mut tab = AgentTabDto {
             plugins,
             user_skills,
-            mcp_servers: self.mcp_servers(settings_text.as_deref()),
+            mcp_servers: settings_text
+                .as_deref()
+                .map(parse_antigravity_json)
+                .unwrap_or_default(),
             hooks: Vec::new(),
         };
         sort_tab(&mut tab);

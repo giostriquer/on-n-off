@@ -73,7 +73,9 @@ fn lists_local_and_cache_plugins_user_skills_and_mcp() {
     )
     .unwrap();
 
-    let tab = CursorAdapter::at(root.clone()).list_tab().expect("list");
+    let tab = CursorAdapter::at(root.clone())
+        .list_scope(None)
+        .expect("list");
     let local = tab
         .plugins
         .iter()

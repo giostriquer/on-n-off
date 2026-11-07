@@ -878,6 +878,7 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | `json_line_session.rs` | A provider CLI kept running and spoken to in line-delimited JSON-RPC: `codex app-server`. See below. |
 | `change.rs` | The one path every config change takes, for every provider: one at a time, checked against the caller's view read locally, backed up, made by the adapter's step and answered with that view. See below. |
 | `config_io.rs`, `backup.rs` | The protected write a change uses: back up every file it touches, then replace a patched document atomically, validate it and restore it from that backup when it does not parse. |
+| `project.rs` | The project view: what a provider's tab shows inside one project, the projects it lists and where a project's items go, built for every provider from what its adapter declares it reads there. See below. |
 | `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
 | `http.rs` | Outbound HTTPS, plus the loopback test server the limits, github and drift suites drive. `get_json` and the `post_*` calls classify a reply (`finish`: a rejected token, a rate limit with its reset); `get_text` hands back any status outside 2xx as the raw `HttpError::Status(code)` for its caller to read (plugin drift: a 404 is an answer, anything else a failure). |
@@ -966,8 +967,16 @@ refuses, each with its reason (`refusedSources`: a git marketplace, a folder, `n
 `npx skills add`, parsed and classified once by `install_source.rs`), the plugin sources an
 uninstall reaches (`uninstallFrom`, all when absent), and whether it reads hooks. Every adapter
 writes every field, so a new one does not compile until each adapter states it. Where an adapter
-puts skills and subagents is not declared beside them: it is its `item_roots`, the code that
-places them.
+puts skills and subagents is not declared beside them: it is its `global_item_roots`, the code
+that places them, and for a project the `items` of its project facts (Project view, below).
+
+The declaration also decides which rows can be switched: every view of a provider
+(`AgentAdapter::list_scope`, which drift reads and the change path checks against) ends with
+`Capabilities::restrict`, so a plugin, skill or MCP server row is never `togglable` while that
+kind's switch is refused. An adapter marks only what keeps a single row from being switched: an
+Antigravity plugin outside its CLI's folder, a Claude plugin's skill and a server that is not the
+user's own, a disabled Muse plugin's skill; every row a project brings is marked by the project
+view. Cursor's rows, Muse's MCP servers and Antigravity's skills set nothing of their own.
 
 The change path (Config changes, below) refuses a change the declaration refuses, with the declared
 reason, before it reads anything, and takes every install source through `Capabilities::admit`,
@@ -979,11 +988,11 @@ declared change of every provider on a seeded home, so it fails then. `AgentInfo
 adapter is listed with, through `AgentInfo::describe` from the declaration, whether the CLI was
 found (`cli_locate::provider_cli_found`) and the adapter's item roots; it is no trait method. It
 carries the declaration whole as `capabilities`, the item roots as `itemRoots`
-(`ItemPlaces::of`, beside `ItemRoots` in `adapter.rs`: each shown from `~` when under the home, the
-project ones relative to the project), and derives the older flags from the declaration for older
-readers: `installGit` and `installFolder` (install ready and the kind accepted), `pluginToggle`
-(the plugin switch ready) and `readsHooks`. A `cli` change is ready only when the CLI was found, a
-`file` change always, a `refused` one never.
+(`ItemPlaces::of`, beside `ItemRoots` in `adapter.rs`: the global ones shown from `~` when under the
+home, the project ones as the adapter declares them, relative to the project), and derives the
+older flags from the declaration for older readers: `installGit` and `installFolder` (install ready
+and the kind accepted), `pluginToggle` (the plugin switch ready) and `readsHooks`. A `cli` change
+is ready only when the CLI was found, a `file` change always, a `refused` one never.
 
 `capabilities/tests.rs` holds the agreement over `AgentId::ALL` in scratch homes
 (`adapter::scratch_adapter`): no declared change, asked through the change path, answers a declared
@@ -1064,7 +1073,7 @@ PROVIDERS.md.
 Whether a plugin is behind its marketplace is answered once, by `drift.rs`, for every provider and
 every read of a view: `drift::read(adapter, view, reach)`.
 
-- The adapter lists its view from disk (`list_scope`: its `list_tab` and the project overlay), each
+- The adapter lists its view from disk (`list_scope`: its `list_tab` and the project view), each
   plugin with its installed version (`drift::installed`), and declares where its marketplaces are
   (`AgentAdapter::marketplaces`): a marketplace checkout on disk with the repository it came from
   (`Marketplace::checkout`), or the versions the provider recorded (`Marketplace::listing`, Muse's
@@ -1113,6 +1122,50 @@ remembered 404, the failure asked again and the answer two providers share, on a
 `commands/tests.rs` pins each command's reach on an `AppState` built from scratch adapters: a local
 read never asks GitHub, two scans ask once through the shared memo, and a refresh after a scan asks
 again.
+
+### Project view
+
+What a provider shows inside one project is built once, by `project.rs`, for every provider, from
+what the adapter declares it reads there: `AgentAdapter::projects` answers a `Projects`, built
+without reading anything, in the shape of the marketplaces drift reads.
+
+- `items`: where on-n-off installs a project's skills (and Claude's subagents), relative to the
+  project (`ItemRoots`). `AgentAdapter::item_roots` places a project install under the project
+  path (`ItemRoots::under`), and `AgentInfo.itemRoots.project` shows the relative form as it is.
+  Its skills dir is also the first one read.
+- `more_skills`, read after it in order, and `skill_files`, how those dirs are read
+  (`scanner::SkillFiles`: `Folders` holds `<name>/SKILL.md`, `FoldersAndMarkdown`, Antigravity's,
+  also loose `*.md` files).
+- `plugins`: workspace plugin folders and the adapter's own reader for its plugin layout
+  (`PluginFolders { dirs, read }`). Antigravity alone declares them, handing its `plugin.json`
+  folder reader, so `project.rs` reads them without knowing whose layout it is; every other
+  provider declares none.
+- `mcp`: the project's MCP files and their formats (`McpFile`, `mcp::McpFormat`: Claude's JSON,
+  Codex's TOML `mcp_servers`, Antigravity's JSON), in reading order.
+- `record`: where the provider records the projects it knows (`ProjectRecord`): Claude's
+  `.claude.json` (its `projects` keys, and each project's entry: the servers it keeps for the
+  project and the list that switches servers off there, read by `claude_mcp::project_servers`) or
+  Codex's `config.toml` (its `[projects]` keys). The path is the one the adapter was built with, so
+  `ClaudeAdapter::at` reads a scratch home's.
+
+`Projects::view` turns the provider's own listing into the project view (`list_scope` with a
+project path), adding workspace plugins first, then skills, then MCP servers. Every row a project
+brings is never `togglable`; its skills and servers carry `origin: "project"`, and its skills,
+servers and workspace plugins have ids prefixed `project:`, except a workspace plugin's own skills,
+which keep their path ids and name the plugin by its unprefixed id (a follow-up in PROVIDERS.md). A
+skill whose name the listing already shows, a plugin's skills included, or one an earlier dir gave,
+is left out, and the first server of an id wins. Claude's entry for the project then drops the
+local-scope rows of the all-projects view and turns off the plugin servers its list names.
+`Projects::inspect` counts a project's skills and servers for its `ProjectDto` (`inspect_project`),
+expanding a leading `~` against the user's home; `Projects::list` inspects every recorded project,
+one per folder, sorted by label (`list_projects`). Both commands reach the adapter through the app
+state.
+
+`project/tests/views.rs` pins every provider's global and project view row by row, the counts and
+the projects Codex lists, in scratch homes; `project/tests/mod.rs` holds the shared mechanics and
+Claude's entry, read through the injected `.claude.json`. Every provider declares the project's
+`.mcp.json`, read as Claude's format; whether the others read that file is an open question in
+PROVIDERS.md.
 
 ### JSON-line sessions
 
@@ -1181,7 +1234,8 @@ the code today; a change that moves one updates its row.
 | --- | --- |
 | Config change | `Changes::make` (`change.rs`), which every change command in `commands.rs` takes, with each adapter's `AgentAdapter::step` (its argv, document edit or `npx skills add`, and the files it touches); the backup and the protected document write are `ConfigIo` (`config_io.rs`); the UI stores the answer (`mutate` in `ui/src/features/session/SessionProvider.tsx`, through `keepShownPluginMetadata`) |
 | Plugin drift | `drift::read` (`drift.rs`) with the caller's `Reach` and the one `drift::Memo` in `AppState`, from each adapter's `AgentAdapter::marketplaces` (`Marketplace`) and the installed version it lists (`drift::installed`); chosen by `list_local_plugins`, `list_plugins` and `refresh` through `AppState::local_plugins`, `remote_plugins` and `forced_plugins` (`commands.rs`) and by the change path's answer (`change.rs`); shown by `ItemList` and Overview's drift rows (`driftRows`, `ui/src/lib/catalog.ts`), merged into the shown tab by `mergeEnrichedPluginMetadata` and kept through a change by `keepShownPluginMetadata` (`ui/src/lib/session.ts`) |
-| Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
+| Project view | `Projects` (`project.rs`), declared by each adapter's `AgentAdapter::projects` with `ItemRoots`, `scanner::SkillFiles`, `PluginFolders`, `McpFile` with `mcp::McpFormat` and `ProjectRecord`; laid over a listing by `Projects::view` in `AgentAdapter::list_scope`, counted by `Projects::inspect` and listed by `Projects::list` for the `inspect_project` and `list_projects` commands (`commands.rs`); a project's item roots by `AgentAdapter::item_roots` and shown by `ItemPlaces::of` (`adapter.rs`) |
+| Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; restricts which rows can be switched (`Capabilities::restrict`, in every `list_scope`); carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
 | Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows notch plan (`side_notch/plan.rs`, `plan/popover.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |

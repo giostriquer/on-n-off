@@ -6,20 +6,22 @@ use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
-use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, PluginDto, SkillDto};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
-use crate::mcp::parse_antigravity_json;
+use crate::mcp::{parse_antigravity_json, McpFormat};
 use crate::paths::{
     antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
     antigravity_config_plugins, antigravity_mcp_config, normalize_skill_path, plugin_id_parts,
 };
-use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill};
+use crate::project::{relative, McpFile, PluginFolders, Projects};
+use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
 const ENABLEMENT: [&str; 3] = ["config.json", "plugins.json", "settings.json"];
 
 const SOURCE_CLI: &str = "cli";
 const SOURCE_CONFIG: &str = "config";
+const SOURCE_WORKSPACE: &str = "workspace";
 
 #[derive(Debug, Clone)]
 struct DiscoveredPlugin {
@@ -154,23 +156,40 @@ impl AgentAdapter for AntigravityAdapter {
         }
     }
 
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => Ok(ItemRoots {
-                skills: self.skills_dir()?,
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError> {
+        Ok(ItemRoots {
+            skills: self.skills_dir()?,
+            agents: None,
+        })
+    }
+
+    fn projects(&self) -> Projects {
+        Projects {
+            items: ItemRoots {
+                skills: relative(&[".agents", "skills"]),
                 agents: None,
+            },
+            more_skills: Vec::new(),
+            skill_files: SkillFiles::FoldersAndMarkdown,
+            plugins: Some(PluginFolders {
+                dirs: vec![
+                    relative(&[".agents", "plugins"]),
+                    relative(&["_agents", "plugins"]),
+                ],
+                read: workspace_plugins,
             }),
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Antigravity,
-            )),
+            mcp: vec![
+                McpFile::mcp_json(),
+                McpFile::at(&[".agents", "mcp_config.json"], McpFormat::AntigravityJson),
+            ],
+            record: None,
         }
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
         let enablement = self.enablement();
         let mut plugins = Vec::new();
-        let mut plugin_skill_paths = HashSet::new();
+        let mut plugin_skill_ids = HashSet::new();
 
         for discovered in self.discover_plugins()? {
             let enabled = enablement
@@ -178,36 +197,20 @@ impl AgentAdapter for AntigravityAdapter {
                 .or_else(|| enablement.get(&discovered.id))
                 .copied()
                 .unwrap_or(true);
-            let skills: Vec<SkillDto> = scan_plugin_skills(&discovered.path)
-                .into_iter()
-                .map(|skill| {
-                    plugin_skill_paths
-                        .insert(normalize_skill_path(&skill.skill_md.to_string_lossy()));
-                    antigravity_skill(Some(&discovered.id), skill)
-                })
-                .collect();
-            plugins.push(PluginDto {
-                id: discovered.id,
-                name: discovered.name,
-                source: discovered.source.clone(),
-                version: String::new(),
-                upstream: String::new(),
-                out_of_sync: false,
-                enabled,
-                togglable: discovered.source == SOURCE_CLI,
-                skills,
-            });
+            let plugin = plugin_row(discovered, enabled);
+            plugin_skill_ids.extend(plugin.skills.iter().map(|skill| skill.id.clone()));
+            plugins.push(plugin);
         }
 
         let mut user_skills = Vec::new();
         let mut seen = HashSet::new();
         if let Ok(dir) = self.skills_dir() {
             for skill in scan_antigravity_skills(&dir) {
-                let key = normalize_skill_path(&skill.skill_md.to_string_lossy());
-                if plugin_skill_paths.contains(&key) || !seen.insert(key) {
+                let skill = antigravity_skill(None, skill);
+                if plugin_skill_ids.contains(&skill.id) || !seen.insert(skill.id.clone()) {
                     continue;
                 }
-                user_skills.push(antigravity_skill(None, skill));
+                user_skills.push(skill);
             }
         }
 
@@ -271,8 +274,26 @@ fn antigravity_skill(plugin_id: Option<&str>, skill: ScannedSkill) -> SkillDto {
         name: skill.name,
         description: skill.description,
         enabled: true,
-        togglable: false,
+        togglable: true,
         origin: String::new(),
+    }
+}
+
+fn plugin_row(discovered: DiscoveredPlugin, enabled: bool) -> PluginDto {
+    let skills = scan_plugin_skills(&discovered.path)
+        .into_iter()
+        .map(|skill| antigravity_skill(Some(&discovered.id), skill))
+        .collect();
+    PluginDto {
+        togglable: discovered.source == SOURCE_CLI,
+        source: discovered.source,
+        id: discovered.id,
+        name: discovered.name,
+        version: String::new(),
+        upstream: String::new(),
+        out_of_sync: false,
+        enabled,
+        skills,
     }
 }
 
@@ -369,40 +390,11 @@ fn merge_enablement(map: &mut HashMap<String, bool>, text: &str) {
     }
 }
 
-pub fn scan_workspace_plugins(project: &Path) -> Vec<PluginDto> {
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    for rel in [
-        Path::new(".agents").join("plugins"),
-        Path::new("_agents").join("plugins"),
-    ] {
-        let dir = project.join(&rel);
-        for discovered in scan_plugin_dirs(&dir, "workspace") {
-            if !seen.insert(discovered.id.clone()) {
-                continue;
-            }
-            let skills = scan_plugin_skills(&discovered.path)
-                .into_iter()
-                .map(|skill| {
-                    let mut dto = antigravity_skill(Some(&discovered.id), skill);
-                    dto.origin = crate::project::ORIGIN_PROJECT.to_string();
-                    dto
-                })
-                .collect();
-            out.push(PluginDto {
-                id: format!("project:{}", discovered.id),
-                name: discovered.name,
-                source: discovered.source,
-                version: String::new(),
-                upstream: String::new(),
-                out_of_sync: false,
-                enabled: true,
-                togglable: false,
-                skills,
-            });
-        }
-    }
-    out
+fn workspace_plugins(dir: &Path) -> Vec<PluginDto> {
+    scan_plugin_dirs(dir, SOURCE_WORKSPACE)
+        .into_iter()
+        .map(|discovered| plugin_row(discovered, true))
+        .collect()
 }
 
 #[cfg(test)]

@@ -48,7 +48,7 @@ fn lists_cli_and_config_plugins_with_skills_and_mcp() {
     .unwrap();
 
     let tab = AntigravityAdapter::at(gemini.clone())
-        .list_tab()
+        .list_scope(None)
         .expect("list");
     let alpha = tab.plugins.iter().find(|p| p.id == "alpha@cli").unwrap();
     assert!(!alpha.enabled);
@@ -107,13 +107,31 @@ fn merge_enablement_reads_disabled_list_and_imports() {
 }
 
 #[test]
-fn workspace_plugin_scan_prefixes_project() {
+fn a_project_view_lists_its_workspace_plugins_prefixed_project() {
     let root = crate::paths::scratch_dir("on-n-off-agy-ws");
     write_plugin(&root.join(".agents").join("plugins"), "ws", Some("local"));
-    let plugins = scan_workspace_plugins(&root);
-    assert_eq!(plugins.len(), 1);
+    write_plugin(&root.join("_agents").join("plugins"), "ws", Some("local"));
+    fs::create_dir_all(root.join(".agents").join("skills").join("local")).unwrap();
+    fs::write(
+        root.join(".agents")
+            .join("skills")
+            .join("local")
+            .join("SKILL.md"),
+        "---\nname: local\ndescription: Project copy\n---\n",
+    )
+    .unwrap();
+    let tab = AntigravityAdapter::at(root.join(".gemini"))
+        .list_scope(Some(&root.to_string_lossy()))
+        .unwrap();
+    let plugins = &tab.plugins;
+    assert_eq!(plugins.len(), 1, "one plugin of a name across both folders");
     assert_eq!(plugins[0].id, "project:ws@workspace");
     assert_eq!(plugins[0].skills[0].origin, crate::project::ORIGIN_PROJECT);
+    assert!(
+        !tab.user_skills.iter().any(|skill| skill.name == "local"),
+        "a project skill named like a workspace plugin's skill is left out: {:?}",
+        tab.user_skills
+    );
     let _ = fs::remove_dir_all(root);
 }
 

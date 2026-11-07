@@ -8,6 +8,21 @@ pub struct ScannedSkill {
     pub skill_md: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillFiles {
+    Folders,
+    FoldersAndMarkdown,
+}
+
+impl SkillFiles {
+    pub fn scan(self, dir: &Path) -> Vec<ScannedSkill> {
+        match self {
+            Self::Folders => scan_user_skills(dir),
+            Self::FoldersAndMarkdown => scan_antigravity_skills(dir),
+        }
+    }
+}
+
 pub fn scan_plugin_skills(plugin_root: &Path) -> Vec<ScannedSkill> {
     let skills_dir = plugin_root.join("skills");
     let mut skills = if skills_dir.is_dir() {

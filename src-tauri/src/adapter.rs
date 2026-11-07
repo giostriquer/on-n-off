@@ -5,12 +5,22 @@ use serde::{Deserialize, Serialize};
 use crate::capabilities::Capabilities;
 use crate::change::{Checked, Step};
 use crate::drift::Marketplace;
-use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, ProjectDto};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope};
+use crate::project::Projects;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ItemRoots {
     pub skills: std::path::PathBuf,
     pub agents: Option<std::path::PathBuf>,
+}
+
+impl ItemRoots {
+    pub fn under(&self, root: &Path) -> Self {
+        Self {
+            skills: root.join(&self.skills),
+            agents: self.agents.as_ref().map(|agents| root.join(agents)),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -29,17 +39,12 @@ pub struct ItemPlace {
 
 impl ItemPlaces {
     pub fn of<A: AgentAdapter + ?Sized>(adapter: &A, home: Option<&Path>) -> Self {
-        let place = |scope: &ItemScope| {
-            adapter
-                .item_roots(scope)
-                .ok()
-                .map(|roots| ItemPlace::shown(&roots, home))
-        };
         Self {
-            global: place(&ItemScope::Global),
-            project: place(&ItemScope::Project {
-                project_path: String::new(),
-            }),
+            global: adapter
+                .global_item_roots()
+                .ok()
+                .map(|roots| ItemPlace::shown(&roots, home)),
+            project: Some(ItemPlace::shown(&adapter.projects().items, home)),
         }
     }
 }
@@ -97,14 +102,13 @@ pub trait AgentAdapter: Send + Sync {
     fn marketplaces(&self) -> Vec<Marketplace> {
         Vec::new()
     }
-    fn list_projects(&self) -> Vec<ProjectDto> {
-        Vec::new()
-    }
+    fn projects(&self) -> Projects;
     fn list_scope(&self, project: Option<&str>) -> Result<AgentTabDto, AdapterError> {
         let mut tab = self.list_tab()?;
         if let Some(path) = project.map(str::trim).filter(|value| !value.is_empty()) {
-            crate::project::overlay_project(&mut tab, Path::new(path), self.id());
+            self.projects().view(&mut tab, Path::new(path));
         }
+        self.capabilities().restrict(&mut tab);
         Ok(tab)
     }
 
@@ -113,11 +117,15 @@ pub trait AgentAdapter: Send + Sync {
         Ok(None)
     }
 
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError>;
+
     fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        let _ = scope;
-        Err(AdapterError::message(
-            "local skill install is not supported for this agent",
-        ))
+        match scope {
+            ItemScope::Global => self.global_item_roots(),
+            ItemScope::Project { project_path } => {
+                Ok(self.projects().items.under(Path::new(project_path)))
+            }
+        }
     }
 }
 

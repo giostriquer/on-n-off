@@ -257,15 +257,25 @@ pub async fn list_projects(
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<ProjectDto>, AdapterError> {
     let adapter = state.adapter(agent_id);
-    blocking("project discovery", move || Ok(adapter.list_projects())).await
+    blocking("project discovery", move || {
+        Ok(adapter
+            .projects()
+            .list(crate::paths::user_home().ok().as_deref()))
+    })
+    .await
 }
 
 #[tauri::command]
-pub async fn inspect_project(agent_id: AgentId, path: String) -> Result<ProjectDto, AdapterError> {
+pub async fn inspect_project(
+    agent_id: AgentId,
+    path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ProjectDto, AdapterError> {
+    let adapter = state.adapter(agent_id);
     blocking("project inspection", move || {
-        Ok(crate::project::inspect_project(
+        Ok(adapter.projects().inspect(
             std::path::Path::new(&path),
-            agent_id,
+            crate::paths::user_home().ok().as_deref(),
         ))
     })
     .await

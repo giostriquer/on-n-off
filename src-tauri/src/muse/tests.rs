@@ -121,7 +121,7 @@ fn lists_plugins_skills_and_activation() {
           "mcpServers":{"docs":{"url":"https://docs.example/mcp"},"git":{"command":"npx","args":["-y","acme-git"]}}}"#,
     );
 
-    let tab = fixture.adapter().list_tab().expect("list");
+    let tab = fixture.adapter().list_scope(None).expect("list");
     assert_eq!(tab.plugins.len(), 1);
     let plugin = &tab.plugins[0];
     assert_eq!(plugin.id, "acme-tools@local");

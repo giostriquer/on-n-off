@@ -10,13 +10,17 @@ use crate::capabilities::{Capabilities, Change};
 use crate::change::{Checked, Step};
 use crate::cli::{argv, AgentCli};
 use crate::drift::Marketplace;
-use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
+use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
+use crate::mcp::McpFormat;
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
 use crate::paths::{
     agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
 };
-use crate::scanner::{scan_plugin_skills, scan_skill_md, scan_user_skills, ScannedSkill};
+use crate::project::{relative, McpFile, ProjectRecord, Projects};
+use crate::scanner::{
+    scan_plugin_skills, scan_skill_md, scan_user_skills, ScannedSkill, SkillFiles,
+};
 use crate::sort::sort_tab;
 
 #[derive(Debug, Deserialize, Default)]
@@ -175,16 +179,30 @@ impl AgentAdapter for CodexAdapter {
         }
     }
 
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => Ok(ItemRoots {
-                skills: self.root()?.join("skills"),
+    fn global_item_roots(&self) -> Result<ItemRoots, AdapterError> {
+        Ok(ItemRoots {
+            skills: self.root()?.join("skills"),
+            agents: None,
+        })
+    }
+
+    fn projects(&self) -> Projects {
+        Projects {
+            items: ItemRoots {
+                skills: relative(&[".codex", "skills"]),
                 agents: None,
-            }),
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Codex,
-            )),
+            },
+            more_skills: vec![relative(&[".agents", "skills"])],
+            skill_files: SkillFiles::Folders,
+            plugins: None,
+            mcp: vec![
+                McpFile::mcp_json(),
+                McpFile::at(&[".codex", "config.toml"], McpFormat::CodexToml),
+            ],
+            record: self
+                .root
+                .as_ref()
+                .map(|root| ProjectRecord::Codex(root.join("config.toml"))),
         }
     }
 
@@ -296,17 +314,6 @@ impl AgentAdapter for CodexAdapter {
                 ))
             })
             .collect()
-    }
-
-    fn list_projects(&self) -> Vec<crate::dto::ProjectDto> {
-        let Ok(root) = self.root() else {
-            return Vec::new();
-        };
-        let text = fs::read_to_string(root.join("config.toml")).unwrap_or_default();
-        crate::project::inspect_projects(
-            crate::project::parse_codex_projects(&text),
-            AgentId::Codex,
-        )
     }
 
     fn step(&self, change: &Checked) -> Result<Option<Step<'_>>, AdapterError> {

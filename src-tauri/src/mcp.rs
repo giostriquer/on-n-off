@@ -7,6 +7,31 @@ use crate::dto::McpServerDto;
 pub const ORIGIN_PLUGIN: &str = "plugin";
 pub const ORIGIN_LOCAL: &str = "local";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum McpFormat {
+    ClaudeJson,
+    CodexToml,
+    AntigravityJson,
+}
+
+impl McpFormat {
+    pub fn servers(self, text: &str) -> Vec<McpServerDto> {
+        match self {
+            Self::ClaudeJson => parse_claude_json(text),
+            Self::CodexToml => toml::from_str::<CodexMcpFile>(text)
+                .map(|file| parse_codex_map(&file.mcp_servers))
+                .unwrap_or_default(),
+            Self::AntigravityJson => parse_antigravity_json(text),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Default)]
+struct CodexMcpFile {
+    #[serde(default)]
+    mcp_servers: HashMap<String, CodexMcpEntry>,
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct CodexMcpEntry {
     pub command: Option<String>,
