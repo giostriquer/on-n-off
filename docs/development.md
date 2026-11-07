@@ -206,13 +206,15 @@ source carries no comments (see [Code comments](#code-comments)).
   `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
   the Windows painter; change a measurement in both files and in the fixture both checks read,
   `rail-cases.json` ([why](architecture/side-notch.md#on-macos)).
-- Where the Windows notch draws and answers clicks: its plan (`side_notch/plan.rs`, the popover's
-  stacks in `plan/popover.rs`), compiled for Windows and for tests on every OS. The window asks it what
-  is under the pointer; the painter draws its rects, though it still works out a cell's ring arcs and
-  figure, the cap's pin and the popover's tail and corners itself. The plan measures text only
-  through `TextMetrics` (`plan/text.rs`), never DirectWrite itself: the window passes `DirectWrite`,
-  tests `FixedAdvance`. A moved rect is a moved Windows pixel: update `plan/fixtures/plans.json`
-  from the golden test's failure only when the move is meant
+- Where the Windows notch draws and answers clicks: its plan (`side_notch/plan.rs`, a cell's arcs,
+  glyph and figure in `plan/cell.rs`, the popover's stacks in `plan/popover.rs`), compiled for
+  Windows and for tests on every OS. The painter maps the plan's coordinates to pixels and draws
+  only style inside them (inks, strokes, the silhouette's curves); never work a position or an
+  extent out in `win_paint.rs`. The window answers the pointer from the plan it presented
+  (`Plan::hit`, through `side_notch/presenter.rs`), never from one it plans again. The plan
+  measures text only through `TextMetrics` (`plan/text.rs`), never DirectWrite itself: the window
+  passes `DirectWrite`, tests `FixedAdvance`. A moved coordinate is a moved Windows pixel: update
+  `plan/fixtures/plans.json` from the golden test's failure only when the move is meant
   ([why](architecture/side-notch.md#the-windows-plan)).
 
 For new settings, use `Rocker`, `Segmented` and `SettingsCard` from

@@ -5,7 +5,7 @@ fn at(popover: &PopoverPlan, wanted: &str) -> R {
         .entries
         .iter()
         .find_map(|(item, rect)| match item {
-            PopItem::Text { text, right, .. } if text == wanted && !right => Some(*rect),
+            PopItem::Text(Text { text, right, .. }) if text == wanted && !right => Some(*rect),
             _ => None,
         })
         .unwrap_or_else(|| panic!("{wanted:?} is planned"))
@@ -20,20 +20,12 @@ fn first(popover: &PopoverPlan, kind: fn(&PopItem) -> bool) -> R {
 }
 
 fn opened(cell: CellData) -> PopoverPlan {
+    let hover = open_on(CellId::of(&cell));
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    plan(
-        &settings(),
-        &displays,
-        &data(vec![cell]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
-        now(),
-    )
-    .expect("fits")
-    .popover
-    .expect("the popover is open")
+    plan(&displays, &data(vec![cell]), hover, now())
+        .expect("fits")
+        .popover
+        .expect("the popover is open")
 }
 
 #[track_caller]
@@ -143,25 +135,12 @@ fn an_action_error_sits_right_above_the_footer() {
         42.0,
     ))]);
     rail.action_error = Some("Could not open the pull request.".into());
-    let popover = plan(
-        &settings(),
-        &displays,
-        &rail,
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
-        now(),
-    )
-    .expect("fits")
-    .popover
-    .expect("the popover is open");
+    let popover = plan(&displays, &rail, open_on(CLAUDE), now())
+        .expect("fits")
+        .popover
+        .expect("the popover is open");
     let error = at(&popover, "Could not open the pull request.");
     same(at(&popover, "Open Limits").y, error.y + error.h);
-    assert_eq!(
-        popover.action_error.as_deref(),
-        Some("Could not open the pull request.")
-    );
 }
 
 #[test]
@@ -192,7 +171,7 @@ fn a_session_stacks_its_lines_two_apart_and_the_list_ends_ten_above_the_footer()
         .iter()
         .rev()
         .find_map(|(item, rect)| match item {
-            PopItem::Text { text, right, .. } if text == "Terminal · webapp" && !right => {
+            PopItem::Text(Text { text, right, .. }) if text == "Terminal · webapp" && !right => {
                 Some(*rect)
             }
             _ => None,

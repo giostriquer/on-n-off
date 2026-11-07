@@ -13,6 +13,8 @@ mod displays;
 mod host;
 #[cfg(any(target_os = "windows", test))]
 mod plan;
+#[cfg(any(target_os = "windows", test))]
+mod presenter;
 #[cfg(target_os = "macos")]
 mod transport;
 

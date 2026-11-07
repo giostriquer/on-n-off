@@ -323,10 +323,11 @@ bun scripts/check-native-notch.mjs   # after a Rust build
 There is no helper and no second executable. `win_window.rs` owns one transparent, always-on-top,
 non-activating Win32 window per selected display, on its own window class and message loop rather
 than a second tao event loop (`OS.md` says why), and presents it with `UpdateLayeredWindow`;
-`plan.rs` works out where everything the window draws and answers clicks for sits
-([the plan](#the-windows-plan)); `win_paint.rs` draws a plan, the rail, the marks and the popovers,
-into a tiny-skia pixmap; `win_displays.rs` enumerates monitors; and `win_transport.rs` is the host's
-Windows transport, in-process channels where macOS has pipes.
+`presenter.rs` holds what that window shows and how it answers the pointer
+([the presenter](#what-the-window-asks-the-plan)); `plan.rs` works out where everything the window
+draws and answers clicks for sits ([the plan](#the-windows-plan)); `win_paint.rs` draws a plan, the
+rail, the marks and the popovers, into a tiny-skia pixmap; `win_displays.rs` enumerates monitors;
+and `win_transport.rs` is the host's Windows transport, in-process channels where macOS has pipes.
 The display is chosen by device name rather than UUID, and the same rule holds — a disconnected or
 mirrored selection hides the notch. Windows 11 is the floor (`CurrentBuildNumber` >= 22000); the
 settings card says so on older builds.
@@ -339,17 +340,69 @@ Read it before changing `win_window.rs`.
 
 ### The Windows plan
 
-`side_notch/plan.rs` turns the settings, the displays, the frame `model/frame.rs` decided, the hover
-state and the clock into a `Plan`: the window, the rail, each cell's rect and what its rings and
-figure show (`cell_content`), the cap, the pill (the collapsed strip shown on hover), and the open
-popover's frame, card, tail and every item and hit zone in it. The rail and its cells come from `model.rs`'s metrics and frames, the
-popover's frame from `popover_frame`, and what is in the popover from `popover::contents`
-(`plan/popover.rs`), the one place that reads a cell's data to lay a popover out, which composes it
-in sections (a provider's quota blocks and session rows, a pull request list and its rows, the
-footer) at one `Scale` (the size and the display's pixel grid). The window asks the plan what is
-under the pointer (`rail_hit`, the popover's zones). The painter draws a plan's rects, but still works
-out some coordinates itself: a cell's ring arcs and figure position, the cap's pin, and the
-popover's tail and card corners.
+`side_notch/plan.rs` turns the displays, the frame `model/frame.rs` decided (its settings among
+it), the hover state and the clock into a `Plan`: the window, the rail, each cell, the cap, the pill
+(the collapsed strip shown on hover), and the open popover's frame, card, tail and every item and
+hit zone in it. The rail and its cells come from `model.rs`'s metrics and frames, the popover's
+frame from `popover_frame`, what each cell draws from `cell::cell` (`plan/cell.rs`), and what is in
+the popover from `popover::contents` (`plan/popover.rs`), the one place that reads a cell's data to
+lay a popover out, which composes it in sections (a provider's quota blocks and session rows, a pull
+request list and its rows, the footer) at one `Scale` (the size and the display's pixel grid).
+
+The plan works out where everything the painter draws sits and how far it reaches; the painter maps
+those to pixels and keeps only what is style: the rail, card and track inks it fills with, the
+card's 1 px border, the strokes of the marks and of a CI dot without checks, the conflict band's
+gradient, and two shapes drawn inside a planned rect, the silhouette's curves inside the rail and
+the pill's capsule 1 px inside the strip. A cell (`CellPlan`) carries its identity (`CellId`,
+NotchCore's `RailCell`), its rect, its arcs, its glyph's box and its figure, a `Text` like any
+popover run, with its rect. A quota bar carries how far it fills (its share of the width, never
+less than its height, so a nearly empty meter is still a round cap), and a CI dot its ink and
+whether it is a ring (no checks) or a disc. Each `Arc` names its
+centre, radius, stroke, start and end in degrees (0 at three o'clock, clockwise), ink and caps: the
+track, the headline's meter from twelve o'clock, the inner ring's track and meter 6 pt inside it,
+or one segment a pull request with 9° between segments, a passing one in conflict banded
+(`ArcInk::Conflict`). The figure is 17 pt at the chosen size, centred under the ring and nudged
+2 pt right when it shows a headline, as the helper's is. The cap carries its pin's box, the popover
+its card's corner radius and its tail's base and apex. The tail is 8 pt long and 7 pt either side
+of its apex, the corners 12 pt, and the nudge 2 pt, each scaled by the size and put on the
+display's pixel grid (`Scale::value`), the helper's `metrics.value`. The painter used to work these
+out itself and disagreed: it drew the tail 8 and 7 times the size off the pixel grid, while the plan
+reserved the aligned length for it, the corners at 12 pt whatever the size, and the nudge at 2
+device pixels, a single point on a 2x display.
+
+### What the window asks the plan
+
+`presenter.rs` (`Presenter`) is the window's state, compiled like the plan for Windows and for
+tests on every OS: the frame and displays it was last sent, whether a full-screen app hides it, the
+hover and pin state, and the plan it presented. `win_window.rs` is the Win32 shell around it: it
+hands the presenter the frame, the displays, the pointer and the clicks, and draws the plan
+`present` returns. Everything the pointer does is answered from that presented plan, the one on
+screen: `Plan::hit` names what is under a point, the cap, a cell by its identity, or a popover zone
+(open a row, copy its review request, or the footer, which names its page: Limits or Pull
+requests), and the pointer's device pixels are read at the scale that plan was drawn at. Whether
+the rail is open to the pointer and which show mode the cap asks for come from it too: the cap's
+pin on screen, not settings that arrived after it was drawn. Hover and pin hold a cell's identity,
+not its slot. The window used to plan afresh for every pointer sample and click, from whatever data
+had arrived since it drew, so a click could land on a row that was not on screen yet, and it decided
+the footer's page by looking its slot up in the frame.
+
+A pinned popover follows the pointer onto another cell and stays put while the pointer is anywhere
+else, its own popover and the rail between cells among it, as the helper's does
+(`PanelController.pollPointer` re-pins only when the pointer is over a cell). The window used to
+unpin it as soon as the pointer left the cell for anything opaque that is not a cell, so moving onto
+the popover to click a row could close it first.
+
+A presented plan that moved from the one before it closes the popover and drops the hover state
+(`Plan::moved_from`): its rail sits elsewhere on screen, its cells are other cells, or the cap pins
+another show mode. A notch shown again after being hidden, by a full-screen app or by being
+switched off, also starts with nothing open. The helper's rule is close but not the same: it drops
+its state when a frame names another display, edge, size, show mode or set of cells, and not when
+the selected display itself changes, so a display change that moves the rail (another resolution,
+say) keeps a macOS popover open where the Windows one closes. The window used to compare a list of settings fields instead, so
+a change of pull request lists closed an open pull request popover and a display change that moved
+the rail kept it open somewhere else.
+
+### What ties the plan to Windows
 
 The plan is compiled for Windows and for tests on every OS (`cfg(any(target_os = "windows", test))`,
 as `RailMetrics::cell` is), so its tests run on a Mac. What ties it to Windows is text: the popover
@@ -358,8 +411,9 @@ wraps, ellipsizes and places runs by their measured width. It measures through o
 size and a `TextWeight`. The window passes `DirectWrite` (`win_paint/text.rs`), the faces and
 advances the painter draws with, so what the plan measured is what is drawn; tests pass
 `FixedAdvance`, a fixed advance a character for each weight, heavier wider, rounded to whole pixels
-as DirectWrite rounds a run. `plan/tests/` plans with `FixedAdvance` on every OS; `win_paint/tests/`
-renders plans made with `DirectWrite`, on Windows only, from the same fixtures.
+as DirectWrite rounds a run. `plan/tests/` plans with `FixedAdvance` on every OS (`chrome.rs` names
+the cell, cap and tail rules), `presenter/tests.rs` drives the presenter the same way, and
+`win_paint/tests/` renders plans made with `DirectWrite`, on Windows only, from the same fixtures.
 
 The popover's spacing is a set of stacks (`Stack`, `plan/popover.rs`), each declaring the spacing
 between its items, as `PopoverView.swift` declares the helper's: the card (10 pt, inside 12 pt of
@@ -370,8 +424,9 @@ spacing: a group's `last` item is followed by the parent's spacing, as a SwiftUI
 is followed by its parent's. The session list, whose last item belongs to a session, ends with
 `close`, which trades its own spacing after that item for the card's. A stack adds an item's extent
 and the gap after it in one step, as the popover always added them, so no rect moved when the
-spacing became stacks. `plan/fixtures/plans.json` pins every rect of ten plans, every edge, size and
-display scale among them, to the bit, and `plan/tests/spacing.rs` names the spacing rules; a change
+spacing became stacks. `plan/fixtures/plans.json` pins every rect, arc, point and radius of ten
+plans, every edge, size and display scale among them, to the bit, and `plan/tests/spacing.rs` names
+the spacing rules; a change
 to either moves the Windows notch's pixels. When it is meant, the golden test's failure prints the
 file's new contents.
 
@@ -391,8 +446,12 @@ The header mark, the footer arrow and the CI dot are also placed on the cap band
 size's text (`cap_middle` is asked at 13, 10.5 and 10 points, unscaled) while the text is drawn at
 the chosen size, so at compact and large they sit slightly off it. On the top edge the card starts
 at the popover's top rather than below its tail (`placed.y + tail_space` adds the reserve only the
-left and right edges have), so the painter draws the tail up over the rail's bottom and the tail's
-length reserved under the card goes unused; the helper pads the top by the tail.
+left and right edges have), so the tail points up over the rail's bottom and the tail's length
+reserved under the card goes unused; the helper pads the top by the tail. The cap's pin is 12 pt at
+every size and sits 0.62 of the cap from its top-left corner on every edge, where the helper's is
+the size's 12 pt and mirrored toward the screen edge on the left and top edges; the figure is
+17 pt times the size off the pixel grid, where the helper's font is `metrics.value(17)`; and the
+popover has no maximum height, where the helper's is 560 pt.
 
 **Typography is measured, not eyeballed.** The overlay sits next to the app's own window, so any
 mismatch in face, weight or antialiasing reads instantly as the wrong font. `win_paint/text.rs`

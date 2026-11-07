@@ -1,10 +1,29 @@
+use super::cell::{CREDITS_INK, CREDITS_TRACK, FABLE_ORANGE, FABLE_TRACK, TRACK_INK};
 use super::*;
+use crate::dto::CiState;
+use crate::side_notch::model::frame::PrSegment;
+
+fn rail_cell(cell: CellData) -> CellPlan {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
+    plan(&displays, &data(vec![cell]), Hover::default(), now())
+        .expect("fits")
+        .cells
+        .remove(0)
+}
 
 fn ring_label(card: ProviderLimitsDto) -> String {
-    match cell_content(&CellData::Provider(projected(card)), now()) {
-        CellContent::Provider { label, .. } => label,
-        _ => panic!("wrong content kind"),
+    rail_cell(CellData::Provider(projected(card))).label.text
+}
+
+fn solid(arc: &Arc) -> Color {
+    match arc.ink {
+        ArcInk::Solid(color) => color,
+        ArcInk::Conflict => panic!("a solid arc"),
     }
+}
+
+fn meter(percent: f64) -> (f64, f64) {
+    (-90.0, -90.0 + percent * 3.6)
 }
 
 #[test]
@@ -42,13 +61,9 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
     );
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
-        &settings(),
         &displays,
         &data(vec![pulls]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        open_on(CellId::PullRequests),
         now(),
     )
     .expect("fits");
@@ -59,7 +74,7 @@ fn unreadable_pull_requests_keep_their_rows_hidden() {
     );
     assert!(
         !popover.entries.iter().any(
-            |(item, _)| matches!(item, PopItem::Text { text, .. } if text.contains("stale row"))
+            |(item, _)| matches!(item, PopItem::Text(Text { text, .. }) if text.contains("stale row"))
         ),
         "an unreadable list shows the hint, not rows"
     );
@@ -93,7 +108,9 @@ fn a_long_session_name_is_ellipsized_not_chopped() {
         .entries
         .iter()
         .find_map(|(item, _)| match item {
-            PopItem::Text { text, .. } if text.starts_with("a-very-long") => Some(text.clone()),
+            PopItem::Text(Text { text, .. }) if text.starts_with("a-very-long") => {
+                Some(text.clone())
+            }
             _ => None,
         })
         .expect("the session name is planned");
@@ -102,7 +119,7 @@ fn a_long_session_name_is_ellipsized_not_chopped() {
         popover
             .entries
             .iter()
-            .any(|(item, _)| matches!(item, PopItem::Text { text, .. } if text == "30 min")),
+            .any(|(item, _)| matches!(item, PopItem::Text(Text { text, .. }) if text == "30 min")),
         "the session's age is read against the clock the plan was given"
     );
 }
@@ -115,21 +132,17 @@ fn pull_request_titles_wrap_at_the_weight_they_are_drawn_in() {
     )]);
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
-        &settings(),
         &displays,
         &data(vec![pulls]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        open_on(CellId::PullRequests),
         now(),
     )
     .expect("fits");
     let popover = planned.popover.as_ref().expect("the popover is open");
     for (item, rect) in &popover.entries {
-        let PopItem::Text {
+        let PopItem::Text(Text {
             text, size, weight, ..
-        } = item
+        }) = item
         else {
             continue;
         };
@@ -182,21 +195,17 @@ fn the_popover_keeps_the_mac_weight_of_every_run() {
         "MINE",
     ];
     let mut seen = 0;
-    for index in 0..cells.len() {
+    for cell in &cells {
         let planned = plan(
-            &settings(),
             &displays,
             &data(cells.clone()),
-            Hover {
-                active: Some(index),
-                ..Hover::default()
-            },
+            open_on(CellId::of(cell)),
             now(),
         )
         .expect("fits");
         let popover = planned.popover.as_ref().expect("the popover is open");
         for (item, _) in &popover.entries {
-            let PopItem::Text { text, weight, .. } = item else {
+            let PopItem::Text(Text { text, weight, .. }) = item else {
                 continue;
             };
             if medium.contains(&text.as_str()) {
@@ -237,34 +246,45 @@ fn popover_texts(provider: ProviderCell) -> Vec<String> {
         .entries
         .into_iter()
         .filter_map(|(item, _)| match item {
-            PopItem::Text { text, .. } => Some(text),
+            PopItem::Text(Text { text, .. }) => Some(text),
             _ => None,
         })
         .collect()
 }
 
-fn inner_ring(provider: ProviderCell) -> Option<(InnerRing, WindowAt)> {
-    match cell_content(&CellData::Provider(provider), now()) {
-        CellContent::Provider { inner, .. } => inner,
-        _ => panic!("wrong content kind"),
+fn inner_ring(provider: ProviderCell) -> Option<(Color, Color, (f64, f64))> {
+    let cell = rail_cell(CellData::Provider(provider));
+    let outer = cell.arcs[0].radius;
+    match cell
+        .arcs
+        .iter()
+        .filter(|arc| arc.radius < outer)
+        .collect::<Vec<_>>()
+        .as_slice()
+    {
+        [] => None,
+        [track, meter] => {
+            assert_eq!((track.from, track.to, track.round), (0.0, 360.0, false));
+            assert!(meter.round, "the meter ends round");
+            Some((solid(track), solid(meter), (meter.from, meter.to)))
+        }
+        arcs => panic!("an inner track and meter: {arcs:?}"),
     }
 }
 
 #[test]
 fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
     let member = codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
-    match cell_content(&CellData::Provider(member.clone()), now()) {
-        CellContent::Provider {
-            label, headline, ..
-        } => {
-            assert_eq!(label, "31%", "the weekly stays the headline");
-            assert_eq!(headline.and_then(|at| at.used_now()), Some(31.0));
-        }
-        _ => panic!("wrong content kind"),
-    }
+    let cell = rail_cell(CellData::Provider(member.clone()));
+    assert_eq!(cell.label.text, "31%", "the weekly stays the headline");
     assert_eq!(
-        inner_ring(member).map(|(ring, at)| (ring, at.used_now())),
-        Some((InnerRing::WorkspaceShare, Some(32.0)))
+        (cell.arcs[1].from, cell.arcs[1].to),
+        meter(31.0),
+        "the outer ring is the weekly"
+    );
+    assert_eq!(
+        inner_ring(member),
+        Some((CREDITS_TRACK, CREDITS_INK, meter(32.0)))
     );
     assert_eq!(
         inner_ring(codex_member(share(
@@ -273,8 +293,8 @@ fn a_codex_members_credit_share_fills_the_inner_ring_under_the_weekly() {
             true,
             "2020-01-01T12:00:00Z"
         )))
-        .map(|(_, at)| at.used_now()),
-        Some(Some(0.0)),
+        .map(|(_, _, sweep)| sweep),
+        Some(meter(0.0)),
         "a share past its reset has renewed, as a window has"
     );
 }
@@ -293,14 +313,10 @@ fn claudes_fable_window_fills_the_inner_ring_in_its_own_ink() {
             ..window("fable", "Weekly · Fable", LimitWindowKind::Model, 13.0)
         },
     ]);
-    let (ring, at) = inner_ring(claude).expect("an inner ring");
     assert_eq!(
-        ring,
-        InnerRing::Fable {
-            window_id: "fable".into()
-        }
+        inner_ring(claude),
+        Some((FABLE_TRACK, FABLE_ORANGE, meter(13.0)))
     );
-    assert_eq!(at.used_now(), Some(13.0));
 }
 
 #[test]
@@ -396,7 +412,7 @@ fn inks(planned: &Plan) -> Vec<(String, Color)> {
         .entries
         .iter()
         .filter_map(|(item, _)| match item {
-            PopItem::Text { text, color, .. } => Some((text.clone(), *color)),
+            PopItem::Text(Text { text, color, .. }) => Some((text.clone(), *color)),
             _ => None,
         })
         .collect()
@@ -413,13 +429,9 @@ fn each_badge_wears_the_ink_of_its_tone() {
     approved["reviewDecision"] = "APPROVED".into();
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
-        &settings(),
         &displays,
         &data(vec![pulls(vec![drafted, rejected, approved])]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        open_on(CellId::PullRequests),
         now(),
     )
     .expect("fits");
@@ -475,13 +487,9 @@ fn a_paused_account_keeps_its_last_reading_on_the_ring() {
 fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no_tag() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
-        &settings(),
         &displays,
         &data(vec![tagged_rows()]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        open_on(CellId::PullRequests),
         now(),
     )
     .expect("fits");
@@ -490,13 +498,13 @@ fn each_row_wears_its_work_or_personal_ink_on_a_stripe_and_the_copy_icon_with_no
         .entries
         .iter()
         .filter_map(|(item, rect)| match item {
-            PopItem::Text {
+            PopItem::Text(Text {
                 text,
                 size,
                 weight,
                 color,
                 ..
-            } => Some((text.as_str(), *rect, *size, *weight, *color)),
+            }) => Some((text.as_str(), *rect, *size, *weight, *color)),
             _ => None,
         })
         .collect();
@@ -620,45 +628,38 @@ fn a_cell_not_read_yet_keeps_its_slot_with_a_dash_and_says_it_is_checking() {
         None,
     );
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let rail = plan(&selected, &displays, &data, Hover::default(), now()).expect("fits");
-    let labels: Vec<String> = rail
+    let rail = plan(&displays, &data, Hover::default(), now()).expect("fits");
+    let labels: Vec<&str> = rail
         .cells
         .iter()
-        .map(|cell| match &cell.content {
-            CellContent::Provider { label, .. } => label.clone(),
-            CellContent::PullRequests { label, segments } => {
-                assert!(
-                    segments.is_empty(),
-                    "nothing about the pull requests is known yet"
-                );
-                label.clone()
-            }
-        })
+        .map(|cell| cell.label.text.as_str())
         .collect();
     assert_eq!(
         labels,
         ["41%", "—", "—"],
         "Codex and the pull requests keep their slots until they are read"
     );
-    for (index, checking) in [(1, "Checking limits…"), (2, "Checking pull requests…")] {
-        let planned = plan(
-            &selected,
-            &displays,
-            &data,
-            Hover {
-                active: Some(index),
-                ..Hover::default()
-            },
-            now(),
-        )
-        .expect("fits");
+    for checking in &rail.cells[1..] {
+        let [track] = checking.arcs.as_slice() else {
+            panic!("a checking cell draws only its track: {:?}", checking.arcs);
+        };
+        assert_eq!(
+            (track.from, track.to, solid(track)),
+            (0.0, 360.0, TRACK_INK)
+        );
+    }
+    for (cell, checking) in [
+        (CellId::Provider(AgentId::Codex), "Checking limits…"),
+        (CellId::PullRequests, "Checking pull requests…"),
+    ] {
+        let planned = plan(&displays, &data, open_on(cell), now()).expect("fits");
         let texts: Vec<String> = planned
             .popover
             .expect("the popover is open")
             .entries
             .into_iter()
             .filter_map(|(item, _)| match item {
-                PopItem::Text { text, .. } => Some(text),
+                PopItem::Text(Text { text, .. }) => Some(text),
                 _ => None,
             })
             .collect();
@@ -690,21 +691,59 @@ fn a_read_pull_request_cell_draws_the_figure_and_segments_the_model_decided() {
             },
         ]
     );
-    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
-    let planned = plan(
-        &settings(),
-        &displays,
-        &data(vec![cell.clone()]),
-        Hover::default(),
-        now(),
-    )
-    .expect("fits");
+    let (label, drawn) = pull_request_ring(cell.clone());
+    assert_eq!(label, "2", "the ring draws the frame's own figure");
     assert_eq!(
-        planned.cells[0].content,
-        CellContent::PullRequests {
-            label: "2".into(),
-            segments
-        },
-        "the ring draws the frame's own figure and segments"
+        drawn,
+        [
+            (-90.0 + 4.5, 90.0 - 4.5, ArcInk::Conflict, false),
+            (90.0 + 4.5, 270.0 - 4.5, ArcInk::Solid(TRIP_RED), false),
+        ],
+        "one segment a pull request, 2.5% apart, the passing one in conflict banded"
     );
+}
+
+#[test]
+fn a_single_pull_request_closes_the_ring_with_no_gap_at_the_top() {
+    let (label, drawn) = pull_request_ring(pulls(vec![pr(1, "Fix the only thing", "o/r")]));
+    assert_eq!(label, "1");
+    assert_eq!(
+        drawn,
+        [(-90.0, 270.0, ArcInk::Solid(LIVE_GREEN), false)],
+        "a lone pull request draws the whole ring"
+    );
+}
+
+fn pull_request_ring(cell: CellData) -> (String, Vec<(f64, f64, ArcInk, bool)>) {
+    let cell = rail_cell(cell);
+    let track = cell.arcs[0];
+    assert_eq!(solid(&track), TRACK_INK);
+    let drawn = cell.arcs[1..]
+        .iter()
+        .map(|arc| {
+            assert_eq!(
+                (arc.centre, arc.radius, arc.stroke),
+                (track.centre, track.radius, track.stroke)
+            );
+            (arc.from, arc.to, arc.ink, arc.round)
+        })
+        .collect();
+    (cell.label.text, drawn)
+}
+
+#[test]
+fn a_weekly_past_100_closes_the_ring_exactly_at_the_top_as_a_reached_one_does() {
+    let ring = |percent| {
+        let cell = rail_cell(CellData::Provider(claude_with(vec![window(
+            "weekly",
+            "Weekly · all models",
+            LimitWindowKind::Weekly,
+            percent,
+        )])));
+        let meter = &cell.arcs[1];
+        (cell.label.text.clone(), meter.from, meter.to, solid(meter))
+    };
+    let reached = ("100%".to_string(), -90.0, 270.0, TRIP_RED);
+    assert_eq!(ring(100.0), reached);
+    assert_eq!(ring(130.0), reached, "never past the top");
 }

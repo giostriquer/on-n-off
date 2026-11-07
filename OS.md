@@ -248,7 +248,7 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   `EventLoop<WindowMsg>` on the notch thread had its own windows' messages read as Tauri's types: the
   heap corrupted and v0.36.0 to v0.38.0 died with `0xc0000005` at launch whenever the notch was on.
   The notch registers its own class (`on-n-off Side notch`), pumps its own thread's queue and waits
-  with `MsgWaitForMultipleObjectsEx` until the state machine's next deadline. tao's
+  with `MsgWaitForMultipleObjectsEx` until the presenter's next deadline. tao's
   `EventLoop::run` also ends the process when its loop exits, which would have quit the app when the
   notch was switched off; the notch thread now destroys its window and returns, and a later switch-on
   creates the window again on the class already registered. `tao` stays a dev-dependency for the
@@ -256,9 +256,10 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   that a crash or an exit fails it instead of ending the test run.
 - **The window procedure only queues input.** `WM_MOUSEMOVE`, `WM_MOUSELEAVE` and `WM_LBUTTONDOWN`
   become `Input` values carrying the client point from `lParam`, and the loop hands them to
-  `Machine::input`. `WM_CLOSE` is swallowed: `DefWindowProcW` would destroy the window while the loop
-  keeps presenting to it. `WM_MOUSELEAVE` is a local constant because the `windows` crate defines it
-  only under `Win32_UI_Controls`, a feature the app does not otherwise need.
+  `Presenter::input` (`side_notch/presenter.rs`). `WM_CLOSE` is swallowed: `DefWindowProcW` would
+  destroy the window while the loop keeps presenting to it. `WM_MOUSELEAVE` is a local constant
+  because the `windows` crate defines it only under `Win32_UI_Controls`, a feature the app does not
+  otherwise need.
 - **The window must be a bare `WS_POPUP`.** With `WS_CAPTION` or `WS_THICKFRAME`, Windows keeps an
   invisible resize border on the left, right and bottom, so the client area is inset by the border
   width, the layered surface is clipped to it, and the compositor draws a drop shadow and a top
@@ -268,7 +269,7 @@ carries the new origin, size and pixels in one call. These behaviours decide whe
   (`WS_EX_NOACTIVATE`), so a click on it leaves the foreground app focused.
 - **Hit testing is per-pixel alpha.** A transparent part of the overlay clicks through to whatever is
   underneath, so the rail's flared ends and the gap beside a popover are not clickable, and
-  `WindowFromPoint` is what tells the state machine whether the pointer is on the notch.
+  `WindowFromPoint` is what tells the presenter whether the pointer is on the notch.
 - **The pointer poll is the hover input that does not depend on the window.** The overlay turns its
   own `WM_MOUSEMOVE` and `WM_MOUSELEAVE` into hover input too, but a per-pixel-alpha window gets no
   mouse messages over its transparent parts (and the tao window it replaced reported none at all).

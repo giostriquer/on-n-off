@@ -13,43 +13,47 @@ fn ink(color: &Color) -> String {
     )
 }
 
-fn content(content: &CellContent) -> String {
-    match content {
-        CellContent::Provider {
-            provider,
-            headline,
-            inner,
-            label,
-        } => format!(
-            "{provider:?} {label} headline {:?} inner {:?}",
-            headline.and_then(|at| at.used_now()),
-            inner
-                .as_ref()
-                .map(|(ring, at)| (ring.clone(), at.used_now()))
-        ),
-        CellContent::PullRequests { label, segments } => {
-            format!("pull requests {label} segments {}", segments.len())
-        }
-    }
+fn point((x, y): (f64, f64)) -> String {
+    format!("{x} {y}")
+}
+
+fn arc(arc: &Arc) -> String {
+    format!(
+        "arc {} r {} w {} {} to {} {} {}",
+        point(arc.centre),
+        arc.radius,
+        arc.stroke,
+        arc.from,
+        arc.to,
+        match arc.ink {
+            ArcInk::Solid(color) => ink(&color),
+            ArcInk::Conflict => "conflict".into(),
+        },
+        if arc.round { "round" } else { "butt" }
+    )
 }
 
 fn item(item: &PopItem) -> String {
     match item {
         PopItem::Mark { kind, size } => format!("mark {kind:?} {size}"),
-        PopItem::Text {
+        PopItem::Text(Text {
             text,
             size,
             weight,
             color,
             right,
-        } => format!(
+        }) => format!(
             "text {text:?} {size} {weight:?} {} {}",
             ink(color),
             if *right { "right" } else { "left" }
         ),
-        PopItem::Bar { percent, color } => format!("bar {percent:?} {}", ink(color)),
+        PopItem::Bar { fill, color } => format!("bar {fill:?} {}", ink(color)),
         PopItem::Divider => "divider".into(),
-        PopItem::Dot { ci } => format!("dot {ci:?}"),
+        PopItem::Dot { ink: color, hollow } => format!(
+            "dot {} {}",
+            ink(color),
+            if *hollow { "hollow" } else { "solid" }
+        ),
         PopItem::CopyIcon { color } => format!("copy {}", ink(color)),
         PopItem::Stripe { color } => format!("stripe {}", ink(color)),
     }
@@ -57,46 +61,60 @@ fn item(item: &PopItem) -> String {
 
 fn describe(plan: &Plan) -> Vec<String> {
     let mut lines = vec![
-        format!(
-            "{:?} display {} size {}",
-            plan.edge, plan.display_scale, plan.size_scale
-        ),
+        format!("{:?} display {}", plan.edge, plan.display_scale),
         format!("window {}", rect(&plan.window)),
         format!("rail {}", rect(&plan.rail)),
         format!("ear {}", plan.metrics.ear()),
     ];
     for (index, cell) in plan.cells.iter().enumerate() {
         lines.push(format!(
-            "cell {index} {}{} {}",
+            "cell {index} {:?} {}{}",
+            cell.id,
             rect(&cell.rect),
             if cell.active { " active" } else { "" },
-            content(&cell.content)
+        ));
+        lines.extend(
+            cell.arcs
+                .iter()
+                .map(|planned| format!("  {}", arc(planned))),
+        );
+        lines.push(format!("  glyph @ {}", rect(&cell.glyph)));
+        lines.push(format!(
+            "  label {:?} {} @ {}",
+            cell.label.text,
+            cell.label.size,
+            rect(&cell.label_rect)
         ));
     }
     lines.push(format!(
-        "cap {} hovered {} pinned {}",
+        "cap {} hovered {} pinned {} pin {}",
         rect(&plan.cap.rect),
         plan.cap.hovered,
-        plan.cap.pinned
+        plan.cap.pinned,
+        rect(&plan.cap.pin)
     ));
     if let Some(pill) = &plan.pill {
         lines.push(format!("pill {}", rect(pill)));
     }
     if let Some(popover) = &plan.popover {
         lines.push(format!(
-            "popover {} card {} tail {}",
+            "popover {} card {} radius {}",
             rect(&popover.rect),
             rect(&popover.card),
-            popover.tail
+            popover.radius
+        ));
+        let [first, last] = popover.tail.base;
+        lines.push(format!(
+            "  tail {} {} apex {}",
+            point(first),
+            point(last),
+            point(popover.tail.apex)
         ));
         for (entry, at) in &popover.entries {
             lines.push(format!("  {} @ {}", item(entry), rect(at)));
         }
         for (zone, at) in &popover.zones {
             lines.push(format!("  zone {zone:?} @ {}", rect(at)));
-        }
-        if let Some(error) = &popover.action_error {
-            lines.push(format!("  action error {error:?}"));
         }
     }
     lines
@@ -162,7 +180,6 @@ fn pulls_dto(status: &str, hint: Option<&str>, stale: bool) -> GithubPrsDto {
 
 struct Case {
     name: &'static str,
-    settings: NotchSettings,
     display: Display,
     data: RailData,
     hover: Hover,
@@ -178,13 +195,6 @@ fn rail_settings(edge: Edge, size: NotchSize, providers: Vec<AgentId>) -> NotchS
             lists: vec![GithubList::Mine, GithubList::ReviewRequested],
         },
         ..settings()
-    }
-}
-
-fn opened(index: usize) -> Hover {
-    Hover {
-        active: Some(index),
-        ..Hover::default()
     }
 }
 
@@ -275,9 +285,8 @@ fn cases() -> Vec<Case> {
             Some(&pulls_dto("ok", None, false)),
             None,
         ),
-        settings: live,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0),
-        hover: opened(0),
+        hover: open_on(CLAUDE),
     });
 
     let paused = both(Edge::Top, NotchSize::Compact);
@@ -292,9 +301,8 @@ fn cases() -> Vec<Case> {
             None,
             None,
         ),
-        settings: paused,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.5),
-        hover: opened(1),
+        hover: open_on(CellId::Provider(AgentId::Codex)),
     });
 
     let left = both(Edge::Left, NotchSize::Large);
@@ -306,9 +314,8 @@ fn cases() -> Vec<Case> {
             None,
             Some("Could not open the pull request.".into()),
         ),
-        settings: left,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.25),
-        hover: opened(0),
+        hover: open_on(CLAUDE),
     });
 
     let bottom = both(Edge::Bottom, NotchSize::Standard);
@@ -320,16 +327,14 @@ fn cases() -> Vec<Case> {
             None,
             None,
         ),
-        settings: bottom.clone(),
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0),
-        hover: opened(1),
+        hover: open_on(CellId::Provider(AgentId::Codex)),
     });
     cases.push(Case {
         name: "a provider not read yet on the bottom at 2x",
         data: frame::rail(&bottom, [(AgentId::Codex, member, Vec::new())], None, None),
-        settings: bottom,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0),
-        hover: opened(0),
+        hover: open_on(CLAUDE),
     });
 
     let pulls_right = both(Edge::Right, NotchSize::Standard);
@@ -341,9 +346,8 @@ fn cases() -> Vec<Case> {
             Some(&pulls_dto("ok", None, false)),
             None,
         ),
-        settings: pulls_right,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0),
-        hover: opened(2),
+        hover: open_on(CellId::PullRequests),
     });
 
     let stale = both(Edge::Top, NotchSize::Compact);
@@ -359,9 +363,8 @@ fn cases() -> Vec<Case> {
             )),
             None,
         ),
-        settings: stale,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.5),
-        hover: opened(2),
+        hover: open_on(CellId::PullRequests),
     });
 
     let unreadable = both(Edge::Bottom, NotchSize::Large);
@@ -377,9 +380,8 @@ fn cases() -> Vec<Case> {
             )),
             Some("Could not copy the review request.".into()),
         ),
-        settings: unreadable,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.25),
-        hover: opened(2),
+        hover: open_on(CellId::PullRequests),
     });
 
     let mut collapsed = both(Edge::Left, NotchSize::Compact);
@@ -392,9 +394,8 @@ fn cases() -> Vec<Case> {
             None,
             None,
         ),
-        settings: collapsed,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0),
-        hover: opened(0),
+        hover: open_on(CLAUDE),
     });
 
     let mut capped = both(Edge::Top, NotchSize::Large);
@@ -402,7 +403,6 @@ fn cases() -> Vec<Case> {
     cases.push(Case {
         name: "an open rail with its cap hovered on the top at large 2x",
         data: frame::rail(&capped, [(AgentId::Claude, claude, Vec::new())], None, None),
-        settings: capped,
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0),
         hover: Hover {
             rail_open: true,
@@ -419,7 +419,6 @@ fn every_rect_of_the_plan_is_pinned() {
         .into_iter()
         .map(|case| {
             let plan = plan(
-                &case.settings,
                 std::slice::from_ref(&case.display),
                 &case.data,
                 case.hover,

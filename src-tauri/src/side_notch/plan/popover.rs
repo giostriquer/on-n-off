@@ -1,9 +1,10 @@
+use super::cell::ci_color;
 use super::text::{TextMetrics, TextWeight, Typesetter};
 use super::{
-    provider_color, tone_color, Color, MarkKind, PopItem, Scale, Zone, MUTED_INK, R, WARN_AMBER,
-    WORKSPACE_CREDITS,
+    provider_color, tone_color, Color, MarkKind, Page, PopItem, Scale, Text, Zone, MUTED_INK, R,
+    WARN_AMBER, WORKSPACE_CREDITS,
 };
-use crate::dto::AgentId;
+use crate::dto::{AgentId, CiState};
 use crate::limits::window_at::WindowAt;
 use crate::side_notch::model::frame::{CellData, Notice, PrCell, PrList, PrRow, ProviderCell};
 use crate::side_notch::model::{meter_color, workspace_share_wording};
@@ -11,6 +12,7 @@ use crate::side_notch::sessions::{LiveSession, SessionStatus};
 use chrono::{DateTime, Utc};
 
 const WHITE: Color = [255, 255, 255, 255];
+const NO_CHECKS_RING: Color = [89, 89, 89, 255];
 
 struct Stack<'a> {
     at: &'a mut f64,
@@ -104,13 +106,13 @@ impl Contents {
         right: bool,
     ) {
         self.entries.push((
-            PopItem::Text {
+            PopItem::Text(Text {
                 text,
                 size,
                 weight,
                 color,
                 right,
-            },
+            }),
             rect,
         ));
     }
@@ -160,11 +162,11 @@ pub(super) fn contents(
     let footer = match cell {
         CellData::Provider(provider) => {
             composer.provider(&mut card, provider);
-            "Open Limits"
+            Page::Limits
         }
         CellData::PullRequests(pulls) => {
             composer.pull_requests(&mut card, pulls);
-            "Open Pull requests"
+            Page::PullRequests
         }
     };
     composer.footer(&mut card, footer, action_error);
@@ -309,13 +311,17 @@ impl Composer<'_> {
             TextWeight::Regular,
             MUTED_INK,
         );
-        let bar = quota.item(self.v(4.0));
+        let bar_h = self.v(4.0);
+        let bar = quota.item(bar_h);
         self.out.item(
             PopItem::Bar {
-                percent: block.at.used_now(),
+                fill: block
+                    .at
+                    .used_now()
+                    .map(|percent| (inner_w * percent.clamp(0.0, 100.0) / 100.0).max(bar_h)),
                 color: meter_color(block.at.meter(), provider_color(provider)),
             },
-            R::new(x, bar, inner_w, self.v(4.0)),
+            R::new(x, bar, inner_w, bar_h),
         );
         let used = block.at.used_text();
         let figure = match (block.at.used_now(), &block.detail) {
@@ -508,7 +514,16 @@ impl Composer<'_> {
             );
         }
         self.out.item(
-            PopItem::Dot { ci: row.ci },
+            match row.ci {
+                CiState::None => PopItem::Dot {
+                    ink: NO_CHECKS_RING,
+                    hollow: true,
+                },
+                ci => PopItem::Dot {
+                    ink: ci_color(ci),
+                    hollow: false,
+                },
+            },
             R::new(
                 x + inner_w - self.v(7.0),
                 repo_at + self.typeset.cap_middle(10.0, TextWeight::Regular) - self.v(7.0) / 2.0,
@@ -531,7 +546,11 @@ impl Composer<'_> {
         );
     }
 
-    fn footer(&mut self, card: &mut Stack, title: &str, action_error: Option<&str>) {
+    fn footer(&mut self, card: &mut Stack, page: Page, action_error: Option<&str>) {
+        let title = match page {
+            Page::Limits => "Open Limits",
+            Page::PullRequests => "Open Pull requests",
+        };
         let (x, inner_w) = (self.x, self.inner_w);
         if let Some(error) = action_error {
             let at = card.item_then(self.line_h(10.0), 0.0);
@@ -570,7 +589,7 @@ impl Composer<'_> {
             ),
         );
         self.out
-            .zone(Zone::Footer, R::new(footer_x, footer, footer_w, line));
+            .zone(Zone::Footer(page), R::new(footer_x, footer, footer_w, line));
     }
 }
 

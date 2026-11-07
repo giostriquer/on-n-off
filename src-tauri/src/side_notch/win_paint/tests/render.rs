@@ -4,17 +4,7 @@ use super::*;
 fn rendering_is_deterministic_and_lands_ink_where_planned() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
-    let planned = plan(
-        &settings(),
-        &displays,
-        &data(cells),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
-        now(),
-    )
-    .expect("fits");
+    let planned = plan(&displays, &data(cells), open_on(CLAUDE), now()).expect("fits");
     let first = render(&planned);
     let second = render(&planned);
     assert_eq!(first.data(), second.data(), "same plan, same bytes");
@@ -39,7 +29,8 @@ fn rendering_is_deterministic_and_lands_ink_where_planned() {
     );
     let column = ((gap_from + (planned.rail.x - gap_from) / 2.0) * scale as f64) as u32;
     let tail = cell.rect.mid_y() * scale as f64;
-    let tail_band = (7.0 + 1.0) * planned.size_scale * scale as f64;
+    let [upper, lower] = popover.tail.base;
+    let tail_band = ((lower.1 - upper.1) / 2.0 + 1.0) * scale as f64;
     let mut probed = 0;
     for y in 0..first.height() {
         if (f64::from(y) - tail).abs() <= tail_band {
@@ -65,9 +56,8 @@ fn the_collapsed_pill_renders_only_the_strip() {
     let mut hover_settings = settings();
     hover_settings.show = ShowMode::OnHover;
     let planned = plan(
-        &hover_settings,
         &displays,
-        &data(cells),
+        &data_for(hover_settings, cells),
         Hover::default(),
         now(),
     )
@@ -126,9 +116,8 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
     hover_settings.show = ShowMode::OnHover;
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
     let planned = plan(
-        &hover_settings,
         &displays,
-        &data(cells),
+        &data_for(hover_settings, cells),
         Hover::default(),
         now(),
     )
@@ -152,16 +141,8 @@ fn the_hover_strip_is_a_capsule_along_its_length() {
 fn hovering_the_cap_lightens_the_ear() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
-    let dark = plan(
-        &settings(),
-        &displays,
-        &data(cells.clone()),
-        Hover::default(),
-        now(),
-    )
-    .expect("fits");
+    let dark = plan(&displays, &data(cells.clone()), Hover::default(), now()).expect("fits");
     let lit = plan(
-        &settings(),
         &displays,
         &data(cells),
         Hover {
@@ -187,13 +168,12 @@ fn the_cap_pin_says_which_show_mode_is_on() {
         cap_hovered: true,
         ..Hover::default()
     };
-    let pinned = plan(&settings(), &displays, &data(cells.clone()), hover, now()).expect("fits");
+    let pinned = plan(&displays, &data(cells.clone()), hover, now()).expect("fits");
     let mut on_hover = settings();
     on_hover.show = ShowMode::OnHover;
     let loose = plan(
-        &on_hover,
         &displays,
-        &data(cells),
+        &data_for(on_hover, cells),
         Hover {
             rail_open: true,
             ..hover
@@ -231,7 +211,6 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
     for scale in [1.0_f64, 2.0] {
         let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, scale)];
         let planned = plan(
-            &settings(),
             &displays,
             &data(vec![CellData::Provider(claude_with(vec![window(
                 "w",
@@ -239,10 +218,7 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
                 LimitWindowKind::Weekly,
                 50.0,
             )]))]),
-            Hover {
-                active: Some(0),
-                ..Hover::default()
-            },
+            open_on(CLAUDE),
             now(),
         )
         .expect("fits");
@@ -251,7 +227,7 @@ fn text_is_measured_at_the_size_it_is_drawn_on_a_scaled_display() {
             .entries
             .iter()
             .find_map(|(item, rect)| match item {
-                PopItem::Text { text, .. } if text == "Open Limits" => Some(*rect),
+                PopItem::Text(Text { text, .. }) if text == "Open Limits" => Some(*rect),
                 _ => None,
             })
             .expect("the footer label is planned");
@@ -295,7 +271,7 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
         .entries
         .iter()
         .find_map(|(item, rect)| match item {
-            PopItem::Text { text, .. } if text.ends_with("Usage") => Some(*rect),
+            PopItem::Text(Text { text, .. }) if text.ends_with("Usage") => Some(*rect),
             _ => None,
         })
         .expect("the header title is planned");
@@ -323,7 +299,6 @@ fn the_header_glyph_sits_on_the_cap_band_of_its_title() {
 fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
     let mut planned = plan(
-        &settings(),
         &displays,
         &data(vec![CellData::Provider(session_only(
             AgentId::Claude,
@@ -333,17 +308,17 @@ fn conflict_blend_stays_in_the_ring_and_preserves_the_icon() {
         now(),
     )
     .expect("fits");
-    planned.cells[0].content = CellContent::PullRequests {
-        label: "1".into(),
-        segments: vec![PrSegment {
-            ci: CiState::Success,
-            passing_with_conflicts: false,
-        }],
+    let track = planned.cells[0].arcs[0];
+    let passing = Arc {
+        from: -90.0,
+        to: 270.0,
+        ink: ArcInk::Solid(LIVE_GREEN),
+        round: false,
+        ..track
     };
+    planned.cells[0].arcs = vec![track, passing];
     let plain = render(&planned);
-    if let CellContent::PullRequests { segments, .. } = &mut planned.cells[0].content {
-        segments[0].passing_with_conflicts = true;
-    }
+    planned.cells[0].arcs[1].ink = ArcInk::Conflict;
     let conflict = render(&planned);
     let scale = planned.display_scale;
     let cell = &planned.cells[0];
@@ -381,7 +356,7 @@ fn the_popover_tail_points_at_its_own_cell() {
                     AgentId::Codex,
                     AgentId::Antigravity,
                     AgentId::Cursor,
-                    AgentId::Claude,
+                    AgentId::Muse,
                 ][index],
                 40.0,
             ))
@@ -389,13 +364,9 @@ fn the_popover_tail_points_at_its_own_cell() {
         .collect();
     let last = cells.len() - 1;
     let planned = plan(
-        &settings(),
         &displays,
         &data(cells),
-        Hover {
-            active: Some(last),
-            ..Hover::default()
-        },
+        open_on(CellId::Provider(AgentId::Muse)),
         now(),
     )
     .expect("fits");
@@ -462,13 +433,9 @@ fn hued_pixels(pixmap: &tiny_skia::Pixmap, rect: R, hue: fn([f64; 3]) -> bool) -
 fn each_row_paints_its_work_or_personal_ink_on_its_stripe_and_copy_icon() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let planned = plan(
-        &settings(),
         &displays,
         &data(vec![tagged_rows()]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        open_on(CellId::PullRequests),
         now(),
     )
     .expect("fits");
@@ -503,16 +470,176 @@ fn each_row_paints_its_work_or_personal_ink_on_its_stripe_and_copy_icon() {
     assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
 }
 
-#[test]
-fn each_inner_ring_paints_in_its_own_ink() {
-    assert_eq!(
-        inner_ring_colors(&InnerRing::WorkspaceShare),
-        (CREDITS_INK, CREDITS_TRACK)
+fn device(rect: R, scale: f64) -> R {
+    R::new(
+        rect.x * scale,
+        rect.y * scale,
+        rect.w * scale,
+        rect.h * scale,
+    )
+}
+
+fn white(px: tiny_skia::PremultipliedColorU8) -> bool {
+    let channels = [px.red(), px.green(), px.blue()];
+    let (low, high) = (
+        channels.into_iter().min().unwrap_or(0),
+        channels.into_iter().max().unwrap_or(0),
     );
-    assert_eq!(
-        inner_ring_colors(&InnerRing::Fable {
-            window_id: "fable".into()
-        }),
-        (FABLE_ORANGE, FABLE_TRACK)
+    low > 70 && high - low < 30
+}
+
+fn near(px: tiny_skia::PremultipliedColorU8, ink: Color) -> bool {
+    [px.red(), px.green(), px.blue()]
+        .into_iter()
+        .zip(ink)
+        .all(|(drawn, wanted)| drawn.abs_diff(wanted) <= 40)
+}
+
+fn ink_bounds(
+    pixmap: &tiny_skia::Pixmap,
+    rect: R,
+    band: f64,
+    inked: fn(tiny_skia::PremultipliedColorU8) -> bool,
+) -> Option<[f64; 4]> {
+    let xs = (rect.x - band).floor().max(0.0) as u32..(rect.x + rect.w + band).ceil() as u32;
+    let ys = (rect.y - band).floor().max(0.0) as u32..(rect.y + rect.h + band).ceil() as u32;
+    let hits: Vec<(u32, u32)> = ys
+        .flat_map(|y| xs.clone().map(move |x| (x, y)))
+        .filter(|&(x, y)| pixmap.pixel(x, y).is_some_and(inked))
+        .collect();
+    let left = hits.iter().map(|hit| hit.0).min()?;
+    let right = hits.iter().map(|hit| hit.0).max()?;
+    let top = hits.iter().map(|hit| hit.1).min()?;
+    let bottom = hits.iter().map(|hit| hit.1).max()?;
+    Some([
+        f64::from(left),
+        f64::from(top),
+        f64::from(right + 1),
+        f64::from(bottom + 1),
+    ])
+}
+
+#[test]
+fn at_twice_the_scale_each_mark_tail_fill_and_right_run_lands_in_its_planned_device_rect() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
+    let cells = vec![CellData::Provider(claude_with(vec![window(
+        "w",
+        "Weekly - all models",
+        LimitWindowKind::Weekly,
+        50.0,
+    )]))];
+    let hover = Hover {
+        cap_hovered: true,
+        ..open_on(CLAUDE)
+    };
+    let planned = plan(&displays, &data(cells), hover, now()).expect("fits");
+    let scale = planned.display_scale;
+    assert_eq!((scale, planned.edge), (2.0, Edge::Right));
+    let pixmap = render(&planned);
+
+    let glyph = device(planned.cells[0].glyph, scale);
+    let drawn = ink_bounds(&pixmap, glyph, 4.0, white).expect("the cell glyph draws");
+    let wanted = [glyph.x, glyph.y, glyph.x + glyph.w, glyph.y + glyph.h];
+    assert!(
+        drawn
+            .iter()
+            .zip(wanted)
+            .all(|(drawn, wanted)| (drawn - wanted).abs() <= 2.0),
+        "the cell glyph fills its device rect {wanted:?} and nothing around it: {drawn:?}"
+    );
+
+    let pin = device(planned.cap.pin, scale);
+    let [left, top, right, bottom] =
+        ink_bounds(&pixmap, pin, 4.0, white).expect("the cap pin draws");
+    assert!(
+        left >= pin.x - 1.0
+            && top >= pin.y - 1.0
+            && right <= pin.x + pin.w + 1.0
+            && bottom <= pin.y + pin.h + 1.0,
+        "the pin's ink stays in its device rect {pin:?}: {:?}",
+        [left, top, right, bottom]
+    );
+    assert!(
+        ((left + right) / 2.0 - pin.mid_x()).abs() <= 1.5 && bottom - top >= pin.h * 0.75,
+        "the pin is centred in and spans its device rect {pin:?}: {:?}",
+        [left, top, right, bottom]
+    );
+
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    let (apex_x, apex_y) = (popover.tail.apex.0 * scale, popover.tail.apex.1 * scale);
+    let base_x = popover.tail.base[0].0 * scale;
+    let inside = (apex_x - (apex_x - base_x) / 4.0).floor() as u32;
+    assert!(
+        pixmap
+            .pixel(inside, apex_y.floor() as u32)
+            .is_some_and(|px| px.alpha() > 200),
+        "the tail reaches towards its device apex ({apex_x}, {apex_y})"
+    );
+    let beyond = (apex_x + 1.0).ceil() as u32..(planned.rail.x * scale - 1.0).floor() as u32;
+    assert!(!beyond.is_empty(), "the rail leaves a gap past the apex");
+    let rows = apex_y.floor() as u32 - 3..=apex_y.floor() as u32 + 3;
+    for x in beyond {
+        for y in rows.clone() {
+            assert_eq!(
+                pixmap.pixel(x, y).map(|px| px.alpha()),
+                Some(0),
+                "nothing is drawn past the apex at ({x}, {y})"
+            );
+        }
+    }
+
+    let card_right = ((popover.card.x + popover.card.w) * scale).floor() as u32;
+    let (fill, ink, bar) = popover
+        .entries
+        .iter()
+        .find_map(|(item, rect)| match item {
+            PopItem::Bar {
+                fill: Some(fill),
+                color,
+            } => Some((*fill, *color, device(*rect, scale))),
+            _ => None,
+        })
+        .expect("the quota bar is filled");
+    let end = bar.x + fill * scale;
+    assert!(
+        end < bar.x + bar.w - 8.0,
+        "the case leaves track past the fill"
+    );
+    let row = bar.mid_y().floor() as u32;
+    let filled: Vec<u32> = (0..card_right)
+        .filter(|x| pixmap.pixel(*x, row).is_some_and(|px| near(px, ink)))
+        .collect();
+    let (&first, &last) = filled
+        .first()
+        .zip(filled.last())
+        .expect("the bar's fill draws");
+    assert_eq!(filled.len() as u32, last - first + 1, "the fill is one run");
+    assert!(
+        f64::from(first) <= bar.x + 1.0 && (f64::from(last + 1) - end).abs() <= 1.5,
+        "the fill runs from the bar's start {} to {end}, drawn {first}..={last}",
+        bar.x
+    );
+
+    let note = popover
+        .entries
+        .iter()
+        .find_map(|(item, rect)| match item {
+            PopItem::Text(Text { right: true, .. }) => Some(device(*rect, scale)),
+            _ => None,
+        })
+        .expect("the reset note is right-aligned");
+    let rows = note.y.ceil() as u32..(note.y + note.h).floor() as u32;
+    let rightmost = (0..card_right - 2)
+        .filter(|x| {
+            rows.clone()
+                .any(|y| pixmap.pixel(*x, y).is_some_and(|px| px.red() > 60))
+        })
+        .max()
+        .expect("the note's row draws");
+    let planned_right = note.x + note.w;
+    assert!(
+        (planned_right - 5.0..=planned_right + 1.0).contains(&f64::from(rightmost + 1)),
+        "the right-aligned run ends at its device rect's right edge {planned_right}: drawn to {}",
+        rightmost + 1
     );
 }

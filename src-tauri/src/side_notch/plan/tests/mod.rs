@@ -4,9 +4,10 @@ use crate::dto::{
     ProviderLimitsDto, Reading,
 };
 use crate::side_notch::model::frame::{self, ProviderCell};
-use crate::side_notch::model::{NotchProvider, NotchPullRequests};
+use crate::side_notch::model::{NotchProvider, NotchPullRequests, NotchSettings};
 use crate::side_notch::sessions::LiveSession;
 
+mod chrome;
 mod content;
 mod geometry;
 mod golden;
@@ -14,15 +15,17 @@ mod layout;
 mod spacing;
 mod text;
 
-fn plan(
-    settings: &NotchSettings,
-    displays: &[Display],
-    data: &RailData,
-    hover: Hover,
-    now: DateTime<Utc>,
-) -> Option<Plan> {
-    super::plan(settings, displays, data, hover, now, &FixedAdvance)
+fn plan(displays: &[Display], data: &RailData, hover: Hover, now: DateTime<Utc>) -> Option<Plan> {
+    super::plan(displays, data, hover, now, &FixedAdvance)
 }
+
+pub fn open_on(cell: CellId) -> Hover {
+    Hover {
+        active: Some(cell),
+        ..Hover::default()
+    }
+}
+pub const CLAUDE: CellId = CellId::Provider(AgentId::Claude);
 
 pub fn now() -> DateTime<Utc> {
     "2026-09-03T10:30:00Z".parse().unwrap()
@@ -78,7 +81,7 @@ fn projected(card: ProviderLimitsDto) -> ProviderCell {
         CellData::PullRequests(_) => panic!("a provider cell"),
     }
 }
-fn pr(number: u64, title: &str, repo: &str) -> serde_json::Value {
+pub fn pr(number: u64, title: &str, repo: &str) -> serde_json::Value {
     serde_json::json!({
         "id": format!("n{number}"), "number": number, "title": title,
         "url": format!("https://github.com/{repo}/pull/{number}"), "repo": repo,
@@ -105,7 +108,7 @@ fn pulls_read(
     };
     decided(only, Vec::new(), Some(&dto))
 }
-fn pulls(rows: Vec<serde_json::Value>) -> CellData {
+pub fn pulls(rows: Vec<serde_json::Value>) -> CellData {
     let total = rows.len();
     pulls_read("ok", None, total, rows)
 }
@@ -133,8 +136,11 @@ pub fn settings() -> NotchSettings {
     }
 }
 pub fn data(cells: Vec<CellData>) -> RailData {
+    data_for(settings(), cells)
+}
+pub fn data_for(settings: NotchSettings, cells: Vec<CellData>) -> RailData {
     RailData {
-        settings: settings(),
+        settings,
         cells,
         action_error: None,
     }
@@ -175,15 +181,12 @@ fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderCell {
     projected(codex_member_card(share))
 }
 fn popover_plan(provider: ProviderCell) -> Plan {
+    let opened = open_on(CellId::Provider(provider.provider));
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     plan(
-        &settings(),
         &displays,
         &data(vec![CellData::Provider(provider)]),
-        Hover {
-            active: Some(0),
-            ..Hover::default()
-        },
+        opened,
         now(),
     )
     .expect("fits")

@@ -3,7 +3,8 @@
 use super::host::{self, Action, Inbound, Link, Transport, STOPPED};
 use super::model::frame::RailData;
 use super::model::NotchSnapshot;
-use super::win_window::{WinAction, WindowMsg};
+use super::presenter::WinAction;
+use super::win_window::WindowMsg;
 use std::sync::{mpsc, Arc, Mutex, MutexGuard};
 use std::time::Instant;
 use tauri::AppHandle;

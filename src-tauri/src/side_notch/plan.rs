@@ -1,17 +1,18 @@
+mod cell;
 mod popover;
 mod text;
 
 #[cfg(test)]
 pub use text::FixedAdvance;
+use text::Typesetter;
 pub use text::{TextMetrics, TextWeight};
 
-use super::model::frame::{CellData, PrSegment, RailData, Tone};
+use super::model::frame::{CellData, RailData, Tone};
 use super::model::{
     layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display, Color,
-    Display, Edge, InnerRing, Layout, NotchSettings, RailMetrics, ShowMode, TRIP_RED,
+    Display, Edge, Layout, RailMetrics, ShowMode, TRIP_RED,
 };
-use crate::dto::{AgentId, CiState};
-use crate::limits::window_at::{WindowAt, UNREADABLE};
+use crate::dto::AgentId;
 use chrono::{DateTime, Utc};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
@@ -68,7 +69,10 @@ impl Scale {
 
 const POPOVER_WIDTH: f64 = 272.0;
 const POPOVER_MARGIN: f64 = 8.0;
-pub const TAIL_LENGTH: f64 = 8.0;
+const TAIL_LENGTH: f64 = 8.0;
+const TAIL_HALF_WIDTH: f64 = 7.0;
+const CARD_RADIUS: f64 = 12.0;
+const PIN_SIZE: f64 = 12.0;
 
 fn popover_frame(cell: &R, edge: Edge, size: (f64, f64), display: &Display, size_scale: f64) -> R {
     let scale = Scale {
@@ -98,32 +102,63 @@ fn popover_frame(cell: &R, edge: Edge, size: (f64, f64), display: &Display, size
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellId {
+    Provider(AgentId),
+    PullRequests,
+}
+
+impl CellId {
+    pub fn of(cell: &CellData) -> Self {
+        match cell {
+            CellData::Provider(provider) => Self::Provider(provider.provider),
+            CellData::PullRequests(_) => Self::PullRequests,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Hover {
     pub rail_open: bool,
-    pub active: Option<usize>,
+    pub active: Option<CellId>,
     pub cap_hovered: bool,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ArcInk {
+    Solid(Color),
+    Conflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Arc {
+    pub centre: (f64, f64),
+    pub radius: f64,
+    pub stroke: f64,
+    pub from: f64,
+    pub to: f64,
+    pub ink: ArcInk,
+    pub round: bool,
+}
+
 #[derive(Clone, Debug, PartialEq)]
-pub enum CellContent {
-    Provider {
-        provider: AgentId,
-        headline: Option<WindowAt>,
-        inner: Option<(InnerRing, WindowAt)>,
-        label: String,
-    },
-    PullRequests {
-        label: String,
-        segments: Vec<PrSegment>,
-    },
+pub struct Text {
+    pub text: String,
+    pub size: f64,
+    pub weight: TextWeight,
+    pub color: Color,
+    pub right: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CellPlan {
+    pub id: CellId,
     pub rect: R,
-    pub content: CellContent,
     pub active: bool,
+    pub arcs: Vec<Arc>,
+    pub glyph: R,
+    pub label: Text,
+    pub label_rect: R,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -131,35 +166,18 @@ pub struct CapPlan {
     pub rect: R,
     pub hovered: bool,
     pub pinned: bool,
+    pub pin: R,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopItem {
-    Mark {
-        kind: MarkKind,
-        size: f64,
-    },
-    Text {
-        text: String,
-        size: f64,
-        weight: TextWeight,
-        color: Color,
-        right: bool,
-    },
-    Bar {
-        percent: Option<f64>,
-        color: Color,
-    },
+    Mark { kind: MarkKind, size: f64 },
+    Text(Text),
+    Bar { fill: Option<f64>, color: Color },
     Divider,
-    Dot {
-        ci: CiState,
-    },
-    CopyIcon {
-        color: Color,
-    },
-    Stripe {
-        color: Color,
-    },
+    Dot { ink: Color, hollow: bool },
+    CopyIcon { color: Color },
+    Stripe { color: Color },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -169,28 +187,56 @@ pub enum MarkKind {
     OpenArrow,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Page {
+    Limits,
+    PullRequests,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum Zone {
     OpenRow { url: String },
     CopyRow { url: String, title: String },
-    Footer,
+    Footer(Page),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hit<'a> {
+    Cap,
+    Cell(CellId),
+    Popover(&'a Zone),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tail {
+    pub base: [(f64, f64); 2],
+    pub apex: (f64, f64),
+}
+
+impl Tail {
+    fn translated(self, dx: f64, dy: f64) -> Self {
+        let shift = |(x, y): (f64, f64)| (x + dx, y + dy);
+        Tail {
+            base: self.base.map(shift),
+            apex: shift(self.apex),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PopoverPlan {
     pub rect: R,
     pub card: R,
-    pub tail: f64,
+    pub radius: f64,
+    pub tail: Tail,
     pub entries: Vec<(PopItem, R)>,
     pub zones: Vec<(Zone, R)>,
-    pub action_error: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan {
     pub edge: Edge,
     pub display_scale: f64,
-    pub size_scale: f64,
     pub window: R,
     pub rail: R,
     pub metrics: RailMetrics,
@@ -198,47 +244,44 @@ pub struct Plan {
     pub cap: CapPlan,
     pub pill: Option<R>,
     pub popover: Option<PopoverPlan>,
+    frame: R,
 }
 
-pub fn rail_hit(plan: &Plan, x: f64, y: f64) -> Option<usize> {
-    plan.cells.iter().position(|cell| cell.rect.contains(x, y))
-}
+impl Plan {
+    pub fn moved_from(&self, earlier: &Plan) -> bool {
+        self.frame != earlier.frame
+            || self.cap.pinned != earlier.cap.pinned
+            || !self
+                .cells
+                .iter()
+                .map(|cell| cell.id)
+                .eq(earlier.cells.iter().map(|cell| cell.id))
+    }
 
-fn cell_content(data: &CellData, now: DateTime<Utc>) -> CellContent {
-    match data {
-        CellData::Provider(provider) => {
-            let reading = provider.reading.as_ref();
-            let headline = reading
-                .and_then(|reading| reading.headline())
-                .map(|window| WindowAt::of(window, now));
-            CellContent::Provider {
-                provider: provider.provider,
-                headline,
-                inner: reading
-                    .and_then(|reading| reading.inner_at(now))
-                    .map(|(ring, at)| (ring.clone(), at)),
-                label: headline.map_or_else(|| UNREADABLE.into(), |at| at.used_text()),
-            }
+    pub fn hit(&self, x: f64, y: f64) -> Option<Hit<'_>> {
+        if self.cap.rect.contains(x, y) {
+            return Some(Hit::Cap);
         }
-        CellData::PullRequests(cell) => CellContent::PullRequests {
-            label: cell.label.clone(),
-            segments: cell
-                .reading
-                .as_ref()
-                .map(|pulls| pulls.segments.clone())
-                .unwrap_or_default(),
-        },
+        if let Some(cell) = self.cells.iter().find(|cell| cell.rect.contains(x, y)) {
+            return Some(Hit::Cell(cell.id));
+        }
+        self.popover
+            .as_ref()?
+            .zones
+            .iter()
+            .find(|(_, rect)| rect.contains(x, y))
+            .map(|(zone, _)| Hit::Popover(zone))
     }
 }
 
 pub fn plan(
-    settings: &NotchSettings,
     displays: &[Display],
     data: &RailData,
     hover: Hover,
     now: DateTime<Utc>,
     text_metrics: &dyn TextMetrics,
 ) -> Option<Plan> {
+    let settings = &data.settings;
     let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
     let edge = settings.edge;
@@ -249,28 +292,20 @@ pub fn plan(
     let metrics = rail_metrics(settings.size, scale.display, edge);
     let collapsed = settings.show == ShowMode::OnHover && !hover.rail_open;
 
-    let cells: Vec<CellPlan> = rail_cell_frames(edge, &metrics, data.cells.len())
+    let frames: Vec<R> = rail_cell_frames(edge, &metrics, data.cells.len())
         .into_iter()
-        .enumerate()
-        .map(|(index, frame)| CellPlan {
-            rect: R::from(frame).translated(rail.x, rail.y),
-            content: cell_content(&data.cells[index], now),
-            active: hover.active == Some(index),
-        })
+        .map(|frame| R::from(frame).translated(rail.x, rail.y))
         .collect();
 
-    let cap = CapPlan {
-        rect: if edge.is_vertical() {
-            R::new(rail.x, rail.y, rail.w, metrics.ear())
-        } else {
-            R::new(rail.x, rail.y, metrics.ear(), rail.h)
-        },
-        hovered: hover.cap_hovered,
-        pinned: settings.show == ShowMode::Always,
+    let cap = if edge.is_vertical() {
+        R::new(rail.x, rail.y, rail.w, metrics.ear())
+    } else {
+        R::new(rail.x, rail.y, metrics.ear(), rail.h)
     };
 
-    let popover = hover.active.filter(|_| !collapsed).and_then(|index| {
-        let cell_rect = &cells.get(index)?.rect;
+    let popover = hover.active.filter(|_| !collapsed).and_then(|id| {
+        let index = data.cells.iter().position(|cell| CellId::of(cell) == id)?;
+        let cell_rect = &frames[index];
         let card_w = scale.value(POPOVER_WIDTH);
         let padding = scale.value(12.0);
         let inner_w = card_w - 2.0 * padding;
@@ -323,7 +358,14 @@ pub fn plan(
         Some(PopoverPlan {
             rect: placed,
             card,
-            tail,
+            radius: scale.value(CARD_RADIUS),
+            tail: tail_of(
+                &card,
+                edge,
+                tail,
+                scale.value(TAIL_LENGTH),
+                scale.value(TAIL_HALF_WIDTH),
+            ),
             entries: contents
                 .entries
                 .into_iter()
@@ -334,7 +376,6 @@ pub fn plan(
                 .into_iter()
                 .map(|(zone, rect)| (zone, rect.translated(card.x, card.y)))
                 .collect(),
-            action_error: data.action_error.clone(),
         })
     });
 
@@ -348,33 +389,78 @@ pub fn plan(
         None
     };
 
+    let typeset = Typesetter::new(text_metrics, scale.display);
+    let cells = frames
+        .into_iter()
+        .zip(&data.cells)
+        .map(|(frame, cell)| {
+            cell::cell(
+                cell,
+                frame.translated(-window.x, -window.y),
+                hover.active == Some(CellId::of(cell)),
+                &metrics.cell,
+                scale,
+                &typeset,
+                now,
+            )
+        })
+        .collect();
+    let cap = cap.translated(-window.x, -window.y);
+
     Some(Plan {
+        frame: rail,
         edge,
         display_scale: scale.display,
-        size_scale: scale.size,
         window,
         rail: rail.translated(-window.x, -window.y),
         metrics,
-        cells: cells
-            .into_iter()
-            .map(|mut cell| {
-                cell.rect = cell.rect.translated(-window.x, -window.y);
-                cell
-            })
-            .collect(),
+        cells,
         cap: CapPlan {
-            rect: cap.rect.translated(-window.x, -window.y),
-            hovered: cap.hovered,
-            pinned: cap.pinned,
+            rect: cap,
+            hovered: hover.cap_hovered,
+            pinned: settings.show == ShowMode::Always,
+            pin: R::new(
+                cap.x + cap.w * 0.62 - PIN_SIZE / 2.0,
+                cap.y + cap.h * 0.62 - PIN_SIZE / 2.0,
+                PIN_SIZE,
+                PIN_SIZE,
+            ),
         },
         pill: pill.map(|pill| pill.translated(-window.x, -window.y)),
         popover: popover.map(|popover| translate_popover(popover, -window.x, -window.y)),
     })
 }
 
+fn tail_of(card: &R, edge: Edge, along: f64, length: f64, half: f64) -> Tail {
+    let at = if edge.is_vertical() {
+        card.y + along
+    } else {
+        card.x + along
+    };
+    match edge {
+        Edge::Right => Tail {
+            base: [(card.x + card.w, at - half), (card.x + card.w, at + half)],
+            apex: (card.x + card.w + length, at),
+        },
+        Edge::Left => Tail {
+            base: [(card.x, at - half), (card.x, at + half)],
+            apex: (card.x - length, at),
+        },
+        Edge::Top => Tail {
+            base: [(at - half, card.y), (at + half, card.y)],
+            apex: (at, card.y - length),
+        },
+        Edge::Bottom => Tail {
+            base: [(at - half, card.y + card.h), (at + half, card.y + card.h)],
+            apex: (at, card.y + card.h + length),
+        },
+    }
+}
+
 fn translate_popover(mut popover: PopoverPlan, dx: f64, dy: f64) -> PopoverPlan {
     popover.rect = popover.rect.translated(dx, dy);
     popover.card = popover.card.translated(dx, dy);
+    popover.tail = popover.tail.translated(dx, dy);
     for (_, rect) in &mut popover.entries {
         *rect = rect.translated(dx, dy);
     }

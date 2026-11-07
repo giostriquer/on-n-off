@@ -5,38 +5,17 @@ mod text;
 
 pub(super) use text::DirectWrite;
 
-use super::model::{meter_color, Color, Edge, InnerRing, RailMetrics, TRIP_RED, UNREADABLE_INK};
+use super::model::{Color, Edge, RailMetrics, TRIP_RED};
 use super::plan::{
-    provider_color, CapPlan, CellContent, CellPlan, MarkKind, Plan, PopItem, PopoverPlan,
-    TextMetrics, TextWeight, LIVE_GREEN, MUTED_INK, R, TAIL_LENGTH, WARN_AMBER,
+    Arc, ArcInk, CapPlan, CellId, CellPlan, MarkKind, Plan, PopItem, PopoverPlan, Text, LIVE_GREEN,
+    MUTED_INK, R,
 };
-use crate::dto::CiState;
 use tiny_skia::{FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform};
-
-fn inner_ring_colors(ring: &InnerRing) -> (Color, Color) {
-    match ring {
-        InnerRing::Fable { .. } => (FABLE_ORANGE, FABLE_TRACK),
-        InnerRing::WorkspaceShare => (CREDITS_INK, CREDITS_TRACK),
-    }
-}
 
 const RAIL_INK: Color = [8, 8, 8, 255];
 const POPOVER_INK: Color = [14, 14, 17, 255];
-const TRACK_INK: Color = [44, 44, 44, 255];
-const FABLE_ORANGE: Color = [204, 98, 64, 255];
-const FABLE_TRACK: Color = [53, 42, 38, 255];
-const CREDITS_INK: Color = [168, 176, 186, 255];
-const CREDITS_TRACK: Color = [38, 41, 45, 255];
 const CAP_HIGHLIGHT: Color = [255, 255, 255, 28];
-
-fn ci_color(ci: CiState) -> Color {
-    match ci {
-        CiState::Success => LIVE_GREEN,
-        CiState::Failure | CiState::Error => TRIP_RED,
-        CiState::Pending => WARN_AMBER,
-        CiState::None => UNREADABLE_INK,
-    }
-}
+const WHITE: Color = [255, 255, 255, 255];
 
 pub fn render(plan: &Plan) -> Pixmap {
     let scale = plan.display_scale as f32;
@@ -68,10 +47,10 @@ pub fn render(plan: &Plan) -> Pixmap {
         scale,
     );
     for cell in &plan.cells {
-        draw_cell(&mut pixmap, cell, plan, scale);
+        draw_cell(&mut pixmap, cell, scale);
     }
     if let Some(popover) = &plan.popover {
-        draw_popover(&mut pixmap, popover, plan, scale);
+        draw_popover(&mut pixmap, popover, scale);
     }
     pixmap
 }
@@ -116,7 +95,7 @@ fn draw_silhouette_masked(
 ) {
     let t = if edge.is_vertical() { rail.w } else { rail.h } as f32;
     let length = if edge.is_vertical() { rail.h } else { rail.w } as f32;
-    let ear = (metrics.ear() as f32).min(length / 2.0);
+    let ear = metrics.ear() as f32;
     let edge_x = t + 1.0;
     let mut pb = PathBuilder::new();
     pb.move_to(edge_x, 0.0);
@@ -222,10 +201,10 @@ fn draw_cap(
     }
     marks::pin(
         (
-            (cap.rect.x + cap.rect.w * 0.62 - 6.0) as f32 * scale,
-            (cap.rect.y + cap.rect.h * 0.62 - 6.0) as f32 * scale,
-            12.0 * scale,
-            12.0 * scale,
+            cap.pin.x as f32 * scale,
+            cap.pin.y as f32 * scale,
+            cap.pin.w as f32 * scale,
+            cap.pin.h as f32 * scale,
         ),
         if cap.pinned {
             [255, 255, 255, 242]
@@ -268,23 +247,16 @@ fn rounded_rect_path(rect: R, radius: f64, scale: f32) -> Option<Path> {
     pb.finish()
 }
 
-fn stroke_ring(
-    pixmap: &mut Pixmap,
-    cx: f32,
-    cy: f32,
-    radius: f32,
-    stroke: f32,
-    from_deg: f32,
-    to_deg: f32,
-    color: Color,
-    round_caps: bool,
-    conflict: bool,
-) {
-    let n = (((to_deg - from_deg).abs() / 5.0).ceil() as usize).max(2);
+fn draw_arc(pixmap: &mut Pixmap, arc: &Arc, scale: f32) {
+    let (cx, cy) = (arc.centre.0 as f32 * scale, arc.centre.1 as f32 * scale);
+    let radius = arc.radius as f32 * scale;
+    let stroke = arc.stroke as f32 * scale;
+    let (from, to) = (arc.from as f32, arc.to as f32);
+    let n = (((to - from).abs() / 5.0).ceil() as usize).max(2);
     let mut pb = PathBuilder::new();
     for step in 0..=n {
         let t = step as f32 / n as f32;
-        let angle = (from_deg + (to_deg - from_deg) * t).to_radians();
+        let angle = (from + (to - from) * t).to_radians();
         let x = cx + radius * angle.cos();
         let y = cy + radius * angle.sin();
         if step == 0 {
@@ -296,39 +268,46 @@ fn stroke_ring(
     if let Some(path) = pb.finish() {
         let stroke_style = Stroke {
             width: stroke,
-            line_cap: if round_caps {
+            line_cap: if arc.round {
                 tiny_skia::LineCap::Round
             } else {
                 tiny_skia::LineCap::Butt
             },
             ..Default::default()
         };
-        let mut paint = Paint::default();
-        paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
-        paint.anti_alias = true;
-        paint.force_hq_pipeline = conflict || color == LIVE_GREEN;
-        if conflict {
-            let outer = radius + stroke / 2.0;
-            let boundary = radius + stroke / 6.0;
-            let blend = stroke * 0.18;
-            let green =
-                tiny_skia::Color::from_rgba8(LIVE_GREEN[0], LIVE_GREEN[1], LIVE_GREEN[2], 255);
-            let red = tiny_skia::Color::from_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 255);
-            if let Some(shader) = tiny_skia::RadialGradient::new(
-                tiny_skia::Point::from_xy(cx, cy),
-                0.0,
-                tiny_skia::Point::from_xy(cx, cy),
-                outer,
-                vec![
-                    tiny_skia::GradientStop::new(0.0, green),
-                    tiny_skia::GradientStop::new((boundary - blend) / outer, green),
-                    tiny_skia::GradientStop::new((boundary + blend) / outer, red),
-                    tiny_skia::GradientStop::new(1.0, red),
-                ],
-                tiny_skia::SpreadMode::Pad,
-                Transform::identity(),
-            ) {
-                paint.shader = shader;
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        match arc.ink {
+            ArcInk::Solid(color) => {
+                paint.set_color_rgba8(color[0], color[1], color[2], color[3]);
+                paint.force_hq_pipeline = color == LIVE_GREEN;
+            }
+            ArcInk::Conflict => {
+                paint.force_hq_pipeline = true;
+                let outer = radius + stroke / 2.0;
+                let boundary = radius + stroke / 6.0;
+                let blend = stroke * 0.18;
+                let green =
+                    tiny_skia::Color::from_rgba8(LIVE_GREEN[0], LIVE_GREEN[1], LIVE_GREEN[2], 255);
+                let red = tiny_skia::Color::from_rgba8(TRIP_RED[0], TRIP_RED[1], TRIP_RED[2], 255);
+                if let Some(shader) = tiny_skia::RadialGradient::new(
+                    tiny_skia::Point::from_xy(cx, cy),
+                    0.0,
+                    tiny_skia::Point::from_xy(cx, cy),
+                    outer,
+                    vec![
+                        tiny_skia::GradientStop::new(0.0, green),
+                        tiny_skia::GradientStop::new((boundary - blend) / outer, green),
+                        tiny_skia::GradientStop::new((boundary + blend) / outer, red),
+                        tiny_skia::GradientStop::new(1.0, red),
+                    ],
+                    tiny_skia::SpreadMode::Pad,
+                    Transform::identity(),
+                ) {
+                    paint.shader = shader;
+                }
             }
         }
         if let Some(stroked) = path.stroke(&stroke_style, 1.0) {
@@ -343,152 +322,57 @@ fn stroke_ring(
     }
 }
 
-fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, plan: &Plan, scale: f32) {
-    let metrics = &plan.metrics.cell;
-    let icon_slot = metrics.icon_slot as f32 * scale;
-    let ring_stroke = metrics.ring_stroke as f32 * scale;
-    let center = (
-        cell.rect.mid_x() as f32 * scale,
-        cell.rect.y as f32 * scale + metrics.padding as f32 * scale + icon_slot / 2.0,
+fn draw_cell(pixmap: &mut Pixmap, cell: &CellPlan, scale: f32) {
+    for arc in &cell.arcs {
+        draw_arc(pixmap, arc, scale);
+    }
+    let glyph = (
+        cell.glyph.x as f32 * scale,
+        cell.glyph.y as f32 * scale,
+        cell.glyph.w as f32 * scale,
+        cell.glyph.h as f32 * scale,
     );
-    let radius = (icon_slot - ring_stroke) / 2.0;
-
-    stroke_ring(
-        pixmap,
-        center.0,
-        center.1,
-        radius,
-        ring_stroke,
-        0.0,
-        360.0,
-        TRACK_INK,
-        true,
-        false,
-    );
-
-    let glyph_size = metrics.glyph as f32 * scale;
-    let glyph_rect = (
-        center.0 - glyph_size / 2.0,
-        center.1 - glyph_size / 2.0,
-        glyph_size,
-        glyph_size,
-    );
-
-    let (label, offset) = match &cell.content {
-        CellContent::Provider {
-            provider,
-            headline,
-            inner,
-            label,
-        } => {
-            if let Some(headline) = headline {
-                let percent = headline.used_now().unwrap_or(0.0);
-                stroke_ring(
-                    pixmap,
-                    center.0,
-                    center.1,
-                    radius,
-                    ring_stroke,
-                    -90.0,
-                    -90.0 + percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(headline.meter(), provider_color(*provider)),
-                    true,
-                    false,
-                );
-            }
-            if let Some((ring, at)) = inner {
-                let (ink, track) = inner_ring_colors(ring);
-                let inner_percent = at.used_now().unwrap_or(0.0);
-                let inner_radius = radius - metrics.inner_ring_inset as f32 * scale;
-                stroke_ring(
-                    pixmap,
-                    center.0,
-                    center.1,
-                    inner_radius,
-                    metrics.inner_ring_stroke as f32 * scale,
-                    0.0,
-                    360.0,
-                    track,
-                    false,
-                    false,
-                );
-                stroke_ring(
-                    pixmap,
-                    center.0,
-                    center.1,
-                    inner_radius,
-                    metrics.inner_ring_stroke as f32 * scale,
-                    -90.0,
-                    -90.0 + inner_percent.clamp(0.0, 100.0) as f32 * 3.6,
-                    meter_color(at.meter(), ink),
-                    true,
-                    false,
-                );
-            }
-            marks::provider(*provider, glyph_rect, [255, 255, 255, 255], pixmap);
-            (label.clone(), if headline.is_some() { 2.0 } else { 0.0 })
-        }
-        CellContent::PullRequests { label, segments } => {
-            if !segments.is_empty() {
-                let span = 360.0 / segments.len() as f32;
-                let gap_deg = if segments.len() > 1 {
-                    0.025 * 360.0
-                } else {
-                    0.0
-                };
-                for (index, segment) in segments.iter().enumerate() {
-                    stroke_ring(
-                        pixmap,
-                        center.0,
-                        center.1,
-                        radius,
-                        ring_stroke,
-                        -90.0 + index as f32 * span + gap_deg / 2.0,
-                        -90.0 + (index + 1) as f32 * span - gap_deg / 2.0,
-                        ci_color(segment.ci),
-                        false,
-                        segment.passing_with_conflicts,
-                    );
-                }
-            }
-            marks::pull_request(glyph_rect, 1.6 * scale, [255, 255, 255, 255], pixmap);
-            (label.clone(), 0.0)
-        }
-    };
-
-    let label_size = 17.0 * plan.size_scale as f32 * scale;
-    let baseline = cell.rect.y as f32 * scale
-        + metrics.padding as f32 * scale
-        + icon_slot
-        + metrics.content_spacing as f32 * scale
-        + text::ascent_px(label_size, TextWeight::Medium);
-    let measured = DirectWrite.measure_px(&label, label_size, TextWeight::Medium);
-    text::draw_px(
-        pixmap,
-        center.0 - measured / 2.0 + offset,
-        baseline,
-        &label,
-        label_size,
-        TextWeight::Medium,
-        [255, 255, 255, 255],
-    );
+    match cell.id {
+        CellId::Provider(provider) => marks::provider(provider, glyph, WHITE, pixmap),
+        CellId::PullRequests => marks::pull_request(glyph, 1.6 * scale, WHITE, pixmap),
+    }
+    draw_text(pixmap, &cell.label, &cell.label_rect, scale);
 }
 
-fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: f32) {
-    let edge = plan.edge;
-    let card = &popover.card;
-    let tail_space = if edge.is_vertical() {
-        TAIL_LENGTH * plan.size_scale
+fn draw_text(pixmap: &mut Pixmap, run: &Text, rect: &R, scale: f32) {
+    let device_size = run.size as f32 * scale;
+    let (x, y, w) = (
+        (rect.x * f64::from(scale)) as f32,
+        (rect.y * f64::from(scale)) as f32,
+        (rect.w * f64::from(scale)) as f32,
+    );
+    let baseline = y + text::ascent_px(device_size, run.weight);
+    if run.right {
+        text::draw_px_right(
+            pixmap,
+            x,
+            w,
+            baseline,
+            &run.text,
+            device_size,
+            run.weight,
+            run.color,
+        );
     } else {
-        0.0
-    };
-    let tail_space_y = if edge.is_vertical() {
-        0.0
-    } else {
-        TAIL_LENGTH * plan.size_scale
-    };
+        text::draw_px(
+            pixmap,
+            x,
+            baseline,
+            &run.text,
+            device_size,
+            run.weight,
+            run.color,
+        );
+    }
+}
 
-    if let Some(path) = rounded_rect_path(*card, 12.0, scale) {
+fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, scale: f32) {
+    if let Some(path) = rounded_rect_path(popover.card, popover.radius, scale) {
         paint_solid(pixmap, &path, POPOVER_INK, false);
         let mut paint = Paint::default();
         paint.set_color_rgba8(255, 255, 255, 28);
@@ -510,42 +394,12 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
         }
     }
 
-    let half = (7.0 * plan.size_scale) as f32 * scale;
-    let length = tail_space.max(tail_space_y) as f32 * scale;
-    let along = if edge.is_vertical() {
-        (card.y + popover.tail) as f32 * scale
-    } else {
-        (card.x + popover.tail) as f32 * scale
-    };
-    let (tx, ty) = match edge {
-        Edge::Right => ((card.x + card.w) as f32 * scale, along),
-        Edge::Left => (card.x as f32 * scale, along),
-        Edge::Top => (along, card.y as f32 * scale),
-        Edge::Bottom => (along, (card.y + card.h) as f32 * scale),
-    };
+    let point = |(x, y): (f64, f64)| (x as f32 * scale, y as f32 * scale);
+    let ([first, last], apex) = (popover.tail.base.map(point), point(popover.tail.apex));
     let mut tail_pb = PathBuilder::new();
-    match edge {
-        Edge::Right => {
-            tail_pb.move_to(tx, ty - half);
-            tail_pb.line_to(tx + length, ty);
-            tail_pb.line_to(tx, ty + half);
-        }
-        Edge::Left => {
-            tail_pb.move_to(tx, ty - half);
-            tail_pb.line_to(tx - length, ty);
-            tail_pb.line_to(tx, ty + half);
-        }
-        Edge::Top => {
-            tail_pb.move_to(tx - half, ty);
-            tail_pb.line_to(tx, ty - length);
-            tail_pb.line_to(tx + half, ty);
-        }
-        Edge::Bottom => {
-            tail_pb.move_to(tx - half, ty);
-            tail_pb.line_to(tx, ty + length);
-            tail_pb.line_to(tx + half, ty);
-        }
-    }
+    tail_pb.move_to(first.0, first.1);
+    tail_pb.line_to(apex.0, apex.1);
+    tail_pb.line_to(last.0, last.1);
     tail_pb.close();
     if let Some(path) = tail_pb.finish() {
         paint_solid(pixmap, &path, POPOVER_INK, false);
@@ -568,55 +422,23 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
                 );
                 match kind {
                     MarkKind::Provider(provider) => {
-                        marks::provider(*provider, device, [255, 255, 255, 255], pixmap)
+                        marks::provider(*provider, device, WHITE, pixmap)
                     }
                     MarkKind::PullRequests => {
-                        marks::pull_request(device, 1.4 * scale, [255, 255, 255, 255], pixmap)
+                        marks::pull_request(device, 1.4 * scale, WHITE, pixmap)
                     }
                     MarkKind::OpenArrow => {
                         marks::open_arrow(device, 1.2 * scale, MUTED_INK, pixmap)
                     }
                 }
             }
-            PopItem::Text {
-                text,
-                size,
-                weight,
-                color,
-                right,
-            } => {
-                let device_size = *size as f32 * scale;
-                let weight = *weight;
-                let baseline = px.y as f32 + text::ascent_px(device_size, weight);
-                if *right {
-                    text::draw_px_right(
-                        pixmap,
-                        px.x as f32,
-                        px.w as f32,
-                        baseline,
-                        text,
-                        device_size,
-                        weight,
-                        *color,
-                    );
-                } else {
-                    text::draw_px(
-                        pixmap,
-                        px.x as f32,
-                        baseline,
-                        text,
-                        device_size,
-                        weight,
-                        *color,
-                    );
-                }
-            }
-            PopItem::Bar { percent, color } => {
+            PopItem::Text(text) => draw_text(pixmap, text, rect, scale),
+            PopItem::Bar { fill, color } => {
                 if let Some(path) = capsule_px(px.x as f32, px.y as f32, px.w as f32, px.h as f32) {
                     paint_solid(pixmap, &path, [255, 255, 255, 36], false);
                 }
-                if let Some(percent) = percent {
-                    let fill_w = (px.w * percent.clamp(0.0, 100.0) / 100.0).max(px.h);
+                if let Some(fill) = fill {
+                    let fill_w = fill * f64::from(scale);
                     if let Some(path) =
                         capsule_px(px.x as f32, px.y as f32, fill_w as f32, px.h as f32)
                     {
@@ -630,14 +452,14 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
                 );
                 paint_solid(pixmap, &divider, [255, 255, 255, 26], false);
             }
-            PopItem::Dot { ci } => {
+            PopItem::Dot { ink, hollow } => {
                 let mut dot_pb = PathBuilder::new();
                 dot_pb.push_circle(px.mid_x() as f32, px.mid_y() as f32, px.w as f32 / 2.0);
                 if let Some(path) = dot_pb.finish() {
-                    if *ci == CiState::None {
-                        marks::stroke(pixmap, &path, 1.0 * scale, [89, 89, 89, 255]);
+                    if *hollow {
+                        marks::stroke(pixmap, &path, 1.0 * scale, *ink);
                     } else {
-                        paint_solid(pixmap, &path, ci_color(*ci), false);
+                        paint_solid(pixmap, &path, *ink, false);
                     }
                 }
             }
@@ -656,7 +478,6 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, plan: &Plan, scale: 
             }
         }
     }
-    let _ = tail_space_y;
 }
 
 #[cfg(test)]

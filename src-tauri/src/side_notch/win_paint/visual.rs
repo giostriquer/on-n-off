@@ -3,9 +3,9 @@ use crate::dto::AgentId;
 use crate::dto::GithubPrsDto;
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, Reading, WindowRole};
 use crate::side_notch::model::frame;
-use crate::side_notch::model::frame::{CellData, RailData};
+use crate::side_notch::model::frame::RailData;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
-use crate::side_notch::plan::{plan, Hover};
+use crate::side_notch::plan::{plan, CellId, Hover, TextWeight};
 use crate::side_notch::sessions::LiveSession;
 use chrono::{DateTime, Utc};
 
@@ -45,15 +45,6 @@ fn projected(
     card.status = status;
     card.message = message.map(str::to_owned);
     NotchProvider::current(vec![card]).expect("a signed-in account")
-}
-
-#[allow(dead_code)]
-fn data(cells: Vec<CellData>, action_error: Option<String>) -> RailData {
-    RailData {
-        settings: NotchSettings::default(),
-        cells,
-        action_error,
-    }
 }
 
 #[ignore]
@@ -209,10 +200,10 @@ fn visual_dump() {
         action_error: None,
     };
     let hover2 = Hover {
-        active: Some(0),
+        active: Some(CellId::of(&d2.cells[0])),
         ..Hover::default()
     };
-    let planned = plan(&s2, &scale2, &d2, hover2, now(), &DirectWrite).expect("scale2 popover");
+    let planned = plan(&scale2, &d2, hover2, now(), &DirectWrite).expect("scale2 popover");
     std::fs::write(
         format!("{out}/scale2-popover.png"),
         render(&planned).encode_png().unwrap(),
@@ -221,10 +212,10 @@ fn visual_dump() {
 
     for cell in 0..data.cells.len() {
         let hover = Hover {
-            active: Some(cell),
+            active: Some(CellId::of(&data.cells[cell])),
             ..Hover::default()
         };
-        let Some(planned) = plan(&settings, &displays, &data, hover, now(), &DirectWrite) else {
+        let Some(planned) = plan(&displays, &data, hover, now(), &DirectWrite) else {
             panic!("cell {cell} should plan");
         };
         let pix = render(&planned);
@@ -236,15 +227,7 @@ fn visual_dump() {
         let _ = cell;
     }
 
-    let planned = plan(
-        &settings,
-        &displays,
-        &data,
-        Hover::default(),
-        now(),
-        &DirectWrite,
-    )
-    .expect("rail");
+    let planned = plan(&displays, &data, Hover::default(), now(), &DirectWrite).expect("rail");
     std::fs::write(
         format!("{out}/rail.png"),
         render(&planned).encode_png().unwrap(),
@@ -255,7 +238,6 @@ fn visual_dump() {
         let mut capped = settings.clone();
         capped.show = show;
         let planned = plan(
-            &capped,
             &displays,
             &RailData {
                 settings: capped.clone(),
@@ -281,9 +263,12 @@ fn visual_dump() {
     let mut hover_settings = settings.clone();
     hover_settings.show = ShowMode::OnHover;
     let planned = plan(
-        &hover_settings,
         &displays,
-        &data,
+        &RailData {
+            settings: hover_settings,
+            cells: data.cells.clone(),
+            action_error: None,
+        },
         Hover::default(),
         now(),
         &DirectWrite,
@@ -303,11 +288,10 @@ fn visual_dump() {
         action_error: Some("Example action error text.".into()),
     };
     let planned = plan(
-        &top,
         &displays,
         &top_data,
         Hover {
-            active: Some(0),
+            active: Some(CellId::of(&top_data.cells[0])),
             ..Hover::default()
         },
         now(),

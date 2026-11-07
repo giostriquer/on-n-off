@@ -1,17 +1,17 @@
 #![allow(unsafe_code)]
 
 use super::model::frame::RailData;
-use super::model::{selected_display, NotchSettings, ShowMode};
-use super::plan::{self, Hover, Plan, Zone};
+use super::plan::Plan;
+use super::presenter::WinAction;
+use super::presenter::{Input, Presenter, SCREEN_POLL};
 use super::win_paint::{self, DirectWrite};
-use crate::side_notch::model::Display;
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::{
     sync::mpsc::{Receiver, Sender},
     sync::Mutex,
     thread,
-    time::{Duration, Instant},
+    time::Instant,
 };
 use tiny_skia::Pixmap;
 use windows::core::{w, PCWSTR};
@@ -41,17 +41,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SWP_NOZORDER, ULW_ALPHA,
 };
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum WinAction {
-    ScreensChanged,
-    Refresh,
-    OpenLimits,
-    OpenPullRequests,
-    SetShow(ShowMode),
-    OpenUrl(String),
-    CopyReviewRequest { title: String, url: String },
-}
-
 #[derive(Debug)]
 pub enum WindowMsg {
     Data(RailData),
@@ -59,325 +48,7 @@ pub enum WindowMsg {
     Shutdown,
 }
 
-const HOVER_OPEN_DELAY: Duration = Duration::from_millis(120);
-const HOVER_CLOSE_GRACE: Duration = Duration::from_millis(350);
-const POINTER_POLL: Duration = Duration::from_millis(80);
-const SCREEN_POLL: Duration = Duration::from_millis(500);
 const ABOVE_WALK_LIMIT: usize = 512;
-
-#[derive(Debug)]
-pub struct Machine {
-    pub data: Option<RailData>,
-    pub displays: Vec<Display>,
-    pub cursor_inside: bool,
-    pub hover: Hover,
-    pub pinned: Option<usize>,
-    hovered_cell: Option<usize>,
-    open_at: Option<Instant>,
-    last_inside: Instant,
-    suppressed: bool,
-    dirty: bool,
-    displays_read: bool,
-}
-
-impl Default for Machine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Machine {
-    pub fn new() -> Self {
-        Self {
-            data: None,
-            displays: Vec::new(),
-            cursor_inside: false,
-            hover: Hover::default(),
-            pinned: None,
-            hovered_cell: None,
-            open_at: None,
-            last_inside: Instant::now(),
-            suppressed: false,
-            dirty: true,
-            displays_read: false,
-        }
-    }
-
-    pub fn accept(&mut self, data: RailData) {
-        if self.data.as_ref() == Some(&data) {
-            return;
-        }
-        let moved = match &self.data {
-            None => true,
-            Some(previous) => {
-                previous.settings.enabled != data.settings.enabled
-                    || previous.settings.display_id != data.settings.display_id
-                    || previous.settings.edge != data.settings.edge
-                    || previous.settings.size != data.settings.size
-                    || previous.settings.show != data.settings.show
-                    || previous.settings.providers != data.settings.providers
-                    || previous.settings.pull_requests.enabled
-                        != data.settings.pull_requests.enabled
-                    || previous.settings.pull_requests.lists != data.settings.pull_requests.lists
-            }
-        };
-        if moved {
-            self.pinned = None;
-            self.hovered_cell = None;
-            self.hover = Hover::default();
-        }
-        self.data = Some(data);
-        self.dirty = true;
-    }
-
-    pub fn set_displays(&mut self, displays: Vec<Display>) -> bool {
-        let first = !std::mem::replace(&mut self.displays_read, true);
-        if self.displays == displays {
-            return false;
-        }
-        self.displays = displays;
-        self.dirty = true;
-        !first
-    }
-
-    pub fn set_suppressed(&mut self, suppressed: bool) {
-        if self.suppressed != suppressed {
-            self.suppressed = suppressed;
-            self.dirty = true;
-        }
-    }
-
-    fn settings(&self) -> Option<&NotchSettings> {
-        Some(&self.data.as_ref()?.settings)
-    }
-
-    pub fn scale(&self) -> f64 {
-        self.selected().map_or(1.0, |display| display.scale)
-    }
-
-    fn selected(&self) -> Option<&Display> {
-        selected_display(self.settings()?, &self.displays)
-    }
-
-    pub fn plan(&self) -> Option<Plan> {
-        if self.suppressed {
-            return None;
-        }
-        let data = self.data.as_ref()?;
-        if !data.settings.enabled {
-            return None;
-        }
-        plan::plan(
-            &data.settings,
-            &self.displays,
-            data,
-            self.hover,
-            chrono::Utc::now(),
-            &DirectWrite,
-        )
-    }
-
-    pub fn take_dirty(&mut self) -> bool {
-        std::mem::take(&mut self.dirty)
-    }
-
-    pub fn dismiss(&mut self) {
-        if self.pinned.is_none() && self.hover.active.is_none() && self.hovered_cell.is_none() {
-            return;
-        }
-        self.pinned = None;
-        self.hover.active = None;
-        self.hovered_cell = None;
-        self.dirty = true;
-    }
-
-    pub fn cursor_at(&mut self, x: f64, y: f64, inside: bool, now: Instant) {
-        self.cursor_inside = inside;
-        if !inside {
-            self.hovered_cell = None;
-            self.open_at = None;
-            self.clear_cap_highlight();
-            return;
-        }
-        self.last_inside = now;
-        let Some(plan) = self.plan() else {
-            self.hover = Hover::default();
-            self.pinned = None;
-            self.hovered_cell = None;
-            self.open_at = None;
-            return;
-        };
-        if !self.hover.rail_open && plan.pill.is_some() {
-            self.hover.rail_open = true;
-            self.dirty = true;
-        }
-        if !self.rail_open() {
-            return;
-        }
-        let on_cap = plan.cap.rect.contains(x, y);
-        if on_cap != self.hover.cap_hovered {
-            self.hover.cap_hovered = on_cap;
-            self.dirty = true;
-        }
-        let cell = plan::rail_hit(&plan, x, y);
-        if cell != self.hovered_cell {
-            self.hovered_cell = cell;
-            if self.pinned.is_some() {
-                self.pinned = cell;
-                self.hover.active = cell;
-                self.dirty = true;
-            } else {
-                self.open_at = cell.map(|_| now + HOVER_OPEN_DELAY);
-            }
-        }
-    }
-
-    pub fn cursor_left(&mut self, _now: Instant) {
-        self.cursor_inside = false;
-    }
-
-    fn clear_cap_highlight(&mut self) {
-        if self.hover.cap_hovered {
-            self.hover.cap_hovered = false;
-            self.dirty = true;
-        }
-    }
-
-    pub fn advance(&mut self, now: Instant) {
-        if let Some(at) = self.open_at {
-            if now >= at {
-                self.open_at = None;
-                if self.cursor_inside && self.pinned.is_none() && self.hovered_cell.is_some() {
-                    self.hover.active = self.hovered_cell;
-                    self.dirty = true;
-                }
-            }
-        }
-        let inside_surfaces = self.pointer_on_surfaces();
-        if inside_surfaces {
-            self.last_inside = now;
-        }
-        let elapsed = now.saturating_duration_since(self.last_inside);
-        if elapsed > HOVER_CLOSE_GRACE && self.pinned.is_none() {
-            self.clear_cap_highlight();
-            if self.hover.active.is_some() {
-                self.hover.active = None;
-                self.dirty = true;
-            }
-            if !self.always_shown() && self.hover.rail_open {
-                self.hover.rail_open = false;
-                self.dirty = true;
-            }
-        }
-    }
-
-    fn pointer_on_surfaces(&self) -> bool {
-        self.cursor_inside
-    }
-
-    fn always_shown(&self) -> bool {
-        self.settings()
-            .is_some_and(|settings| settings.show == ShowMode::Always)
-    }
-
-    fn rail_open(&self) -> bool {
-        self.always_shown() || self.hover.rail_open
-    }
-    pub fn pointer_poll_active(&self) -> bool {
-        !self.suppressed && self.settings().is_some_and(|settings| settings.enabled)
-    }
-
-    pub fn clicked(&mut self, x: f64, y: f64) -> Vec<WinAction> {
-        let Some(plan) = self.plan() else {
-            return Vec::new();
-        };
-        if !self.rail_open() {
-            return Vec::new();
-        }
-        self.last_inside = Instant::now();
-        if plan.cap.rect.contains(x, y) {
-            let next = if self.always_shown() {
-                ShowMode::OnHover
-            } else {
-                ShowMode::Always
-            };
-            return vec![WinAction::SetShow(next)];
-        }
-        if let Some(cell) = plan::rail_hit(&plan, x, y) {
-            if self.pinned == Some(cell) {
-                self.pinned = None;
-                self.hover.active = None;
-            } else {
-                self.pinned = Some(cell);
-                self.hover.active = Some(cell);
-            }
-            self.dirty = true;
-            return Vec::new();
-        }
-        if let Some((zone, _)) = plan
-            .popover
-            .as_ref()
-            .and_then(|popover| popover.zones.iter().find(|(_, rect)| rect.contains(x, y)))
-        {
-            let cell = self.hover.active;
-            return match zone {
-                Zone::OpenRow { url } => vec![WinAction::OpenUrl(url.clone())],
-                Zone::CopyRow { url, title } => vec![WinAction::CopyReviewRequest {
-                    title: title.clone(),
-                    url: url.clone(),
-                }],
-                Zone::Footer => {
-                    let footer = match cell {
-                        Some(index) => {
-                            match self.data.as_ref().and_then(|data| data.cells.get(index)) {
-                                Some(super::model::frame::CellData::PullRequests(_)) => {
-                                    WinAction::OpenPullRequests
-                                }
-                                _ => WinAction::OpenLimits,
-                            }
-                        }
-                        None => WinAction::OpenLimits,
-                    };
-                    self.pinned = None;
-                    self.hover.active = None;
-                    self.dirty = true;
-                    vec![footer, WinAction::Refresh]
-                }
-            };
-        }
-        Vec::new()
-    }
-
-    fn input(&mut self, input: Input, now: Instant) -> Vec<WinAction> {
-        let scale = self.scale();
-        match input {
-            Input::Moved { x, y } => {
-                self.cursor_at(f64::from(x) / scale, f64::from(y) / scale, true, now);
-                Vec::new()
-            }
-            Input::Left => {
-                self.cursor_left(now);
-                Vec::new()
-            }
-            Input::Pressed { x, y } => self.clicked(f64::from(x) / scale, f64::from(y) / scale),
-        }
-    }
-
-    pub fn deadline(&self, now: Instant) -> Instant {
-        let mut deadline = now + SCREEN_POLL;
-        if self.pointer_poll_active() {
-            deadline = deadline.min(now + POINTER_POLL);
-        }
-        if let Some(at) = self.open_at {
-            deadline = deadline.min(at);
-        }
-        let grace = self.last_inside + HOVER_CLOSE_GRACE + Duration::from_millis(5);
-        if grace > now {
-            deadline = deadline.min(grace);
-        }
-        deadline
-    }
-}
 
 pub fn spawn(action_tx: Sender<WinAction>) -> Sender<WindowMsg> {
     let (msg_tx, msg_rx) = std::sync::mpsc::channel::<WindowMsg>();
@@ -444,14 +115,6 @@ unsafe extern "system" fn low_level_mouse_proc(
 
 const CLASS: PCWSTR = w!("on-n-off Side notch");
 const WM_MOUSELEAVE: u32 = 0x02A3;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum Input {
-    Moved { x: i32, y: i32 },
-    Left,
-    Pressed { x: i32, y: i32 },
-}
-
 fn client_point(lparam: LPARAM) -> (i32, i32) {
     let x = (lparam.0 & 0xFFFF) as u16 as i16;
     let y = ((lparam.0 >> 16) & 0xFFFF) as u16 as i16;
@@ -553,7 +216,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
     disable_window_chrome(hwnd);
     disarm_outside_click_hook();
 
-    let mut machine = Machine::new();
+    let mut presenter = Presenter::new(&DirectWrite);
     let mut was_visible = false;
     let mut last_poll = Instant::now();
     let mut deadline = Instant::now();
@@ -565,7 +228,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         while let Ok(msg) = msg_rx.try_recv() {
             match msg {
                 WindowMsg::Data(data) => {
-                    machine.accept(data);
+                    presenter.accept(data);
                 }
                 WindowMsg::Shutdown => exit = true,
 
@@ -575,34 +238,35 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         if last_poll.elapsed() >= SCREEN_POLL {
             last_poll = Instant::now();
             let displays = super::win_displays::read().unwrap_or_default();
-            if machine.set_displays(displays) && action_tx.send(WinAction::ScreensChanged).is_err()
-            {
-                exit = true;
+            if let Some(changed) = presenter.set_displays(displays) {
+                if action_tx.send(changed).is_err() {
+                    exit = true;
+                }
             }
-            let fullscreen = fullscreen_foreground(&machine, own);
-            machine.set_suppressed(fullscreen);
+            let fullscreen = fullscreen_foreground(&presenter, own);
+            presenter.set_suppressed(fullscreen);
             keep_on_top(own, fullscreen);
         }
 
-        if machine.pointer_poll_active() {
-            let scale = machine.scale();
+        if presenter.pointer_poll_active() {
+            let scale = presenter.scale();
             let (origin_x, origin_y) = window_position(hwnd);
             if let Some((x, y, inside)) = cursor_over(hwnd, scale, origin_x, origin_y) {
-                machine.cursor_at(x, y, inside, Instant::now());
+                presenter.cursor_at(x, y, inside, Instant::now());
             }
         }
-        machine.advance(Instant::now());
-        if machine.pinned.is_some() {
+        presenter.advance(Instant::now());
+        if presenter.pinned().is_some() {
             arm_outside_click_hook(hwnd);
         } else {
             disarm_outside_click_hook();
         }
         if OUTSIDE_CLICK_PENDING.swap(false, Ordering::SeqCst) {
-            machine.dismiss();
+            presenter.dismiss();
         }
 
         for input in INPUT.with_borrow_mut(std::mem::take) {
-            for action in machine.input(input, Instant::now()) {
+            for action in presenter.input(input, Instant::now()) {
                 if action_tx.send(action).is_err() {
                     exit = true;
                 }
@@ -613,10 +277,10 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
             break;
         }
 
-        if machine.take_dirty() {
-            match machine.plan() {
-                Some(plan) if !plan.cells.is_empty() => {
-                    present(hwnd, &plan);
+        if presenter.take_dirty() {
+            match presenter.present(chrono::Utc::now()) {
+                Some(plan) => {
+                    present(hwnd, plan);
                     if !was_visible {
                         unsafe {
                             let _ = ShowWindow(own, SW_SHOWNOACTIVATE);
@@ -635,7 +299,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
             }
         }
 
-        deadline = machine.deadline(Instant::now());
+        deadline = presenter.deadline(Instant::now());
         unsafe {
             if !IsWindowVisible(own).as_bool() {
                 deadline = Instant::now() + SCREEN_POLL;
@@ -678,8 +342,8 @@ fn window_position(hwnd: isize) -> (i32, i32) {
     (rect.left, rect.top)
 }
 
-fn fullscreen_foreground(machine: &Machine, own: HWND) -> bool {
-    let Some(selected) = machine.selected() else {
+fn fullscreen_foreground(presenter: &Presenter, own: HWND) -> bool {
+    let Some(selected) = presenter.selected() else {
         return false;
     };
     let (mx, my, mw, mh) = (
