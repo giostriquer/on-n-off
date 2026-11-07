@@ -8,7 +8,6 @@ import { copy } from "$lib/copy";
 import { canSwitchPlugins, canUninstallPlugin, canUpdate } from "$lib/capabilities";
 import {
   formatPluginVersion,
-  pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
 } from "$lib/catalog";
@@ -154,7 +153,7 @@ export function ItemList({
   const pluginPool = kind === "plugin" ? items : [];
   const plugins =
     chip === "outdated"
-      ? pluginPool.filter((plugin) => pluginOutOfSync(plugin))
+      ? pluginPool.filter((plugin) => plugin.outOfSync)
       : applyChip(pluginPool, chip, (plugin) => plugin.enabled);
   const skillPool = kind === "skill" ? items : [];
   const skills = applyChip(skillPool, chip, (skill) => skillIsLive(skill, tab));
@@ -232,7 +231,7 @@ export function ItemList({
                           </div>
                           <div
                             className={`font-mono text-[11px]/[1.3] ${
-                              pluginOutOfSync(plugin) ? "text-[var(--warn)]" : "text-[var(--mute)]"
+                              plugin.outOfSync ? "text-[var(--warn)]" : "text-[var(--mute)]"
                             }`}
                           >
                             {pluginVersionNote(plugin)}
@@ -242,7 +241,7 @@ export function ItemList({
                         <div className="font-mono text-[12px]/[1.3] text-[var(--mute)]">—</div>
                       )}
                     </div>
-                    {pluginOutOfSync(plugin) ? (
+                    {plugin.outOfSync ? (
                       <button
                         type="button"
                         className="mt-0.5 h-[26px] shrink-0 border border-[var(--warn)] bg-transparent px-3 text-[11px] font-semibold tracking-[0.03em] text-[var(--warn)] uppercase disabled:opacity-45"

@@ -135,7 +135,7 @@ impl AgentAdapter for CursorAdapter {
         let mut plugins = Vec::new();
         let mut plugin_skill_paths = HashSet::new();
         for discovered in self.discover_plugins() {
-            let version = crate::plugin_meta::installed_hint(&discovered.path, None).version;
+            let version = crate::drift::installed(&discovered.path, None);
             let skills: Vec<SkillDto> = scan_plugin_skills(&discovered.path)
                 .into_iter()
                 .map(|skill| {
@@ -231,7 +231,7 @@ fn plugin_install_dir(dir: &Path) -> Option<(PathBuf, PathBuf)> {
 
 fn checkout_rank(checkout: &Path, manifest: &Path) -> (bool, Vec<u64>, std::time::SystemTime) {
     let complete = checkout.join(CACHE_COMPLETE).is_file();
-    let version = crate::plugin_meta::installed_hint(checkout, None).version;
+    let version = crate::drift::installed(checkout, None);
     let version_key = version
         .split(['.', '-', '+'])
         .map(|part| part.parse::<u64>().unwrap_or(0))

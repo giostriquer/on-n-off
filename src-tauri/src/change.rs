@@ -353,13 +353,13 @@ impl Changes {
         if matches!(change, Change::Refused { .. }) {
             return Err(change.refusal());
         }
-        let checked = request.check(&declared, || adapter.list_local_scope(view))?;
+        let checked = request.check(&declared, || adapter.list_scope(view))?;
         let Some(step) = adapter.step(&checked)? else {
             return Err(change.refusal());
         };
         let backups = self.io.back_up(id, &step.touches)?;
         self.run(step, &backups, request.deadline())?;
-        adapter.list_local_scope(view)
+        crate::drift::read(adapter, view, crate::drift::Reach::Local)
     }
 
     fn run(

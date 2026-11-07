@@ -102,7 +102,7 @@ fn fixture() -> PathBuf {
 fn lists_user_scope_plugins_using_default_enabled_when_absent() {
     let root = fixture();
     let adapter = ClaudeAdapter::at(root.clone());
-    let tab = adapter.list_tab().expect("list");
+    let tab = crate::drift::read(&adapter, None, crate::drift::Reach::Local).expect("list");
     let ids: Vec<_> = tab
         .plugins
         .iter()
@@ -167,9 +167,9 @@ fn local_tab_skips_remote_marketplace_enrichment() {
     fs::write(&known_path, known.to_string()).unwrap();
     let adapter = ClaudeAdapter::at(root.clone());
 
-    let local = crate::plugin_meta::with_fetch_text(
+    let local = crate::drift::with_fetch_text(
         |_| panic!("local inventory must not fetch remote metadata"),
-        || adapter.list_local_tab().expect("local list"),
+        || crate::drift::read(&adapter, None, crate::drift::Reach::Local).expect("local list"),
     );
     let local_plugin = local
         .plugins
@@ -178,14 +178,18 @@ fn local_tab_skips_remote_marketplace_enrichment() {
         .unwrap();
     assert_eq!(local_plugin.upstream, "1.1.0");
 
-    let enriched = crate::plugin_meta::with_fetch_text(
+    let memo = crate::drift::Memo::new();
+    let enriched = crate::drift::with_fetch_text(
         |_| {
-            Some(
+            Ok(Some(
                 r#"{"plugins":[{"name":"workbench","version":"2.0.0","source":"./plugins/workbench"}]}"#
                     .into(),
-            )
+            ))
         },
-        || adapter.list_tab().expect("enriched list"),
+        || {
+            crate::drift::read(&adapter, None, crate::drift::Reach::Remote(&memo))
+                .expect("enriched list")
+        },
     );
     let enriched_plugin = enriched
         .plugins
@@ -824,12 +828,12 @@ fn a_cli_change_backs_up_every_document_the_plugins_are_read_from() {
         assert_eq!(touched, read, "{change:?}");
     }
 
-    let listed = adapter.list_local_tab().unwrap();
+    let listed = crate::drift::read(&adapter, None, crate::drift::Reach::Local).unwrap();
     for document in documents {
         let kept = fs::read(&document).unwrap();
         fs::write(&document, "{}").unwrap();
         assert_ne!(
-            adapter.list_local_tab().ok(),
+            crate::drift::read(&adapter, None, crate::drift::Reach::Local).ok(),
             Some(listed.clone()),
             "the plugins are not read from {}",
             document.display()

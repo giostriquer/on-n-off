@@ -187,7 +187,8 @@ fn plugin_source_names_its_marketplace_and_upstream_version() {
     )
     .unwrap();
 
-    let tab = fixture.adapter().list_tab().expect("list");
+    let tab =
+        crate::drift::read(&fixture.adapter(), None, crate::drift::Reach::Local).expect("list");
     let plugin = &tab.plugins[0];
     assert_eq!(plugin.id, "acme-tools@acme");
     assert_eq!(plugin.source, "acme");
@@ -461,7 +462,7 @@ fn marketplace_matching_uses_source_before_selecting_same_named_plugin() {
     )
     .unwrap();
     let adapter = stubbed(&fixture, true);
-    let tab = adapter.list_tab().unwrap();
+    let tab = crate::drift::read(&adapter, None, crate::drift::Reach::Local).unwrap();
     let plugin = &tab.plugins[0];
     assert_eq!(plugin.id, "acme-tools@acme");
     assert_eq!(plugin.upstream, "2.0.0");

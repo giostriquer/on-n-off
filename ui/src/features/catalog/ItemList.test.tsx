@@ -85,6 +85,7 @@ describe("ItemList", () => {
       source: "workshop",
       version: "0.23.0",
       upstream: "0.23.0",
+      outOfSync: false,
       enabled: true,
       togglable: true,
       skills: [],
@@ -118,11 +119,19 @@ describe("ItemList", () => {
       source: "workshop",
       version: "0.23.0",
       upstream: "0.23.0",
+      outOfSync: false,
       enabled: true,
       togglable: true,
       skills: [],
     };
-    const stale = { ...current, id: "toolkit@workshop", name: "toolkit", version: "1.0.0", upstream: "1.1.0" };
+    const stale = {
+      ...current,
+      id: "toolkit@workshop",
+      name: "toolkit",
+      version: "1.0.0",
+      upstream: "1.1.0",
+      outOfSync: true,
+    };
     render(
       <ItemList
         kind="plugin"

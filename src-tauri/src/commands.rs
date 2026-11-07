@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
 use crate::change::{Changes, Request};
+use crate::drift::{Memo, Reach};
 use crate::dto::{
     AdapterError, AgentId, AgentInfo, AgentTabDto, ColumnEntryDto, GithubPrsReplyDto,
     InstallItemsRequest, InstallItemsResultDto, ItemStatusDto, MarketplaceInspectDto,
@@ -20,6 +21,7 @@ pub struct UpdaterBuildInfo {
     target: Option<&'static str>,
 }
 
+#[derive(Clone)]
 pub struct AppState {
     claude: Arc<dyn AgentAdapter>,
     codex: Arc<dyn AgentAdapter>,
@@ -27,6 +29,7 @@ pub struct AppState {
     cursor: Arc<dyn AgentAdapter>,
     muse: Arc<dyn AgentAdapter>,
     changes: Arc<Changes>,
+    upstreams: Arc<Memo>,
     items: Result<Arc<ItemService>, AdapterError>,
 }
 
@@ -39,6 +42,7 @@ impl AppState {
             cursor: Arc::new(crate::cursor::CursorAdapter::new()),
             muse: Arc::new(crate::muse::MuseAdapter::new()),
             changes: Arc::new(Changes::production()),
+            upstreams: Arc::new(Memo::new()),
             items: ItemService::production().map(Arc::new),
         }
     }
@@ -55,6 +59,32 @@ impl AppState {
 
     fn items(&self) -> Result<Arc<ItemService>, AdapterError> {
         self.items.clone()
+    }
+
+    fn local_plugins(
+        &self,
+        agent_id: AgentId,
+        project_path: Option<&str>,
+    ) -> Result<AgentTabDto, AdapterError> {
+        crate::drift::read(&*self.adapter(agent_id), project_path, Reach::Local)
+    }
+
+    fn remote_plugins(
+        &self,
+        agent_id: AgentId,
+        project_path: Option<&str>,
+    ) -> Result<AgentTabDto, AdapterError> {
+        let reach = Reach::Remote(&self.upstreams);
+        crate::drift::read(&*self.adapter(agent_id), project_path, reach)
+    }
+
+    fn forced_plugins(
+        &self,
+        agent_id: AgentId,
+        project_path: Option<&str>,
+    ) -> Result<AgentTabDto, AdapterError> {
+        let reach = Reach::Forced(&self.upstreams);
+        crate::drift::read(&*self.adapter(agent_id), project_path, reach)
     }
 }
 
@@ -247,9 +277,9 @@ pub async fn list_plugins(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
+    let state = state.inner().clone();
     blocking("catalog scan", move || {
-        adapter.list_scope(project_path.as_deref())
+        state.remote_plugins(agent_id, project_path.as_deref())
     })
     .await
 }
@@ -260,9 +290,9 @@ pub async fn list_local_plugins(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
+    let state = state.inner().clone();
     blocking("local catalog scan", move || {
-        adapter.list_local_scope(project_path.as_deref())
+        state.local_plugins(agent_id, project_path.as_deref())
     })
     .await
 }
@@ -366,9 +396,9 @@ pub async fn refresh(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let adapter = state.adapter(agent_id);
+    let state = state.inner().clone();
     blocking("catalog refresh", move || {
-        adapter.list_scope(project_path.as_deref())
+        state.forced_plugins(agent_id, project_path.as_deref())
     })
     .await
 }

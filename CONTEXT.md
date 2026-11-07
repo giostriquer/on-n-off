@@ -23,6 +23,14 @@ CLI makes it, on-n-off edits a file, or it is refused and why; the install sourc
 whether it installs subagents and reads hooks.
 _Avoid_: toggles, support, features (a Limits card's features are another thing)
 
+**Plugin drift**:
+Whether an installed plugin is behind what its marketplace offers: the version installed, the
+marketplace's version (its upstream) and whether they are out of sync. An upstream is given only
+when both are release versions (a commit SHA, `unknown` or nothing is not), and they are out of
+sync when they differ. Read from the marketplace copies the provider keeps on disk, and from
+GitHub when a screen asks; what GitHub answered is reused for an hour, and Refresh asks again.
+_Avoid_: enrichment, metadata, outdated (a filter on the Plugins screen)
+
 **Config change**:
 One change on-n-off makes to a provider's configuration for the user: switching a plugin, a skill or
 an MCP server on or off, or installing, uninstalling or updating a plugin. Every provider's is made

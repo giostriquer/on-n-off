@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::capabilities::Capabilities;
 use crate::change::{Checked, Step};
+use crate::drift::Marketplace;
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ItemScope, ProjectDto};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -93,21 +94,14 @@ pub trait AgentAdapter: Send + Sync {
         false
     }
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError>;
-    fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        self.list_tab()
+    fn marketplaces(&self) -> Vec<Marketplace> {
+        Vec::new()
     }
     fn list_projects(&self) -> Vec<ProjectDto> {
         Vec::new()
     }
     fn list_scope(&self, project: Option<&str>) -> Result<AgentTabDto, AdapterError> {
         let mut tab = self.list_tab()?;
-        if let Some(path) = project.map(str::trim).filter(|value| !value.is_empty()) {
-            crate::project::overlay_project(&mut tab, Path::new(path), self.id());
-        }
-        Ok(tab)
-    }
-    fn list_local_scope(&self, project: Option<&str>) -> Result<AgentTabDto, AdapterError> {
-        let mut tab = self.list_local_tab()?;
         if let Some(path) = project.map(str::trim).filter(|value| !value.is_empty()) {
             crate::project::overlay_project(&mut tab, Path::new(path), self.id());
         }

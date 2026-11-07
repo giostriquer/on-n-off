@@ -14,6 +14,7 @@ mod codex;
 mod commands;
 mod config_io;
 mod cursor;
+mod drift;
 mod dto;
 mod file_lease;
 mod flags;

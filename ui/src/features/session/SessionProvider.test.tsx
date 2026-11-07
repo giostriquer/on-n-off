@@ -34,6 +34,7 @@ const CODEX_TAB: AgentTabDto = {
       source: "workshop",
       version: "0.23.0",
       upstream: "0.23.0",
+      outOfSync: false,
       enabled: true,
       togglable: true,
       skills: [
@@ -60,6 +61,7 @@ const CLAUDE_TAB: AgentTabDto = {
       source: "local",
       version: "1.0.0",
       upstream: "1.0.0",
+      outOfSync: false,
       enabled: true,
       togglable: true,
       skills: [],
@@ -83,6 +85,7 @@ vi.mock("$lib/api", () => ({
     }
     return Promise.resolve(state.refreshResults[agentId] ?? EMPTY_TAB);
   },
+  listPlugins: (agentId: AgentId) => Promise.resolve(state.refreshResults[agentId] ?? EMPTY_TAB),
   refresh: (agentId: AgentId) => Promise.resolve(state.refreshResults[agentId] ?? EMPTY_TAB),
 }));
 

@@ -60,7 +60,7 @@ export type PluginDto = {
   source: string;
   version: string;
   upstream: string;
-  outOfSync?: boolean;
+  outOfSync: boolean;
   enabled: boolean;
   togglable: boolean;
   skills: SkillDto[];

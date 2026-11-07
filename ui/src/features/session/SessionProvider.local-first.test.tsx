@@ -26,7 +26,7 @@ const state = vi.hoisted(() => ({
   events: [] as string[],
   hiddenAgents: [] as AgentId[],
   localHandler: null as null | ((agentId: AgentId, path: string | null) => Promise<AgentTabDto>),
-  refreshHandler: null as null | ((agentId: AgentId, path: string | null) => Promise<AgentTabDto>),
+  remoteHandler: null as null | ((agentId: AgentId, path: string | null) => Promise<AgentTabDto>),
   projectsHandler: null as null | ((agentId: AgentId) => Promise<ProjectDto[]>),
   inspectHandler: null as null | ((agentId: AgentId, path: string) => Promise<ProjectDto>),
   mutationHandler: null as null | ((agentId: AgentId) => Promise<AgentTabDto>),
@@ -123,11 +123,11 @@ vi.mock("$lib/api", () => {
     },
     listPlugins: (agentId: AgentId, path: string | null) => {
       state.events.push(`list:${agentId}:${path ?? "global"}`);
-      return state.localHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
+      return state.remoteHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
     },
     refresh: (agentId: AgentId, path: string | null) => {
       state.events.push(`refresh:${agentId}:${path ?? "global"}`);
-      return state.refreshHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
+      return state.remoteHandler?.(agentId, path) ?? Promise.resolve(EMPTY_TAB);
     },
     setPluginEnabled: (agentId: AgentId, _pluginId: string, _enabled: boolean, path?: string | null) =>
       change("plugin", agentId, path),
@@ -169,8 +169,11 @@ function Probe() {
       </span>
       <span data-testid="banner">{session.banner ?? ""}</span>
       <span data-testid="log">{session.log.map((entry) => entry.text).join(" | ")}</span>
-      <button type="button" onClick={() => void session.loadTab("codex", true)}>
+      <button type="button" onClick={() => void session.loadTab("codex", "probe")}>
         Refresh Codex
+      </button>
+      <button type="button" onClick={() => void session.loadTab("claude")}>
+        Load Claude
       </button>
       <button type="button" onClick={() => void session.refreshAll()}>
         Refresh all
@@ -236,7 +239,7 @@ describe("SessionProvider local-first startup", () => {
     state.events.length = 0;
     state.hiddenAgents = [];
     state.localHandler = (agentId) => Promise.resolve(agentId === "codex" ? LOCAL_TAB : EMPTY_TAB);
-    state.refreshHandler = (agentId) =>
+    state.remoteHandler = (agentId) =>
       Promise.resolve(agentId === "codex" ? ENRICHED_TAB : EMPTY_TAB);
     state.projectsHandler = () => Promise.resolve([]);
     state.inspectHandler = (_agentId, path) =>
@@ -250,7 +253,7 @@ describe("SessionProvider local-first startup", () => {
     const enrichment = deferred<AgentTabDto>();
     state.projectsHandler = (agentId) =>
       agentId === "codex" ? projects.promise : Promise.resolve([]);
-    state.refreshHandler = (agentId) =>
+    state.remoteHandler = (agentId) =>
       agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB);
 
     renderSession();
@@ -280,7 +283,7 @@ describe("SessionProvider local-first startup", () => {
 
   it("applies only enriched plugin metadata and preserves the usable local catalog", async () => {
     const enrichment = deferred<AgentTabDto>();
-    state.refreshHandler = (agentId) =>
+    state.remoteHandler = (agentId) =>
       agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB);
     renderSession();
     await screen.findByText("workbench@workshop");
@@ -296,7 +299,7 @@ describe("SessionProvider local-first startup", () => {
 
   it("keeps local inventory on enrichment failure and explicit Refresh fully replaces it", async () => {
     let codexRefreshes = 0;
-    state.refreshHandler = (agentId) => {
+    state.remoteHandler = (agentId) => {
       if (agentId !== "codex") {
         return Promise.resolve(EMPTY_TAB);
       }
@@ -329,7 +332,7 @@ describe("SessionProvider local-first startup", () => {
     state.projectsHandler = (agentId) =>
       agentId === "codex" ? projects.promise : Promise.resolve([]);
     state.inspectHandler = () => inspection.promise;
-    state.refreshHandler = (agentId) =>
+    state.remoteHandler = (agentId) =>
       agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB);
     renderSession();
 
@@ -438,6 +441,25 @@ describe("SessionProvider local-first startup", () => {
     expect(screen.getByTestId("banner")).toBeEmptyDOMElement();
   });
 
+  it("keeps the strongest load asked for while a change runs, whatever order it was asked in", async () => {
+    const mutation = deferred<AgentTabDto>();
+    state.mutationHandler = (agentId) =>
+      agentId === "codex" ? mutation.promise : Promise.resolve(EMPTY_TAB);
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("ready")).toHaveTextContent("yes"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(state.events).toContain("mutate:plugin:codex:global"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
+    state.events.length = 0;
+
+    mutation.resolve(LOCAL_TAB);
+
+    await waitFor(() => expect(state.events).toContain("refresh:codex:C:/fixture/new-scope"));
+    expect(state.events).not.toContain("local:codex:C:/fixture/new-scope");
+  });
+
   it("stores a change's answer for the scope in view, without listing again, keeping the badges it showed", async () => {
     const remembered = "C:/fixture/remembered";
     localStorage.setItem(`${SCOPE_KEY}.codex`, remembered);
@@ -450,7 +472,7 @@ describe("SessionProvider local-first startup", () => {
       plugins: [{ ...LOCAL_TAB.plugins[0], enabled: true }],
       userSkills: [],
     };
-    state.refreshHandler = (agentId) => Promise.resolve(agentId === "codex" ? shown : EMPTY_TAB);
+    state.remoteHandler = (agentId) => Promise.resolve(agentId === "codex" ? shown : EMPTY_TAB);
     state.mutationHandler = (agentId) => Promise.resolve(agentId === "codex" ? answer : EMPTY_TAB);
     renderSession();
     await waitFor(() => expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0"));
@@ -529,14 +551,14 @@ describe("SessionProvider local-first startup", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
 
-    await waitFor(() => expect(state.events).toContain("refresh:codex:C:/fixture/new-scope"));
+    await waitFor(() => expect(state.events).toContain("list:codex:C:/fixture/new-scope"));
     await waitFor(() => expect(screen.getByTestId("plugin-version")).toHaveTextContent("0.23.0"));
     expect(screen.getByTestId("plugin-upstream")).toHaveTextContent("0.24.0");
   });
 
   it("drops an enrichment that was in flight when a change answered, keeping the answer's versions", async () => {
     const enrichment = deferred<AgentTabDto>();
-    state.refreshHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
+    state.remoteHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
     const answer: AgentTabDto = {
       ...LOCAL_TAB,
       plugins: [{ ...LOCAL_TAB.plugins[0], version: "0.25.0", upstream: "0.25.0", outOfSync: false }],
@@ -559,7 +581,7 @@ describe("SessionProvider local-first startup", () => {
 
   it("still lays an in-flight enrichment over plugins a change left on the same version", async () => {
     const enrichment = deferred<AgentTabDto>();
-    state.refreshHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
+    state.remoteHandler = (agentId) => (agentId === "codex" ? enrichment.promise : Promise.resolve(EMPTY_TAB));
     const answer: AgentTabDto = {
       ...LOCAL_TAB,
       plugins: [{ ...LOCAL_TAB.plugins[0], enabled: true }],
@@ -585,11 +607,25 @@ describe("SessionProvider local-first startup", () => {
     expect(screen.getByTestId("plugin-enabled")).toHaveTextContent("true");
   });
 
-  it("refreshes every visible provider from one Refresh and probes only the open tab", async () => {
+  it("enriches a load from the remembered GitHub answers and never forces them", async () => {
     renderSession();
     await waitFor(() => {
       for (const id of ["claude", "codex", "antigravity", "cursor"]) {
-        expect(state.events).toContain(`refresh:${id}:global`);
+        expect(state.events).toContain(`list:${id}:global`);
+      }
+    });
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
+
+    await waitFor(() => expect(state.events).toContain("list:codex:C:/fixture/new-scope"));
+    expect(state.events.filter((event) => event.startsWith("refresh:"))).toEqual([]);
+  });
+
+  it("refreshes every visible provider from one Refresh, forcing GitHub's answers, and probes only the open tab", async () => {
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`list:${id}:global`);
       }
     });
     state.events.length = 0;
@@ -598,15 +634,126 @@ describe("SessionProvider local-first startup", () => {
 
     await waitFor(() => {
       expect(state.events).toContain("refresh:codex:global");
-      expect(state.events).toContain("local:claude:global");
-      expect(state.events).toContain("local:antigravity:global");
-      expect(state.events).toContain("local:cursor:global");
+      for (const id of ["claude", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`local:${id}:global`);
+        expect(state.events).toContain(`refresh:${id}:global`);
+      }
     });
     expect(state.events).not.toContain("local:codex:global");
+    expect(state.events.filter((event) => event.startsWith("list:"))).toEqual([]);
     expect(state.events.filter((event) => event === "agents")).toHaveLength(1);
     await waitFor(() =>
       expect(screen.getByTestId("log")).toHaveTextContent("refreshed Claude, Codex, Antigravity, Cursor"),
     );
+  });
+
+  it("forces GitHub's answers only for the Refresh that asked, even when its local read failed", async () => {
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`list:${id}:global`);
+      }
+    });
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    const readable = state.localHandler!;
+    state.localHandler = (agentId, path) =>
+      agentId === "claude" ? Promise.reject(new Error("settings unreadable")) : readable(agentId, path);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("log")).toHaveTextContent("refreshed Claude, Codex, Antigravity, Cursor"),
+    );
+    expect(state.events).toContain("local:claude:global");
+    expect(state.events).not.toContain("refresh:claude:global");
+
+    state.localHandler = readable;
+    state.events.length = 0;
+    fireEvent.click(screen.getByRole("button", { name: "Load Claude" }));
+
+    await waitFor(() => expect(state.events).toContain("list:claude:global"));
+    expect(state.events.filter((event) => /^(local|list|refresh):claude/.test(event))).toEqual([
+      "local:claude:global",
+      "list:claude:global",
+    ]);
+  });
+
+  it("keeps a Refresh's forced read when a plain load supersedes it before its local read lands", async () => {
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`list:${id}:global`);
+      }
+    });
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    const readable = state.localHandler!;
+    const gate = deferred<AgentTabDto>();
+    let held = true;
+    state.localHandler = (agentId, path) =>
+      agentId === "claude" && held ? gate.promise : readable(agentId, path);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() => expect(state.events).toContain("local:claude:global"));
+    state.events.length = 0;
+    held = false;
+
+    fireEvent.click(screen.getByRole("button", { name: "Load Claude" }));
+    gate.resolve(EMPTY_TAB);
+
+    await waitFor(() => expect(state.events).toContain("refresh:claude:global"));
+    expect(state.events.filter((event) => /^(local|list|refresh):claude/.test(event))).toEqual([
+      "local:claude:global",
+      "refresh:claude:global",
+    ]);
+  });
+
+  it("paints a scope change from disk first when it supersedes the open tab's Refresh, and still forces GitHub", async () => {
+    renderSession();
+    await waitFor(() => {
+      for (const id of ["claude", "codex", "antigravity", "cursor"]) {
+        expect(state.events).toContain(`list:${id}:global`);
+      }
+    });
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    const gate = deferred<AgentTabDto>();
+    let held = true;
+    state.remoteHandler = (agentId) =>
+      agentId === "codex" ? (held ? gate.promise : Promise.resolve(ENRICHED_TAB)) : Promise.resolve(EMPTY_TAB);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh Codex" }));
+    await waitFor(() => expect(state.events).toContain("refresh:codex:global"));
+    state.events.length = 0;
+    held = false;
+
+    fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
+    gate.resolve(ENRICHED_TAB);
+
+    await waitFor(() => expect(state.events).toContain("refresh:codex:C:/fixture/new-scope"));
+    expect(state.events.filter((event) => /^(agents$|(local|list|refresh):codex)/.test(event))).toEqual([
+      "local:codex:C:/fixture/new-scope",
+      "refresh:codex:C:/fixture/new-scope",
+    ]);
+  });
+
+  it("keeps a plain load queued behind a change on the remembered answers, even after a Refresh", async () => {
+    renderSession();
+    await waitFor(() => expect(screen.getByTestId("ready")).toHaveTextContent("yes"));
+    await waitFor(() => expect(state.events).toContain("list:codex:global"));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("log")).toHaveTextContent("refreshed Claude, Codex, Antigravity, Cursor"),
+    );
+    await waitFor(() => expect(screen.getByTestId("busy")).toHaveTextContent("no"));
+    const mutation = deferred<AgentTabDto>();
+    state.mutationHandler = (agentId) =>
+      agentId === "codex" ? mutation.promise : Promise.resolve(EMPTY_TAB);
+    fireEvent.click(screen.getByRole("button", { name: "Mutate Codex" }));
+    await waitFor(() => expect(state.events).toContain("mutate:plugin:codex:global"));
+    fireEvent.click(screen.getByRole("button", { name: "Select new scope" }));
+    state.events.length = 0;
+    mutation.resolve(LOCAL_TAB);
+
+    await waitFor(() => expect(state.events).toContain("list:codex:C:/fixture/new-scope"));
+    expect(state.events.filter((event) => /^(local|list|refresh):codex/.test(event))).toEqual([
+      "local:codex:C:/fixture/new-scope",
+      "list:codex:C:/fixture/new-scope",
+    ]);
   });
 
   it("leaves a hidden provider out of the Refresh sweep", async () => {
@@ -614,7 +761,7 @@ describe("SessionProvider local-first startup", () => {
     renderSession();
     await waitFor(() => {
       for (const id of ["claude", "codex", "cursor"]) {
-        expect(state.events).toContain(`refresh:${id}:global`);
+        expect(state.events).toContain(`list:${id}:global`);
       }
     });
     state.events.length = 0;
@@ -623,9 +770,10 @@ describe("SessionProvider local-first startup", () => {
 
     await waitFor(() => {
       expect(state.events).toContain("refresh:codex:global");
-      expect(state.events).toContain("local:claude:global");
-      expect(state.events).toContain("local:cursor:global");
+      expect(state.events).toContain("refresh:claude:global");
+      expect(state.events).toContain("refresh:cursor:global");
     });
     expect(state.events).not.toContain("local:antigravity:global");
+    expect(state.events).not.toContain("refresh:antigravity:global");
   });
 });

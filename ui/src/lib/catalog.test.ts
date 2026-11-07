@@ -11,7 +11,6 @@ import {
   masterAllOn,
   mcpIsLive,
   mcpSourcesLabel,
-  pluginOutOfSync,
   pluginVersionNote,
   skillIsLive,
   sortHooks,
@@ -29,6 +28,7 @@ const tab: AgentTabDto = {
       source: "workshop",
       version: "0.22.1",
       upstream: "0.23.0",
+      outOfSync: true,
       enabled: true,
       togglable: true,
       skills: [
@@ -48,6 +48,7 @@ const tab: AgentTabDto = {
       source: "official",
       version: "",
       upstream: "",
+      outOfSync: false,
       enabled: false,
       togglable: true,
       skills: [
@@ -120,29 +121,17 @@ describe("catalog", () => {
     expect(rows.find((row) => row.id === "workbench@workshop")?.meta).toBe("plugin · workshop · 0.22.1");
   });
 
-  it("flags catalog drift only when both versions exist and differ", () => {
-    expect(pluginOutOfSync(tab.plugins[0])).toBe(true);
-    expect(pluginOutOfSync(tab.plugins[1])).toBe(false);
+  it("shows the drift Rust answered without restating its version rules", () => {
     expect(driftRows(tab).map((row) => row.id)).toEqual(["workbench@workshop"]);
+    expect(
+      driftRows({ ...tab, plugins: [{ ...tab.plugins[0], version: "1.0.0", upstream: "2.0.0", outOfSync: false }] }),
+    ).toEqual([]);
     expect(pluginVersionNote(tab.plugins[0])).toBe("upstream v0.23.0");
-    expect(pluginVersionNote({ ...tab.plugins[0], upstream: "0.22.1" })).toBe("up to date");
+    expect(pluginVersionNote({ ...tab.plugins[0], upstream: "0.22.1", outOfSync: false })).toBe("up to date");
     expect(pluginVersionNote({ ...tab.plugins[1], version: "1.0.0" })).toBe("installed");
+    expect(pluginVersionNote({ ...tab.plugins[1], version: "a1b2c3d4e5f6" })).toBe("installed");
     expect(formatPluginVersion("0.22.1")).toBe("v0.22.1");
     expect(formatPluginVersion("bd2122cb")).toBe("bd2122cb");
-    expect(
-      pluginOutOfSync({
-        ...tab.plugins[0],
-        version: "6.3.0",
-        upstream: "b36e082",
-      }),
-    ).toBe(false);
-    expect(
-      pluginVersionNote({
-        ...tab.plugins[0],
-        version: "6.3.0",
-        upstream: "b36e082",
-      }),
-    ).toBe("installed");
   });
 
   it("sorts skills by plugin name then skill name", () => {

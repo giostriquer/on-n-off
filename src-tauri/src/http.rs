@@ -35,7 +35,14 @@ impl std::fmt::Display for HttpError {
 type Reply = ureq::http::Response<ureq::Body>;
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::new_with_config(agent_config(ureq::Agent::config_builder(), !cfg!(test)))
+    agent_within(TIMEOUT)
+}
+
+fn agent_within(timeout: Duration) -> ureq::Agent {
+    ureq::Agent::new_with_config(agent_config(
+        ureq::Agent::config_builder().timeout_global(Some(timeout)),
+        !cfg!(test),
+    ))
 }
 
 fn agent_config(
@@ -43,7 +50,6 @@ fn agent_config(
     honour_env_proxy: bool,
 ) -> ureq::config::Config {
     let builder = builder
-        .timeout_global(Some(TIMEOUT))
         .user_agent(concat!("on-n-off/", env!("CARGO_PKG_VERSION")))
         .http_status_as_error(false);
     if honour_env_proxy {
@@ -84,6 +90,20 @@ pub fn get_json_with(
         .call()
         .map_err(|error| HttpError::Network(error.to_string()))?;
     finish(response, forbidden)
+}
+
+pub fn get_text(url: &str, timeout: Duration) -> Result<String, HttpError> {
+    let mut response = agent_within(timeout)
+        .get(url)
+        .call()
+        .map_err(|error| HttpError::Network(error.to_string()))?;
+    match response.status().as_u16() {
+        200..=299 => response
+            .body_mut()
+            .read_to_string()
+            .map_err(|error| HttpError::Network(error.to_string())),
+        code => Err(HttpError::Status(code)),
+    }
 }
 
 pub fn post_json(url: &str, bearer: &str, body: &Value) -> Result<Value, HttpError> {

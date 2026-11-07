@@ -109,7 +109,7 @@ comments.
 | Subsystem | What it does | Notable |
 | --- | --- | --- |
 | `{claude,codex,antigravity,cursor,muse}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference in behaviour belongs here; each provider's static facts are its row in `provider_catalogue.rs`, and what on-n-off can change for it is the adapter's own capabilities (`capabilities.rs`, below). Layout per provider is in `PROVIDERS.md`. |
-| `scanner.rs`, `plugin_meta.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. |
+| `scanner.rs`, `plugin_meta.rs`, `drift.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. `plugin_meta.rs` holds the plugin and marketplace manifest formats; whether a plugin is behind its marketplace is `drift.rs` (Plugin drift, below). |
 | `usage/` | Token and cost aggregation from transcripts, and the usage kept after they are deleted | Read-only on agent homes. See below. |
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
 | `github/` + `github_monitor.rs` | The Pull requests screen and its CI notifications | Not a provider, not behind `AgentAdapter`. See below. |
@@ -880,7 +880,7 @@ only the fixture's keys, so a setting added only in TypeScript snaps back in a `
 | `config_io.rs`, `backup.rs` | The protected write a change uses: back up every file it touches, then replace a patched document atomically, validate it and restore it from that backup when it does not parse. |
 | `paths.rs` | Agent homes and app data paths. `ON_N_OFF_HOME` redirects them in a running app; a test build has no user home, so tests inject their roots. `paths::equivalent` decides whether two paths name the same directory (a CLI's reported home against the one on-n-off gave it). |
 | `read_revision.rs` | Tells every surface when a shared cached read has been replaced; in the UI, `ui/src/lib/sharedReads/` holds one module per source and one listener per window. See [shared-reads.md](shared-reads.md). |
-| `http.rs` | Outbound HTTPS, plus the loopback test server the limits and github suites drive. |
+| `http.rs` | Outbound HTTPS, plus the loopback test server the limits, github and drift suites drive. `get_json` and the `post_*` calls classify a reply (`finish`: a rejected token, a rate limit with its reset); `get_text` hands back any status outside 2xx as the raw `HttpError::Status(code)` for its caller to read (plugin drift: a 404 is an answer, anything else a failure). |
 | `dto.rs` | The serialized shapes crossing the IPC boundary. Changing one is a compatibility event. |
 | `provider_catalogue.rs` | Every provider the app knows and one row of static facts each. Every Rust and UI provider list is drawn from it; the Swift helper's is still kept by hand. See below. |
 
@@ -1024,9 +1024,9 @@ optional `projectPath`: the scope the caller is viewing. In order:
 
 1. One change at a time per provider: `Changes`, one in `AppState`, holds a lock per provider.
 2. A change the adapter's capabilities refuse answers the declared reason before anything is read.
-3. The target is checked against the caller's view, read locally (`list_local_scope`, which never
-   reads the network): the plugin, skill or MCP server must be in it and switchable (`togglable`),
-   an uninstall must reach the plugin's source (`Capabilities::uninstalls`, for every provider), and
+3. The target is checked against the caller's view, read locally (`list_scope`, the adapter's own
+   scan, which never reads the network): the plugin, skill or MCP server must be in it and
+   switchable (`togglable`), an uninstall must reach the plugin's source (`Capabilities::uninstalls`, for every provider), and
    an install's source passes `Capabilities::admit`. "plugin not found: …" and "… is not
    togglable: …" are its answers, so a row a project brings into its view is never switched.
 4. The adapter's step (`AgentAdapter::step`), handed its own copy of the row it acts on: argv run
@@ -1039,8 +1039,9 @@ optional `projectPath`: the scope the caller is viewing. In order:
    change. A document edit's own file is always among them, and its write (`ConfigIo::patch`)
    refuses a file the change did not back up, replaces the file atomically, checks that it parses
    and restores it from that backup when it does not. A provider CLI's own writes are backed up, never rolled back.
-6. The answer is the caller's view read again, locally, so a change reads no network. The UI stores
-   it as the tab (`mutate`, `masterCut` and `install` in `SessionProvider.tsx`), keeping the
+6. The answer is the caller's view read again, locally (`drift::read` with `Reach::Local`: its
+   upstream versions come from the marketplace copies on disk), so a change reads no network. The
+   UI stores it as the tab (`mutate`, `masterCut` and `install` in `SessionProvider.tsx`), keeping the
    upstream version and out-of-sync badge it already showed for every plugin whose installed
    version the change left alone (`keepShownPluginMetadata`, `ui/src/lib/session.ts`), so they do
    not flash; a plugin the change moved to another version shows the answer's own, read from the
@@ -1054,9 +1055,64 @@ optional `projectPath`: the scope the caller is viewing. In order:
 `change/tests.rs` is one table over every provider in scratch homes, with a fake step: a made change
 backs up its files before the step runs and answers the local view of the caller's scope, read after
 the step; an unknown or unswitchable target, a declared refusal and a failed backup are refused
-without writing anything; and no change reads the network (`plugin_meta::with_fetch_text` panics,
-on fixtures whose enriched view would fetch). Which files each provider's changes touch is in
+without writing anything; and no change reads the network (`drift::with_fetch_text` panics, on
+fixtures whose `Reach::Remote` view would fetch). Which files each provider's changes touch is in
 PROVIDERS.md.
+
+### Plugin drift
+
+Whether a plugin is behind its marketplace is answered once, by `drift.rs`, for every provider and
+every read of a view: `drift::read(adapter, view, reach)`.
+
+- The adapter lists its view from disk (`list_scope`: its `list_tab` and the project overlay), each
+  plugin with its installed version (`drift::installed`), and declares where its marketplaces are
+  (`AgentAdapter::marketplaces`): a marketplace checkout on disk with the repository it came from
+  (`Marketplace::checkout`), or the versions the provider recorded (`Marketplace::listing`, Muse's
+  snapshots). Neither knows whether GitHub is read; what each provider declares is in PROVIDERS.md.
+- `read` answers each plugin's `upstream` and `outOfSync`, looking it up by marketplace and name.
+  An upstream is answered only when it and the installed version are both release versions
+  (trimmed, not empty, not `unknown`, not a commit SHA), so a plugin recorded at a commit shows no
+  upstream; `outOfSync` is whether the two differ, a leading `v` and case aside. The screens restate
+  none of it: the version note (`pluginVersionNote`), the Outdated filter and Overview's drift rows
+  read `outOfSync` and `upstream` as answered. How far it reaches is the caller's `Reach`: `Local` reads only the copies on disk; `Remote` also
+  asks GitHub (each marketplace's file on its default branch, and the manifest of a plugin pinned
+  to a commit with no version of its own) through the memo; `Forced` asks GitHub again for every
+  answer it needs, once per read.
+- The memo (`drift::Memo`, one in `AppState`) keeps each GitHub answer by URL, with when it came,
+  for an hour (`REMEMBERED_FOR`). An answer is the file or GitHub's 404 for it (`http::get_text`);
+  a request that fails any other way (no network, a timeout, another status) is no answer, is not
+  kept, and the next read asks again, so an app started offline shows upstreams once it is online.
+  A read accepts anything that landed since it started and, unless `Forced`, anything younger than
+  the hour, so a later tab load, scope change or provider reading the same marketplace repository
+  reuses it. Two
+  reads that overlap before the first answer lands each ask (nothing waits on a request in flight).
+  Until this module, every enriched read fetched the marketplace files again and a plugin
+  manifest's answer, failures included, was kept for the life of the process.
+- The commands choose the reach: `list_local_plugins` reads `Local` (a screen's first paint; every
+  config change answers the same view), `list_plugins` reads `Remote` and `refresh` reads `Forced`.
+  Each command runs one synchronous `AppState` method that fixes its reach (`local_plugins`,
+  `remote_plugins`, `forced_plugins`) on a clone of the state in a blocking worker, so a test calls
+  the same method on its own thread, where `drift::with_fetch_text` applies.
+  The UI paints a provider from `list_local_plugins`, then reads `list_plugins` and merges only its
+  plugin versions and badges into what it shows (`enrichTab` in `SessionProvider.tsx`,
+  `mergeEnrichedPluginMetadata`), so a tab load or a scope change asks GitHub at most once an hour.
+  Each load carries its mode (`LoadMode`): `local` (a first paint, a tab switch, a scope change:
+  `list_local_plugins` then `list_plugins`), `forced` (`list_local_plugins` then `refresh`) or
+  `probe` (`refresh` alone, after the CLIs are looked up again). The Refresh button loads the open
+  provider as `probe` and every other visible provider as `forced`, so Refresh always reads GitHub
+  again; a load asked for while another is running supersedes it and waits as the strongest mode
+  asked (probe, then forced, then local), the superseded load's own included, except that a
+  superseded probe counts as forced: its CLI lookup already ran, so a scope change asked during
+  the open tab's Refresh still paints from disk first and still reads GitHub again. A forced load
+  whose local read fails leaves nothing behind.
+
+`drift/tests/providers.rs` pins every provider's answers in scratch homes, from disk and with a
+fake GitHub (`drift::with_fetch_text`); `drift/tests/memo.rs` pins the hour, the forced read, the
+remembered 404, the failure asked again and the answer two providers share, on a test clock
+(`Memo::on`) that moves forward on every reading, and the exact hour on one that does not.
+`commands/tests.rs` pins each command's reach on an `AppState` built from scratch adapters: a local
+read never asks GitHub, two scans ask once through the shared memo, and a refresh after a scan asks
+again.
 
 ### JSON-line sessions
 
@@ -1124,6 +1180,7 @@ the code today; a change that moves one updates its row.
 | Term | Where it lives |
 | --- | --- |
 | Config change | `Changes::make` (`change.rs`), which every change command in `commands.rs` takes, with each adapter's `AgentAdapter::step` (its argv, document edit or `npx skills add`, and the files it touches); the backup and the protected document write are `ConfigIo` (`config_io.rs`); the UI stores the answer (`mutate` in `ui/src/features/session/SessionProvider.tsx`, through `keepShownPluginMetadata`) |
+| Plugin drift | `drift::read` (`drift.rs`) with the caller's `Reach` and the one `drift::Memo` in `AppState`, from each adapter's `AgentAdapter::marketplaces` (`Marketplace`) and the installed version it lists (`drift::installed`); chosen by `list_local_plugins`, `list_plugins` and `refresh` through `AppState::local_plugins`, `remote_plugins` and `forced_plugins` (`commands.rs`) and by the change path's answer (`change.rs`); shown by `ItemList` and Overview's drift rows (`driftRows`, `ui/src/lib/catalog.ts`), merged into the shown tab by `mergeEnrichedPluginMetadata` and kept through a change by `keepShownPluginMetadata` (`ui/src/lib/session.ts`) |
 | Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |

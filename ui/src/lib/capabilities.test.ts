@@ -39,6 +39,7 @@ const plugin = (source: string, id = `acme@${source}`): PluginDto => ({
   source,
   version: "",
   upstream: "",
+  outOfSync: false,
   enabled: true,
   togglable: true,
   skills: [],

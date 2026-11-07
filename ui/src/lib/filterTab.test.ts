@@ -10,6 +10,7 @@ const tab: AgentTabDto = {
       source: "workshop",
       version: "0.22.1",
       upstream: "0.23.0",
+      outOfSync: true,
       enabled: true,
       togglable: true,
       skills: [

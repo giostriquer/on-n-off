@@ -20,10 +20,25 @@ adapter assumes today (change the adapter and this file together).
   XDG way, so it has a config root and a data root (`paths::muse_config_for` /
   `paths::muse_data_for`, Muse below).
 - Plugin id: `<name>@<marketplace>`; `local` when there is no marketplace (`paths::plugin_id_parts`).
-- Manifest lookup order for versions (`plugin_meta.rs`): `.cursor-plugin/plugin.json`,
-  `.codex-plugin/plugin.json`, `.claude-plugin/plugin.json`, `.muse-plugin/plugin.json`,
-  `plugin.json`, then a version-looking
+- Installed version (`drift::installed`): the version the provider recorded, else the first
+  manifest that names one, in the order `.cursor-plugin/plugin.json`, `.codex-plugin/plugin.json`,
+  `.claude-plugin/plugin.json`, `.muse-plugin/plugin.json`, `plugin.json`, else a version-looking
   folder name.
+- Plugin drift (`drift.rs`; the architecture guide's Plugin drift section): what each listed
+  plugin's marketplace offers upstream, and whether the installed version is out of sync with it,
+  is answered by one module for every provider. An adapter only declares where its marketplaces
+  are (`AgentAdapter::marketplaces`): Claude the known marketplaces (install location, and the
+  repository from `source.repo` or `source.url`), Codex its config's marketplaces (a local path, or
+  the `.tmp/marketplaces/<name>` clone of a git source, with that source), Muse each marketplace's
+  snapshot versions; Cursor and Antigravity declare none, so their plugins never show an upstream.
+  A plugin is looked up by its marketplace (the id's `@` part, Muse's credited marketplace) and
+  name. On disk the upstream is the marketplace file's version, else the version in the plugin's
+  manifest inside the marketplace copy, else a version-looking `ref`; a commit SHA never counts.
+  From GitHub (a marketplace whose repository is on GitHub), the marketplace file on its default
+  branch (`origin/HEAD`, then `main`, `master`) overrides those versions, and a plugin pinned to a
+  commit or tag with no version reads its manifest at that pin. A plugin shows an upstream only
+  when it and the installed version are both release versions (a commit SHA, `unknown` or nothing
+  is not), and is out of sync when they differ, a leading `v` and case aside. **code**.
 - MCP DTO: `enabled` is derived per provider (see below); the UI switch is a config change
   (below), which the adapter's `step` makes.
 - Hooks (`hooks.rs`, one module for every provider the way `mcp.rs` is): one row per handler,

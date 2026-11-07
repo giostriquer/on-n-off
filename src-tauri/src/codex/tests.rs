@@ -69,7 +69,7 @@ fn fixture() -> (PathBuf, PathBuf) {
 fn lists_plugins_and_user_skills_from_agents_dir_and_config_paths() {
     let (root, agents_skills) = fixture();
     let adapter = CodexAdapter::at(root.clone(), agents_skills);
-    let tab = adapter.list_tab().expect("list");
+    let tab = crate::drift::read(&adapter, None, crate::drift::Reach::Local).expect("list");
     assert_eq!(tab.plugins[0].id, "toolkit@workshop");
     assert!(!tab.plugins[0].enabled);
     assert_eq!(tab.plugins[1].id, "workbench@workshop");
@@ -115,9 +115,9 @@ fn local_tab_skips_remote_marketplace_enrichment() {
     fs::write(&config_path, config).unwrap();
     let adapter = CodexAdapter::at(root.clone(), agents_skills);
 
-    let local = crate::plugin_meta::with_fetch_text(
+    let local = crate::drift::with_fetch_text(
         |_| panic!("local inventory must not fetch remote metadata"),
-        || adapter.list_local_tab().expect("local list"),
+        || crate::drift::read(&adapter, None, crate::drift::Reach::Local).expect("local list"),
     );
     let local_plugin = local
         .plugins
@@ -126,14 +126,18 @@ fn local_tab_skips_remote_marketplace_enrichment() {
         .unwrap();
     assert_eq!(local_plugin.upstream, "0.23.0");
 
-    let enriched = crate::plugin_meta::with_fetch_text(
+    let memo = crate::drift::Memo::new();
+    let enriched = crate::drift::with_fetch_text(
         |_| {
-            Some(
+            Ok(Some(
                 r#"{"plugins":[{"name":"workbench","version":"0.24.0","source":"./plugins/workbench"}]}"#
                     .into(),
-            )
+            ))
         },
-        || adapter.list_tab().expect("enriched list"),
+        || {
+            crate::drift::read(&adapter, None, crate::drift::Reach::Remote(&memo))
+                .expect("enriched list")
+        },
     );
     let enriched_plugin = enriched
         .plugins

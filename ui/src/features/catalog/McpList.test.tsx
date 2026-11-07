@@ -75,6 +75,7 @@ describe("McpList", () => {
       source: "acme",
       version: "",
       upstream: "",
+      outOfSync: false,
       enabled: true,
       togglable: true,
       skills: [],

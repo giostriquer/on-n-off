@@ -93,6 +93,7 @@ const fullTab = (): AgentTabDto => ({
     source: "workshop",
     version: `0.${index + 12}.0`,
     upstream: `0.${index + 12}.0`,
+    outOfSync: false,
     enabled: true,
     togglable: true,
     skills: index === 0

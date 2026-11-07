@@ -168,14 +168,14 @@ fn contents(dir: &Path) -> BTreeMap<std::path::PathBuf, Vec<u8>> {
 }
 
 fn offline<T>(run: impl FnOnce() -> T) -> T {
-    crate::plugin_meta::with_fetch_text(|url| panic!("a change read the network: {url}"), run)
+    crate::drift::with_fetch_text(|url| panic!("a change read the network: {url}"), run)
 }
 
 static FETCHED: AtomicUsize = AtomicUsize::new(0);
 
-fn count_fetch(_: &str) -> Option<String> {
+fn count_fetch(_: &str) -> Result<Option<String>, crate::drift::Transient> {
     FETCHED.fetch_add(1, Ordering::SeqCst);
-    None
+    Ok(None)
 }
 
 struct Home {
@@ -210,7 +210,7 @@ impl Home {
     }
 
     fn skill_id(&self, name: &str, scoped: bool) -> String {
-        let tab = self.adapter.list_local_scope(self.view(scoped)).unwrap();
+        let tab = self.adapter.list_scope(self.view(scoped)).unwrap();
         tab.plugins
             .iter()
             .flat_map(|plugin| plugin.skills.iter())
@@ -311,7 +311,14 @@ fn check(id: AgentId, scoped: bool, request: impl Fn(&Home) -> Request, expect: 
                 DEFAULT_TIMEOUT
             };
             assert_eq!(applied.deadline, Some(deadline), "{what}");
-            let local = offline(|| home.adapter.list_local_scope(home.view(scoped)).unwrap());
+            let local = offline(|| {
+                crate::drift::read(
+                    &*home.adapter,
+                    home.view(scoped),
+                    crate::drift::Reach::Local,
+                )
+                .unwrap()
+            });
             assert_eq!(answer, local, "{what}");
             assert!(
                 answer
@@ -650,7 +657,10 @@ fn the_fixtures_would_reach_the_network_if_a_change_read_the_enriched_view() {
     for id in [AgentId::Claude, AgentId::Codex] {
         let home = Home::new(id);
         let before = FETCHED.load(Ordering::SeqCst);
-        crate::plugin_meta::with_fetch_text(count_fetch, || home.adapter.list_scope(None).unwrap());
+        let memo = crate::drift::Memo::new();
+        crate::drift::with_fetch_text(count_fetch, || {
+            crate::drift::read(&*home.adapter, None, crate::drift::Reach::Remote(&memo)).unwrap()
+        });
         assert!(FETCHED.load(Ordering::SeqCst) > before, "{id:?}");
     }
 }
@@ -778,6 +788,7 @@ fn a_change_that_panicked_leaves_the_next_change_free_to_run() {
     assert!(first.is_err());
 
     let answer = changes.make(&*home.adapter, request, None).unwrap();
-    assert_eq!(answer, home.adapter.list_local_scope(None).unwrap());
+    let local = crate::drift::read(&*home.adapter, None, crate::drift::Reach::Local).unwrap();
+    assert_eq!(answer, local);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }

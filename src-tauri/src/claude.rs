@@ -9,6 +9,7 @@ use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
+use crate::drift::Marketplace;
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::paths::{claude_root, plugin_id_parts};
@@ -205,100 +206,6 @@ impl ClaudeAdapter {
         servers.extend(crate::claude_mcp::local_servers(&config));
         servers
     }
-
-    fn marketplace_roots(&self) -> HashMap<String, (PathBuf, String)> {
-        let (Ok(root), Ok(documents)) = (self.root(), self.documents()) else {
-            return HashMap::new();
-        };
-        let mut roots = HashMap::new();
-        let known_path = documents.marketplaces;
-        if let Ok(text) = fs::read_to_string(&known_path) {
-            if let Ok(known) = serde_json::from_str::<HashMap<String, KnownMarketplace>>(&text) {
-                for (name, entry) in known {
-                    let location = entry
-                        .install_location
-                        .clone()
-                        .unwrap_or_else(|| root.join("plugins").join("marketplaces").join(&name));
-                    roots.insert(name, (location, entry.origin()));
-                }
-            }
-        }
-        roots
-    }
-
-    fn build_tab(&self, enrich_remote: bool) -> Result<AgentTabDto, AdapterError> {
-        let settings = self.settings()?;
-        let catalogs: HashMap<String, HashMap<String, crate::plugin_meta::VersionHint>> = self
-            .marketplace_roots()
-            .into_iter()
-            .map(|(name, (path, origin))| {
-                let mut hints = crate::plugin_meta::catalog_hints(&path);
-                if enrich_remote {
-                    crate::plugin_meta::apply_remote_marketplace_versions(
-                        &mut hints, &origin, &path,
-                    );
-                }
-                (name, hints)
-            })
-            .collect();
-        let mut plugins = Vec::new();
-        let mut enabled_plugins = Vec::new();
-        for (id, install_path, inventory_version) in self.installed()? {
-            let (name, source) = plugin_id_parts(&id);
-            let enabled = settings
-                .enabled_plugins
-                .get(&id)
-                .copied()
-                .unwrap_or_else(|| plugin_default_enabled(&install_path));
-            if enabled {
-                enabled_plugins.push(crate::plugin_files::PluginSource {
-                    id: id.clone(),
-                    name: name.clone(),
-                    root: install_path.clone(),
-                });
-            }
-            let skills = scan_plugin_skills(&install_path)
-                .into_iter()
-                .map(|skill| claude_plugin_skill(&id, skill))
-                .collect();
-            let installed =
-                crate::plugin_meta::installed_hint(&install_path, inventory_version.as_deref());
-            let mut catalog = catalogs
-                .get(&source)
-                .and_then(|hints| hints.get(&name))
-                .cloned();
-            if enrich_remote {
-                if let Some(hint) = catalog.as_mut() {
-                    crate::plugin_meta::fill_remote_version(hint);
-                }
-            }
-            let (version, upstream, out_of_sync) =
-                crate::plugin_meta::resolve_versions(&installed, catalog.as_ref());
-            plugins.push(PluginDto {
-                id,
-                name,
-                source,
-                version,
-                upstream,
-                out_of_sync,
-                enabled,
-                togglable: true,
-                skills,
-            });
-        }
-        let user_skills = scan_user_skills(&self.root()?.join("skills"))
-            .into_iter()
-            .map(|skill| claude_user_skill(skill, &settings.skill_overrides))
-            .collect();
-        let mut tab = AgentTabDto {
-            plugins,
-            user_skills,
-            mcp_servers: self.mcp_servers(&enabled_plugins),
-            hooks: crate::hooks::claude_hooks(self.root()?, &enabled_plugins),
-        };
-        sort_tab(&mut tab);
-        Ok(tab)
-    }
 }
 
 impl AgentAdapter for ClaudeAdapter {
@@ -340,11 +247,73 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        self.build_tab(true)
+        let settings = self.settings()?;
+        let mut plugins = Vec::new();
+        let mut enabled_plugins = Vec::new();
+        for (id, install_path, inventory_version) in self.installed()? {
+            let (name, source) = plugin_id_parts(&id);
+            let enabled = settings
+                .enabled_plugins
+                .get(&id)
+                .copied()
+                .unwrap_or_else(|| plugin_default_enabled(&install_path));
+            if enabled {
+                enabled_plugins.push(crate::plugin_files::PluginSource {
+                    id: id.clone(),
+                    name: name.clone(),
+                    root: install_path.clone(),
+                });
+            }
+            let skills = scan_plugin_skills(&install_path)
+                .into_iter()
+                .map(|skill| claude_plugin_skill(&id, skill))
+                .collect();
+            plugins.push(PluginDto {
+                id,
+                name,
+                source,
+                version: crate::drift::installed(&install_path, inventory_version.as_deref()),
+                upstream: String::new(),
+                out_of_sync: false,
+                enabled,
+                togglable: true,
+                skills,
+            });
+        }
+        let user_skills = scan_user_skills(&self.root()?.join("skills"))
+            .into_iter()
+            .map(|skill| claude_user_skill(skill, &settings.skill_overrides))
+            .collect();
+        let mut tab = AgentTabDto {
+            plugins,
+            user_skills,
+            mcp_servers: self.mcp_servers(&enabled_plugins),
+            hooks: crate::hooks::claude_hooks(self.root()?, &enabled_plugins),
+        };
+        sort_tab(&mut tab);
+        Ok(tab)
     }
 
-    fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        self.build_tab(false)
+    fn marketplaces(&self) -> Vec<Marketplace> {
+        let (Ok(root), Ok(documents)) = (self.root(), self.documents()) else {
+            return Vec::new();
+        };
+        let Ok(text) = fs::read_to_string(documents.marketplaces) else {
+            return Vec::new();
+        };
+        let Ok(known) = serde_json::from_str::<HashMap<String, KnownMarketplace>>(&text) else {
+            return Vec::new();
+        };
+        known
+            .into_iter()
+            .map(|(name, entry)| {
+                let location = entry
+                    .install_location
+                    .clone()
+                    .unwrap_or_else(|| root.join("plugins").join("marketplaces").join(&name));
+                Marketplace::checkout(name, location, entry.origin())
+            })
+            .collect()
     }
 
     fn list_projects(&self) -> Vec<crate::dto::ProjectDto> {

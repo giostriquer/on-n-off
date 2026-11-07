@@ -170,6 +170,11 @@ source carries no comments (see [Code comments](#code-comments)).
   restate the rule, `Reading::has_observations` among it. The Limits column's legacy fold asks the
   same rule through `ProviderLimitsDto::stands_unavailable`. The cases they all check are
   `limits/standing/fixtures/standing-cases.json` ([why](architecture/README.md#limits)).
+- Whether a plugin is behind its marketplace, and which upstream it shows: `drift::read`
+  (`drift.rs`), for every provider. The UI renders `outOfSync` and `upstream` as answered and never
+  compares versions or recognises a commit SHA itself; an adapter only lists the installed version
+  (`drift::installed`) and declares its marketplaces
+  ([why](architecture/README.md#plugin-drift)).
 - Whether the pull request read is live, last observed or unavailable, and the message and tone it
   shows: its read standing, `PrReadStanding::of` (`github/standing.rs`), from the read as it leaves,
   sent to the screen with it (`GithubPrsReplyDto`) and never stored. The screen's banner
@@ -243,7 +248,7 @@ comment line in the Rust, TypeScript, Swift and `.mjs` script sources; compiler 
   `#[path = "updater_build/tests.rs"]` — do not "simplify" that away.
 - Shared fixtures live next to the domain that owns them: `paths::scratch_dir`,
   `json_line_session::Script` (the scripted JSON-line peer),
-  `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `plugin_meta::with_fetch_text`,
+  `http::{serve_once, serve_once_capturing, refused_url, never_asked, was_asked, head_header}`, `drift::with_fetch_text`,
   `usage::pricing::{with_test_fetch, lock_rates_state}`, `usage::files::testing` counters,
   `github/fixtures.rs` (with `FakeGithub`), and the notch plan's frames and settings in
   `side_notch/plan/tests/mod.rs`, which the Windows painter's tests plan from. Single-consumer helpers stay in that module's

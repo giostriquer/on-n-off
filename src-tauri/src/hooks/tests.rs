@@ -307,9 +307,7 @@ fn a_disabled_claude_plugin_contributes_no_hooks() {
     )
     .unwrap();
 
-    let tab = crate::claude::ClaudeAdapter::at(root)
-        .list_local_tab()
-        .unwrap();
+    let tab = crate::claude::ClaudeAdapter::at(root).list_tab().unwrap();
 
     assert_eq!(commands(&tab.hooks), ["acme on", "acme user"]);
 }
@@ -355,7 +353,7 @@ fn a_disabled_codex_plugin_contributes_no_hooks() {
     .unwrap();
 
     let tab = crate::codex::CodexAdapter::at(root, home.join(".agents/skills"))
-        .list_local_tab()
+        .list_tab()
         .unwrap();
 
     assert_eq!(commands(&tab.hooks), ["acme on"]);
@@ -619,7 +617,7 @@ fn the_codex_tab_merges_every_source_and_applies_the_state() {
     .unwrap();
 
     let tab = crate::codex::CodexAdapter::at(root, home.join(".agents/skills"))
-        .list_local_tab()
+        .list_tab()
         .unwrap();
 
     let rows: Vec<(&str, &str, bool)> = tab

@@ -64,33 +64,6 @@ export function pluginNameForSkill(skill: SkillDto, plugins: PluginDto[] = []): 
   return plugins.find((plugin) => plugin.id === skill.pluginId)?.name ?? skill.pluginId;
 }
 
-function versionKey(value: string): string {
-  return value.trim().replace(/^v/i, "").toLowerCase();
-}
-
-function isCommitSha(value: string): boolean {
-  return /^[a-f0-9]{7,40}$/i.test(value.trim());
-}
-
-export function pluginOutOfSync(plugin: PluginDto): boolean {
-  if (typeof plugin.outOfSync === "boolean") {
-    return plugin.outOfSync;
-  }
-  const installed = plugin.version.trim();
-  const upstream = plugin.upstream.trim();
-  if (
-    !installed ||
-    !upstream ||
-    installed.toLowerCase() === "unknown" ||
-    upstream.toLowerCase() === "unknown" ||
-    isCommitSha(installed) ||
-    isCommitSha(upstream)
-  ) {
-    return false;
-  }
-  return versionKey(installed) !== versionKey(upstream);
-}
-
 export function formatPluginVersion(version: string): string {
   const value = version.trim();
   if (!value) {
@@ -103,19 +76,14 @@ export function formatPluginVersion(version: string): string {
 }
 
 export function pluginVersionNote(plugin: PluginDto): string {
-  const upstream = isCommitSha(plugin.upstream) ? "" : plugin.upstream.trim();
-  const version = isCommitSha(plugin.version) ? "" : plugin.version.trim();
-  if (!upstream) {
-    return version ? "installed" : "";
+  if (plugin.outOfSync) {
+    return `upstream ${formatPluginVersion(plugin.upstream)}`;
   }
-  if (pluginOutOfSync({ ...plugin, version, upstream })) {
-    return `upstream ${formatPluginVersion(upstream)}`;
-  }
-  return version ? copy.upToDate : "";
+  return plugin.upstream ? copy.upToDate : "installed";
 }
 
 export function driftRows(tab: AgentTabDto): DriftRow[] {
-  return sortPlugins(tab.plugins.filter(pluginOutOfSync)).map((plugin) => ({
+  return sortPlugins(tab.plugins.filter((plugin) => plugin.outOfSync)).map((plugin) => ({
     kind: "plugin",
     id: plugin.id,
     name: plugin.name,

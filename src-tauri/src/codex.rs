@@ -9,6 +9,7 @@ use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
 use crate::change::{Checked, Step};
 use crate::cli::{argv, AgentCli};
+use crate::drift::Marketplace;
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::mcp::{parse_codex_map, CodexMcpEntry};
@@ -139,22 +140,6 @@ impl CodexAdapter {
         })
     }
 
-    fn marketplace_roots(&self, config: &CodexConfig) -> HashMap<String, (PathBuf, String)> {
-        let Ok(root) = self.root() else {
-            return HashMap::new();
-        };
-        let mut roots = HashMap::new();
-        for (name, entry) in &config.marketplaces {
-            if let Some(path) = marketplace_path(root, name, entry) {
-                roots.insert(
-                    name.clone(),
-                    (path, entry.source.clone().unwrap_or_default()),
-                );
-            }
-        }
-        roots
-    }
-
     fn plugin_cache_dir(&self, plugin_id: &str) -> Option<PathBuf> {
         let (name, marketplace) = plugin_id.split_once('@')?;
         let cache = self
@@ -166,23 +151,46 @@ impl CodexAdapter {
             .join(name);
         newest_dir(&cache)
     }
+}
 
-    fn build_tab(&self, enrich_remote: bool) -> Result<AgentTabDto, AdapterError> {
+impl AgentAdapter for CodexAdapter {
+    fn supports_accounts(&self) -> bool {
+        true
+    }
+    fn id(&self) -> AgentId {
+        AgentId::Codex
+    }
+
+    fn capabilities(&self) -> Capabilities {
+        Capabilities {
+            plugin_switch: Change::file("file patch · [plugins.*.enabled]"),
+            skill_switch: Change::file("file patch · [[skills.config]]"),
+            mcp_switch: Change::file("file patch · [mcp_servers.*.enabled]"),
+            install: Change::cli("codex plugin add · marketplace add"),
+            refused_sources: BTreeMap::new(),
+            uninstall: Change::cli("codex plugin remove"),
+            uninstall_from: None,
+            update: Change::cli("codex plugin marketplace upgrade · add"),
+            reads_hooks: true,
+        }
+    }
+
+    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
+        match scope {
+            ItemScope::Global => Ok(ItemRoots {
+                skills: self.root()?.join("skills"),
+                agents: None,
+            }),
+            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
+                Path::new(project_path),
+                AgentId::Codex,
+            )),
+        }
+    }
+
+    fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
         let config = self.config()?;
         let enable_by_path = skill_enable_map(&config);
-        let catalogs: HashMap<String, HashMap<String, crate::plugin_meta::VersionHint>> = self
-            .marketplace_roots(&config)
-            .into_iter()
-            .map(|(name, (path, origin))| {
-                let mut hints = crate::plugin_meta::catalog_hints(&path);
-                if enrich_remote {
-                    crate::plugin_meta::apply_remote_marketplace_versions(
-                        &mut hints, &origin, &path,
-                    );
-                }
-                (name, hints)
-            })
-            .collect();
         let mut plugins = Vec::new();
         let mut hook_plugins = Vec::new();
         let plugin_rows: Vec<_> = config.plugins.iter().collect();
@@ -199,21 +207,10 @@ impl CodexAdapter {
                     });
                 }
             }
-            let installed = cache
-                .as_ref()
-                .map(|dir| crate::plugin_meta::installed_hint(dir, None))
+            let version = cache
+                .as_deref()
+                .map(|dir| crate::drift::installed(dir, None))
                 .unwrap_or_default();
-            let mut catalog = catalogs
-                .get(&source)
-                .and_then(|hints| hints.get(&name))
-                .cloned();
-            if enrich_remote {
-                if let Some(hint) = catalog.as_mut() {
-                    crate::plugin_meta::fill_remote_version(hint);
-                }
-            }
-            let (version, upstream, out_of_sync) =
-                crate::plugin_meta::resolve_versions(&installed, catalog.as_ref());
             let skills: Vec<SkillDto> = cache
                 .map(|dir| {
                     scan_plugin_skills(&dir)
@@ -231,8 +228,8 @@ impl CodexAdapter {
                 name,
                 source,
                 version,
-                upstream,
-                out_of_sync,
+                upstream: String::new(),
+                out_of_sync: false,
                 enabled: entry.enabled,
                 togglable: true,
                 skills,
@@ -282,49 +279,23 @@ impl CodexAdapter {
         sort_tab(&mut tab);
         Ok(tab)
     }
-}
 
-impl AgentAdapter for CodexAdapter {
-    fn supports_accounts(&self) -> bool {
-        true
-    }
-    fn id(&self) -> AgentId {
-        AgentId::Codex
-    }
-
-    fn capabilities(&self) -> Capabilities {
-        Capabilities {
-            plugin_switch: Change::file("file patch · [plugins.*.enabled]"),
-            skill_switch: Change::file("file patch · [[skills.config]]"),
-            mcp_switch: Change::file("file patch · [mcp_servers.*.enabled]"),
-            install: Change::cli("codex plugin add · marketplace add"),
-            refused_sources: BTreeMap::new(),
-            uninstall: Change::cli("codex plugin remove"),
-            uninstall_from: None,
-            update: Change::cli("codex plugin marketplace upgrade · add"),
-            reads_hooks: true,
-        }
-    }
-
-    fn item_roots(&self, scope: &ItemScope) -> Result<ItemRoots, AdapterError> {
-        match scope {
-            ItemScope::Global => Ok(ItemRoots {
-                skills: self.root()?.join("skills"),
-                agents: None,
-            }),
-            ItemScope::Project { project_path } => Ok(crate::project::project_item_roots(
-                Path::new(project_path),
-                AgentId::Codex,
-            )),
-        }
-    }
-
-    fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        self.build_tab(true)
-    }
-
-    fn list_local_tab(&self) -> Result<AgentTabDto, AdapterError> {
-        self.build_tab(false)
+    fn marketplaces(&self) -> Vec<Marketplace> {
+        let (Ok(root), Ok(config)) = (self.root(), self.config()) else {
+            return Vec::new();
+        };
+        config
+            .marketplaces
+            .iter()
+            .filter_map(|(name, entry)| {
+                let path = marketplace_path(root, name, entry)?;
+                Some(Marketplace::checkout(
+                    name.clone(),
+                    path,
+                    entry.source.clone().unwrap_or_default(),
+                ))
+            })
+            .collect()
     }
 
     fn list_projects(&self) -> Vec<crate::dto::ProjectDto> {

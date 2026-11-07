@@ -8,6 +8,7 @@ use crate::adapter::{AgentAdapter, ItemRoots};
 use crate::capabilities::{Capabilities, Change};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
+use crate::drift::Marketplace;
 use crate::dto::{
     AdapterError, AgentId, AgentTabDto, ErrorKind, ItemScope, McpServerDto, PluginDto, SkillDto,
 };
@@ -85,7 +86,6 @@ struct SnapshotPlugin {
 struct MarketplaceHint {
     marketplace: String,
     source: PathBuf,
-    version: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -207,17 +207,17 @@ impl MuseAdapter {
             .collect())
     }
 
-    fn marketplace_hints(&self) -> HashMap<String, Vec<MarketplaceHint>> {
-        let mut hints = HashMap::new();
+    fn snapshots(&self) -> Vec<(String, PathBuf, SnapshotFile)> {
         let (Ok(data), Ok(documents)) = (self.data_root(), self.documents()) else {
-            return hints;
+            return Vec::new();
         };
         let Ok(text) = fs::read_to_string(documents.marketplaces) else {
-            return hints;
+            return Vec::new();
         };
         let Ok(file) = serde_json::from_str::<MarketplacesFile>(&text) else {
-            return hints;
+            return Vec::new();
         };
+        let mut snapshots = Vec::new();
         for (name, record) in file.marketplaces {
             let Some(source) = record.source.path else {
                 continue;
@@ -236,6 +236,14 @@ impl MuseAdapter {
             let Ok(snapshot) = serde_json::from_str::<SnapshotFile>(&text) else {
                 continue;
             };
+            snapshots.push((name, source, snapshot));
+        }
+        snapshots
+    }
+
+    fn marketplace_hints(&self) -> HashMap<String, Vec<MarketplaceHint>> {
+        let mut hints = HashMap::new();
+        for (name, source, snapshot) in self.snapshots() {
             for plugin in snapshot.plugins {
                 hints
                     .entry(plugin.name)
@@ -243,7 +251,6 @@ impl MuseAdapter {
                     .push(MarketplaceHint {
                         marketplace: name.clone(),
                         source: source.clone(),
-                        version: plugin.version,
                     });
             }
         }
@@ -396,6 +403,21 @@ impl AgentAdapter for MuseAdapter {
         }
     }
 
+    fn marketplaces(&self) -> Vec<Marketplace> {
+        self.snapshots()
+            .into_iter()
+            .map(|(name, _, snapshot)| {
+                Marketplace::listing(
+                    name,
+                    snapshot
+                        .plugins
+                        .into_iter()
+                        .map(|plugin| (plugin.name, plugin.version)),
+                )
+            })
+            .collect()
+    }
+
     fn list_tab(&self) -> Result<AgentTabDto, AdapterError> {
         let settings_text = self.settings_text()?;
         let activation = activation_map(settings_text.as_deref());
@@ -414,15 +436,8 @@ impl AgentAdapter for MuseAdapter {
                         .is_some_and(|source| source.starts_with(&hint.source))
                 })
             });
-            let (source, upstream) = hint.map_or_else(
-                || (SOURCE_LOCAL.to_string(), String::new()),
-                |hint| {
-                    (
-                        hint.marketplace.clone(),
-                        hint.version.clone().unwrap_or_default(),
-                    )
-                },
-            );
+            let source =
+                hint.map_or_else(|| SOURCE_LOCAL.to_string(), |hint| hint.marketplace.clone());
             let dto_id = format!("{slug}@{source}");
             let skills = scan_plugin_skills(&record.cache_path)
                 .into_iter()
@@ -437,17 +452,13 @@ impl AgentAdapter for MuseAdapter {
                     )
                 })
                 .collect();
-            let installed =
-                crate::plugin_meta::installed_hint(&record.cache_path, record.version.as_deref());
-            let (version, _, _) = crate::plugin_meta::resolve_versions(&installed, None);
-            let out_of_sync = crate::plugin_meta::out_of_sync(&version, &upstream);
             plugins.push(PluginDto {
                 id: dto_id,
                 name: slug,
                 source,
-                version,
-                upstream,
-                out_of_sync,
+                version: crate::drift::installed(&record.cache_path, record.version.as_deref()),
+                upstream: String::new(),
+                out_of_sync: false,
                 enabled: record.enabled,
                 togglable: true,
                 skills,
