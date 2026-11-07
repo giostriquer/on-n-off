@@ -17,6 +17,7 @@ export const NOTHING_OFFERED: Capabilities = {
   pluginSwitch: UNKNOWN,
   skillSwitch: UNKNOWN,
   mcpSwitch: UNKNOWN,
+  refusedGlobally: {},
   install: UNKNOWN,
   refusedSources: {},
   uninstall: UNKNOWN,
@@ -57,9 +58,12 @@ export function canUpdate(agent: AgentInfo): boolean {
   return ready(agent, agent.capabilities.update);
 }
 
-export function mcpNotice(agent: AgentInfo): string | null {
+export function mcpNotice(agent: AgentInfo, scopePath: string | null): string | null {
   const change = agent.capabilities.mcpSwitch;
-  return change.by === "refused" && change.reason ? change.reason : null;
+  if (change.by === "refused") {
+    return change.reason || null;
+  }
+  return scopePath?.trim() ? null : (agent.capabilities.refusedGlobally.mcp ?? null);
 }
 
 export function chosenAgents(agents: readonly AgentInfo[], providers: readonly AgentId[]): AgentInfo[] {

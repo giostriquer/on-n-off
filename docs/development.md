@@ -25,7 +25,8 @@ source carries no comments (see [Code comments](#code-comments)).
   adapter's `capabilities()` (`capabilities.rs`), declared beside the step that makes each
   change; where it puts skills and subagents is its `global_item_roots` and its project facts'
   `items`. Which rows can be switched follows the declaration too (`Capabilities::restrict`, in
-  every `list_scope`): an adapter marks only what keeps one row from being switched. Only
+  every `list_scope`, with the switches the all-projects view refuses, `refusedGlobally`): an
+  adapter marks only what keeps one row from being switched. Only
   `list_scope` is served; `list_tab`, whose rows are not restricted yet, is never handed to a
   caller. A refusal is never a step's own message: the change path refuses with the declared
   reason, and an install source goes through `Capabilities::admit`. The UI gates every action and
@@ -179,6 +180,11 @@ source carries no comments (see [Code comments](#code-comments)).
   `project.rs`, which builds the project view, a project's counts and the listed projects from it
   for every provider ([why](architecture/README.md#project-view)). A file the adapter has a path
   for (Claude's `.claude.json`) is read through that path, never through `paths::user_home`.
+- Claude's MCP rule (which servers each view lists, what turns each off in it, which can be
+  switched there and the edit a switch makes): `claude_mcp.rs` alone, reached by the Claude
+  adapter for the all-projects view and its step, and by the project view only through the
+  declared `McpSource::ClaudeEntry` arm; never a Claude branch in `project.rs` or `ConfigIo`
+  ([why](../PROVIDERS.md#claude-claude-code)).
 - Whether a plugin is behind its marketplace, and which upstream it shows: `drift::read`
   (`drift.rs`), for every provider. The UI renders `outOfSync` and `upstream` as answered and never
   compares versions or recognises a commit SHA itself; an adapter only lists the installed version

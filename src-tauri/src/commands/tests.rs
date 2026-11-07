@@ -162,10 +162,7 @@ fn a_change_reaches_the_named_provider_and_answers_the_scope_it_names() {
     let project = Some(project.to_string_lossy().into_owned());
 
     for (scope, on) in [(None, false), (project.clone(), true), (project, false)] {
-        let request = Request::SwitchMcp {
-            id: "github".into(),
-            on,
-        };
+        let request = Request::mcp("github", on);
         let answer = tauri::async_runtime::block_on(change(
             &scratch.state,
             AgentId::Codex,
@@ -201,10 +198,7 @@ fn a_change_reaches_the_named_provider_and_answers_the_scope_it_names() {
     let refused = tauri::async_runtime::block_on(change(
         &scratch.state,
         AgentId::Cursor,
-        Request::SwitchMcp {
-            id: "github".into(),
-            on: false,
-        },
+        Request::mcp("github", false),
         None,
         "MCP toggle",
     ))

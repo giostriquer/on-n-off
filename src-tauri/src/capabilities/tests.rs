@@ -96,7 +96,15 @@ fn refusals(capabilities: &Capabilities) -> Vec<String> {
             Change::Cli { .. } | Change::File { .. } => None,
         })
         .chain(capabilities.refused_sources.values().cloned())
+        .chain(capabilities.refused_globally.values().cloned())
         .collect()
+}
+
+fn in_all_projects(capabilities: &Capabilities, kind: Switch) -> Change {
+    match capabilities.refused_globally.get(&kind) {
+        Some(reason) => Change::refused("", reason),
+        None => capabilities.switch(kind).clone(),
+    }
 }
 
 fn assert_agrees(
@@ -131,22 +139,37 @@ fn every_change_an_adapter_declares_is_one_it_makes_and_every_refusal_is_declare
         let changes = Changes::at(home.join("_backups"));
         let change = |request| changes.make(&*adapter, request, None);
 
-        let attempts = [
+        let project = home.join("acme").to_string_lossy().into_owned();
+        let switches = [
             (
                 "plugin switch",
-                &declared.plugin_switch,
-                change(Request::plugin("acme@webapp", false)),
+                Switch::Plugin,
+                Request::plugin("acme@webapp", false),
             ),
-            (
-                "skill switch",
-                &declared.skill_switch,
-                change(Request::skill("acme", false)),
-            ),
-            (
-                "mcp switch",
-                &declared.mcp_switch,
-                change(Request::mcp("acme", false)),
-            ),
+            ("skill switch", Switch::Skill, Request::skill("acme", false)),
+            ("mcp switch", Switch::Mcp, Request::mcp("acme", false)),
+        ];
+        for (what, kind, request) in switches {
+            assert_agrees(
+                id,
+                what,
+                &in_all_projects(&declared, kind),
+                change(request.clone()),
+                &refusals,
+            );
+            let inside = changes.make(&*adapter, request, Some(&project));
+            if declared.refused_globally.contains_key(&kind) {
+                assert_agrees(
+                    id,
+                    &format!("{what} inside a project"),
+                    declared.switch(kind),
+                    inside,
+                    &refusals,
+                );
+            }
+        }
+
+        let attempts = [
             (
                 "uninstall",
                 &declared.uninstall,
@@ -292,7 +315,7 @@ fn a_refused_change_leaves_the_home_as_it_was() {
         if refused(&declared.skill_switch) {
             let _ = change(Request::skill("acme", true));
         }
-        if refused(&declared.mcp_switch) {
+        if refused(&declared.mcp_switch) || declared.refused_globally.contains_key(&Switch::Mcp) {
             let _ = change(Request::mcp("acme", true));
         }
         if refused(&declared.uninstall) {

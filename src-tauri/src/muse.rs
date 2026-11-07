@@ -14,7 +14,7 @@ use crate::install_source::{InstallSource, SourceKind};
 use crate::mcp::parse_antigravity_json;
 use crate::paths::agents_skills_root;
 use crate::paths::plugin_id_parts;
-use crate::project::{relative, McpFile, Projects};
+use crate::project::{relative, McpSource, Projects};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
@@ -361,6 +361,7 @@ impl AgentAdapter for MuseAdapter {
             plugin_switch: Change::cli("muse plugins enable/disable"),
             skill_switch: Change::cli("muse skills enable/disable"),
             mcp_switch: Change::refused("managed in Muse · read-only here", MCP_READ_ONLY),
+            refused_globally: BTreeMap::new(),
             install: Change::cli("muse plugins install"),
             refused_sources: BTreeMap::from([
                 (
@@ -395,7 +396,7 @@ impl AgentAdapter for MuseAdapter {
             ],
             skill_files: SkillFiles::Folders,
             plugins: None,
-            mcp: vec![McpFile::mcp_json()],
+            mcp: vec![McpSource::mcp_json()],
             record: None,
         }
     }

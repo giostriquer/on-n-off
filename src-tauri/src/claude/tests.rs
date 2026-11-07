@@ -153,7 +153,7 @@ fn lists_user_scope_plugins_using_default_enabled_when_absent() {
     assert_eq!(mcp_ids, ["Docs", "github"]);
     assert_eq!(tab.mcp_servers[0].system, "http");
     assert!(tab.mcp_servers[1].enabled);
-    assert!(tab.mcp_servers[1].togglable);
+    assert!(!tab.mcp_servers[1].togglable);
     let _ = fs::remove_dir_all(root);
 }
 
@@ -242,57 +242,6 @@ fn toggling_user_skill_patches_skill_overrides_and_refuses_plugin_skills() {
         .unwrap()
         .next()
         .is_some());
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn toggling_mcp_patches_claude_json_without_dropping_other_servers() {
-    let root = fixture();
-    let adapter = ClaudeAdapter::at(root.clone());
-    let changes = Changes::beside(&root);
-    let err = changes
-        .global(&adapter, Request::mcp("missing", false))
-        .expect_err("missing");
-    assert!(err.message.contains("mcp server not found"));
-    let tab = changes
-        .global(&adapter, Request::mcp("github", false))
-        .expect("toggle");
-    let github = tab
-        .mcp_servers
-        .iter()
-        .find(|server| server.id == "github")
-        .unwrap();
-    assert!(!github.enabled);
-    assert!(github.togglable);
-    let docs = tab
-        .mcp_servers
-        .iter()
-        .find(|server| server.id == "Docs")
-        .unwrap();
-    assert!(docs.enabled);
-    let value: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".claude.json")).unwrap()).unwrap();
-    assert_eq!(value["mcpServers"]["github"]["disabled"], true);
-    assert_eq!(value["mcpServers"]["github"]["command"], "npx");
-    assert_eq!(
-        value["mcpServers"]["Docs"]["url"],
-        "https://docs.example/mcp"
-    );
-    assert_eq!(value["disabledMcpServers"], serde_json::json!(["github"]));
-    let tab = changes
-        .global(&adapter, Request::mcp("github", true))
-        .expect("on");
-    assert!(
-        tab.mcp_servers
-            .iter()
-            .find(|server| server.id == "github")
-            .unwrap()
-            .enabled
-    );
-    let value: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(root.join(".claude.json")).unwrap()).unwrap();
-    assert_eq!(value["mcpServers"]["github"]["disabled"], false);
-    assert_eq!(value["disabledMcpServers"], serde_json::json!([]));
     let _ = fs::remove_dir_all(root);
 }
 
@@ -488,7 +437,9 @@ fn lists_the_mcp_servers_enabled_plugins_bring_read_only() {
         serde_json::json!({ "mcpServers": { "hidden": { "type": "http", "url": "https://quiet.example/mcp" } } }),
     );
 
-    let tab = ClaudeAdapter::at(root.clone()).list_tab().expect("list");
+    let tab = ClaudeAdapter::at(root.clone())
+        .list_scope(None)
+        .expect("list");
 
     let plugin_rows: Vec<_> = tab
         .mcp_servers
@@ -629,13 +580,23 @@ fn every_change_backs_up_the_file_it_rewrites_once_before_it_is_made() {
     let backups = root.join("_backups");
     let kept = |file: &str| crate::backup::kept(&backups, AgentId::Claude, file).len();
 
+    let project = root.join("acme");
+    let mut claude_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(root.join(".claude.json")).unwrap()).unwrap();
+    claude_json["projects"] = serde_json::json!({ project.to_string_lossy(): {} });
+    fs::write(root.join(".claude.json"), claude_json.to_string()).unwrap();
+
     let changes = Changes::beside(&root);
     changes
         .global(&adapter, Request::skill("statusline", true))
         .unwrap();
     assert_eq!((kept("settings.json"), kept(".claude.json")), (1, 0));
     changes
-        .global(&adapter, Request::mcp("github", false))
+        .make(
+            &adapter,
+            Request::mcp("github", false),
+            Some(&project.to_string_lossy()),
+        )
         .unwrap();
     assert_eq!((kept("settings.json"), kept(".claude.json")), (1, 1));
     changes
@@ -685,57 +646,6 @@ fn json_patch_only_changes_skill_overrides_and_keeps_unrelated_keys() {
         .unwrap()
         .next()
         .is_some());
-    let _ = fs::remove_dir_all(root);
-}
-
-#[test]
-fn json_mcp_toggle_sets_disabled_flag_and_list() {
-    let root = crate::paths::scratch_dir("on-n-off-json-mcp");
-    let path = root.join(".claude.json");
-    fs::write(
-        &path,
-        r#"{
-  "numStartups": 3,
-  "mcpServers": {
-    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] },
-    "docs": { "type": "http", "url": "https://docs.example/mcp" }
-  }
-}"#,
-    )
-    .unwrap();
-    patched(
-        AgentId::Claude,
-        &path,
-        Edit::json(|root| mcp_enabled(root, "github", false)),
-    )
-    .unwrap();
-    let value: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(value["numStartups"], 3);
-    assert_eq!(
-        value["mcpServers"]["docs"]["url"],
-        "https://docs.example/mcp"
-    );
-    assert_eq!(value["mcpServers"]["github"]["disabled"], true);
-    assert_eq!(value["mcpServers"]["github"]["command"], "npx");
-    assert_eq!(value["disabledMcpServers"], serde_json::json!(["github"]));
-    patched(
-        AgentId::Claude,
-        &path,
-        Edit::json(|root| mcp_enabled(root, "github", true)),
-    )
-    .unwrap();
-    let value: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(value["mcpServers"]["github"]["disabled"], false);
-    assert_eq!(value["disabledMcpServers"], serde_json::json!([]));
-    let err = patched(
-        AgentId::Claude,
-        &path,
-        Edit::json(|root| mcp_enabled(root, "missing", false)),
-    )
-    .expect_err("missing");
-    assert!(err.message.contains("mcp server not found"));
     let _ = fs::remove_dir_all(root);
 }
 

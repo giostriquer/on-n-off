@@ -79,32 +79,44 @@ pub fn parse_claude_json(text: &str) -> Vec<McpServerDto> {
         .unwrap_or_default()
 }
 
-pub fn claude_json_servers(value: &serde_json::Value) -> Vec<McpServerDto> {
+fn claude_json_servers(value: &serde_json::Value) -> Vec<McpServerDto> {
     let Some(servers) = value.get("mcpServers").and_then(|value| value.as_object()) else {
         return Vec::new();
     };
-    claude_servers(servers, &claude_disabled_list(value))
+    let disabled_list = claude_disabled_list(value);
+    claude_entries(servers)
+        .into_iter()
+        .map(|(mut dto, disabled)| {
+            dto.enabled = !disabled && !disabled_list.contains(&dto.id);
+            dto
+        })
+        .collect()
 }
 
-pub fn claude_servers(
+pub fn claude_servers(servers: &serde_json::Map<String, serde_json::Value>) -> Vec<McpServerDto> {
+    claude_entries(servers)
+        .into_iter()
+        .map(|(dto, _)| dto)
+        .collect()
+}
+
+fn claude_entries(
     servers: &serde_json::Map<String, serde_json::Value>,
-    disabled_list: &[String],
-) -> Vec<McpServerDto> {
+) -> Vec<(McpServerDto, bool)> {
     let mut out = Vec::new();
     for (id, raw) in servers {
         let Ok(entry) = serde_json::from_value::<ClaudeMcpEntry>(raw.clone()) else {
             continue;
         };
-        let enabled = !entry.disabled && !disabled_list.iter().any(|name| name == id);
         if let Some(dto) = mcp_dto(
             id,
             entry.r#type.as_deref(),
             entry.command.as_deref(),
             &entry.args,
             entry.url.as_deref(),
-            enabled,
+            true,
         ) {
-            out.push(dto);
+            out.push((dto, entry.disabled));
         }
     }
     out

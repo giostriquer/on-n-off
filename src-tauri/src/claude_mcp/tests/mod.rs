@@ -1,6 +1,8 @@
 use std::fs;
 
 use super::*;
+use crate::config_io::{patched, Edit};
+use crate::dto::AgentId;
 use crate::paths::scratch_dir;
 
 fn plugin(root: &Path, name: &str) -> PluginSource {
@@ -77,7 +79,7 @@ fn reads_a_manifest_that_declares_one_inline_map() {
 
     assert_eq!(ids(&servers), ["plugin:tools:inline"]);
     assert_eq!(servers[0].source, "${CLAUDE_PLUGIN_ROOT}/bin/inline");
-    assert!(!servers[0].togglable);
+    assert!(servers[0].togglable);
     assert_eq!(servers[0].origin, ORIGIN_PLUGIN);
     let _ = fs::remove_dir_all(root);
 }
@@ -285,6 +287,13 @@ fn server(id: &str, origin: &str) -> McpServerDto {
     }
 }
 
+fn entry_file(tag: &str, config: &Value) -> (std::path::PathBuf, std::path::PathBuf) {
+    let root = scratch_dir(tag);
+    let path = root.join(".claude.json");
+    write(&path, config.clone());
+    (root, path)
+}
+
 #[test]
 fn a_project_view_applies_that_projects_own_disabled_list() {
     let config = serde_json::json!({
@@ -302,14 +311,16 @@ fn a_project_view_applies_that_projects_own_disabled_list() {
             }
         }
     });
+    let (root, path) = entry_file("claude-mcp-project-list", &config);
     let mut servers = vec![
         server("github", ""),
         server("plugin:kit:tracker", ORIGIN_PLUGIN),
         server("plugin:kit:search", ORIGIN_PLUGIN),
         server("local:docs", ORIGIN_LOCAL),
     ];
+    let mut own = Vec::new();
 
-    let own = project_servers(&mut servers, &config, Path::new("E:\\dev\\app"));
+    in_project(&path, Path::new("E:\\dev\\app"), &mut servers, &mut own);
 
     let view: Vec<_> = servers
         .iter()
@@ -328,18 +339,95 @@ fn a_project_view_applies_that_projects_own_disabled_list() {
         .map(|server| (server.id.as_str(), server.enabled))
         .collect();
     assert_eq!(own, [("docs", false), ("db", true)]);
+    let _ = fs::remove_dir_all(root);
 }
 
 #[test]
 fn a_project_with_no_entry_keeps_every_plugin_server_on() {
+    let root = scratch_dir("claude-mcp-no-entry");
     let mut servers = vec![server("plugin:kit:tracker", ORIGIN_PLUGIN)];
+    let mut own = Vec::new();
 
-    let own = project_servers(
-        &mut servers,
-        &Value::Null,
+    in_project(
+        &root.join(".claude.json"),
         Path::new("/Users/me/acme/webapp"),
+        &mut servers,
+        &mut own,
     );
 
     assert!(own.is_empty());
     assert!(servers[0].enabled);
+    let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn the_edit_names_the_server_in_the_projects_own_list_and_keeps_everything_else() {
+    let root = scratch_dir("on-n-off-json-mcp");
+    let path = root.join(".claude.json");
+    fs::write(
+        &path,
+        r#"{
+  "numStartups": 3,
+  "mcpServers": {
+    "github": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"] }
+  },
+  "projects": {
+    "/Users/me/acme/webapp/": { "allowedTools": ["Read"], "disabledMcpServers": ["docs"] },
+    "/Users/me/acme/api": { "allowedTools": [] },
+    "/Users/me/acme/broken": { "disabledMcpServers": "docs" }
+  }
+}"#,
+    )
+    .unwrap();
+    let edit = |project: &str, id: &str, on: bool| {
+        let origin = if id.starts_with("plugin:") {
+            ORIGIN_PLUGIN
+        } else {
+            ""
+        };
+        let change = switch(Some(Path::new(project)), &server(id, origin), on)?;
+        patched(AgentId::Claude, &path, Edit::json(change))
+    };
+    let read = || -> Value { serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap() };
+    let before = read();
+
+    edit("/Users/me/acme/webapp", "github", false).unwrap();
+    edit("/Users/me/acme/api", "plugin:kit:tracker", false).unwrap();
+    let off = read();
+    edit("/Users/me/acme/webapp", "github", true).unwrap();
+    edit("/Users/me/acme/webapp", "github", true).unwrap();
+
+    let mut expected = before.clone();
+    expected["projects"]["/Users/me/acme/webapp/"]["disabledMcpServers"] =
+        serde_json::json!(["docs", "github"]);
+    expected["projects"]["/Users/me/acme/api"]["disabledMcpServers"] =
+        serde_json::json!(["plugin:kit:tracker"]);
+    assert_eq!(off, expected);
+    expected["projects"]["/Users/me/acme/webapp/"]["disabledMcpServers"] =
+        serde_json::json!(["docs"]);
+    assert_eq!(read(), expected);
+    assert_eq!(
+        edit("/Users/me/acme/notes", "github", false)
+            .unwrap_err()
+            .message,
+        "Claude Code has not recorded this project: /Users/me/acme/notes"
+    );
+    assert_eq!(
+        edit("/Users/me/acme/broken", "github", false)
+            .unwrap_err()
+            .message,
+        "disabledMcpServers must be an array"
+    );
+    assert_eq!(
+        switch(None, &server("github", ""), false)
+            .err()
+            .unwrap()
+            .message,
+        SWITCHED_IN_PROJECTS
+    );
+    assert_eq!(read(), expected);
+    let _ = fs::remove_dir_all(root);
+}
+
+mod key;
+mod views;

@@ -49,7 +49,7 @@ it.each([
     id: "claude", displayName: "Claude", binary: "claude", home: "~/.claude/",
     plugins: "~/.claude/plugins", skills: "~/.claude/plugins · user skills", mcpConfig: "~/.claude.json",
     install: ["git/url · folder", "YES"], folder: ["supported", "YES"],
-    pluginToggle: "claude plugin enable/disable", pluginSwitchable: true, mcpToggle: "file patch · ~/.claude.json disabled", mcpSwitchable: true,
+    pluginToggle: "claude plugin enable/disable", pluginSwitchable: true, mcpToggle: "file patch · ~/.claude.json, the project's disabledMcpServers", mcpSwitchable: true,
   },
   {
     id: "codex", displayName: "Codex", binary: "codex", home: "~/.codex/",

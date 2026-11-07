@@ -109,7 +109,7 @@ comments.
 | Subsystem | What it does | Notable |
 | --- | --- | --- |
 | `{claude,codex,antigravity,cursor,muse}.rs` | Provider adapters behind `AgentAdapter` | Every provider difference in behaviour belongs here; each provider's static facts are its row in `provider_catalogue.rs`, and what on-n-off can change for it is the adapter's own capabilities (`capabilities.rs`, below). Layout per provider is in `PROVIDERS.md`. |
-| `scanner.rs`, `plugin_meta.rs`, `drift.rs`, `mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. `plugin_meta.rs` holds the plugin and marketplace manifest formats; whether a plugin is behind its marketplace is `drift.rs` (Plugin drift, below). |
+| `scanner.rs`, `plugin_meta.rs`, `drift.rs`, `mcp.rs`, `claude_mcp.rs` | Plugins, skills and MCP servers for a provider | Feeds Overview, Plugins, Skills, MCP. `plugin_meta.rs` holds the plugin and marketplace manifest formats; whether a plugin is behind its marketplace is `drift.rs` (Plugin drift, below). `claude_mcp.rs` is Claude's MCP rule in both directions: the servers each view lists and what turns each off there, and the edit a switch makes (PROVIDERS.md, Claude). |
 | `usage/` | Token and cost aggregation from transcripts, and the usage kept after they are deleted | Read-only on agent homes. See below. |
 | `limits/` + `limits_refresh.rs` | Live subscription rate limits | Provider problems come back as a `status` on the DTO, never an `Err`. See below. |
 | `github/` + `github_monitor.rs` | The Pull requests screen and its CI notifications | Not a provider, not behind `AgentAdapter`. See below. |
@@ -965,7 +965,9 @@ install, uninstall, update) is performed by the provider's CLI (`cli`), by on-n-
 with `how`, the short text Agent Config prints. Beside them: the install source kinds the install
 refuses, each with its reason (`refusedSources`: a git marketplace, a folder, `name@marketplace` or
 `npx skills add`, parsed and classified once by `install_source.rs`), the plugin sources an
-uninstall reaches (`uninstallFrom`, all when absent), and whether it reads hooks. Every adapter
+uninstall reaches (`uninstallFrom`, all when absent), the switches the all-projects view refuses,
+each with its reason (`refusedGlobally`, keyed by `Switch`: Claude's MCP switch, since Claude Code
+switches a server off one project at a time), and whether it reads hooks. Every adapter
 writes every field, so a new one does not compile until each adapter states it. Where an adapter
 puts skills and subagents is not declared beside them: it is its `global_item_roots`, the code
 that places them, and for a project the `items` of its project facts (Project view, below).
@@ -973,13 +975,16 @@ that places them, and for a project the `items` of its project facts (Project vi
 The declaration also decides which rows can be switched: every view of a provider
 (`AgentAdapter::list_scope`, which drift reads and the change path checks against) ends with
 `Capabilities::restrict`, so a plugin, skill or MCP server row is never `togglable` while that
-kind's switch is refused. An adapter marks only what keeps a single row from being switched: an
-Antigravity plugin outside its CLI's folder, a Claude plugin's skill and a server that is not the
-user's own, a disabled Muse plugin's skill; every row a project brings is marked by the project
+kind's switch is refused in that view (`Capabilities::refuses(kind, project)`: refused, or refused
+in the all-projects view when no project is chosen). An adapter marks only what keeps a single row
+from being switched: an Antigravity plugin outside its CLI's folder, a Claude plugin's skill, a
+Claude local-scope server and Claude's servers in a project Claude Code has not recorded
+(`claude_mcp`), a disabled Muse plugin's skill; every row a project brings is marked by the project
 view. Cursor's rows, Muse's MCP servers and Antigravity's skills set nothing of their own.
 
 The change path (Config changes, below) refuses a change the declaration refuses, with the declared
-reason, before it reads anything, and takes every install source through `Capabilities::admit`,
+reason, before it reads anything (a switch the all-projects view refuses, when the caller views all
+projects, too), and takes every install source through `Capabilities::admit`,
 which refuses a declared kind before anything runs, so a provider that does not make a change only
 declares it refused. An adapter whose step makes no step for a change it declares (`step` answers
 `None`) is answered with that declared change's refusal, "… is not implemented yet";
@@ -1017,7 +1022,7 @@ place of submitting it (`sourceRefusal`; adding a GitHub repository as a marketp
 marketplace kind, while copying its skills is not a source kind and stays offered), the plugin
 switch on Plugins and Overview (`canSwitchPlugins`), Update on Plugins and Overview (`canUpdate`),
 Uninstall (`canUninstallPlugin`), Agent Config's install, plugin and MCP rows, the MCP screen's
-notice (`mcpNotice`), the Hooks screen and its rail count (`capabilities.readsHooks`), whether
+notice (`mcpNotice`, which also shows the all-projects view's refusal while no project is chosen), the Hooks screen and its rail count (`capabilities.readsHooks`), whether
 subagents can be picked for a scope (`takesSubagents`) and whether Skills lists installed ones
 (`holdsSubagents`), both from the item roots, and the install sheet's preview (`previewPath`, in the
 order the providers were chosen, `chosenAgents`). `overlayAgents` (`ui/src/lib/session.ts`) keeps
@@ -1032,7 +1037,10 @@ asks. The six change commands keep their names and their answer, an `AgentTabDto
 optional `projectPath`: the scope the caller is viewing. In order:
 
 1. One change at a time per provider: `Changes`, one in `AppState`, holds a lock per provider.
-2. A change the adapter's capabilities refuse answers the declared reason before anything is read.
+2. A change the adapter's capabilities refuse answers the declared reason before anything is read,
+   and so does a switch they refuse in the all-projects view when the caller has no project
+   (`Capabilities::refuses`; the project is `adapter::chosen(projectPath)`, a blank path being none).
+   An MCP switch's step is handed that project (`Checked::Mcp`).
 3. The target is checked against the caller's view, read locally (`list_scope`, the adapter's own
    scan, which never reads the network): the plugin, skill or MCP server must be in it and
    switchable (`togglable`), an uninstall must reach the plugin's source (`Capabilities::uninstalls`, for every provider), and
@@ -1140,13 +1148,18 @@ without reading anything, in the shape of the marketplaces drift reads.
   (`PluginFolders { dirs, read }`). Antigravity alone declares them, handing its `plugin.json`
   folder reader, so `project.rs` reads them without knowing whose layout it is; every other
   provider declares none.
-- `mcp`: the project's MCP files and their formats (`McpFile`, `mcp::McpFormat`: Claude's JSON,
-  Codex's TOML `mcp_servers`, Antigravity's JSON), in reading order.
-- `record`: where the provider records the projects it knows (`ProjectRecord`): Claude's
-  `.claude.json` (its `projects` keys, and each project's entry: the servers it keeps for the
-  project and the list that switches servers off there, read by `claude_mcp::project_servers`) or
-  Codex's `config.toml` (its `[projects]` keys). The path is the one the adapter was built with, so
-  `ClaudeAdapter::at` reads a scratch home's.
+- `mcp`: where the project's MCP servers come from, in reading order (`McpSource`): a file and
+  its format (`McpSource::File`, built with `McpSource::at` or `McpSource::mcp_json`;
+  `mcp::McpFormat`: Claude's JSON, Codex's TOML `mcp_servers`, Antigravity's JSON), or the
+  project's entry in Claude's `.claude.json` (`McpSource::ClaudeEntry`, the entry Claude Code keys
+  the folder by: its repository's main checkout, found from the files alone, `claude_mcp::claude_key`),
+  which Claude's rule reads (`claude_mcp::in_project`): it drops the all-projects view's local-scope rows, adds the servers
+  the entry keeps, and decides every server of the view by the entry's `disabledMcpServers` (and
+  whether the user's ones can be switched there by whether the project is recorded). Claude
+  declares it after `.mcp.json`, so its list covers the `.mcp.json` servers too.
+- `record`: where the provider records the projects it knows (`ProjectRecord`), only to list them:
+  Claude's `.claude.json` (its `projects` keys) or Codex's `config.toml` (its `[projects]` keys).
+  The path is the one the adapter was built with, so `ClaudeAdapter::at` reads a scratch home's.
 
 `Projects::view` turns the provider's own listing into the project view (`list_scope` with a
 project path), adding workspace plugins first, then skills, then MCP servers. Every row a project
@@ -1154,8 +1167,8 @@ brings is never `togglable`; its skills and servers carry `origin: "project"`, a
 servers and workspace plugins have ids prefixed `project:`, except a workspace plugin's own skills,
 which keep their path ids and name the plugin by its unprefixed id (a follow-up in PROVIDERS.md). A
 skill whose name the listing already shows, a plugin's skills included, or one an earlier dir gave,
-is left out, and the first server of an id wins. Claude's entry for the project then drops the
-local-scope rows of the all-projects view and turns off the plugin servers its list names.
+is left out, and the first server of an id wins. Each MCP source is read with the rows the view
+already holds and the servers read before it, so Claude's entry can settle all of them (above).
 `Projects::inspect` counts a project's skills and servers for its `ProjectDto` (`inspect_project`),
 expanding a leading `~` against the user's home; `Projects::list` inspects every recorded project,
 one per folder, sorted by label (`list_projects`). Both commands reach the adapter through the app
@@ -1163,7 +1176,8 @@ state.
 
 `project/tests/views.rs` pins every provider's global and project view row by row, the counts and
 the projects Codex lists, in scratch homes; `project/tests/mod.rs` holds the shared mechanics and
-Claude's entry, read through the injected `.claude.json`. Every provider declares the project's
+Claude's entry, read through the injected `.claude.json`; `claude_mcp/tests/views.rs` pins
+Claude's rule per view: what each row kind reads, which can be switched, and what a switch writes. Every provider declares the project's
 `.mcp.json`, read as Claude's format; whether the others read that file is an open question in
 PROVIDERS.md.
 
@@ -1234,8 +1248,8 @@ the code today; a change that moves one updates its row.
 | --- | --- |
 | Config change | `Changes::make` (`change.rs`), which every change command in `commands.rs` takes, with each adapter's `AgentAdapter::step` (its argv, document edit or `npx skills add`, and the files it touches); the backup and the protected document write are `ConfigIo` (`config_io.rs`); the UI stores the answer (`mutate` in `ui/src/features/session/SessionProvider.tsx`, through `keepShownPluginMetadata`) |
 | Plugin drift | `drift::read` (`drift.rs`) with the caller's `Reach` and the one `drift::Memo` in `AppState`, from each adapter's `AgentAdapter::marketplaces` (`Marketplace`) and the installed version it lists (`drift::installed`); chosen by `list_local_plugins`, `list_plugins` and `refresh` through `AppState::local_plugins`, `remote_plugins` and `forced_plugins` (`commands.rs`) and by the change path's answer (`change.rs`); shown by `ItemList` and Overview's drift rows (`driftRows`, `ui/src/lib/catalog.ts`), merged into the shown tab by `mergeEnrichedPluginMetadata` and kept through a change by `keepShownPluginMetadata` (`ui/src/lib/session.ts`) |
-| Project view | `Projects` (`project.rs`), declared by each adapter's `AgentAdapter::projects` with `ItemRoots`, `scanner::SkillFiles`, `PluginFolders`, `McpFile` with `mcp::McpFormat` and `ProjectRecord`; laid over a listing by `Projects::view` in `AgentAdapter::list_scope`, counted by `Projects::inspect` and listed by `Projects::list` for the `inspect_project` and `list_projects` commands (`commands.rs`); a project's item roots by `AgentAdapter::item_roots` and shown by `ItemPlaces::of` (`adapter.rs`) |
-| Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; restricts which rows can be switched (`Capabilities::restrict`, in every `list_scope`); carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
+| Project view | `Projects` (`project.rs`), declared by each adapter's `AgentAdapter::projects` with `ItemRoots`, `scanner::SkillFiles`, `PluginFolders`, `McpSource` with `mcp::McpFormat` (and Claude's entry, read by `claude_mcp::in_project`) and `ProjectRecord`; laid over a listing by `Projects::view` in `AgentAdapter::list_scope`, counted by `Projects::inspect` and listed by `Projects::list` for the `inspect_project` and `list_projects` commands (`commands.rs`); a project's item roots by `AgentAdapter::item_roots` and shown by `ItemPlaces::of` (`adapter.rs`) |
+| Capabilities | `Capabilities` and `Change` (`capabilities.rs`), declared by each adapter's `AgentAdapter::capabilities`; restricts which rows can be switched (`Capabilities::restrict`, in every `list_scope`, with the all-projects view's refusals, `refusedGlobally`); carried on `AgentInfo` (`capabilities`, with `itemRoots` from `ItemPlaces::of` in `adapter.rs`, and the derived flags) by `AgentInfo::of`; install source kinds are `SourceKind` (`install_source.rs`); read in the UI through `ui/src/lib/capabilities.ts`; the fixture both sides check is `capabilities/fixtures/agents.json` |
 | Provider catalogue | `AgentId::ALL` and `AgentId::facts` (`provider_catalogue.rs`), with each Limits provider's `LimitsFacts` (`AgentId::limits_facts`), the lists kept there (`RAIL_ORDER`, `WITH_LIMITS`, `WITH_SAVED_ACCOUNTS`, `WITH_BANKED_RESETS` and its one `BANKED_RESETS_PROVIDER`), the lookups `AgentId::from_key` and `AgentId::from_binary`, and `UsageProvider` with `UsageProvider::all` and `UsageProvider::from_key`; written for the UI as `provider_catalogue/fixtures/providers.json`, which `ui/src/lib/providers.ts` derives every UI provider list and fact from; the Swift list is outside it |
 | Quota window | `LimitWindowDto` (`dto/limits.rs`), built only by `QuotaWindow::into_dto` (`limits/window.rs`) from the facts each reader maps, its `role` and `starts_on_first_message` among them |
 | Window at an instant | `WindowAt` (`limits/window_at.rs`, with `reached` and `used_text` for the limits monitor), used by the Windows notch plan (`side_notch/plan.rs`, `plan/popover.rs`) and `NotchProvider::inner_at` (`side_notch/model.rs`); restated by `windowAt` and `shareAt` (`ui/src/lib/windowAt.ts`) and `Quota` (`NotchCore/Models.swift`), all checked against `limits/window_at/fixtures/window-cases.json` |

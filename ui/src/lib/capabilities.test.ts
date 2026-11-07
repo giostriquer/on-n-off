@@ -99,14 +99,20 @@ describe("what each adapter declares it can change", () => {
     expect(canUpdate(agentInfo("cursor"))).toBe(false);
   });
 
-  it("shows the reason an MCP server cannot be switched as the MCP screen's notice", () => {
+  it("shows the reason an MCP server cannot be switched in the scope shown as the MCP screen's notice", () => {
+    const project = "/Users/me/acme/webapp";
     for (const id of PROVIDER_IDS) {
       const agent = agentInfo(id);
       const change = agent.capabilities.mcpSwitch;
-      expect(mcpNotice(agent), id).toBe(change.by === "refused" ? change.reason : null);
+      const refused = change.by === "refused" ? change.reason : null;
+      expect(mcpNotice(agent, project), id).toBe(refused);
+      expect(mcpNotice(agent, null), id).toBe(refused ?? agent.capabilities.refusedGlobally.mcp ?? null);
     }
-    expect(mcpNotice(agentInfo("cursor"))).toMatch(/^Cursor keeps MCP servers on or off in its own settings/);
-    expect(mcpNotice(agentInfo("claude"))).toBeNull();
+    expect(mcpNotice(agentInfo("cursor"), project)).toMatch(/^Cursor keeps MCP servers on or off in its own settings/);
+    expect(mcpNotice(agentInfo("claude"), project)).toBeNull();
+    expect(mcpNotice(agentInfo("claude"), null)).toMatch(/^Claude Code turns MCP servers off one project at a time/);
+    expect(mcpNotice(agentInfo("claude"), " ")).toBe(mcpNotice(agentInfo("claude"), null));
+    expect(mcpNotice(agentInfo("codex"), null)).toBeNull();
   });
 
   it("lets subagents in only when a chosen provider has a place for them in that scope", () => {
@@ -172,7 +178,8 @@ describe("an agent Rust has not described", () => {
   ])("offers nothing %s", (_when, agent) => {
     const global = { kind: "global" } as const;
     expect(agent.itemRoots).toEqual({ global: null, project: null });
-    expect(mcpNotice(agent)).toBeNull();
+    expect(mcpNotice(agent, null)).toBeNull();
+    expect(mcpNotice(agent, "/Users/me/acme/webapp")).toBeNull();
     expect(agent.capabilities.readsHooks).toBe(false);
     expect(canInstall(agent)).toBe(false);
     expect(canSwitchPlugins(agent)).toBe(false);

@@ -7,7 +7,7 @@ use crate::capabilities::{Capabilities, Change};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, PluginDto, SkillDto};
 use crate::mcp::{parse_antigravity_json, McpFormat};
 use crate::paths::{cursor_root, normalize_skill_path};
-use crate::project::{relative, McpFile, Projects};
+use crate::project::{relative, McpSource, Projects};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
@@ -109,6 +109,7 @@ impl AgentAdapter for CursorAdapter {
             plugin_switch: Change::not_implemented("plugin enable"),
             skill_switch: Change::not_implemented("skill toggle"),
             mcp_switch: Change::refused("managed in Cursor · read-only here", MCP_READ_ONLY),
+            refused_globally: BTreeMap::new(),
             install: Change::not_implemented("install"),
             refused_sources: BTreeMap::new(),
             uninstall: Change::not_implemented("uninstall"),
@@ -135,8 +136,8 @@ impl AgentAdapter for CursorAdapter {
             skill_files: SkillFiles::Folders,
             plugins: None,
             mcp: vec![
-                McpFile::mcp_json(),
-                McpFile::at(&[".cursor", "mcp.json"], McpFormat::AntigravityJson),
+                McpSource::mcp_json(),
+                McpSource::at(&[".cursor", "mcp.json"], McpFormat::AntigravityJson),
             ],
             record: None,
         }

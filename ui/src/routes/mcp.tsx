@@ -10,7 +10,7 @@ export function McpRoute() {
       servers={session.filtered?.mcpServers ?? []}
       filterQuery={session.currentTab.filter}
       busy={session.currentTab.inFlight}
-      notice={mcpNotice(session.currentAgent) ?? undefined}
+      notice={mcpNotice(session.currentAgent, session.currentScopePath) ?? undefined}
       onToggle={session.toggleMcp}
     />
   );

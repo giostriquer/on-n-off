@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::adapter::{scratch_adapter, AgentAdapter};
+use crate::capabilities::Switch;
 use crate::dto::{AgentId, AgentTabDto};
 
 fn write(path: &Path, text: &str) {
@@ -67,7 +68,14 @@ fn seed_home(id: AgentId, home: &Path, project: &Path) {
             skill(&root.join("skills"), "statusline", "Claude user");
             write(
                 &root.join(".claude.json"),
-                r#"{"mcpServers":{"github":{"command":"npx"}},"projects":{"/Users/me/elsewhere":{"mcpServers":{"pad":{"command":"pad"}}}}}"#,
+                &serde_json::json!({
+                    "mcpServers": { "github": { "command": "npx" } },
+                    "projects": {
+                        "/Users/me/elsewhere": { "mcpServers": { "pad": { "command": "pad" } } },
+                        project.to_string_lossy(): {}
+                    }
+                })
+                .to_string(),
             );
         }
         AgentId::Codex => {
@@ -277,7 +285,7 @@ fn every_provider_lists_its_own_rows_switchable_only_as_it_allows() {
                 "plugin kit@market on switchable",
                 "  skill kit-skill of kit@market [] on",
                 "skill statusline (Claude user) [] on switchable",
-                "mcp github npx [] on switchable",
+                "mcp github npx [] on",
                 "mcp local:pad pad [local] on",
                 "mcp plugin:kit:tracker tracker [plugin] on",
             ],
@@ -345,7 +353,7 @@ fn every_provider_shows_what_a_project_brings_marked_and_never_switched() {
                 "skill twin (from .claude) [project] on",
                 "mcp github npx [] on switchable",
                 "mcp project:repo-docs node docs.js [project] on",
-                "mcp plugin:kit:tracker tracker [plugin] on",
+                "mcp plugin:kit:tracker tracker [plugin] on switchable",
             ],
         ),
         (
@@ -436,8 +444,12 @@ fn no_row_is_switchable_where_its_provider_refuses_the_switch() {
         let scratch = Scratch::new(&format!("refused-{}", id.key()));
         let adapter = scratch.adapter(id);
         let declared = adapter.capabilities();
-        let refused = |change: &crate::capabilities::Change| change.is_refused();
         for view in [None, Some(scratch.project())] {
+            let refused = |kind| {
+                declared
+                    .refuses(kind, view.as_deref().map(Path::new))
+                    .is_some()
+            };
             let tab = adapter.list_scope(view.as_deref()).unwrap();
             let switchable = |kind: &str| -> Vec<String> {
                 match kind {
@@ -463,12 +475,12 @@ fn no_row_is_switchable_where_its_provider_refuses_the_switch() {
                         .collect(),
                 }
             };
-            for (kind, change) in [
-                ("plugin", &declared.plugin_switch),
-                ("skill", &declared.skill_switch),
-                ("mcp", &declared.mcp_switch),
+            for (kind, switch) in [
+                ("plugin", Switch::Plugin),
+                ("skill", Switch::Skill),
+                ("mcp", Switch::Mcp),
             ] {
-                if refused(change) {
+                if refused(switch) {
                     assert_eq!(switchable(kind), Vec::<String>::new(), "{id:?} {kind}");
                 }
             }

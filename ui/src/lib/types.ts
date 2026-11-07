@@ -15,10 +15,13 @@ export type Change =
 
 export type InstallSourceKind = "gitMarketplace" | "folder" | "marketplacePlugin" | "marketplaceSkill";
 
+export type Switch = "plugin" | "skill" | "mcp";
+
 export type Capabilities = {
   pluginSwitch: Change;
   skillSwitch: Change;
   mcpSwitch: Change;
+  refusedGlobally: Partial<Record<Switch, string>>;
   install: Change;
   refusedSources: Partial<Record<InstallSourceKind, string>>;
   uninstall: Change;

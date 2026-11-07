@@ -17,7 +17,7 @@ use crate::mcp::{parse_codex_map, CodexMcpEntry};
 use crate::paths::{
     agents_skills_root, codex_root, newest_dir, normalize_skill_path, plugin_id_parts,
 };
-use crate::project::{relative, McpFile, ProjectRecord, Projects};
+use crate::project::{relative, McpSource, ProjectRecord, Projects};
 use crate::scanner::{
     scan_plugin_skills, scan_skill_md, scan_user_skills, ScannedSkill, SkillFiles,
 };
@@ -170,6 +170,7 @@ impl AgentAdapter for CodexAdapter {
             plugin_switch: Change::file("file patch · [plugins.*.enabled]"),
             skill_switch: Change::file("file patch · [[skills.config]]"),
             mcp_switch: Change::file("file patch · [mcp_servers.*.enabled]"),
+            refused_globally: BTreeMap::new(),
             install: Change::cli("codex plugin add · marketplace add"),
             refused_sources: BTreeMap::new(),
             uninstall: Change::cli("codex plugin remove"),
@@ -196,8 +197,8 @@ impl AgentAdapter for CodexAdapter {
             skill_files: SkillFiles::Folders,
             plugins: None,
             mcp: vec![
-                McpFile::mcp_json(),
-                McpFile::at(&[".codex", "config.toml"], McpFormat::CodexToml),
+                McpSource::mcp_json(),
+                McpSource::at(&[".codex", "config.toml"], McpFormat::CodexToml),
             ],
             record: self
                 .root
@@ -328,7 +329,7 @@ impl AgentAdapter for CodexAdapter {
                 let (path, on) = (skill.id.clone(), *on);
                 Step::toml(config, move |doc| skill_enabled(doc, &path, on))
             }
-            Checked::Mcp { server, on } => {
+            Checked::Mcp { server, on, .. } => {
                 let (id, on) = (server.id.clone(), *on);
                 Step::toml(config, move |doc| mcp_enabled(doc, &id, on))
             }

@@ -11,7 +11,10 @@
       },
       "mcpSwitch": {
         "by": "file",
-        "how": "file patch · ~/.claude.json disabled"
+        "how": "file patch · ~/.claude.json, the project's disabledMcpServers"
+      },
+      "refusedGlobally": {
+        "mcp": "Claude Code turns MCP servers off one project at a time, so on-n-off switches them only inside a project. Choose a project under Scope, or use /mcp in Claude Code."
       },
       "install": {
         "by": "cli",
@@ -70,6 +73,7 @@
         "by": "file",
         "how": "file patch · [mcp_servers.*.enabled]"
       },
+      "refusedGlobally": {},
       "install": {
         "by": "cli",
         "how": "codex plugin add · marketplace add"
@@ -128,6 +132,7 @@
         "by": "file",
         "how": "file patch · mcpServers.*.disabled"
       },
+      "refusedGlobally": {},
       "install": {
         "by": "cli",
         "how": "agy plugin install"
@@ -191,6 +196,7 @@
         "how": "managed in Cursor · read-only here",
         "reason": "Cursor keeps MCP servers on or off in its own settings, so on-n-off lists them but cannot switch them here. Manage them in the Cursor app, or run `agent mcp enable <name>` / `agent mcp disable <name>`."
       },
+      "refusedGlobally": {},
       "install": {
         "by": "refused",
         "how": "not implemented yet",
@@ -252,6 +258,7 @@
         "how": "managed in Muse · read-only here",
         "reason": "Muse manages MCP servers itself, so on-n-off lists them but cannot switch them here. Edit `mcpServers` in Muse’s settings.json, or use `muse mcp login <name>`."
       },
+      "refusedGlobally": {},
       "install": {
         "by": "cli",
         "how": "muse plugins install"

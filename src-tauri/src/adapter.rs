@@ -76,6 +76,12 @@ fn shown(path: &Path, home: Option<&Path>) -> String {
     path.display().to_string()
 }
 
+pub fn chosen(view: Option<&str>) -> Option<&Path> {
+    view.map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(Path::new)
+}
+
 #[cfg(test)]
 pub fn scratch_adapter(id: AgentId, home: &Path) -> Box<dyn AgentAdapter> {
     match id {
@@ -105,10 +111,11 @@ pub trait AgentAdapter: Send + Sync {
     fn projects(&self) -> Projects;
     fn list_scope(&self, project: Option<&str>) -> Result<AgentTabDto, AdapterError> {
         let mut tab = self.list_tab()?;
-        if let Some(path) = project.map(str::trim).filter(|value| !value.is_empty()) {
-            self.projects().view(&mut tab, Path::new(path));
+        let project = chosen(project);
+        if let Some(path) = project {
+            self.projects().view(&mut tab, path);
         }
-        self.capabilities().restrict(&mut tab);
+        self.capabilities().restrict(&mut tab, project);
         Ok(tab)
     }
 

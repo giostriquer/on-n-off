@@ -75,7 +75,11 @@ fn seed(id: AgentId, home: &Path) {
             skill(&root.join("skills"), "statusline");
             write(
                 &root.join(".claude.json"),
-                r#"{"mcpServers":{"github":{"command":"npx"}}}"#,
+                &serde_json::json!({
+                    "mcpServers": { "github": { "command": "npx" } },
+                    "projects": { home.join("acme-project").to_string_lossy(): {} }
+                })
+                .to_string(),
             );
         }
         AgentId::Codex => {
@@ -391,18 +395,30 @@ fn every_provider_checks_backs_up_and_answers_through_one_change_path() {
             fixed(Request::skill("acme-missing", false)),
             &refused("skill not found: acme-missing"),
         );
-        check(Claude, scoped, fixed(Request::mcp("github", false)), &Made);
+        let inside = |expect: Expect| {
+            if scoped {
+                expect
+            } else {
+                refused(crate::claude_mcp::SWITCHED_IN_PROJECTS)
+            }
+        };
+        check(
+            Claude,
+            scoped,
+            fixed(Request::mcp("github", false)),
+            &inside(Made),
+        );
         check(
             Claude,
             scoped,
             fixed(Request::mcp("plugin:workbench:docs", false)),
-            &refused("mcp server is not togglable: plugin:workbench:docs"),
+            &inside(Made),
         );
         check(
             Claude,
             scoped,
             fixed(Request::mcp("acme-missing", false)),
-            &refused("mcp server not found: acme-missing"),
+            &inside(refused("mcp server not found: acme-missing")),
         );
         check(
             Claude,
@@ -630,21 +646,29 @@ fn a_skill_a_project_brings_is_listed_in_its_view_but_never_switched() {
 
 #[test]
 fn a_change_whose_backup_fails_is_refused_before_its_step_runs() {
-    let cases: [(AgentId, Request); 6] = [
-        (AgentId::Claude, Request::mcp("github", false)),
-        (AgentId::Claude, Request::install("acme@webapp")),
-        (AgentId::Codex, Request::plugin("workbench@workshop", false)),
-        (AgentId::Antigravity, Request::plugin("alpha@cli", false)),
-        (AgentId::Antigravity, Request::mcp("github", false)),
-        (AgentId::Muse, Request::uninstall("acme-tools@local")),
+    let cases: [(AgentId, Request, bool); 6] = [
+        (AgentId::Claude, Request::mcp("github", false), true),
+        (AgentId::Claude, Request::install("acme@webapp"), false),
+        (
+            AgentId::Codex,
+            Request::plugin("workbench@workshop", false),
+            false,
+        ),
+        (
+            AgentId::Antigravity,
+            Request::plugin("alpha@cli", false),
+            false,
+        ),
+        (AgentId::Antigravity, Request::mcp("github", false), false),
+        (AgentId::Muse, Request::uninstall("acme-tools@local"), false),
     ];
-    for (id, request) in cases {
+    for (id, request, scoped) in cases {
         let home = Home::new(id);
         let record = Arc::new(std::sync::Mutex::new(Applied::default()));
         let changes = faked(&home, Arc::clone(&record));
         write(&home.backups(), "blocked");
         let before = contents(&home.root);
-        let error = offline(|| changes.make(&*home.adapter, request.clone(), None))
+        let error = offline(|| changes.make(&*home.adapter, request.clone(), home.view(scoped)))
             .expect_err(&format!("{id:?} {request:?}"));
         assert_eq!(error.kind, ErrorKind::Write, "{id:?} {request:?}");
         assert_eq!(record.lock().unwrap().steps, 0, "{id:?} {request:?}");
@@ -791,4 +815,19 @@ fn a_change_that_panicked_leaves_the_next_change_free_to_run() {
     let local = crate::drift::read(&*home.adapter, None, crate::drift::Reach::Local).unwrap();
     assert_eq!(answer, local);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_blank_project_path_is_all_projects_so_claude_refuses_its_mcp_switch() {
+    let home = Home::new(AgentId::Claude);
+    let record = Arc::new(std::sync::Mutex::new(Applied::default()));
+    let changes = faked(&home, Arc::clone(&record));
+    let before = contents(&home.root);
+
+    let error = offline(|| changes.make(&*home.adapter, Request::mcp("github", false), Some("  ")))
+        .unwrap_err();
+
+    assert_eq!(error.message, crate::claude_mcp::SWITCHED_IN_PROJECTS);
+    assert_eq!(record.lock().unwrap().steps, 0);
+    assert_eq!(contents(&home.root), before);
 }

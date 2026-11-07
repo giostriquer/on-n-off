@@ -19,7 +19,7 @@ pub struct Projects {
     pub more_skills: Vec<PathBuf>,
     pub skill_files: SkillFiles,
     pub plugins: Option<PluginFolders>,
-    pub mcp: Vec<McpFile>,
+    pub mcp: Vec<McpSource>,
     pub record: Option<ProjectRecord>,
 }
 
@@ -30,9 +30,9 @@ pub struct PluginFolders {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct McpFile {
-    path: PathBuf,
-    format: McpFormat,
+pub enum McpSource {
+    File { path: PathBuf, format: McpFormat },
+    ClaudeEntry(PathBuf),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,9 +45,9 @@ pub fn relative(parts: &[&str]) -> PathBuf {
     parts.iter().collect()
 }
 
-impl McpFile {
+impl McpSource {
     pub fn at(parts: &[&str], format: McpFormat) -> Self {
-        Self {
+        Self::File {
             path: relative(parts),
             format,
         }
@@ -57,10 +57,17 @@ impl McpFile {
         Self::at(&[".mcp.json"], McpFormat::ClaudeJson)
     }
 
-    fn servers(&self, project: &Path) -> Vec<McpServerDto> {
-        fs::read_to_string(project.join(&self.path))
-            .map(|text| self.format.servers(&text))
-            .unwrap_or_default()
+    fn read(&self, project: &Path, rows: &mut Vec<McpServerDto>, brought: &mut Vec<McpServerDto>) {
+        match self {
+            Self::File { path, format } => brought.extend(
+                fs::read_to_string(project.join(path))
+                    .map(|text| format.servers(&text))
+                    .unwrap_or_default(),
+            ),
+            Self::ClaudeEntry(claude_json) => {
+                crate::claude_mcp::in_project(claude_json, project, rows, brought);
+            }
+        }
     }
 }
 
@@ -182,19 +189,9 @@ impl Projects {
     }
 
     fn add_servers(&self, tab: &mut AgentTabDto, project: &Path) {
-        let mut servers: Vec<McpServerDto> = self
-            .mcp
-            .iter()
-            .flat_map(|file| file.servers(project))
-            .collect();
-        if let Some(ProjectRecord::Claude(path)) = &self.record {
-            let claude_json: serde_json::Value =
-                serde_json::from_str(&read(path)).unwrap_or_default();
-            servers.extend(crate::claude_mcp::project_servers(
-                &mut tab.mcp_servers,
-                &claude_json,
-                project,
-            ));
+        let mut servers = Vec::new();
+        for source in &self.mcp {
+            source.read(project, &mut tab.mcp_servers, &mut servers);
         }
         let mut seen: HashSet<String> = tab
             .mcp_servers

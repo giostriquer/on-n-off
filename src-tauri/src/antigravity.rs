@@ -13,7 +13,7 @@ use crate::paths::{
     antigravity_cli_plugins, antigravity_cli_root, antigravity_cli_skills,
     antigravity_config_plugins, antigravity_mcp_config, normalize_skill_path, plugin_id_parts,
 };
-use crate::project::{relative, McpFile, PluginFolders, Projects};
+use crate::project::{relative, McpSource, PluginFolders, Projects};
 use crate::scanner::{scan_antigravity_skills, scan_plugin_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
@@ -147,6 +147,7 @@ impl AgentAdapter for AntigravityAdapter {
             plugin_switch: Change::cli("agy plugin enable/disable"),
             skill_switch: Change::not_implemented("skill toggle"),
             mcp_switch: Change::file("file patch · mcpServers.*.disabled"),
+            refused_globally: BTreeMap::new(),
             install: Change::cli("agy plugin install"),
             refused_sources: BTreeMap::new(),
             uninstall: Change::cli("agy plugin uninstall"),
@@ -179,8 +180,8 @@ impl AgentAdapter for AntigravityAdapter {
                 read: workspace_plugins,
             }),
             mcp: vec![
-                McpFile::mcp_json(),
-                McpFile::at(&[".agents", "mcp_config.json"], McpFormat::AntigravityJson),
+                McpSource::mcp_json(),
+                McpSource::at(&[".agents", "mcp_config.json"], McpFormat::AntigravityJson),
             ],
             record: None,
         }
@@ -232,7 +233,7 @@ impl AgentAdapter for AntigravityAdapter {
                 let (name, _) = plugin_id_parts(&plugin.id);
                 cli(vec![argv(&["plugin", switch(*on), &name])])
             }
-            Checked::Mcp { server, on } => {
+            Checked::Mcp { server, on, .. } => {
                 let (id, on) = (server.id.clone(), *on);
                 Step::json(self.mcp_path()?, move |root| mcp_enabled(root, &id, on))
             }

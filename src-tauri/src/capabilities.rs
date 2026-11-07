@@ -13,12 +13,21 @@ pub struct Capabilities {
     pub plugin_switch: Change,
     pub skill_switch: Change,
     pub mcp_switch: Change,
+    pub refused_globally: BTreeMap<Switch, String>,
     pub install: Change,
     pub refused_sources: BTreeMap<SourceKind, String>,
     pub uninstall: Change,
     pub uninstall_from: Option<Vec<String>>,
     pub update: Change,
     pub reads_hooks: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "camelCase")]
+pub enum Switch {
+    Plugin,
+    Skill,
+    Mcp,
 }
 
 impl Default for Capabilities {
@@ -28,6 +37,7 @@ impl Default for Capabilities {
             plugin_switch: unknown(),
             skill_switch: unknown(),
             mcp_switch: unknown(),
+            refused_globally: BTreeMap::new(),
             install: unknown(),
             refused_sources: BTreeMap::new(),
             uninstall: unknown(),
@@ -108,10 +118,33 @@ impl Capabilities {
         }
     }
 
-    pub fn restrict(&self, tab: &mut AgentTabDto) {
-        let plugins = !self.plugin_switch.is_refused();
-        let skills = !self.skill_switch.is_refused();
-        let servers = !self.mcp_switch.is_refused();
+    pub fn switch(&self, kind: Switch) -> &Change {
+        match kind {
+            Switch::Plugin => &self.plugin_switch,
+            Switch::Skill => &self.skill_switch,
+            Switch::Mcp => &self.mcp_switch,
+        }
+    }
+
+    pub fn refuses(&self, kind: Switch, project: Option<&Path>) -> Option<AdapterError> {
+        let change = self.switch(kind);
+        if change.is_refused() {
+            return Some(change.refusal());
+        }
+        match project {
+            Some(_) => None,
+            None => self
+                .refused_globally
+                .get(&kind)
+                .map(|reason| AdapterError::message(reason.clone())),
+        }
+    }
+
+    pub fn restrict(&self, tab: &mut AgentTabDto, project: Option<&Path>) {
+        let allowed = |kind| self.refuses(kind, project).is_none();
+        let plugins = allowed(Switch::Plugin);
+        let skills = allowed(Switch::Skill);
+        let servers = allowed(Switch::Mcp);
         for plugin in &mut tab.plugins {
             plugin.togglable &= plugins;
             for skill in &mut plugin.skills {

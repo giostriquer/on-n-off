@@ -6,14 +6,14 @@ use serde::Deserialize;
 use serde_json::Value as JsonValue;
 
 use crate::adapter::{AgentAdapter, ItemRoots};
-use crate::capabilities::{Capabilities, Change};
+use crate::capabilities::{Capabilities, Change, Switch};
 use crate::change::{switch, Checked, Step};
 use crate::cli::{argv, AgentCli};
 use crate::drift::Marketplace;
 use crate::dto::{AdapterError, AgentId, AgentTabDto, ErrorKind, PluginDto, SkillDto};
 use crate::install_source::InstallSource;
 use crate::paths::{claude_root, plugin_id_parts};
-use crate::project::{relative, McpFile, ProjectRecord, Projects};
+use crate::project::{relative, McpSource, ProjectRecord, Projects};
 use crate::scanner::{scan_plugin_skills, scan_user_skills, ScannedSkill, SkillFiles};
 use crate::sort::sort_tab;
 
@@ -191,22 +191,6 @@ impl ClaudeAdapter {
         }
         Ok(plugins)
     }
-
-    fn mcp_servers(
-        &self,
-        plugins: &[crate::plugin_files::PluginSource],
-    ) -> Vec<crate::dto::McpServerDto> {
-        let config: serde_json::Value = self
-            .claude_json
-            .as_ref()
-            .and_then(|path| fs::read_to_string(path).ok())
-            .and_then(|text| serde_json::from_str(&text).ok())
-            .unwrap_or_default();
-        let mut servers = crate::mcp::claude_json_servers(&config);
-        servers.extend(crate::claude_mcp::plugin_servers(plugins));
-        servers.extend(crate::claude_mcp::local_servers(&config));
-        servers
-    }
 }
 
 impl AgentAdapter for ClaudeAdapter {
@@ -221,7 +205,13 @@ impl AgentAdapter for ClaudeAdapter {
         Capabilities {
             plugin_switch: Change::cli("claude plugin enable/disable"),
             skill_switch: Change::file("file patch · ~/.claude/settings.json skillOverrides"),
-            mcp_switch: Change::file("file patch · ~/.claude.json disabled"),
+            mcp_switch: Change::file(
+                "file patch · ~/.claude.json, the project's disabledMcpServers",
+            ),
+            refused_globally: BTreeMap::from([(
+                Switch::Mcp,
+                crate::claude_mcp::SWITCHED_IN_PROJECTS.to_string(),
+            )]),
             install: Change::cli("claude plugin install · marketplace add"),
             refused_sources: BTreeMap::new(),
             uninstall: Change::cli("claude plugin uninstall"),
@@ -248,7 +238,9 @@ impl AgentAdapter for ClaudeAdapter {
             more_skills: vec![relative(&[".agents", "skills"])],
             skill_files: SkillFiles::Folders,
             plugins: None,
-            mcp: vec![McpFile::mcp_json()],
+            mcp: std::iter::once(McpSource::mcp_json())
+                .chain(self.claude_json.clone().map(McpSource::ClaudeEntry))
+                .collect(),
             record: self.claude_json.clone().map(ProjectRecord::Claude),
         }
     }
@@ -294,7 +286,7 @@ impl AgentAdapter for ClaudeAdapter {
         let mut tab = AgentTabDto {
             plugins,
             user_skills,
-            mcp_servers: self.mcp_servers(&enabled_plugins),
+            mcp_servers: crate::claude_mcp::servers(self.claude_json.as_deref(), &enabled_plugins),
             hooks: crate::hooks::claude_hooks(self.root()?, &enabled_plugins),
         };
         sort_tab(&mut tab);
@@ -337,13 +329,19 @@ impl AgentAdapter for ClaudeAdapter {
                 let (name, on) = (skill.id.clone(), *on);
                 Step::json(settings, move |root| skill_override(root, &name, on))
             }
-            Checked::Mcp { server, on } => {
-                let (id, on) = (server.id.clone(), *on);
+            Checked::Mcp {
+                server,
+                on,
+                project,
+            } => {
                 let path = self
                     .claude_json
                     .clone()
                     .ok_or_else(|| AdapterError::message("home directory not found"))?;
-                Step::json(path, move |root| mcp_enabled(root, &id, on))
+                Step::json(
+                    path,
+                    crate::claude_mcp::switch(project.as_deref(), server, *on)?,
+                )
             }
             Checked::Install(source @ InstallSource::NpxSkills { .. }) => {
                 Step::npx(source.clone(), "claude-code")
@@ -404,32 +402,6 @@ fn skill_override(root: &mut JsonValue, name: &str, on: bool) -> Result<(), Adap
         name.to_string(),
         JsonValue::String(if on { "on" } else { "off" }.to_string()),
     );
-    Ok(())
-}
-
-fn mcp_enabled(root: &mut JsonValue, id: &str, on: bool) -> Result<(), AdapterError> {
-    let object = root
-        .as_object_mut()
-        .ok_or_else(|| AdapterError::message("claude.json root must be an object"))?;
-    let servers = object
-        .get_mut("mcpServers")
-        .and_then(JsonValue::as_object_mut)
-        .ok_or_else(|| AdapterError::message("mcpServers missing"))?;
-    let entry = servers
-        .get_mut(id)
-        .and_then(JsonValue::as_object_mut)
-        .ok_or_else(|| AdapterError::message(format!("mcp server not found: {id}")))?;
-    entry.insert("disabled".to_string(), JsonValue::Bool(!on));
-    let list = object
-        .entry("disabledMcpServers")
-        .or_insert_with(|| JsonValue::Array(Vec::new()));
-    let list = list
-        .as_array_mut()
-        .ok_or_else(|| AdapterError::message("disabledMcpServers must be an array"))?;
-    list.retain(|item| item.as_str() != Some(id));
-    if !on {
-        list.push(JsonValue::String(id.to_string()));
-    }
     Ok(())
 }
 

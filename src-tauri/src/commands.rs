@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::adapter::AgentAdapter;
+use crate::capabilities::Switch;
 use crate::change::{Changes, Request};
 use crate::drift::{Memo, Reach};
 use crate::dto::{
@@ -330,7 +331,8 @@ pub async fn set_plugin_enabled(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let request = Request::SwitchPlugin {
+    let request = Request::Switch {
+        kind: Switch::Plugin,
         id: plugin_id,
         on: enabled,
     };
@@ -345,7 +347,8 @@ pub async fn set_skill_enabled(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let request = Request::SwitchSkill {
+    let request = Request::Switch {
+        kind: Switch::Skill,
         id: skill_id,
         on: enabled,
     };
@@ -360,7 +363,8 @@ pub async fn set_mcp_enabled(
     project_path: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<AgentTabDto, AdapterError> {
-    let request = Request::SwitchMcp {
+    let request = Request::Switch {
+        kind: Switch::Mcp,
         id: mcp_id,
         on: enabled,
     };

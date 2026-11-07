@@ -19,8 +19,9 @@ _Avoid_: registry, provider list
 **Capabilities**:
 What on-n-off can change for a provider, as the provider's own adapter states it: for each change
 (switching a plugin, a skill or an MCP server; install, uninstall, update), whether the provider's
-CLI makes it, on-n-off edits a file, or it is refused and why; the install sources it refuses; and
-whether it installs subagents and reads hooks.
+CLI makes it, on-n-off edits a file, or it is refused and why; the switches it refuses only while
+all projects are shown, and why (Claude's MCP switch: Claude Code turns a server off one project
+at a time); the install sources it refuses; and whether it installs subagents and reads hooks.
 _Avoid_: toggles, support, features (a Limits card's features are another thing)
 
 **Plugin drift**:
@@ -34,8 +35,8 @@ _Avoid_: enrichment, metadata, outdated (a filter on the Plugins screen)
 **Config change**:
 One change on-n-off makes to a provider's configuration for the user: switching a plugin, a skill or
 an MCP server on or off, or installing, uninstalling or updating a plugin. Every provider's is made
-the same way: one at a time, refused unless the provider's capabilities allow it and the item is one
-the view the user is looking at can switch, made only once the configuration files it touches are
+the same way: one at a time, refused unless the provider's capabilities allow it in the view the
+user is looking at and the item is one that view can switch, made only once the configuration files it touches are
 backed up, and answered with that view as read from disk.
 _Avoid_: mutation, toggle (a switch is one kind), write
 

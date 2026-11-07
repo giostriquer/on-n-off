@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -6,7 +6,7 @@ use serde_json::Value as JsonValue;
 use toml_edit::DocumentMut;
 
 use crate::adapter::AgentAdapter;
-use crate::capabilities::{Capabilities, Change};
+use crate::capabilities::{Capabilities, Change, Switch};
 use crate::cli::{run_npx_skills, AgentCli, DEFAULT_TIMEOUT, INSTALL_TIMEOUT};
 use crate::config_io::{Backups, ConfigIo, Edit};
 use crate::dto::{AdapterError, AgentId, AgentTabDto, McpServerDto, PluginDto, SkillDto};
@@ -14,9 +14,7 @@ use crate::install_source::InstallSource;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
-    SwitchPlugin { id: String, on: bool },
-    SwitchSkill { id: String, on: bool },
-    SwitchMcp { id: String, on: bool },
+    Switch { kind: Switch, id: String, on: bool },
     Install { source: String },
     Uninstall { id: String },
     Update { id: String },
@@ -24,9 +22,19 @@ pub enum Request {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Checked {
-    Plugin { plugin: PluginDto, on: bool },
-    Skill { skill: SkillDto, on: bool },
-    Mcp { server: McpServerDto, on: bool },
+    Plugin {
+        plugin: PluginDto,
+        on: bool,
+    },
+    Skill {
+        skill: SkillDto,
+        on: bool,
+    },
+    Mcp {
+        server: McpServerDto,
+        on: bool,
+        project: Option<PathBuf>,
+    },
     Install(InstallSource),
     Uninstall(PluginDto),
     Update(PluginDto),
@@ -141,15 +149,23 @@ impl Step<'_> {
 #[cfg(test)]
 impl Request {
     pub fn plugin(id: &str, on: bool) -> Self {
-        Self::SwitchPlugin { id: id.into(), on }
+        Self::switching(Switch::Plugin, id, on)
     }
 
     pub fn skill(id: &str, on: bool) -> Self {
-        Self::SwitchSkill { id: id.into(), on }
+        Self::switching(Switch::Skill, id, on)
     }
 
     pub fn mcp(id: &str, on: bool) -> Self {
-        Self::SwitchMcp { id: id.into(), on }
+        Self::switching(Switch::Mcp, id, on)
+    }
+
+    fn switching(kind: Switch, id: &str, on: bool) -> Self {
+        Self::Switch {
+            kind,
+            id: id.into(),
+            on,
+        }
     }
 
     pub fn install(source: &str) -> Self {
@@ -196,43 +212,62 @@ pub fn argv_of(adapter: &dyn AgentAdapter, change: &Checked) -> Vec<Vec<String>>
 impl Request {
     fn declared<'c>(&self, capabilities: &'c Capabilities) -> &'c Change {
         match self {
-            Self::SwitchPlugin { .. } => &capabilities.plugin_switch,
-            Self::SwitchSkill { .. } => &capabilities.skill_switch,
-            Self::SwitchMcp { .. } => &capabilities.mcp_switch,
+            Self::Switch { kind, .. } => capabilities.switch(*kind),
             Self::Install { .. } => &capabilities.install,
             Self::Uninstall { .. } => &capabilities.uninstall,
             Self::Update { .. } => &capabilities.update,
         }
     }
 
+    fn refusal(&self, declared: &Capabilities, project: Option<&Path>) -> Option<AdapterError> {
+        match self {
+            Self::Switch { kind, .. } => declared.refuses(*kind, project),
+            Self::Install { .. } | Self::Uninstall { .. } | Self::Update { .. } => {
+                let change = self.declared(declared);
+                change.is_refused().then(|| change.refusal())
+            }
+        }
+    }
+
     fn deadline(&self) -> Duration {
         match self {
             Self::Install { .. } | Self::Update { .. } => INSTALL_TIMEOUT,
-            Self::SwitchPlugin { .. }
-            | Self::SwitchSkill { .. }
-            | Self::SwitchMcp { .. }
-            | Self::Uninstall { .. } => DEFAULT_TIMEOUT,
+            Self::Switch { .. } | Self::Uninstall { .. } => DEFAULT_TIMEOUT,
         }
     }
 
     fn check(
         &self,
         declared: &Capabilities,
+        project: Option<&Path>,
         read: impl FnOnce() -> Result<AgentTabDto, AdapterError>,
     ) -> Result<Checked, AdapterError> {
         Ok(match self {
             Self::Install { source } => Checked::Install(declared.admit(source)?),
-            Self::SwitchPlugin { id, on } => Checked::Plugin {
+            Self::Switch {
+                kind: Switch::Plugin,
+                id,
+                on,
+            } => Checked::Plugin {
                 plugin: switchable_plugin(&read()?, id)?.clone(),
                 on: *on,
             },
-            Self::SwitchSkill { id, on } => Checked::Skill {
+            Self::Switch {
+                kind: Switch::Skill,
+                id,
+                on,
+            } => Checked::Skill {
                 skill: switchable_skill(&read()?, id)?.clone(),
                 on: *on,
             },
-            Self::SwitchMcp { id, on } => Checked::Mcp {
+            Self::Switch {
+                kind: Switch::Mcp,
+                id,
+                on,
+            } => Checked::Mcp {
                 server: switchable_server(&read()?, id)?.clone(),
                 on: *on,
+                project: project.map(Path::to_path_buf),
             },
             Self::Uninstall { id } => {
                 let shown = read()?;
@@ -349,13 +384,13 @@ impl Changes {
         let id = adapter.id();
         let _turn = self.turn(id);
         let declared = adapter.capabilities();
-        let change = request.declared(&declared);
-        if change.is_refused() {
-            return Err(change.refusal());
+        let project = crate::adapter::chosen(view);
+        if let Some(refusal) = request.refusal(&declared, project) {
+            return Err(refusal);
         }
-        let checked = request.check(&declared, || adapter.list_scope(view))?;
+        let checked = request.check(&declared, project, || adapter.list_scope(view))?;
         let Some(step) = adapter.step(&checked)? else {
-            return Err(change.refusal());
+            return Err(request.declared(&declared).refusal());
         };
         let backups = self.io.back_up(id, &step.touches)?;
         self.run(step, &backups, request.deadline())?;
