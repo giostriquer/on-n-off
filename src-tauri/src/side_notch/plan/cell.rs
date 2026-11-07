@@ -1,5 +1,5 @@
 use super::text::{TextWeight, Typesetter};
-use super::{provider_color, Arc, ArcInk, CellId, CellPlan, Color, Scale, Text, R};
+use super::{provider_color, Arc, ArcInk, CellId, CellPlan, Color, Text, R};
 use crate::dto::CiState;
 use crate::limits::window_at::{WindowAt, UNREADABLE};
 use crate::side_notch::model::frame::CellData;
@@ -12,8 +12,6 @@ pub(super) const FABLE_TRACK: Color = [53, 42, 38, 255];
 pub(super) const CREDITS_INK: Color = [168, 176, 186, 255];
 pub(super) const CREDITS_TRACK: Color = [38, 41, 45, 255];
 const WHITE: Color = [255, 255, 255, 255];
-const LABEL_SIZE: f64 = 17.0;
-const LABEL_NUDGE: f64 = 2.0;
 const SEGMENT_GAP: f64 = 9.0;
 
 pub(super) fn ci_color(ci: CiState) -> Color {
@@ -71,7 +69,6 @@ pub(super) fn cell(
     rect: R,
     active: bool,
     metrics: &CellMetrics,
-    scale: Scale,
     typeset: &Typesetter,
     now: DateTime<Utc>,
 ) -> CellPlan {
@@ -81,7 +78,7 @@ pub(super) fn cell(
     );
     let ring = Ring {
         centre,
-        radius: (metrics.icon_slot - metrics.ring_stroke) / 2.0,
+        radius: metrics.ring_radius(),
         stroke: metrics.ring_stroke,
     };
     let mut arcs = vec![ring.whole(TRACK_INK, true)];
@@ -98,14 +95,14 @@ pub(super) fn cell(
                 let (ink, track) = inner_ring_inks(inner);
                 let inner_ring = Ring {
                     centre,
-                    radius: ring.radius - metrics.inner_ring_inset,
+                    radius: metrics.inner_ring_radius(),
                     stroke: metrics.inner_ring_stroke,
                 };
                 arcs.push(inner_ring.whole(track, false));
                 arcs.push(inner_ring.meter(&at, ink));
             }
             match headline {
-                Some(at) => (at.used_text(), scale.value(LABEL_NUDGE)),
+                Some(at) => (at.used_text(), metrics.label_nudge),
                 None => (UNREADABLE.into(), 0.0),
             }
         }
@@ -132,7 +129,7 @@ pub(super) fn cell(
             (pulls.label.clone(), 0.0)
         }
     };
-    let size = LABEL_SIZE * scale.size;
+    let size = metrics.label_size;
     let width = typeset.width(&text, size, TextWeight::Medium);
     CellPlan {
         id: CellId::of(data),

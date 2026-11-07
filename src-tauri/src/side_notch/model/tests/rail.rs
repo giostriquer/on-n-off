@@ -10,6 +10,8 @@ struct Fixture {
     work_area: WorkArea,
     rails: Vec<RailCase>,
     metrics: Vec<MetricsCase>,
+    popovers: Vec<PopoverCase>,
+    placements: Vec<PlacementCase>,
 }
 
 #[derive(Deserialize)]
@@ -63,8 +65,51 @@ struct MetricsCase {
     inner_ring_stroke: f64,
     inner_ring_inset: f64,
     glyph_size: f64,
+    label_size: f64,
+    label_nudge: f64,
+    ring_radius: f64,
+    inner_ring_radius: f64,
+    pin_size: f64,
+    cap_pins: CapPins,
     right_cells: Vec<[f64; 4]>,
     top_cells: Vec<[f64; 4]>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CapPins {
+    right: [f64; 2],
+    left: [f64; 2],
+    top: [f64; 2],
+    bottom: [f64; 2],
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PopoverCase {
+    displays: Option<Vec<Screen>>,
+    scale: f64,
+    size: NotchSize,
+    width: f64,
+    padding: f64,
+    tail_length: f64,
+    tail_half_width: f64,
+    corner_radius: f64,
+    border: f64,
+    max_height: f64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PlacementCase {
+    displays: Option<Vec<Screen>>,
+    scale: f64,
+    size: NotchSize,
+    edge: Edge,
+    cell: [f64; 4],
+    fitting: [f64; 2],
+    frame: [f64; 4],
+    card: [f64; 4],
 }
 
 fn fixture() -> Fixture {
@@ -87,34 +132,35 @@ fn assert_pixels<const N: usize>(actual: Option<[f64; N]>, expected: Option<[f64
     assert!(matches, "{what}: {actual:?} != {expected:?}");
 }
 
-#[test]
-fn every_rail_frame_and_pill_matches_the_shared_cases() {
-    let fixture = fixture();
-    assert!(!fixture.rails.is_empty());
-    let area = &fixture.work_area;
+fn displays(area: &WorkArea, screens: Option<&[Screen]>, scale: f64) -> Vec<Display> {
     let main = [Screen {
         id: "main".into(),
         ..Screen::default()
     }];
+    screens
+        .unwrap_or(&main)
+        .iter()
+        .map(|screen| Display {
+            id: screen.id.clone(),
+            name: screen.id.clone(),
+            x: screen.x.unwrap_or(0.0),
+            y: 0.0,
+            width: screen.width.unwrap_or(area.width),
+            height: area.height,
+            work_y: screen.work_y.unwrap_or(area.work_y),
+            work_height: screen.work_height.unwrap_or(area.work_height),
+            scale: screen.scale.unwrap_or(scale),
+            mirrored: screen.mirrored.unwrap_or(false),
+        })
+        .collect()
+}
+
+#[test]
+fn every_rail_frame_and_pill_matches_the_shared_cases() {
+    let fixture = fixture();
+    assert!(!fixture.rails.is_empty());
     for (index, case) in fixture.rails.iter().enumerate() {
-        let displays: Vec<Display> = case
-            .displays
-            .as_deref()
-            .unwrap_or(&main)
-            .iter()
-            .map(|screen| Display {
-                id: screen.id.clone(),
-                name: screen.id.clone(),
-                x: screen.x.unwrap_or(0.0),
-                y: 0.0,
-                width: screen.width.unwrap_or(area.width),
-                height: area.height,
-                work_y: screen.work_y.unwrap_or(area.work_y),
-                work_height: screen.work_height.unwrap_or(area.work_height),
-                scale: screen.scale.unwrap_or(case.scale),
-                mirrored: screen.mirrored.unwrap_or(false),
-            })
-            .collect();
+        let displays = displays(&fixture.work_area, case.displays.as_deref(), case.scale);
         let current = NotchSettings {
             enabled: case.enabled.unwrap_or(true),
             size: case.size,
@@ -174,6 +220,39 @@ fn every_rail_metric_matches_the_shared_cases() {
             ]),
             &format!("{:?} at {}x", case.size, case.scale),
         );
+        assert_pixels(
+            Some(
+                [
+                    m.cell.label_size,
+                    m.cell.label_nudge,
+                    m.cell.ring_radius(),
+                    m.cell.inner_ring_radius(),
+                    m.pin,
+                ]
+                .map(|points| points * case.scale),
+            ),
+            Some([
+                case.label_size,
+                case.label_nudge,
+                case.ring_radius,
+                case.inner_ring_radius,
+                case.pin_size,
+            ]),
+            &format!("{:?} chrome at {}x", case.size, case.scale),
+        );
+        for (edge, pin) in [
+            (Edge::Right, case.cap_pins.right),
+            (Edge::Left, case.cap_pins.left),
+            (Edge::Top, case.cap_pins.top),
+            (Edge::Bottom, case.cap_pins.bottom),
+        ] {
+            let (x, y) = rail_metrics(case.size, case.scale, edge).cap_pin(edge);
+            assert_pixels(
+                Some([x * case.scale, y * case.scale]),
+                Some(pin),
+                &format!("{edge:?} cap pin of {:?} at {}x", case.size, case.scale),
+            );
+        }
         let across = rail_metrics(case.size, case.scale, Edge::Top);
         assert_eq!(
             (across.thickness, across.cell_length),
@@ -220,4 +299,69 @@ fn cells_tile_the_rail() {
         cells[0].y,
         metrics.length(4) - (cells[3].y + cells[3].height)
     );
+}
+
+#[test]
+fn every_popover_measure_matches_the_shared_cases() {
+    let fixture = fixture();
+    assert!(!fixture.popovers.is_empty());
+    for case in fixture.popovers {
+        let display = &displays(&fixture.work_area, case.displays.as_deref(), case.scale)[0];
+        let chrome = popover_metrics(case.size, display);
+        assert_pixels(
+            Some(
+                [
+                    chrome.width,
+                    chrome.padding,
+                    chrome.tail_length,
+                    chrome.tail_half_width,
+                    chrome.corner_radius,
+                    chrome.border,
+                    chrome.max_height,
+                ]
+                .map(|points| points * case.scale),
+            ),
+            Some([
+                case.width,
+                case.padding,
+                case.tail_length,
+                case.tail_half_width,
+                case.corner_radius,
+                case.border,
+                case.max_height,
+            ]),
+            &format!(
+                "popover of {:?} at {}x on {}",
+                case.size, case.scale, display.work_height
+            ),
+        );
+    }
+}
+
+#[test]
+fn every_popover_placement_matches_the_shared_cases() {
+    let fixture = fixture();
+    assert!(!fixture.placements.is_empty());
+    for (index, case) in fixture.placements.iter().enumerate() {
+        let display = &displays(&fixture.work_area, case.displays.as_deref(), case.scale)[0];
+        let chrome = popover_metrics(case.size, display);
+        let [x, y, width, height] = case.cell;
+        let cell = Layout {
+            x,
+            y,
+            width,
+            height,
+        };
+        let frame = chrome.frame(&cell, case.edge, (case.fitting[0], case.fitting[1]));
+        assert_pixels(
+            pixels(Some(frame), case.scale),
+            Some(case.frame),
+            &format!("placement {index} frame"),
+        );
+        assert_pixels(
+            pixels(Some(chrome.card(&frame, case.edge)), case.scale),
+            Some(case.card),
+            &format!("placement {index} card"),
+        );
+    }
 }

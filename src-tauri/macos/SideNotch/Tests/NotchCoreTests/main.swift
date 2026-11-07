@@ -16,15 +16,6 @@ final class NotchTests {
   func reading(windows: [Quota], headline: String? = nil, inner: InnerRing? = nil) -> Reading {
     Reading(windows: windows, headlineWindowId: headline, innerRing: inner)
   }
-  func rail(_ displayId: String, edge: Edge = .right, size: NotchSize = .standard) -> Settings {
-    Settings(enabled: true, displayId: displayId, edge: edge, size: size)
-  }
-  func display(_ id: String, x: Double = 0, mirrored: Bool = false, scale: Double = 2) -> Display
-  {
-    Display(
-      id: id, name: "Same name", x: x, y: 0, width: 1728, height: 1117, workY: 33,
-      workHeight: 1084, scale: scale, mirrored: mirrored)
-  }
 
   func testEachMeterLevelDrawsInOneInk() {
     for base in ProviderId.allCases.map(providerInk) + [fableInk, creditsInk] {
@@ -151,17 +142,8 @@ final class NotchTests {
   func testRailFramesAndPillsMatchTheSharedCases() throws {
     let fixture = try RailFixture.load()
     expectEqual(fixture.rails.isEmpty, false)
-    let main = RailFixture.Screen(
-      id: "main", x: nil, width: nil, workY: nil, workHeight: nil, scale: nil, mirrored: nil)
     for (index, entry) in fixture.rails.enumerated() {
-      let area = fixture.workArea
-      let displays = (entry.displays ?? [main]).map { screen in
-        Display(
-          id: screen.id, name: screen.id, x: screen.x ?? 0, y: 0, width: screen.width ?? area.width,
-          height: area.height, workY: screen.workY ?? area.workY,
-          workHeight: screen.workHeight ?? area.workHeight, scale: screen.scale ?? entry.scale,
-          mirrored: screen.mirrored ?? false)
-      }
+      let displays = fixture.displays(entry.displays, scale: entry.scale)
       let settings = Settings(
         enabled: entry.enabled ?? true, displayId: "main", edge: entry.edge, size: entry.size)
       let count = entry.cells ?? ProviderId.allCases.count
@@ -191,6 +173,20 @@ final class NotchTests {
           entry.contentSpacing, entry.iconSlot, entry.labelHeight, entry.ringStroke,
           entry.innerRingStroke, entry.innerRingInset, entry.glyphSize,
         ], scale: entry.scale, "\(entry.size) at \(entry.scale)x")
+      expectPixels(
+        [layout.labelSize, layout.labelNudge, layout.ringRadius, layout.innerRingRadius, layout.pinSize],
+        [entry.labelSize, entry.labelNudge, entry.ringRadius, entry.innerRingRadius, entry.pinSize],
+        scale: entry.scale, "\(entry.size) chrome at \(entry.scale)x")
+      for (edge, pin) in [
+        (Edge.right, entry.capPins.right), (.left, entry.capPins.left), (.top, entry.capPins.top),
+        (.bottom, entry.capPins.bottom),
+      ] {
+        let centre = railLayout(size: entry.size, displayScale: entry.scale, edge: edge)
+          .capPin(edge: edge)
+        expectPixels(
+          [Double(centre.x), Double(centre.y)], pin, scale: entry.scale,
+          "\(edge) cap pin of \(entry.size) at \(entry.scale)x")
+      }
       let across = railLayout(size: entry.size, displayScale: entry.scale, edge: .top)
       expectEqual([across.thickness, across.cellLength], [layout.cellLength, layout.thickness])
       for (edge, cells) in [(Edge.right, entry.rightCells), (.top, entry.topCells)] {
@@ -231,8 +227,7 @@ final class NotchTests {
     }
   }
 
-  func testCellsTileTheRailAndPopoversStayInsideTheWorkArea() {
-    let main = display("main", scale: 1)
+  func testCellsTileTheRail() {
     let layout = railLayout(size: .standard, displayScale: 1, edge: .right)
     let cells = railCellFrames(edge: .right, layout: layout, count: 4)
     expectEqual(cells.count, 4)
@@ -244,23 +239,41 @@ final class NotchTests {
       railCellFrames(edge: .top, layout: bar, count: 2)[1].minX,
       bar.inset + bar.cellLength + bar.cellSpacing)
     expectEqual(cells[0].minY, layout.length(count: 4) - cells[3].maxY)
+  }
 
-    let railFrame = notchRailFrame(settings: rail("main"), displays: [main], count: 4)!
-    let cell = cells[0].offsetBy(dx: railFrame.minX, dy: railFrame.minY)
-    let size = CGSize(width: 300, height: 420)
-    let frame = popoverFrame(cell: cell, edge: .right, size: size, display: main, scale: 1)
-    expectEqual(frame.maxX, cell.minX - 2)
-    expectEqual(abs(frame.midY - cell.midY) <= 0.5, true)
-    let topCell = CGRect(x: 690, y: 33, width: 76, height: 73)
-    let below = popoverFrame(cell: topCell, edge: .top, size: size, display: main, scale: 1)
-    expectEqual(below.minY, topCell.maxY + 2)
-    expectEqual(below.midX, topCell.midX)
-    let cornerCell = CGRect(x: 1652, y: 40, width: 76, height: 73)
-    let clamped = popoverFrame(cell: cornerCell, edge: .right, size: size, display: main, scale: 1)
-    expectEqual(clamped.minY, 33 + 8)
-    let bottomCell = CGRect(x: 1652, y: 1100, width: 76, height: 73)
-    let clampedBottom = popoverFrame(cell: bottomCell, edge: .right, size: size, display: main, scale: 1)
-    expectEqual(clampedBottom.maxY, 33 + 1084 - 8)
+  func testPopoverMeasuresMatchTheSharedCases() throws {
+    let fixture = try RailFixture.load()
+    expectEqual(fixture.popovers.isEmpty, false)
+    for entry in fixture.popovers {
+      let display = fixture.displays(entry.displays, scale: entry.scale)[0]
+      let layout = popoverLayout(size: entry.size, display: display)
+      expectPixels(
+        [
+          layout.width, layout.padding, layout.tailLength, layout.tailHalfWidth,
+          layout.cornerRadius, layout.border, layout.maxHeight,
+        ],
+        [
+          entry.width, entry.padding, entry.tailLength, entry.tailHalfWidth, entry.cornerRadius,
+          entry.border, entry.maxHeight,
+        ], scale: entry.scale, "popover of \(entry.size) at \(entry.scale)x on \(display.workHeight)")
+    }
+  }
+
+  func testPopoverPlacementsMatchTheSharedCases() throws {
+    let fixture = try RailFixture.load()
+    expectEqual(fixture.placements.isEmpty, false)
+    for (index, entry) in fixture.placements.enumerated() {
+      let display = fixture.displays(entry.displays, scale: entry.scale)[0]
+      let layout = popoverLayout(size: entry.size, display: display)
+      let cell = CGRect(x: entry.cell[0], y: entry.cell[1], width: entry.cell[2], height: entry.cell[3])
+      let frame = layout.frame(
+        cell: cell, edge: entry.edge,
+        fitting: CGSize(width: entry.fitting[0], height: entry.fitting[1]))
+      expectPixels(pixels(frame), entry.frame, scale: entry.scale, "placement \(index) frame")
+      expectPixels(
+        pixels(layout.card(in: frame, edge: entry.edge)), entry.card, scale: entry.scale,
+        "placement \(index) card")
+    }
   }
 
   let message =
@@ -681,11 +694,43 @@ struct RailFixture: Decodable {
     let size: NotchSize
     let thickness, cellLength, cellSpacing, inset, cellPadding, contentSpacing, iconSlot: Double
     let labelHeight, ringStroke, innerRingStroke, innerRingInset, glyphSize: Double
+    let labelSize, labelNudge, ringRadius, innerRingRadius, pinSize: Double
+    let capPins: CapPins
     let rightCells, topCells: [[Double]]
+  }
+  struct CapPins: Decodable {
+    let right, left, top, bottom: [Double]
+  }
+  struct Popover: Decodable {
+    let displays: [Screen]?
+    let scale: Double
+    let size: NotchSize
+    let width, padding, tailLength, tailHalfWidth, cornerRadius, border, maxHeight: Double
+  }
+  struct Placement: Decodable {
+    let displays: [Screen]?
+    let scale: Double
+    let size: NotchSize
+    let edge: Edge
+    let cell, fitting, frame, card: [Double]
   }
   let workArea: WorkArea
   let rails: [Rail]
   let metrics: [Metrics]
+  let popovers: [Popover]
+  let placements: [Placement]
+
+  func displays(_ screens: [Screen]?, scale: Double) -> [Display] {
+    let main = Screen(
+      id: "main", x: nil, width: nil, workY: nil, workHeight: nil, scale: nil, mirrored: nil)
+    return (screens ?? [main]).map { screen in
+      Display(
+        id: screen.id, name: screen.id, x: screen.x ?? 0, y: 0, width: screen.width ?? workArea.width,
+        height: workArea.height, workY: screen.workY ?? workArea.workY,
+        workHeight: screen.workHeight ?? workArea.workHeight, scale: screen.scale ?? scale,
+        mirrored: screen.mirrored ?? false)
+    }
+  }
 
   static func load() throws -> RailFixture {
     let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -750,7 +795,9 @@ checks.testSessionAgesReadLikeTheReferenceApp()
 try checks.testRailFramesAndPillsMatchTheSharedCases()
 try checks.testRailMetricsMatchTheSharedCases()
 try checks.testSettingsDecodeWhatTheHelperDrawsAndIgnoreWhatOnlyTheHostReads()
-checks.testCellsTileTheRailAndPopoversStayInsideTheWorkArea()
+checks.testCellsTileTheRail()
+try checks.testPopoverMeasuresMatchTheSharedCases()
+try checks.testPopoverPlacementsMatchTheSharedCases()
 try checks.testProtocolRejectsUnsupportedVersionOversizeAndBadSessionsButNotAnUnreadableMeter()
 try checks.testACellForAProviderTheHelperDoesNotKnowIsSkippedNotFatal()
 try checks.testProtocolCarriesTheRingsByWindowIdAndRefusesDanglingNames()
@@ -760,5 +807,5 @@ try checks.testTheGoldenMessagesDecodeToTheCellsTheHostDecided()
 checks.testVoiceOverSpeaksEachCellFromWhatTheHostDecided()
 checks.testReviewRequestsLinkTheTitleAndEscapeMarkup()
 try checks.testClientActionsEncodeACompleteTypedProtocol()
-print("19 native check groups; \(failures) failures")
+print("21 native check groups; \(failures) failures")
 exit(failures == 0 ? 0 : 1)

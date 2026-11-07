@@ -3,8 +3,8 @@ use crate::dto::{AgentId, LimitWindowKind};
 use crate::side_notch::model::frame::{CellData, ProviderCell, RailData};
 use crate::side_notch::model::{Display, ShowMode};
 use crate::side_notch::plan::tests::{
-    claude_with, data, data_for, display, now, open_on, pr, pulls, session_only, settings,
-    tagged_rows, window, CLAUDE, PERSONAL, WORK,
+    claude_with, data, data_for, display, long_rows, now, open_on, pr, pulls, session_only,
+    settings, tagged_rows, window, CLAUDE, PERSONAL, WORK,
 };
 use crate::side_notch::plan::{CellId, Hover};
 use chrono::{DateTime, Utc};

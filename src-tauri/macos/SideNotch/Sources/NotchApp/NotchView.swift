@@ -89,18 +89,6 @@ struct RailModel {
       ? CGRect(x: 0, y: 0, width: layout.thickness, height: layout.ear)
       : CGRect(x: 0, y: 0, width: layout.ear, height: layout.thickness)
   }
-
-  var capIconCenter: CGPoint {
-    let along = layout.ear * 0.62
-    let towardEdge = layout.thickness * 0.62
-    let awayFromEdge = layout.thickness - towardEdge
-    switch edge {
-    case .right: return CGPoint(x: towardEdge, y: along)
-    case .left: return CGPoint(x: awayFromEdge, y: along)
-    case .top: return CGPoint(x: along, y: awayFromEdge)
-    case .bottom: return CGPoint(x: along, y: towardEdge)
-    }
-  }
 }
 
 struct NotchRailView: View {
@@ -144,8 +132,7 @@ struct NotchRailView: View {
     switch cell {
     case .provider(let provider):
       MeterCell(
-        cell: provider, now: now, active: active == id, layout: layout,
-        metrics: model.metrics, action: { action(id) }
+        cell: provider, now: now, active: active == id, layout: layout, action: { action(id) }
       )
       .frame(width: size.width, height: size.height)
     case .pullRequests(let pulls):
@@ -160,7 +147,6 @@ struct NotchRailView: View {
 
 private struct RailCellChrome<Ring: View, Glyph: View>: View {
   let layout: RailLayout
-  let metrics: NotchMetrics
   let label: String
   let labelOffset: CGFloat
   let description: String
@@ -180,7 +166,7 @@ private struct RailCellChrome<Ring: View, Glyph: View>: View {
         .padding(CGFloat(layout.ringStroke) / 2)
         .frame(width: CGFloat(layout.iconSlot), height: CGFloat(layout.iconSlot))
         Text(label)
-          .font(metrics.font(17, weight: .medium).monospacedDigit())
+          .font(NotchMetrics.font(aligned: CGFloat(layout.labelSize), weight: .medium).monospacedDigit())
           .lineLimit(1)
           .frame(height: CGFloat(layout.labelHeight))
           .offset(x: labelOffset)
@@ -202,7 +188,6 @@ private struct MeterCell: View {
   let now: Date
   let active: Bool
   let layout: RailLayout
-  let metrics: NotchMetrics
   let action: () -> Void
   private var id: ProviderId { cell.provider }
   private var entry: Reading? { cell.reading }
@@ -221,8 +206,8 @@ private struct MeterCell: View {
 
   var body: some View {
     RailCellChrome(
-      layout: layout, metrics: metrics, label: headline?.text(at: now) ?? "—",
-      labelOffset: headline == nil ? 0 : metrics.value(2), description: description,
+      layout: layout, label: headline?.text(at: now) ?? "—",
+      labelOffset: headline == nil ? 0 : CGFloat(layout.labelNudge), description: description,
       active: active, action: action,
       ring: ZStack {
         Circle().trim(from: 0, to: CGFloat(headline?.percent(at: now) ?? 0) / 100)
@@ -257,7 +242,7 @@ private struct PullRequestRailCell: View {
 
   var body: some View {
     RailCellChrome(
-      layout: layout, metrics: metrics, label: cell.label,
+      layout: layout, label: cell.label,
       labelOffset: 0, description: description, active: active, action: action,
       ring: SegmentedRing(segments: segments, lineWidth: CGFloat(layout.ringStroke)),
       glyph: PullRequestMark().stroke(
@@ -343,7 +328,7 @@ private struct ShowToggleCap: View {
 
   var body: some View {
     let cap = model.capRect
-    let metrics = model.metrics
+    let layout = model.layout
     ZStack(alignment: .topLeading) {
       NotchSilhouette(edge: model.edge, ear: CGFloat(model.layout.ear))
         .fill(Color.white.opacity(hovered ? 0.11 : 0))
@@ -353,9 +338,9 @@ private struct ShowToggleCap: View {
         )
         .animation(.easeInOut(duration: 0.12), value: hovered)
       Image(systemName: pinned ? "pin.fill" : "pin")
-        .font(metrics.font(12, weight: .semibold))
+        .font(NotchMetrics.font(aligned: CGFloat(layout.pinSize), weight: .semibold))
         .foregroundColor(Color.white.opacity(hovered ? 0.95 : 0))
-        .position(model.capIconCenter)
+        .position(layout.capPin(edge: model.edge))
         .animation(.easeInOut(duration: 0.12), value: hovered)
       Button(action: action) {
         Color.clear.frame(width: cap.width, height: cap.height).contentShape(Rectangle())

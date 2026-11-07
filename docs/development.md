@@ -202,10 +202,12 @@ source carries no comments (see [Code comments](#code-comments)).
   badge, notice, tone, cap or rule a drawer decides for itself is a second copy that will drift;
   change the model, the Swift models and the golden messages `host-message.json` together
   ([why](architecture/side-notch.md#what-each-cell-shows-is-decided-once)).
-- The side notch rail's sizes and frames: `rail_metrics` and the frames built from it in
-  `side_notch/model.rs`, mirrored by `NotchCore/Models.swift`. Never a second set of numbers in
-  the Windows painter; change a measurement in both files and in the fixture both checks read,
-  `rail-cases.json` ([why](architecture/side-notch.md#on-macos)).
+- The side notch rail's sizes and frames, and its chrome (a cell's ring radii and figure, the cap's
+  pin, the popover's measures, frame and card): `rail_metrics`, `popover_metrics` and the frames
+  built from them in `side_notch/model.rs`, mirrored by `NotchCore/Models.swift` (`railLayout`,
+  `popoverLayout`), which the helper's views read. Never a second set of numbers in the Windows
+  plan, its painter or a SwiftUI view; change a measurement in both files and in the fixture both
+  checks read, `rail-cases.json` ([why](architecture/side-notch.md#on-macos)).
 - Where the Windows notch draws and answers clicks: its plan (`side_notch/plan.rs`, a cell's arcs,
   glyph and figure in `plan/cell.rs`, the popover's stacks in `plan/popover.rs`), compiled for
   Windows and for tests on every OS. The painter maps the plan's coordinates to pixels and draws

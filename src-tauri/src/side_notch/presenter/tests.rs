@@ -654,3 +654,55 @@ fn a_pinned_popover_stays_while_the_pointer_leaves_its_cell_and_follows_it_to_an
         "a pin follows the pointer onto another cell"
     );
 }
+
+fn weekly_resetting(at: &str) -> RailData {
+    let claude = NotchProvider::current(vec![crate::limits::signed_in_card(
+        AgentId::Claude,
+        "acct",
+        Reading {
+            windows: vec![LimitWindowDto {
+                id: "weekly".into(),
+                label: "Weekly · all models".into(),
+                kind: LimitWindowKind::Weekly,
+                used_percent: 10.0,
+                resets_at: Some(at.into()),
+                window_seconds: None,
+                observed_at: "2026-09-01T10:00:00Z".into(),
+                role: None,
+                starts_on_first_message: false,
+            }],
+            ..Reading::default()
+        },
+    )])
+    .expect("a signed-in account");
+    frame::rail(
+        &settings(ShowMode::Always),
+        [(AgentId::Claude, Some(claude), Vec::new())],
+        None,
+        None,
+    )
+}
+
+#[test]
+fn the_presented_popover_words_its_reset_in_the_zone_of_the_clock_it_is_given() {
+    let mut presenter = pinned_on_screen(weekly_resetting("2099-01-01T00:00:00Z"), CLAUDE.unwrap());
+    for (hours, note) in [(13, "Resets Thu 13:00"), (-13, "Resets Wed 11:00")] {
+        let zone = chrono::FixedOffset::east_opt(hours * 3600).unwrap();
+        let notes: Vec<String> = presenter
+            .present(clock().with_timezone(&zone))
+            .expect("plan")
+            .popover
+            .as_ref()
+            .expect("the popover stays open")
+            .entries
+            .iter()
+            .filter_map(|(item, _)| match item {
+                crate::side_notch::plan::PopItem::Text(run) if run.text.starts_with("Resets") => {
+                    Some(run.text.clone())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes, [note], "UTC{hours:+}");
+    }
+}

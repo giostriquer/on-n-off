@@ -103,6 +103,19 @@ fn describe(plan: &Plan) -> Vec<String> {
             rect(&popover.card),
             popover.radius
         ));
+        lines.push(format!(
+            "  border {} radius {} width {}",
+            rect(&popover.border.rect),
+            popover.border.radius,
+            popover.border.width
+        ));
+        if let Some(clip) = &popover.clip {
+            lines.push(format!(
+                "  clip {} radius {}",
+                rect(&clip.rect),
+                clip.radius
+            ));
+        }
         let [first, last] = popover.tail.base;
         lines.push(format!(
             "  tail {} {} apex {}",
@@ -169,13 +182,7 @@ fn pulls_dto(status: &str, hint: Option<&str>, stale: bool) -> GithubPrsDto {
     pending["ci"] = "pending".into();
     pending["reviewDecision"] = "APPROVED".into();
     pending["mergeKind"] = "ready".into();
-    serde_json::from_value(serde_json::json!({
-        "status": status, "hint": hint, "stale": stale, "scope": [],
-        "mine": {"total": 5, "items": [long, failing, pending]},
-        "reviewRequested": {"total": 0, "items": []},
-        "assigned": {"total": 0, "items": []}
-    }))
-    .expect("a pull request read")
+    prs_dto(status, hint, stale, 5, vec![long, failing, pending])
 }
 
 struct Case {
@@ -402,13 +409,31 @@ fn cases() -> Vec<Case> {
     capped.show = ShowMode::OnHover;
     cases.push(Case {
         name: "an open rail with its cap hovered on the top at large 2x",
-        data: frame::rail(&capped, [(AgentId::Claude, claude, Vec::new())], None, None),
+        data: frame::rail(
+            &capped,
+            [(AgentId::Claude, claude.clone(), Vec::new())],
+            None,
+            None,
+        ),
         display: display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0),
         hover: Hover {
             rail_open: true,
             cap_hovered: true,
             active: None,
         },
+    });
+
+    let long = prs_dto("ok", None, false, 30, long_rows(25));
+    cases.push(Case {
+        name: "a pull request list taller than the maximum on the left at compact 1.5x",
+        data: frame::rail(
+            &both(Edge::Left, NotchSize::Compact),
+            [(AgentId::Claude, claude, Vec::new())],
+            Some(&long),
+            None,
+        ),
+        display: display("d1", 0.0, 0.0, 1920.0, 900.0, 1.5),
+        hover: open_on(CellId::PullRequests),
     });
     cases
 }

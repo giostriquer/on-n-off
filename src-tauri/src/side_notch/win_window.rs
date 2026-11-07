@@ -278,7 +278,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         }
 
         if presenter.take_dirty() {
-            match presenter.present(chrono::Utc::now()) {
+            match presenter.present(chrono::Local::now()) {
                 Some(plan) => {
                     present(hwnd, plan);
                     if !was_visible {

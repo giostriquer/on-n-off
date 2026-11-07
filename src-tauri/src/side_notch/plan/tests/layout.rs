@@ -48,28 +48,6 @@ fn a_compact_popover_on_the_top_edge_is_a_scaled_card_with_its_tail_below() {
     );
 }
 #[test]
-fn the_popover_places_inward_from_the_edge_and_clamps_to_the_work_area() {
-    let panel = display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0);
-    let cell = R::new(1844.0, 300.0, 76.0, 73.0);
-    let placed = popover_frame(&cell, Edge::Right, (272.0, 400.0), &panel, 1.0);
-    assert_eq!(placed.w, 272.0);
-    assert_eq!(
-        placed.x,
-        cell.x - 2.0 - 272.0,
-        "inward from the edge with a 2 pt gap"
-    );
-    assert!(
-        (placed.mid_y() - cell.mid_y()).abs() <= 0.5,
-        "centred on the cell within a pixel"
-    );
-
-    let tiny = display("d1", 0.0, 0.0, 400.0, 600.0, 1.0);
-    let cell_on_tiny = R::new(120.0, 100.0, 76.0, 73.0);
-    let clamped = popover_frame(&cell_on_tiny, Edge::Right, (272.0, 400.0), &tiny, 1.0);
-    assert_eq!(clamped.x, 8.0, "clamped to the display margin");
-    assert_eq!(clamped.y, 8.0);
-}
-#[test]
 fn plan_hides_when_layout_hides_and_rails_when_it_fits() {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
@@ -321,19 +299,6 @@ fn a_rect_holds_its_left_and_top_edges_but_not_its_right_and_bottom() {
         "its bottom edge is the next rect's"
     );
     assert!(!rect.contains(9.5, 30.0) && !rect.contains(20.0, 19.5));
-}
-#[test]
-fn a_popover_near_the_far_edges_is_pulled_back_inside_the_margin() {
-    let panel = display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0);
-    let corner = R::new(1844.0, 1000.0, 76.0, 73.0);
-    let low = popover_frame(&corner, Edge::Right, (272.0, 400.0), &panel, 1.0);
-    assert_eq!(low.y, 1080.0 - 8.0 - 400.0, "kept above the bottom margin");
-    let across = popover_frame(&corner, Edge::Bottom, (272.0, 400.0), &panel, 1.0);
-    assert_eq!(
-        across.x,
-        1920.0 - 8.0 - 272.0,
-        "kept left of the right margin"
-    );
 }
 #[test]
 fn a_collapsed_rail_on_the_right_shows_its_strip_against_the_screen_edge() {

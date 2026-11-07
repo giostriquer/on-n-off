@@ -1,7 +1,8 @@
 use super::model::frame::RailData;
 use super::model::{Display, NotchSettings, ShowMode};
 use super::plan::{self, CellId, Hit, Hover, Page, Plan, TextMetrics, Zone};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone};
+use std::fmt;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -102,8 +103,11 @@ impl Presenter {
         super::model::selected_display(self.settings()?, &self.displays)
     }
 
-    pub fn present(&mut self, now: DateTime<Utc>) -> Option<&Plan> {
-        let mut next = self.plan(now);
+    pub fn present<Tz: TimeZone>(&mut self, now: DateTime<Tz>) -> Option<&Plan>
+    where
+        Tz::Offset: fmt::Display,
+    {
+        let mut next = self.plan(now.clone());
         let moved = match (&self.presented, &next) {
             (Some(shown), Some(next)) => next.moved_from(shown),
             (None, Some(_)) => true,
@@ -119,7 +123,10 @@ impl Presenter {
         self.presented.as_ref()
     }
 
-    fn plan(&self, now: DateTime<Utc>) -> Option<Plan> {
+    fn plan<Tz: TimeZone>(&self, now: DateTime<Tz>) -> Option<Plan>
+    where
+        Tz::Offset: fmt::Display,
+    {
         if self.suppressed {
             return None;
         }

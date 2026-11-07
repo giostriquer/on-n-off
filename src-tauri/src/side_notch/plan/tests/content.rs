@@ -330,14 +330,11 @@ fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
     let weekly = texts.iter().position(|text| text == "Weekly · all models");
     let credits = texts.iter().position(|text| text == "Workspace credits");
     assert!(weekly.is_some() && credits > weekly, "{texts:?}");
-    let note = format!(
-        "Resets {}",
-        chrono::DateTime::parse_from_rfc3339("2099-01-01T12:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Local)
-            .format("%b %-d")
+    assert_eq!(
+        texts.get(credits.unwrap() + 1).map(String::as_str),
+        Some("Resets Jan 1"),
+        "{texts:?}"
     );
-    assert_eq!(texts.get(credits.unwrap() + 1), Some(&note), "{texts:?}");
     assert!(
         texts.contains(&"32% Used · 17,000 of 25,000 left".to_string()),
         "{texts:?}"
@@ -356,6 +353,31 @@ fn the_codex_popover_lists_the_credit_share_after_the_weekly() {
         .filter(|(item, _)| matches!(item, PopItem::Bar { .. }))
         .count();
     assert_eq!(bars, 2, "a bar for the weekly and one for the share");
+}
+
+#[test]
+fn reset_notes_read_in_the_zone_of_the_clock_the_plan_is_given() {
+    let member = || codex_member(share("8000", 32.0, false, "2099-01-01T12:00:00Z"));
+    for (hours, weekly, credits) in [
+        (13, "Resets Thu 13:00", "Resets Jan 2"),
+        (-13, "Resets Wed 11:00", "Resets Dec 31"),
+    ] {
+        let zone = chrono::FixedOffset::east_opt(hours * 3600).unwrap();
+        let popover = popover_plan_at(member(), now().with_timezone(&zone))
+            .popover
+            .expect("the popover is open");
+        let notes: Vec<&str> = popover
+            .entries
+            .iter()
+            .filter_map(|(item, _)| match item {
+                PopItem::Text(Text { text, right, .. }) if *right && text.starts_with("Resets") => {
+                    Some(text.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(notes, [weekly, credits], "UTC{hours:+}");
+    }
 }
 
 #[test]

@@ -655,10 +655,27 @@ public struct RailLayout: Equatable, Sendable {
   public let innerRingInset: Double
   public let glyphSize: Double
   public let labelHeight: Double
+  public let labelSize: Double
+  public let labelNudge: Double
+  public let pinSize: Double
+  public var ringRadius: Double { (iconSlot - ringStroke) / 2 }
+  public var innerRingRadius: Double { ringRadius - innerRingInset }
 
   public func length(count: Int) -> Double {
     let count = Double(max(count, 0))
     return count * cellLength + max(count - 1, 0) * cellSpacing + 2 * inset
+  }
+
+  public func capPin(edge: Edge) -> CGPoint {
+    let along = ear * 0.62
+    let toward = thickness * 0.62
+    let away = thickness - toward
+    switch edge {
+    case .right: return CGPoint(x: toward, y: along)
+    case .left: return CGPoint(x: away, y: along)
+    case .top: return CGPoint(x: along, y: away)
+    case .bottom: return CGPoint(x: along, y: toward)
+    }
   }
 }
 
@@ -678,7 +695,8 @@ public func railLayout(size: NotchSize, displayScale: Double, edge: Edge) -> Rai
     cellLength: vertical ? cellHeight : cellWidth,
     cellSpacing: value(8), inset: value(40), cellPadding: cellPadding, contentSpacing: contentSpacing, iconSlot: iconSlot,
     ringStroke: value(4), innerRingStroke: value(3), innerRingInset: value(6),
-    glyphSize: value(24), labelHeight: labelHeight)
+    glyphSize: value(24), labelHeight: labelHeight, labelSize: value(17), labelNudge: value(2),
+    pinSize: value(12))
 }
 
 public func notchRailFrame(settings: Settings, displays: [Display], count: Int) -> CGRect? {
@@ -733,32 +751,63 @@ public func railCellFrames(edge: Edge, layout: RailLayout, count: Int) -> [CGRec
   }
 }
 
-public let popoverWidth = 272.0
-public let popoverGap = 2.0
-public let popoverMargin = 8.0
+public struct PopoverLayout: Equatable, Sendable {
+  public let width: Double
+  public let padding: Double
+  public let tailLength: Double
+  public let tailHalfWidth: Double
+  public let cornerRadius: Double
+  public let border: Double
+  public let maxHeight: Double
+  let gap: Double
+  let margin: Double
+  let display: Display
 
-public func popoverFrame(
-  cell: CGRect, edge: Edge, size: CGSize, display: Display, scale: Double
-) -> CGRect {
-  let gap = pixelAligned(popoverGap * scale, displayScale: display.scale)
-  let margin = pixelAligned(popoverMargin * scale, displayScale: display.scale)
-  var origin: CGPoint
-  switch edge {
-  case .right: origin = CGPoint(x: cell.minX - gap - size.width, y: cell.midY - size.height / 2)
-  case .left: origin = CGPoint(x: cell.maxX + gap, y: cell.midY - size.height / 2)
-  case .top: origin = CGPoint(x: cell.midX - size.width / 2, y: cell.maxY + gap)
-  case .bottom: origin = CGPoint(x: cell.midX - size.width / 2, y: cell.minY - gap - size.height)
+  public func frame(cell: CGRect, edge: Edge, fitting: CGSize) -> CGRect {
+    let size = CGSize(
+      width: fitting.width,
+      height: min(fitting.height, maxHeight + (edge.isVertical ? 0 : tailLength)))
+    var origin: CGPoint
+    switch edge {
+    case .right: origin = CGPoint(x: cell.minX - gap - size.width, y: cell.midY - size.height / 2)
+    case .left: origin = CGPoint(x: cell.maxX + gap, y: cell.midY - size.height / 2)
+    case .top: origin = CGPoint(x: cell.midX - size.width / 2, y: cell.maxY + gap)
+    case .bottom: origin = CGPoint(x: cell.midX - size.width / 2, y: cell.minY - gap - size.height)
+    }
+    let minX = display.x + margin
+    let maxX = display.x + display.width - margin - size.width
+    let minY = display.workY + margin
+    let maxY = display.workY + display.workHeight - margin - size.height
+    origin.x = min(max(origin.x, minX), max(minX, maxX))
+    origin.y = min(max(origin.y, minY), max(minY, maxY))
+    return CGRect(
+      x: pixelAligned(origin.x, displayScale: display.scale),
+      y: pixelAligned(origin.y, displayScale: display.scale), width: size.width,
+      height: size.height)
   }
-  let minX = display.x + margin
-  let maxX = display.x + display.width - margin - size.width
-  let minY = display.workY + margin
-  let maxY = display.workY + display.workHeight - margin - size.height
-  origin.x = min(max(origin.x, minX), max(minX, maxX))
-  origin.y = min(max(origin.y, minY), max(minY, maxY))
-  return CGRect(
-    x: pixelAligned(origin.x, displayScale: display.scale),
-    y: pixelAligned(origin.y, displayScale: display.scale), width: size.width,
-    height: size.height)
+
+  public func card(in frame: CGRect, edge: Edge) -> CGRect {
+    var card = frame
+    switch edge {
+    case .right: card.size.width -= tailLength
+    case .left: card.origin.x += tailLength; card.size.width -= tailLength
+    case .top: card.origin.y += tailLength; card.size.height -= tailLength
+    case .bottom: card.size.height -= tailLength
+    }
+    return card
+  }
+}
+
+public func popoverLayout(size: NotchSize, display: Display) -> PopoverLayout {
+  func value(_ points: Double) -> Double {
+    pixelAligned(points * size.scale, displayScale: display.scale)
+  }
+  let margin = value(8)
+  return PopoverLayout(
+    width: value(272), padding: value(12), tailLength: value(8), tailHalfWidth: value(7),
+    cornerRadius: value(12), border: value(1),
+    maxHeight: min(value(560), display.workHeight - 2 * margin), gap: value(2), margin: margin,
+    display: display)
 }
 
 public func selectedDisplay(settings: Settings, displays: [Display]) -> Display? {

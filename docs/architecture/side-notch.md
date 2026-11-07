@@ -141,7 +141,9 @@ window's percent now, its reset note, a session's age, the percent under a provi
 what is only style: provider names and marks, the inks of each tone, list titles and tags set in
 capitals, the CI dot's colour, "Nothing open." and "N of M". The rules for what a window reads at
 an instant are still one, `limits/window_at.rs`, which the Windows plan asks with the clock its
-window passes in and NotchCore restates; both, and the card, read the cases in
+window passes in (a `DateTime` in the viewer's zone, so reset times are worded in it: the window
+passes `chrono::Local::now()`, tests a fixed zone, and the plan reads no zone of its own) and
+NotchCore restates; both, and the card, read the cases in
 `limits/window_at/fixtures/window-cases.json` ([why](README.md#limits)). The review request copied from a row is
 still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
 (`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided
@@ -209,7 +211,7 @@ flowchart LR
     end
 
     subgraph helper["on-n-off-notch — owns the pixels"]
-        core["NotchCore<br/>notchRailFrame · notchPillFrame<br/>railCellFrames · popoverFrame"]
+        core["NotchCore<br/>notchRailFrame · notchPillFrame<br/>railCellFrames · popoverLayout"]
         panel["One NSPanel on the<br/>selected display UUID"]
     end
 
@@ -271,23 +273,43 @@ Things that are easy to get wrong:
   `side_notch/model.rs` (Rust), so Rust can reason about it without calling into AppKit. They
   mirror each other function for function: `railLayout` is `rail_metrics`, `RailLayout.length` is
   `RailMetrics::length`, `notchRailFrame` is `layout`, `railCellFrames` is `rail_cell_frames`,
-  `notchPillFrame` is `pill_frame`, and `selectedDisplay` and `pixelAligned` keep their names. The
-  frames take the rail's cell count rather than counting the settings' providers.
+  `notchPillFrame` is `pill_frame`, `RailLayout.capPin` is `RailMetrics::cap_pin`,
+  `popoverLayout` is `popover_metrics` (`PopoverLayout` is `PopoverMetrics`, with `frame` and
+  `card`), and `selectedDisplay` and `pixelAligned` keep their names. The frames take the rail's
+  cell count rather than counting the settings' providers.
   Both round every measurement to the display's pixel grid before adding them up, so a rail is
   exactly as long as its cells, their spacing and two ears, and lands on whole device pixels.
-  The helper draws from the Swift copy. Rust's copy decides whether the rail has room (`save` and
-  the host's reads) and is what the Windows plan places the rail, its cells, the cap and the pill
-  from. A change to `model.rs` alone therefore moves the Windows notch and the macOS room check,
-  never the macOS helper. The expected numbers live once, in
-  `macos/SideNotch/Tests/NotchCoreTests/rail-cases.json`, which `NotchCoreChecks` and
-  `model/tests/rail.rs` both read: each case is a list of displays (the one named `main` is
-  selected), a size, an edge and a cell count, and the rail and pill it gets in device pixels, or
-  `null` where the rail hides; the metrics rows give every measurement of a right-edge rail and
-  the first two cells on the right and top edges. To change a measurement, edit both files and
-  the fixture. A change on one side only fails that side's check.
-  Popovers are not in `model.rs`: the Windows plan places them with its own copy of
-  `popoverFrame` (`popover_frame`) and lays out what is in them itself
-  ([the Windows plan](#the-windows-plan)).
+  The geometry also holds the notch's chrome, each a number both drawers used to work out
+  themselves: a cell's ring radius (`(iconSlot − ringStroke) / 2`) and inner ring radius, its figure's
+  size (`value(17)`) and the nudge right when it shows a headline (`value(2)`), the cap's pin
+  (`value(12)`, centred 0.62 of the ear along the rail and 0.62 of the thickness toward the screen
+  edge, mirrored on the left and top edges), and the popover's layout: its width (272), padding
+  (12), tail (8 long, 7 either side), corner radius (12), border (1, drawn inside the card) and
+  maximum height (560, or the work area less its margins), each `value(…)`; its frame, which clamps
+  the height it fits to that maximum (plus the tail on the top and bottom edges) and then places it
+  2 pt off its cell, inside an 8 pt margin (against the left or top margin when the display is too
+  narrow or short for both); and its card, the frame less the tail on the rail's side.
+  The helper draws from the Swift copy: `RailCellChrome` sets the figure from it, `ShowToggleCap`
+  the pin, and `popoverPlacement`, `PopoverSurface` and `PopoverOutline` the popover. Its rings are
+  laid out by padding their icon slot by half the stroke and the inner ring by its inset, the same
+  circles as the radii: framing the rings from the radii, or writing those paddings as
+  `iconSlot / 2 − ringRadius` and `ringRadius − innerRingRadius`, moves ring pixels on a 1.5x
+  display (at compact for the ring, at large for the inner ring), where SwiftUI snaps the
+  differently rounded lengths to other pixels.
+  Rust's copy decides whether the rail has room (`save` and the host's reads) and is what the
+  Windows plan places the rail, its cells, their rings and figures, the cap and its pin, the pill
+  and the popover's frame, card, tail, corners and border from. A change to `model.rs` alone
+  therefore moves the Windows notch and the macOS room check, never the macOS helper. The expected
+  numbers live once, in `macos/SideNotch/Tests/NotchCoreTests/rail-cases.json`, which
+  `NotchCoreChecks` and `model/tests/rail.rs` both read: each rail case is a list of displays (the
+  one named `main` is selected), a size, an edge and a cell count, and the rail and pill it gets in
+  device pixels, or `null` where the rail hides; the metrics rows give every measurement of a
+  right-edge rail, its chrome, the cap pin on every edge and the first two cells on the right and
+  top edges; the popover rows give the popover's measures for every size and display scale and for
+  short work areas; and the placement rows a cell, the size a popover fits and the frame and card
+  it gets on every edge, clamped to the margins and to the maximum height. To change a measurement,
+  edit both files and the fixture. A change on one side only fails that side's check. What is in a
+  popover is laid out by each drawer ([the Windows plan](#the-windows-plan)).
 - **Nothing sensitive crosses the pipe** — current-account numbers, session rows, PR rows. No
   credentials, no network listener. PR rows open in the browser and copy a link to the pasteboard;
   the helper never writes to GitHub.
@@ -343,15 +365,17 @@ Read it before changing `win_window.rs`.
 `side_notch/plan.rs` turns the displays, the frame `model/frame.rs` decided (its settings among
 it), the hover state and the clock into a `Plan`: the window, the rail, each cell, the cap, the pill
 (the collapsed strip shown on hover), and the open popover's frame, card, tail and every item and
-hit zone in it. The rail and its cells come from `model.rs`'s metrics and frames, the popover's
-frame from `popover_frame`, what each cell draws from `cell::cell` (`plan/cell.rs`), and what is in
+hit zone in it. The rail, its cells, their chrome and the cap's pin come from `model.rs`'s metrics
+and frames, the popover's frame, card, tail, corners, border and maximum height from
+`popover_metrics` ([mirrored with the helper](#on-macos)), what each cell draws from `cell::cell`
+(`plan/cell.rs`), and what is in
 the popover from `popover::contents` (`plan/popover.rs`), the one place that reads a cell's data to
 lay a popover out, which composes it in sections (a provider's quota blocks and session rows, a pull
 request list and its rows, the footer) at one `Scale` (the size and the display's pixel grid).
 
 The plan works out where everything the painter draws sits and how far it reaches; the painter maps
-those to pixels and keeps only what is style: the rail, card and track inks it fills with, the
-card's 1 px border, the strokes of the marks and of a CI dot without checks, the conflict band's
+those to pixels and keeps only what is style: the rail, card, border and track inks it fills with,
+the strokes of the marks and of a CI dot without checks, the conflict band's
 gradient, and two shapes drawn inside a planned rect, the silhouette's curves inside the rail and
 the pill's capsule 1 px inside the strip. A cell (`CellPlan`) carries its identity (`CellId`,
 NotchCore's `RailCell`), its rect, its arcs, its glyph's box and its figure, a `Text` like any
@@ -361,14 +385,22 @@ whether it is a ring (no checks) or a disc. Each `Arc` names its
 centre, radius, stroke, start and end in degrees (0 at three o'clock, clockwise), ink and caps: the
 track, the headline's meter from twelve o'clock, the inner ring's track and meter 6 pt inside it,
 or one segment a pull request with 9° between segments, a passing one in conflict banded
-(`ArcInk::Conflict`). The figure is 17 pt at the chosen size, centred under the ring and nudged
-2 pt right when it shows a headline, as the helper's is. The cap carries its pin's box, the popover
-its card's corner radius and its tail's base and apex. The tail is 8 pt long and 7 pt either side
-of its apex, the corners 12 pt, and the nudge 2 pt, each scaled by the size and put on the
-display's pixel grid (`Scale::value`), the helper's `metrics.value`. The painter used to work these
-out itself and disagreed: it drew the tail 8 and 7 times the size off the pixel grid, while the plan
-reserved the aligned length for it, the corners at 12 pt whatever the size, and the nudge at 2
-device pixels, a single point on a 2x display.
+(`ArcInk::Conflict`). The figure is the shared geometry's size, centred under the ring and nudged
+right when it shows a headline, as the helper's is. The cap carries its pin's box; the popover its
+card's corner radius, its border (the rect its stroke's centre line runs on, half its width inside
+the card, and its width: the helper's `strokeBorder`), its tail's base and apex, and the clip below.
+The painter used to work these out itself and disagreed: it drew the tail 8 and 7 times the size off
+the pixel grid, while the plan reserved the aligned length for it, the corners at 12 pt whatever the
+size, and the nudge at 2 device pixels, a single point on a 2x display.
+
+A popover taller than its maximum keeps its end and loses its top, as the helper's does: the helper
+does not scroll, and SwiftUI anchors the oversize card at the bottom of its panel (measured with an
+overflowing `--render`), so the footer and the last rows show and the header and first rows are cut.
+The plan lays the contents out in full, moves them up by what overflows, keeps only what reaches
+into the card and narrows each hit zone to it, and names the clip (`PopoverPlan::clip`, inside the
+border), which the painter draws the contents through. The Windows tail still points at its cell:
+on the left, right and top edges the helper's tail goes with the cut top of an overflowing card, a
+helper defect this choice does not copy.
 
 ### What the window asks the plan
 
@@ -418,40 +450,23 @@ the cell, cap and tail rules), `presenter/tests.rs` drives the presenter the sam
 The popover's spacing is a set of stacks (`Stack`, `plan/popover.rs`), each declaring the spacing
 between its items, as `PopoverView.swift` declares the helper's: the card (10 pt, inside 12 pt of
 padding), each quota block (5), the session list (8) and each session (2), each pull request list
-(6) and each row (2), and, across, a row's repository and badges (6). A nested stack writes through
+(6) and each row (2), and, across, a row's repository and badges (5). A nested stack writes through
 its parent's position, so there is nothing to hand back when it ends, and it knows its parent's
 spacing: a group's `last` item is followed by the parent's spacing, as a SwiftUI stack's last child
-is followed by its parent's. The session list, whose last item belongs to a session, ends with
-`close`, which trades its own spacing after that item for the card's. A stack adds an item's extent
-and the gap after it in one step, as the popover always added them, so no rect moved when the
-spacing became stacks. `plan/fixtures/plans.json` pins every rect, arc, point and radius of ten
-plans, every edge, size and display scale among them, to the bit, and `plan/tests/spacing.rs` names
-the spacing rules; a change
-to either moves the Windows notch's pixels. When it is meant, the golden test's failure prints the
-file's new contents.
+is followed by its parent's. The session list and each pull request list, whose last items belong
+to a session or a row, end with `close`, which trades their own spacing after that item for the
+card's. A notice, the paused line and an action error are card items like any other, followed by its
+10 pt; the sessions divider takes its 1 pt line; and a row's CI dot is centred in a 20 pt frame
+8 pt after its repository line, which the repository and badges stop short of. A stack adds an
+item's extent and the gap after it in one step. `plan/fixtures/plans.json` pins every rect, arc,
+point and radius of eleven plans, every edge, size and display scale and an overflowing list among
+them, to the bit, and `plan/tests/spacing.rs` names the spacing rules; a change to either moves the
+Windows notch's pixels. When it is meant, the golden test's failure prints the file's new contents.
 
-Where the Windows popover departs from the helper's stacks, the gap is written at that item:
-
-| Where | Windows | Helper |
-| --- | --- | --- |
-| After a provider's notice | 0 | 10 |
-| After the paused line | 4 | 10 |
-| After a pull request notice | 4 | 10 |
-| After a pull request list | 6 + 8 | 10 |
-| After an action error, before the footer | 0 | 10 |
-| The sessions divider | no height of its own | its line |
-| Repository to first badge, badge to badge | 8, 6 | 5, 5 |
-
-The header mark, the footer arrow and the CI dot are also placed on the cap band of the standard
-size's text (`cap_middle` is asked at 13, 10.5 and 10 points, unscaled) while the text is drawn at
-the chosen size, so at compact and large they sit slightly off it. On the top edge the card starts
-at the popover's top rather than below its tail (`placed.y + tail_space` adds the reserve only the
-left and right edges have), so the tail points up over the rail's bottom and the tail's length
-reserved under the card goes unused; the helper pads the top by the tail. The cap's pin is 12 pt at
-every size and sits 0.62 of the cap from its top-left corner on every edge, where the helper's is
-the size's 12 pt and mirrored toward the screen edge on the left and top edges; the figure is
-17 pt times the size off the pixel grid, where the helper's font is `metrics.value(17)`; and the
-popover has no maximum height, where the helper's is 560 pt.
+The header mark, the CI dot and the footer arrow centre on the cap band (`cap_middle`) of the size
+their text is drawn at. What differs from the helper is what each drawer lays out in its own terms:
+the Windows plan's line height is 1.3 times the size where SwiftUI's comes from the font, a badge
+that does not fit is dropped where SwiftUI truncates, and a session's status has no icon.
 
 **Typography is measured, not eyeballed.** The overlay sits next to the app's own window, so any
 mismatch in face, weight or antialiasing reads instantly as the wrong font. `win_paint/text.rs`

@@ -26,7 +26,6 @@ final class TrackingHostingView<Content: View>: NSHostingView<Content> {
   override func mouseEntered(with event: NSEvent) { entered?() }
 }
 
-let tailLength = 8.0
 private let hoverOpenDelay = 0.12
 private let hoverCloseGrace = 0.35
 private let pointerPollInterval = 0.08
@@ -70,11 +69,7 @@ func popoverPlacement(
   openLimits: @escaping () -> Void, openPullRequests: @escaping () -> Void
 ) -> PopoverPlacement? {
   guard let frame = rail.cellFrame(of: cell) else { return nil }
-  let metrics = rail.metrics
-  let tail = metrics.value(CGFloat(tailLength))
-  let width = metrics.value(CGFloat(popoverWidth))
-  let margin = pixelAligned(popoverMargin * rail.settings.size.scale, displayScale: rail.display.scale)
-  let maxHeight = min(metrics.value(560), CGFloat(rail.display.workHeight - 2 * margin))
+  let layout = popoverLayout(size: rail.settings.size, display: rail.display)
   let content: PopoverContent
   switch message.cells.first(where: { $0.id == cell }) {
   case .provider(let provider)?: content = .provider(provider)
@@ -83,16 +78,12 @@ func popoverPlacement(
   }
   func model(tailAt: CGFloat) -> PopoverModel {
     PopoverModel(
-      content: content, now: now, edge: rail.edge, metrics: metrics, width: width,
-      maxHeight: maxHeight, tailLength: tail, tail: tailAt, style: rail.settings.popoverStyle,
-      actionError: message.actionError, openLimits: openLimits, openPullRequests: openPullRequests)
+      content: content, now: now, edge: rail.edge, metrics: rail.metrics, layout: layout,
+      tail: tailAt, style: rail.settings.popoverStyle, actionError: message.actionError,
+      openLimits: openLimits, openPullRequests: openPullRequests)
   }
   let probe = NSHostingView(rootView: NotchPopoverView(model: model(tailAt: 0)))
-  var size = probe.fittingSize
-  size.height = min(size.height, maxHeight + (rail.edge.isVertical ? 0 : tail))
-  let placed = popoverFrame(
-    cell: frame, edge: rail.edge, size: size, display: rail.display,
-    scale: rail.settings.size.scale)
+  let placed = layout.frame(cell: frame, edge: rail.edge, fitting: probe.fittingSize)
   let tailAt = rail.edge.isVertical ? frame.midY - placed.minY : frame.midX - placed.minX
   return PopoverPlacement(view: NotchPopoverView(model: model(tailAt: tailAt)), frame: placed)
 }

@@ -16,6 +16,12 @@ struct NotchMetrics {
   func font(_ points: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default)
     -> Font
   {
-    .system(size: value(points), weight: weight, design: design)
+    Self.font(aligned: value(points), weight: weight, design: design)
+  }
+
+  static func font(
+    aligned size: CGFloat, weight: Font.Weight = .regular, design: Font.Design = .default
+  ) -> Font {
+    .system(size: size, weight: weight, design: design)
   }
 }

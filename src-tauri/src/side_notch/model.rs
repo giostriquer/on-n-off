@@ -219,6 +219,8 @@ pub struct RailMetrics {
     pub inset: f64,
     #[cfg(any(target_os = "windows", test))]
     pub cell: CellMetrics,
+    #[cfg(any(target_os = "windows", test))]
+    pub pin: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -232,6 +234,19 @@ pub struct CellMetrics {
     pub inner_ring_stroke: f64,
     pub inner_ring_inset: f64,
     pub glyph: f64,
+    pub label_size: f64,
+    pub label_nudge: f64,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl CellMetrics {
+    pub fn ring_radius(&self) -> f64 {
+        (self.icon_slot - self.ring_stroke) / 2.0
+    }
+
+    pub fn inner_ring_radius(&self) -> f64 {
+        self.ring_radius() - self.inner_ring_inset
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -244,6 +259,19 @@ impl RailMetrics {
     #[cfg(any(target_os = "windows", test))]
     pub fn ear(&self) -> f64 {
         self.inset
+    }
+
+    #[cfg(any(target_os = "windows", test))]
+    pub fn cap_pin(&self, edge: Edge) -> (f64, f64) {
+        let along = self.ear() * 0.62;
+        let toward = self.thickness * 0.62;
+        let away = self.thickness - toward;
+        match edge {
+            Edge::Right => (toward, along),
+            Edge::Left => (away, along),
+            Edge::Top => (along, away),
+            Edge::Bottom => (along, toward),
+        }
     }
 }
 
@@ -272,7 +300,11 @@ pub fn rail_metrics(size: NotchSize, display_scale: f64, edge: Edge) -> RailMetr
             inner_ring_stroke: value(3.0),
             inner_ring_inset: value(6.0),
             glyph: value(24.0),
+            label_size: value(17.0),
+            label_nudge: value(2.0),
         },
+        #[cfg(any(target_os = "windows", test))]
+        pin: value(12.0),
     }
 }
 
@@ -390,6 +422,92 @@ pub fn pill_frame(settings: &NotchSettings, displays: &[Display], cells: usize) 
         width,
         height,
     })
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq)]
+pub struct PopoverMetrics {
+    pub width: f64,
+    pub padding: f64,
+    pub tail_length: f64,
+    pub tail_half_width: f64,
+    pub corner_radius: f64,
+    pub border: f64,
+    pub max_height: f64,
+    gap: f64,
+    margin: f64,
+    display: Display,
+}
+
+#[cfg(any(target_os = "windows", test))]
+pub fn popover_metrics(size: NotchSize, display: &Display) -> PopoverMetrics {
+    let value = |points: f64| pixel_aligned(points * size.scale(), display.scale);
+    let margin = value(8.0);
+    PopoverMetrics {
+        width: value(272.0),
+        padding: value(12.0),
+        tail_length: value(8.0),
+        tail_half_width: value(7.0),
+        corner_radius: value(12.0),
+        border: value(1.0),
+        max_height: value(560.0).min(display.work_height - 2.0 * margin),
+        gap: value(2.0),
+        margin,
+        display: display.clone(),
+    }
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl PopoverMetrics {
+    pub fn frame(&self, cell: &Layout, edge: Edge, fitting: (f64, f64)) -> Layout {
+        let display = &self.display;
+        let w = fitting.0;
+        let h = fitting.1.min(
+            self.max_height
+                + if edge.is_vertical() {
+                    0.0
+                } else {
+                    self.tail_length
+                },
+        );
+        let (mid_x, mid_y) = (cell.x + cell.width / 2.0, cell.y + cell.height / 2.0);
+        let (mut x, mut y) = match edge {
+            Edge::Right => (cell.x - self.gap - w, mid_y - h / 2.0),
+            Edge::Left => (cell.x + cell.width + self.gap, mid_y - h / 2.0),
+            Edge::Top => (mid_x - w / 2.0, cell.y + cell.height + self.gap),
+            Edge::Bottom => (mid_x - w / 2.0, cell.y - self.gap - h),
+        };
+        let min_x = display.x + self.margin;
+        let max_x = display.x + display.width - self.margin - w;
+        let min_y = display.work_y + self.margin;
+        let max_y = display.work_y + display.work_height - self.margin - h;
+        x = x.max(min_x).min(max_x.max(min_x));
+        y = y.max(min_y).min(max_y.max(min_y));
+        Layout {
+            x: pixel_aligned(x, display.scale),
+            y: pixel_aligned(y, display.scale),
+            width: w,
+            height: h,
+        }
+    }
+
+    pub fn card(&self, frame: &Layout, edge: Edge) -> Layout {
+        let tail = self.tail_length;
+        let mut card = *frame;
+        match edge {
+            Edge::Right => card.width -= tail,
+            Edge::Left => {
+                card.x += tail;
+                card.width -= tail;
+            }
+            Edge::Top => {
+                card.y += tail;
+                card.height -= tail;
+            }
+            Edge::Bottom => card.height -= tail,
+        }
+        card
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]

@@ -7,9 +7,10 @@ use super::{
 use crate::dto::{AgentId, CiState};
 use crate::limits::window_at::WindowAt;
 use crate::side_notch::model::frame::{CellData, Notice, PrCell, PrList, PrRow, ProviderCell};
-use crate::side_notch::model::{meter_color, workspace_share_wording};
+use crate::side_notch::model::{meter_color, workspace_share_wording, PopoverMetrics};
 use crate::side_notch::sessions::{LiveSession, SessionStatus};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
+use std::fmt::Display;
 
 const WHITE: Color = [255, 255, 255, 255];
 const NO_CHECKS_RING: Color = [89, 89, 89, 255];
@@ -63,10 +64,6 @@ impl<'a> Stack<'a> {
 
     fn space(&mut self) {
         *self.at += self.spacing;
-    }
-
-    fn gap(&mut self, gap: f64) {
-        *self.at += gap;
     }
 
     fn close(self) {
@@ -132,32 +129,38 @@ struct Block {
     detail: Option<String>,
 }
 
-struct Composer<'a> {
+struct Composer<'a, Tz: TimeZone> {
     scale: Scale,
     typeset: Typesetter<'a>,
     now: DateTime<Utc>,
+    zone: &'a Tz,
     x: f64,
     inner_w: f64,
     out: Contents,
 }
 
-pub(super) fn contents(
+pub(super) fn contents<Tz: TimeZone>(
     cell: &CellData,
     action_error: Option<&str>,
-    inner_w: f64,
+    chrome: &PopoverMetrics,
     scale: Scale,
     text_metrics: &dyn TextMetrics,
     now: DateTime<Utc>,
-) -> Contents {
+    zone: &Tz,
+) -> Contents
+where
+    Tz::Offset: Display,
+{
     let mut composer = Composer {
         scale,
         typeset: Typesetter::new(text_metrics, scale.display),
         now,
-        x: scale.value(12.0),
-        inner_w,
+        zone,
+        x: chrome.padding,
+        inner_w: chrome.width - 2.0 * chrome.padding,
         out: Contents::default(),
     };
-    let mut top = scale.value(12.0);
+    let mut top = chrome.padding;
     let mut card = Stack::new(&mut top, scale.value(10.0));
     let footer = match cell {
         CellData::Provider(provider) => {
@@ -173,7 +176,10 @@ pub(super) fn contents(
     composer.out
 }
 
-impl Composer<'_> {
+impl<Tz: TimeZone> Composer<'_, Tz>
+where
+    Tz::Offset: Display,
+{
     fn v(&self, points: f64) -> f64 {
         self.scale.value(points)
     }
@@ -184,7 +190,7 @@ impl Composer<'_> {
 
     fn header(&mut self, at: f64, kind: MarkKind, title: String) {
         let (x, v13) = (self.x, self.v(13.0));
-        let lift = self.typeset.cap_middle(13.0, TextWeight::Semibold) - v13 / 2.0;
+        let lift = self.typeset.cap_middle(v13, TextWeight::Semibold) - v13 / 2.0;
         self.out.item(
             PopItem::Mark { kind, size: v13 },
             R::new(x, at + lift, v13, v13),
@@ -205,11 +211,16 @@ impl Composer<'_> {
 
     fn notice(&mut self, card: &mut Stack, notice: &Notice) {
         let (size, line_h) = (self.v(11.0), self.line_h(11.0));
-        for line in self
+        let lines = self
             .typeset
-            .wrap(&notice.text, self.inner_w, size, TextWeight::Regular, 4)
-        {
-            let at = card.line(line_h);
+            .wrap(&notice.text, self.inner_w, size, TextWeight::Regular, 4);
+        let count = lines.len();
+        for (index, line) in lines.into_iter().enumerate() {
+            let at = if index + 1 == count {
+                card.item(line_h)
+            } else {
+                card.line(line_h)
+            };
             self.out.text(
                 R::new(self.x, at, self.inner_w, line_h),
                 line,
@@ -231,7 +242,7 @@ impl Composer<'_> {
             self.notice(card, notice);
         }
         if let Some(paused) = &provider.paused {
-            let at = card.item_then(self.line_h(10.0), self.v(4.0));
+            let at = card.item(self.line_h(10.0));
             self.out.text(
                 R::new(self.x, at, self.inner_w, self.line_h(10.0)),
                 paused.text.clone(),
@@ -268,7 +279,7 @@ impl Composer<'_> {
             self.quota_block(card, block, provider.provider);
         }
         if !provider.sessions.is_empty() {
-            let divider = card.item(0.0);
+            let divider = card.item(1.0);
             self.out
                 .item(PopItem::Divider, R::new(self.x, divider, self.inner_w, 1.0));
             let mut list = card.nest(self.v(8.0));
@@ -282,7 +293,7 @@ impl Composer<'_> {
     fn quota_block(&mut self, card: &mut Stack, block: Block, provider: AgentId) {
         let (x, inner_w) = (self.x, self.inner_w);
         let note = self.typeset.ellipsize(
-            &block.at.notch_note(&chrono::Local),
+            &block.at.notch_note(self.zone),
             inner_w * 0.6,
             self.v(10.0),
             TextWeight::Regular,
@@ -394,11 +405,9 @@ impl Composer<'_> {
         self.header(header, MarkKind::PullRequests, "Pull requests".into());
         if let Some(notice) = &pulls.notice {
             self.notice(card, notice);
-            card.gap(self.v(4.0));
         }
         for list in pulls.reading.iter().flat_map(|reading| &reading.lists) {
             self.pull_list(card, list);
-            card.gap(self.v(8.0));
         }
     }
 
@@ -437,6 +446,7 @@ impl Composer<'_> {
         for row in &list.items {
             self.pull_row(&mut rows, row);
         }
+        rows.close();
     }
 
     fn pull_row(&mut self, rows: &mut Stack, row: &PrRow) {
@@ -479,7 +489,8 @@ impl Composer<'_> {
         pull.space();
         let repo_at = pull.last(self.line_h(10.0));
         let repo_size = self.v(10.0);
-        let badge_limit = x + inner_w - self.v(7.0) - self.v(10.0);
+        let (dot, dot_frame) = (self.v(7.0), self.v(20.0));
+        let badge_limit = x + inner_w - dot_frame - self.v(8.0);
         let repo = self.typeset.ellipsize(
             &format!("{} #{}", row.repo, row.number),
             badge_limit - x,
@@ -487,8 +498,8 @@ impl Composer<'_> {
             TextWeight::Regular,
         );
         let mut badge_x =
-            x + self.typeset.width(&repo, repo_size, TextWeight::Regular) + self.v(8.0);
-        let mut along = Stack::new(&mut badge_x, self.v(6.0));
+            x + self.typeset.width(&repo, repo_size, TextWeight::Regular) + self.v(5.0);
+        let mut along = Stack::new(&mut badge_x, self.v(5.0));
         self.out.text(
             R::new(x, repo_at, inner_w, self.line_h(10.0)),
             repo,
@@ -525,10 +536,10 @@ impl Composer<'_> {
                 },
             },
             R::new(
-                x + inner_w - self.v(7.0),
-                repo_at + self.typeset.cap_middle(10.0, TextWeight::Regular) - self.v(7.0) / 2.0,
-                self.v(7.0),
-                self.v(7.0),
+                x + inner_w - dot_frame + (dot_frame - dot) / 2.0,
+                repo_at + self.typeset.cap_middle(repo_size, TextWeight::Regular) - dot / 2.0,
+                dot,
+                dot,
             ),
         );
         let row_rect = R::new(x, row_top, inner_w, repo_at + self.line_h(10.0) - row_top);
@@ -553,7 +564,7 @@ impl Composer<'_> {
         };
         let (x, inner_w) = (self.x, self.inner_w);
         if let Some(error) = action_error {
-            let at = card.item_then(self.line_h(10.0), 0.0);
+            let at = card.item(self.line_h(10.0));
             self.out.text(
                 R::new(x, at, inner_w, self.line_h(10.0)),
                 error.into(),
@@ -583,7 +594,7 @@ impl Composer<'_> {
             },
             R::new(
                 x + inner_w - arrow,
-                footer + self.typeset.cap_middle(10.5, TextWeight::Medium) - arrow / 2.0,
+                footer + self.typeset.cap_middle(size, TextWeight::Medium) - arrow / 2.0,
                 arrow,
                 arrow,
             ),

@@ -15,7 +15,15 @@ mod layout;
 mod spacing;
 mod text;
 
-fn plan(displays: &[Display], data: &RailData, hover: Hover, now: DateTime<Utc>) -> Option<Plan> {
+fn plan<Tz: TimeZone>(
+    displays: &[Display],
+    data: &RailData,
+    hover: Hover,
+    now: DateTime<Tz>,
+) -> Option<Plan>
+where
+    Tz::Offset: fmt::Display,
+{
     super::plan(displays, data, hover, now, &FixedAdvance)
 }
 
@@ -89,19 +97,33 @@ pub fn pr(number: u64, title: &str, repo: &str) -> serde_json::Value {
         "baseRef": "main", "updatedAt": "2026-09-01T10:00:00Z"
     })
 }
+pub fn prs_dto(
+    status: &str,
+    hint: Option<&str>,
+    stale: bool,
+    total: usize,
+    mine: Vec<serde_json::Value>,
+) -> GithubPrsDto {
+    serde_json::from_value(serde_json::json!({
+        "status": status, "hint": hint, "stale": stale, "scope": [],
+        "mine": {"total": total, "items": mine},
+        "reviewRequested": {"total": 0, "items": []},
+        "assigned": {"total": 0, "items": []}
+    }))
+    .expect("a pull request read")
+}
+pub fn long_rows(count: u64) -> Vec<serde_json::Value> {
+    (1..=count)
+        .map(|number| pr(number, &format!("Fix flaky test {number}"), "acme/webapp"))
+        .collect()
+}
 fn pulls_read(
     status: &str,
     hint: Option<&str>,
     total: usize,
     rows: Vec<serde_json::Value>,
 ) -> CellData {
-    let dto: GithubPrsDto = serde_json::from_value(serde_json::json!({
-        "status": status, "hint": hint, "stale": false, "scope": [],
-        "mine": {"total": total, "items": rows},
-        "reviewRequested": {"total": 0, "items": []},
-        "assigned": {"total": 0, "items": []}
-    }))
-    .expect("a pull request read");
+    let dto = prs_dto(status, hint, false, total, rows);
     let only = NotchSettings {
         providers: Vec::new(),
         ..settings()
@@ -181,13 +203,19 @@ fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderCell {
     projected(codex_member_card(share))
 }
 fn popover_plan(provider: ProviderCell) -> Plan {
+    popover_plan_at(provider, now())
+}
+fn popover_plan_at<Tz: TimeZone>(provider: ProviderCell, now: DateTime<Tz>) -> Plan
+where
+    Tz::Offset: fmt::Display,
+{
     let opened = open_on(CellId::Provider(provider.provider));
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     plan(
         &displays,
         &data(vec![CellData::Provider(provider)]),
         opened,
-        now(),
+        now,
     )
     .expect("fits")
 }

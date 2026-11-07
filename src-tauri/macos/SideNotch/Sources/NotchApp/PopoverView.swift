@@ -12,9 +12,7 @@ struct PopoverModel {
   let now: Date
   let edge: NotchCore.Edge
   let metrics: NotchMetrics
-  let width: CGFloat
-  let maxHeight: CGFloat
-  let tailLength: CGFloat
+  let layout: PopoverLayout
   let tail: CGFloat
   let style: NotchStyle
   let actionError: String?
@@ -67,8 +65,8 @@ private struct PopoverCard: View {
         }
       }
     }
-    .padding(metrics.value(12))
-    .frame(width: model.width, alignment: .topLeading)
+    .padding(CGFloat(model.layout.padding))
+    .frame(width: CGFloat(model.layout.width), alignment: .topLeading)
     .modifier(PopoverSurface(model: model))
     .foregroundColor(.white)
     .preferredColorScheme(.dark)
@@ -77,28 +75,26 @@ private struct PopoverCard: View {
 
 private struct PopoverSurface: ViewModifier {
   let model: PopoverModel
-  private var metrics: NotchMetrics { model.metrics }
-  private var cornerRadius: CGFloat { metrics.value(12) }
+  private var layout: PopoverLayout { model.layout }
 
   func body(content: Content) -> some View {
     content.padding(tailPadding).notchSurface(
       popoverInk,
-      in: PopoverOutline(
-        edge: model.edge, tailLength: model.tailLength, tail: model.tail,
-        tailHalfWidth: metrics.value(7), cornerRadius: cornerRadius),
+      in: PopoverOutline(edge: model.edge, layout: layout, tail: model.tail),
       style: model.style,
-      solidBorder: RoundedRectangle(cornerRadius: cornerRadius)
-        .strokeBorder(Color.white.opacity(0.11), lineWidth: metrics.value(1))
+      solidBorder: RoundedRectangle(cornerRadius: CGFloat(layout.cornerRadius))
+        .strokeBorder(Color.white.opacity(0.11), lineWidth: CGFloat(layout.border))
         .padding(tailPadding))
   }
 
   private var tailPadding: EdgeInsets {
+    let tail = CGFloat(layout.tailLength)
     var insets = EdgeInsets()
     switch model.edge {
-    case .right: insets.trailing = model.tailLength
-    case .left: insets.leading = model.tailLength
-    case .top: insets.top = model.tailLength
-    case .bottom: insets.bottom = model.tailLength
+    case .right: insets.trailing = tail
+    case .left: insets.leading = tail
+    case .top: insets.top = tail
+    case .bottom: insets.bottom = tail
     }
     return insets
   }
@@ -106,20 +102,12 @@ private struct PopoverSurface: ViewModifier {
 
 private struct PopoverOutline: Shape {
   let edge: NotchCore.Edge
-  let tailLength: CGFloat
+  let layout: PopoverLayout
   let tail: CGFloat
-  let tailHalfWidth: CGFloat
-  let cornerRadius: CGFloat
 
   func path(in rect: CGRect) -> Path {
-    var card = rect
-    switch edge {
-    case .right: card.size.width -= tailLength
-    case .left: card.origin.x += tailLength; card.size.width -= tailLength
-    case .top: card.origin.y += tailLength; card.size.height -= tailLength
-    case .bottom: card.size.height -= tailLength
-    }
-    let body = Path(roundedRect: card, cornerRadius: cornerRadius)
+    let card = layout.card(in: rect, edge: edge)
+    let body = Path(roundedRect: card, cornerRadius: CGFloat(layout.cornerRadius))
     if #available(macOS 14.0, *) {
       return body.union(tailPath(card: card, in: rect, foot: 1))
     }
@@ -130,7 +118,7 @@ private struct PopoverOutline: Shape {
 
   private func tailPath(card: CGRect, in rect: CGRect, foot: CGFloat) -> Path {
     let along = edge.isVertical ? card.minY + tail : card.minX + tail
-    let half = tailHalfWidth
+    let half = CGFloat(layout.tailHalfWidth)
     let points: [CGPoint]
     switch edge {
     case .right:

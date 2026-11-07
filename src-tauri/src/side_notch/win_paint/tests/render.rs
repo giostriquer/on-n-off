@@ -470,6 +470,119 @@ fn each_row_paints_its_work_or_personal_ink_on_its_stripe_and_copy_icon() {
     assert_eq!(painted[2], (0, 0), "an unread row's copy icon stays muted");
 }
 
+fn rgb(pixmap: &tiny_skia::Pixmap, x: u32, y: u32) -> [u8; 4] {
+    let pixel = pixmap.pixel(x, y).expect("inside the pixmap");
+    [pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()]
+}
+
+fn within_three(pixel: [u8; 4], ink: [u8; 4]) -> bool {
+    pixel
+        .iter()
+        .zip(ink)
+        .all(|(value, ink)| value.abs_diff(ink) <= 3)
+}
+
+#[test]
+fn the_cards_border_is_one_point_of_border_ink_then_card_ink() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 2.0)];
+    let cells = vec![CellData::Provider(session_only(AgentId::Claude, 42.0))];
+    let planned = plan(&displays, &data(cells), open_on(CLAUDE), now()).expect("fits");
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    assert_eq!(planned.edge, crate::side_notch::model::Edge::Right);
+    assert_eq!(popover.border.width, 1.0, "a standard border is 1 pt");
+    let pixmap = render(&planned);
+    let scale = planned.display_scale;
+    let width = (popover.border.width * scale).round() as u32;
+    let edge = (popover.card.x * scale).round() as u32;
+    let row = (popover.card.mid_y() * scale).round() as u32;
+    for inset in 0..width {
+        let pixel = rgb(&pixmap, edge + inset, row);
+        assert!(
+            within_three(pixel, [40, 40, 43, 255]),
+            "{inset} px in from the card's far edge is border ink, not {pixel:?}"
+        );
+    }
+    let pixel = rgb(&pixmap, edge + width, row);
+    assert!(
+        within_three(pixel, POPOVER_INK),
+        "{width} px in the card's own ink begins, not {pixel:?}"
+    );
+}
+
+fn outside(x: f64, y: f64, rect: R, radius: f64) -> bool {
+    let (left, top, right, bottom) = (rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
+    if x <= left - 0.5 || x >= right + 0.5 || y <= top - 0.5 || y >= bottom + 0.5 {
+        return true;
+    }
+    let dx = (left + radius - x).max(x - (right - radius)).max(0.0);
+    let dy = (top + radius - y).max(y - (bottom - radius)).max(0.0);
+    dx > 0.0 && dy > 0.0 && dx.hypot(dy) > radius + 1.0
+}
+
+#[test]
+fn a_popover_taller_than_its_maximum_paints_its_contents_only_inside_the_clip() {
+    let displays = vec![display("d1", 0.0, 0.0, 1920.0, 400.0, 2.0)];
+    let planned = plan(
+        &displays,
+        &data(vec![pulls(long_rows(25))]),
+        open_on(CellId::PullRequests),
+        now(),
+    )
+    .expect("fits");
+    let popover = planned.popover.as_ref().expect("the popover is open");
+    let clip = popover.clip.expect("the card cuts what overflows");
+    let with = |entries: Vec<(PopItem, R)>| {
+        let mut changed = planned.clone();
+        changed.popover.as_mut().expect("open").entries = entries;
+        render(&changed)
+    };
+    let empty = with(Vec::new());
+    let contents = render(&planned);
+    let covered = with(vec![(
+        PopItem::Divider,
+        R::new(0.0, 0.0, planned.window.w, planned.window.h),
+    )]);
+    let scale = planned.display_scale;
+    let rect = R::new(
+        clip.rect.x * scale,
+        clip.rect.y * scale,
+        clip.rect.w * scale,
+        clip.rect.h * scale,
+    );
+    let radius = clip.radius * scale;
+    let (mut outside_checked, mut contents_inside, mut covered_inside) = (0, 0, 0);
+    for y in 0..empty.height() {
+        for x in 0..empty.width() {
+            let bare = rgb(&empty, x, y);
+            if outside(f64::from(x) + 0.5, f64::from(y) + 0.5, rect, radius) {
+                outside_checked += 1;
+                assert_eq!(
+                    rgb(&contents, x, y),
+                    bare,
+                    "contents painted outside the clip at {x},{y}"
+                );
+                assert_eq!(
+                    rgb(&covered, x, y),
+                    bare,
+                    "a covering item painted outside the clip at {x},{y}"
+                );
+            } else {
+                contents_inside += usize::from(rgb(&contents, x, y) != bare);
+                covered_inside += usize::from(rgb(&covered, x, y) != bare);
+            }
+        }
+    }
+    assert!(
+        outside_checked > 1000,
+        "the card's rim and the rail were compared: {outside_checked}"
+    );
+    assert!(contents_inside > 0, "the contents paint inside the clip");
+    assert!(
+        covered_inside > 1000,
+        "a covering item paints the clip: {covered_inside}"
+    );
+}
+
 fn device(rect: R, scale: f64) -> R {
     R::new(
         rect.x * scale,

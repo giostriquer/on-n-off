@@ -374,12 +374,15 @@ fn draw_text(pixmap: &mut Pixmap, run: &Text, rect: &R, scale: f32) {
 fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, scale: f32) {
     if let Some(path) = rounded_rect_path(popover.card, popover.radius, scale) {
         paint_solid(pixmap, &path, POPOVER_INK, false);
+    }
+    let border = popover.border;
+    if let Some(path) = rounded_rect_path(border.rect, border.radius, scale) {
         let mut paint = Paint::default();
         paint.set_color_rgba8(255, 255, 255, 28);
         paint.anti_alias = true;
         if let Some(stroked) = path.stroke(
             &Stroke {
-                width: 1.0,
+                width: (border.width * f64::from(scale)) as f32,
                 ..Default::default()
             },
             1.0,
@@ -405,6 +408,31 @@ fn draw_popover(pixmap: &mut Pixmap, popover: &PopoverPlan, scale: f32) {
         paint_solid(pixmap, &path, POPOVER_INK, false);
     }
 
+    match popover.clip {
+        Some(clip) => {
+            let mut layer = pixmap.clone();
+            draw_entries(&mut layer, popover, scale);
+            let mask = rounded_rect_path(clip.rect, clip.radius, scale).and_then(|path| {
+                let mut mask = tiny_skia::Mask::new(pixmap.width(), pixmap.height())?;
+                mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+                Some(mask)
+            });
+            if let Some(mask) = mask {
+                pixmap.draw_pixmap(
+                    0,
+                    0,
+                    layer.as_ref(),
+                    &tiny_skia::PixmapPaint::default(),
+                    Transform::identity(),
+                    Some(&mask),
+                );
+            }
+        }
+        None => draw_entries(pixmap, popover, scale),
+    }
+}
+
+fn draw_entries(pixmap: &mut Pixmap, popover: &PopoverPlan, scale: f32) {
     for (item, rect) in &popover.entries {
         let px = R::new(
             rect.x * scale as f64,

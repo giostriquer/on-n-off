@@ -303,6 +303,64 @@ fn visual_dump() {
         render(&planned).encode_png().unwrap(),
     )
     .unwrap();
+
+    for (name, edge) in [("left", Edge::Left), ("top", Edge::Top)] {
+        let mut capped = settings.clone();
+        capped.edge = edge;
+        capped.size = crate::side_notch::model::NotchSize::Large;
+        let planned = plan(
+            &displays,
+            &RailData {
+                settings: capped,
+                cells: data.cells.clone(),
+                action_error: None,
+            },
+            Hover {
+                rail_open: true,
+                cap_hovered: true,
+                ..Hover::default()
+            },
+            now(),
+            &DirectWrite,
+        )
+        .expect("cap");
+        std::fs::write(
+            format!("{out}/cap-{name}-large.png"),
+            render(&planned).encode_png().unwrap(),
+        )
+        .unwrap();
+    }
+
+    let long_pulls = crate::side_notch::plan::tests::prs_dto(
+        "ok",
+        None,
+        false,
+        30,
+        crate::side_notch::plan::tests::long_rows(25),
+    );
+    let long = frame::rail(
+        &settings,
+        Vec::<(AgentId, Option<NotchProvider>, Vec<LiveSession>)>::new(),
+        Some(&long_pulls),
+        None,
+    );
+    let short = vec![display("d1", 0.0, 0.0, 1920.0, 700.0, 1.0)];
+    let planned = plan(
+        &short,
+        &long,
+        Hover {
+            active: long.cells.last().map(CellId::of),
+            ..Hover::default()
+        },
+        now(),
+        &DirectWrite,
+    )
+    .expect("overflowing popover");
+    std::fs::write(
+        format!("{out}/popover-overflow.png"),
+        render(&planned).encode_png().unwrap(),
+    )
+    .unwrap();
 }
 
 #[ignore]

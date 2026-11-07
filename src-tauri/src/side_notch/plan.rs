@@ -9,11 +9,13 @@ pub use text::{TextMetrics, TextWeight};
 
 use super::model::frame::{CellData, RailData, Tone};
 use super::model::{
-    layout, pill_frame, pixel_aligned, rail_cell_frames, rail_metrics, selected_display, Color,
-    Display, Edge, Layout, RailMetrics, ShowMode, TRIP_RED,
+    layout, pill_frame, pixel_aligned, popover_metrics, rail_cell_frames, rail_metrics,
+    selected_display, Color, Display, Edge, Layout, PopoverMetrics, RailMetrics, ShowMode,
+    TRIP_RED,
 };
 use crate::dto::AgentId;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
+use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -39,11 +41,31 @@ impl R {
     fn translated(&self, dx: f64, dy: f64) -> R {
         R::new(self.x + dx, self.y + dy, self.w, self.h)
     }
+    fn bottom(&self) -> f64 {
+        self.y + self.h
+    }
+    fn within(&self, bounds: &R) -> Option<R> {
+        let (left, top) = (self.x.max(bounds.x), self.y.max(bounds.y));
+        let right = (self.x + self.w).min(bounds.x + bounds.w);
+        let bottom = self.bottom().min(bounds.bottom());
+        (right > left && bottom > top).then(|| R::new(left, top, right - left, bottom - top))
+    }
 }
 
 impl From<Layout> for R {
     fn from(frame: Layout) -> Self {
         R::new(frame.x, frame.y, frame.width, frame.height)
+    }
+}
+
+impl From<R> for Layout {
+    fn from(rect: R) -> Self {
+        Layout {
+            x: rect.x,
+            y: rect.y,
+            width: rect.w,
+            height: rect.h,
+        }
     }
 }
 
@@ -65,41 +87,6 @@ impl Scale {
     fn value(self, points: f64) -> f64 {
         pixel_aligned(points * self.size, self.display)
     }
-}
-
-const POPOVER_WIDTH: f64 = 272.0;
-const POPOVER_MARGIN: f64 = 8.0;
-const TAIL_LENGTH: f64 = 8.0;
-const TAIL_HALF_WIDTH: f64 = 7.0;
-const CARD_RADIUS: f64 = 12.0;
-const PIN_SIZE: f64 = 12.0;
-
-fn popover_frame(cell: &R, edge: Edge, size: (f64, f64), display: &Display, size_scale: f64) -> R {
-    let scale = Scale {
-        size: size_scale,
-        display: display.scale,
-    };
-    let gap = scale.value(2.0);
-    let margin = scale.value(POPOVER_MARGIN);
-    let (w, h) = size;
-    let (mut x, mut y) = match edge {
-        Edge::Right => (cell.x - gap - w, cell.mid_y() - h / 2.0),
-        Edge::Left => (cell.x + cell.w + gap, cell.mid_y() - h / 2.0),
-        Edge::Top => (cell.mid_x() - w / 2.0, cell.y + cell.h + gap),
-        Edge::Bottom => (cell.mid_x() - w / 2.0, cell.y - gap - h),
-    };
-    let min_x = display.x + margin;
-    let max_x = display.x + display.width - margin - w;
-    let min_y = display.work_y + margin;
-    let max_y = display.work_y + display.work_height - margin - h;
-    x = x.clamp(min_x.min(max_x), max_x.max(min_x));
-    y = y.clamp(min_y.min(max_y), max_y.max(min_y));
-    R::new(
-        pixel_aligned(x, display.scale),
-        pixel_aligned(y, display.scale),
-        w,
-        h,
-    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -213,14 +200,17 @@ pub struct Tail {
     pub apex: (f64, f64),
 }
 
-impl Tail {
-    fn translated(self, dx: f64, dy: f64) -> Self {
-        let shift = |(x, y): (f64, f64)| (x + dx, y + dy);
-        Tail {
-            base: self.base.map(shift),
-            apex: shift(self.apex),
-        }
-    }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Border {
+    pub rect: R,
+    pub radius: f64,
+    pub width: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Clip {
+    pub rect: R,
+    pub radius: f64,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -228,6 +218,8 @@ pub struct PopoverPlan {
     pub rect: R,
     pub card: R,
     pub radius: f64,
+    pub border: Border,
+    pub clip: Option<Clip>,
     pub tail: Tail,
     pub entries: Vec<(PopItem, R)>,
     pub zones: Vec<(Zone, R)>,
@@ -274,13 +266,18 @@ impl Plan {
     }
 }
 
-pub fn plan(
+pub fn plan<Tz: TimeZone>(
     displays: &[Display],
     data: &RailData,
     hover: Hover,
-    now: DateTime<Utc>,
+    now: DateTime<Tz>,
     text_metrics: &dyn TextMetrics,
-) -> Option<Plan> {
+) -> Option<Plan>
+where
+    Tz::Offset: fmt::Display,
+{
+    let zone = now.timezone();
+    let now = now.with_timezone(&Utc);
     let settings = &data.settings;
     let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
@@ -303,86 +300,45 @@ pub fn plan(
         R::new(rail.x, rail.y, metrics.ear(), rail.h)
     };
 
-    let popover = hover.active.filter(|_| !collapsed).and_then(|id| {
+    let opened = hover.active.filter(|_| !collapsed).and_then(|id| {
         let index = data.cells.iter().position(|cell| CellId::of(cell) == id)?;
-        let cell_rect = &frames[index];
-        let card_w = scale.value(POPOVER_WIDTH);
-        let padding = scale.value(12.0);
-        let inner_w = card_w - 2.0 * padding;
-        let tail_space = if edge.is_vertical() {
-            scale.value(TAIL_LENGTH)
-        } else {
-            0.0
-        };
+        let cell = frames[index];
+        let chrome = popover_metrics(settings.size, display);
         let contents = popover::contents(
             data.cells.get(index)?,
             data.action_error.as_deref(),
-            inner_w,
+            &chrome,
             scale,
             text_metrics,
             now,
+            &zone,
         );
-        let card_h = contents.bottom() + padding;
-        let height = card_h
-            + if edge.is_vertical() {
-                0.0
-            } else {
-                scale.value(TAIL_LENGTH)
-            };
-        let placed = popover_frame(
-            cell_rect,
-            edge,
-            (card_w + tail_space, height),
-            display,
-            scale.size,
-        );
-        let card = R::new(
-            if edge == Edge::Left {
-                placed.x + tail_space
-            } else {
-                placed.x
-            },
-            if edge == Edge::Top {
-                placed.y + tail_space
-            } else {
-                placed.y
-            },
-            card_w,
-            card_h,
-        );
-        let tail = if edge.is_vertical() {
-            cell_rect.mid_y() - placed.y
+        let content_h = contents.bottom() + chrome.padding;
+        let tail = chrome.tail_length;
+        let fitting = if edge.is_vertical() {
+            (chrome.width + tail, content_h)
         } else {
-            cell_rect.mid_x() - placed.x
+            (chrome.width, content_h + tail)
         };
-        Some(PopoverPlan {
-            rect: placed,
+        let rect = chrome.frame(&cell.into(), edge, fitting);
+        let card = R::from(chrome.card(&rect, edge));
+        Some(Opened {
+            cell,
+            rect: rect.into(),
             card,
-            radius: scale.value(CARD_RADIUS),
-            tail: tail_of(
-                &card,
-                edge,
-                tail,
-                scale.value(TAIL_LENGTH),
-                scale.value(TAIL_HALF_WIDTH),
-            ),
-            entries: contents
-                .entries
-                .into_iter()
-                .map(|(item, rect)| (item, rect.translated(card.x, card.y)))
-                .collect(),
-            zones: contents
-                .zones
-                .into_iter()
-                .map(|(zone, rect)| (zone, rect.translated(card.x, card.y)))
-                .collect(),
+            contents,
+            overflow: if content_h > chrome.max_height {
+                content_h - card.h
+            } else {
+                0.0
+            },
+            chrome,
         })
     });
 
-    let window = match &popover {
-        Some(popover) => union(&rail, &popover.rect),
-        None => rail,
-    };
+    let window = opened
+        .as_ref()
+        .map_or(rail, |opened| union(&rail, &opened.rect));
     let pill = if collapsed {
         pill_frame(settings, displays, data.cells.len()).map(R::from)
     } else {
@@ -399,13 +355,14 @@ pub fn plan(
                 frame.translated(-window.x, -window.y),
                 hover.active == Some(CellId::of(cell)),
                 &metrics.cell,
-                scale,
                 &typeset,
                 now,
             )
         })
         .collect();
     let cap = cap.translated(-window.x, -window.y);
+    let pin = metrics.pin;
+    let (pin_x, pin_y) = metrics.cap_pin(edge);
 
     Some(Plan {
         frame: rail,
@@ -420,22 +377,99 @@ pub fn plan(
             hovered: hover.cap_hovered,
             pinned: settings.show == ShowMode::Always,
             pin: R::new(
-                cap.x + cap.w * 0.62 - PIN_SIZE / 2.0,
-                cap.y + cap.h * 0.62 - PIN_SIZE / 2.0,
-                PIN_SIZE,
-                PIN_SIZE,
+                cap.x + pin_x - pin / 2.0,
+                cap.y + pin_y - pin / 2.0,
+                pin,
+                pin,
             ),
         },
         pill: pill.map(|pill| pill.translated(-window.x, -window.y)),
-        popover: popover.map(|popover| translate_popover(popover, -window.x, -window.y)),
+        popover: opened.map(|opened| opened.in_window(&window, edge)),
     })
 }
 
-fn tail_of(card: &R, edge: Edge, along: f64, length: f64, half: f64) -> Tail {
+struct Opened {
+    cell: R,
+    rect: R,
+    card: R,
+    contents: popover::Contents,
+    overflow: f64,
+    chrome: PopoverMetrics,
+}
+
+impl Opened {
+    fn in_window(self, window: &R, edge: Edge) -> PopoverPlan {
+        let card = self.card.translated(-window.x, -window.y);
+        let cell = self.cell.translated(-window.x, -window.y);
+        let (dx, dy) = (
+            self.card.x - window.x,
+            self.card.y - window.y - self.overflow,
+        );
+        let border = self.chrome.border;
+        let radius = self.chrome.corner_radius;
+        let inside = Clip {
+            rect: R::new(
+                card.x + border,
+                card.y + border,
+                card.w - 2.0 * border,
+                card.h - 2.0 * border,
+            ),
+            radius: radius - border,
+        };
+        let clipped = self.overflow > 0.0;
+        let shown = |rect: &R| rect.bottom() > inside.rect.y && rect.y < inside.rect.bottom();
+        PopoverPlan {
+            rect: self.rect.translated(-window.x, -window.y),
+            card,
+            radius,
+            border: Border {
+                rect: R::new(
+                    card.x + border / 2.0,
+                    card.y + border / 2.0,
+                    card.w - border,
+                    card.h - border,
+                ),
+                radius: radius - border / 2.0,
+                width: border,
+            },
+            clip: clipped.then_some(inside),
+            tail: tail_of(
+                &card,
+                edge,
+                (cell.mid_x(), cell.mid_y()),
+                self.chrome.tail_length,
+                self.chrome.tail_half_width,
+            ),
+            entries: self
+                .contents
+                .entries
+                .into_iter()
+                .map(|(item, rect)| (item, rect.translated(dx, dy)))
+                .filter(|(_, rect)| !clipped || shown(rect))
+                .collect(),
+            zones: self
+                .contents
+                .zones
+                .into_iter()
+                .filter_map(|(zone, rect)| {
+                    let rect = rect.translated(dx, dy);
+                    let rect = if clipped {
+                        rect.within(&inside.rect)?
+                    } else {
+                        rect
+                    };
+                    Some((zone, rect))
+                })
+                .collect(),
+        }
+    }
+}
+
+fn tail_of(card: &R, edge: Edge, toward: (f64, f64), length: f64, half: f64) -> Tail {
     let at = if edge.is_vertical() {
-        card.y + along
+        toward.1
     } else {
-        card.x + along
+        toward.0
     };
     match edge {
         Edge::Right => Tail {
@@ -455,19 +489,6 @@ fn tail_of(card: &R, edge: Edge, along: f64, length: f64, half: f64) -> Tail {
             apex: (at, card.y + card.h + length),
         },
     }
-}
-
-fn translate_popover(mut popover: PopoverPlan, dx: f64, dy: f64) -> PopoverPlan {
-    popover.rect = popover.rect.translated(dx, dy);
-    popover.card = popover.card.translated(dx, dy);
-    popover.tail = popover.tail.translated(dx, dy);
-    for (_, rect) in &mut popover.entries {
-        *rect = rect.translated(dx, dy);
-    }
-    for (_, rect) in &mut popover.zones {
-        *rect = rect.translated(dx, dy);
-    }
-    popover
 }
 
 const WORKSPACE_CREDITS: &str = "Workspace credits";
