@@ -87,15 +87,21 @@ Sign-in ended tag.
 Where the login sits in a Claude Code store, the default store or a home, the date is Claude Code's
 own answer for that store (`ClaudeNative::sign_in_deadline`): `claude auth status --json`, which
 reads only what is stored and asks Anthropic nothing, given five seconds (`LOGIN_END_PATIENCE`)
-because the listing waits for it. A `loginExpiresAt` that is a date is the deadline. A null one
-beside `authMethod` `claude.ai` is Claude Code holding a usable login it gives no date for (it
-withholds a stored date the access token outlives by more than three days), so there is none.
+because the listing waits for it. The default store is asked once per listing, and only when a
+saved profile could use the answer; a store whose config names no account in its organization is
+not asked. A `loginExpiresAt` that is a date is the deadline. A null one beside `authMethod`
+`claude.ai` is Claude Code holding a usable login it gives no date for (none is stored, or it
+withholds a stored date the access token outlives by more than three days): the account has no
+date, and for the account signed in there that stands over the copy of the login on-n-off saved
+(`Deadline::of`), whose stored date would otherwise show. An answer counts only when it names the
+account the store's config does, by organization and, where the record has one, by email, the same
+two fields switch verification checks; one that names another account says nothing about this one.
 Anything else is no answer for the stored login, and the `refreshTokenExpiresAt` stored beside it
 stands, read through the store as before: a Claude Code older than 2.1.318, which has no such
 field; a login Claude Code emptied, which it reports as signed out, so an ended sign-in keeps its
-date; another way of signing in; a date that cannot be read; no answer in time. A store whose
-config names no account is not asked. A login on-n-off holds outside a store, in the vault or while
-it moves one, has only the stored date, the one Claude Code reports from.
+date; another way of signing in; a date that cannot be read; no answer in time. A login on-n-off
+holds outside a store, in the vault or while it moves one, has only the stored date, the one Claude
+Code reports from.
 
 Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
 signed-in account, or the account's home. The issuer replaces a refresh token each time it renews

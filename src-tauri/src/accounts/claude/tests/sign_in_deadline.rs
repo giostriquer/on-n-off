@@ -33,15 +33,19 @@ fn signed_in(root: &Path) -> ClaudeNative {
     stored(root, &login(), &json!({"oauthAccount": account()}))
 }
 
-fn deadline(at: i64) -> Option<SignInDeadline> {
+fn ending(ends_at_ms: Option<i64>) -> Option<SignInDeadline> {
     Some(SignInDeadline {
         identity: Identity {
             provider: AgentId::Claude,
             user_id: "user-a".into(),
             workspace_id: "org-a".into(),
         },
-        ends_at_ms: at,
+        ends_at_ms,
     })
+}
+
+fn deadline(at: i64) -> Option<SignInDeadline> {
+    ending(Some(at))
 }
 
 fn answering(root: &Path, claude_code: CliStub) -> PathBuf {
@@ -80,11 +84,50 @@ fn the_sign_in_deadline_is_the_date_claude_code_reports_for_its_login() {
 }
 
 #[test]
-fn a_claude_ai_login_claude_code_dates_no_end_for_has_no_deadline() {
+fn a_claude_ai_login_claude_code_dates_no_end_for_is_this_accounts_with_no_date() {
     let root = tempfile::tempdir().unwrap();
     let native = signed_in(root.path());
 
-    assert_eq!(told(root.path(), &native, UNDATED), None);
+    assert_eq!(told(root.path(), &native, UNDATED), ending(None));
+}
+
+#[test]
+fn an_answer_for_another_account_is_not_this_accounts() {
+    for (status, why) in [
+        (
+            DATED.replace("org-a", "org-b"),
+            "another organization's date",
+        ),
+        (
+            DATED.replace("a@example.com", "b@example.com"),
+            "another email's date",
+        ),
+        (
+            UNDATED.replace("org-a", "org-b"),
+            "another organization's lack of one",
+        ),
+        (
+            DATED.replace(r#""orgId":"org-a","#, ""),
+            "a date for no organization",
+        ),
+    ] {
+        let root = tempfile::tempdir().unwrap();
+        let native = signed_in(root.path());
+
+        assert_eq!(told(root.path(), &native, &status), None, "{why}");
+    }
+}
+
+#[test]
+fn an_account_record_without_an_email_takes_the_date_for_its_organization() {
+    let root = tempfile::tempdir().unwrap();
+    let native = stored(
+        root.path(),
+        &login(),
+        &json!({"oauthAccount":{"accountUuid":"user-a","organizationUuid":"org-a"}}),
+    );
+
+    assert_eq!(told(root.path(), &native, DATED), deadline(REPORTED));
 }
 
 #[test]
@@ -187,7 +230,7 @@ fn a_store_with_no_account_record_has_no_deadline_and_claude_code_is_not_asked()
 }
 
 #[test]
-fn a_reported_date_needs_the_account_it_is_for() {
+fn an_account_record_without_its_organization_has_no_deadline_and_claude_code_is_not_asked() {
     let root = tempfile::tempdir().unwrap();
     let native = stored(
         root.path(),
@@ -195,11 +238,8 @@ fn a_reported_date_needs_the_account_it_is_for() {
         &json!({"oauthAccount":{"accountUuid":"user-a"}}),
     );
 
-    assert_eq!(
-        told(root.path(), &native, DATED),
-        None,
-        "an account without its organization"
-    );
+    assert_eq!(told(root.path(), &native, DATED), None);
+    assert_eq!(asked(root.path()), Vec::<String>::new());
 }
 
 #[test]
@@ -239,17 +279,15 @@ fn probe_real_home_sign_in_deadline() {
     let home = crate::paths::probe_home();
     let native = ClaudeNative::resolve_from(&home, &|_| None).unwrap();
     let status = crate::limits::claude_cli::auth_status(&|| native.command());
-    let reported = status.as_ref().and_then(LoginEnd::reported);
+    let reported = status.as_ref().and_then(ReportedEnd::of);
     let deadline = NativeAccount::sign_in_deadline(&native);
+    let dated = matches!(reported, Some(ReportedEnd(Some(_))));
     let same = match (&reported, &deadline) {
-        (Some(LoginEnd::At(at)), Some(deadline)) => *at == deadline.ends_at_ms,
+        (Some(ReportedEnd(at)), Some(deadline)) => dated && deadline.ends_at_ms == *at,
         _ => false,
     };
     println!("Claude Code answered: {}", status.is_some());
-    println!(
-        "Claude Code dates the sign-in's end: {}",
-        matches!(reported, Some(LoginEnd::At(_)))
-    );
+    println!("Claude Code dates the sign-in's end: {dated}");
     println!("deadline read: {}", deadline.is_some());
     println!("deadline is the date Claude Code reports: {same}");
 }

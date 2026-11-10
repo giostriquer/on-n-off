@@ -336,7 +336,7 @@ fn a_homes_sign_in_says_when_it_ends_until_the_home_is_emptied() {
     };
     let ends = Some(SignInDeadline {
         identity: identity(),
-        ends_at_ms: 1_792_081_900_000,
+        ends_at_ms: Some(1_792_081_900_000),
     });
 
     let bin = root.path().join("bin");

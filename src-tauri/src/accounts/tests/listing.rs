@@ -154,7 +154,7 @@ fn dated(mut login: super::super::store::Login, ends_at_ms: i64) -> super::super
 fn deadline(user: &str, ends_at_ms: i64) -> Option<SignInDeadline> {
     Some(SignInDeadline {
         identity: identity(AgentId::Claude, user, "team"),
-        ends_at_ms,
+        ends_at_ms: Some(ends_at_ms),
     })
 }
 
@@ -200,6 +200,28 @@ fn listing_says_when_each_saved_claude_sign_in_ends() {
     let json = serde_json::to_value(harness.accounts().list(AgentId::Claude).unwrap()).unwrap();
     assert_eq!(json["profiles"][0]["signInEndsAt"], "2026-10-15T16:31:40Z");
     assert!(json["profiles"][2].get("signInEndsAt").is_none(), "{json}");
+}
+
+#[test]
+fn a_listing_asks_when_the_native_sign_in_ends_once_and_only_for_a_saved_profile() {
+    let harness = Harness::new();
+    harness.signed_in(Some(claude("a", "a1")));
+
+    harness.accounts().list(AgentId::Claude).unwrap();
+    assert_eq!(
+        harness.native.deadline_reads.get(),
+        0,
+        "no saved profile could use the answer"
+    );
+
+    harness.saved(identity(AgentId::Claude, "a", "team"), claude("a", "a1"));
+    harness.saved(identity(AgentId::Claude, "b", "team"), claude("b", "b1"));
+    harness.accounts().list(AgentId::Claude).unwrap();
+    assert_eq!(
+        harness.native.deadline_reads.get(),
+        1,
+        "asked once for the whole listing"
+    );
 }
 
 #[test]

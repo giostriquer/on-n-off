@@ -228,22 +228,24 @@ impl ClaudeNative {
     fn sign_in_deadline_within(&self, patience: Duration) -> Option<SignInDeadline> {
         let config = native::read_json(&self.config_file).ok()?;
         let account = config.get("oauthAccount")?;
+        let identity = account_identity(account).ok()?;
         let status = crate::limits::claude_cli::auth_status_within(&|| self.command(), patience);
-        match status.as_ref().and_then(LoginEnd::reported) {
-            Some(LoginEnd::At(ends_at_ms)) => Some(SignInDeadline {
-                identity: account_identity(account).ok()?,
-                ends_at_ms,
-            }),
-            Some(LoginEnd::Undated) => None,
-            None => {
-                let auth = self.stored().ok()?.document?;
-                ClaudeLogin {
-                    auth: &auth,
-                    account,
-                }
-                .sign_in_deadline()
-            }
-        }
+        let reported = status
+            .as_ref()
+            .and_then(|status| Some((status, ReportedEnd::of(status)?)));
+        let Some((status, ReportedEnd(ends_at_ms))) = reported else {
+            let auth = self.stored().ok()?.document?;
+            return Some(SignInDeadline {
+                ends_at_ms: Some(stored_end(&auth)?),
+                identity,
+            });
+        };
+        let named = reports_organization(status, &identity)
+            && reports_email(status, account_email(account).as_deref());
+        named.then_some(SignInDeadline {
+            identity,
+            ends_at_ms,
+        })
     }
 
     fn keychain(&self) -> KeychainProbe {
@@ -426,11 +428,10 @@ impl Native for ClaudeNative {
         if status.get("loggedIn").and_then(Value::as_bool) != Some(true) {
             return Err("Claude Code does not report the login as signed in.".into());
         }
-        if status.get("orgId").and_then(Value::as_str) != Some(identity.workspace_id.as_str()) {
+        if !reports_organization(&status, &identity) {
             return Err("Claude credential and organization identity disagree.".into());
         }
-        let email = ClaudeLogin::of(&login).email();
-        if email.is_some() && status.get("email").and_then(Value::as_str) != email.as_deref() {
+        if !reports_email(&status, ClaudeLogin::of(&login).email().as_deref()) {
             return Err("Claude credential and account identity disagree.".into());
         }
         let current = self
@@ -506,25 +507,44 @@ impl<'a> ClaudeLogin<'a> {
     }
 }
 
-enum LoginEnd {
-    At(i64),
-    Undated,
-}
+struct ReportedEnd(Option<i64>);
 
-impl LoginEnd {
-    fn reported(status: &Value) -> Option<Self> {
+impl ReportedEnd {
+    fn of(status: &Value) -> Option<Self> {
         match status.get("loginExpiresAt")? {
             Value::String(at) => chrono::DateTime::parse_from_rfc3339(at)
                 .ok()
-                .map(|at| Self::At(at.timestamp_millis())),
+                .map(|at| Self(Some(at.timestamp_millis()))),
             Value::Null
                 if status.get("authMethod").and_then(Value::as_str) == Some("claude.ai") =>
             {
-                Some(Self::Undated)
+                Some(Self(None))
             }
             _ => None,
         }
     }
+}
+
+fn reports_organization(status: &Value, identity: &Identity) -> bool {
+    status.get("orgId").and_then(Value::as_str) == Some(identity.workspace_id.as_str())
+}
+
+fn reports_email(status: &Value, email: Option<&str>) -> bool {
+    email.is_none() || status.get("email").and_then(Value::as_str) == email
+}
+
+fn stored_end(auth: &Value) -> Option<i64> {
+    auth.pointer("/claudeAiOauth/refreshTokenExpiresAt")?
+        .as_i64()
+}
+
+fn account_email(account: &Value) -> Option<String> {
+    account
+        .get("emailAddress")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|email| !email.is_empty())
+        .map(str::to_owned)
 }
 
 fn account_identity(account: &Value) -> Result<Identity, String> {
@@ -543,12 +563,7 @@ impl LoginView for ClaudeLogin<'_> {
     }
 
     fn email(&self) -> Option<String> {
-        self.account
-            .get("emailAddress")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|email| !email.is_empty())
-            .map(str::to_owned)
+        account_email(self.account)
     }
 
     fn fingerprint(&self) -> String {
@@ -567,10 +582,7 @@ impl LoginView for ClaudeLogin<'_> {
 
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
         Some(SignInDeadline {
-            ends_at_ms: self
-                .auth
-                .pointer("/claudeAiOauth/refreshTokenExpiresAt")?
-                .as_i64()?,
+            ends_at_ms: Some(stored_end(self.auth)?),
             identity: account_identity(self.account).ok()?,
         })
     }

@@ -414,8 +414,8 @@ fixed date that renewing never moves, and Claude Code keeps that date beside the
 `refreshTokenExpiresAt`: Anthropic's `refresh_token_expires_in` at each renewal, or 30 days from
 sign-in when Anthropic gives none. From 2.1.318 it also reports the date, as `loginExpiresAt` in
 `claude auth status --json` and `credential_expires_at` on a `claude -p` JSON result: the stored
-date, or null when no claude.ai login with a refresh token is stored or the access token outlives
-the date by more than three days. **code** (2.1.322); **verified** (2026-11-10, one Max account:
+date, or null when no claude.ai login with a refresh token is stored, no usable date is stored, or
+the access token outlives the date by more than three days. **code** (2.1.322); **verified** (2026-11-10, one Max account:
 `loginExpiresAt` beside `authMethod` `claude.ai`). Once the date passes, Claude Code's next renewal is refused, it
 empties the login but keeps the date, and every session answers "Login expired · Please run /login".
 Claude Code's own notice ("Your login expires in N days") appears only in its terminal and only for
@@ -434,7 +434,8 @@ card reads only that state, never a per-provider switch, so a provider whose ada
 sign-in deadline would get the same tag, with its own name in the copy. A sign-in still awaiting Use account is
 newer than whatever the default store holds for that account, so it reads only its own login;
 otherwise the default store's date comes first. The listing reads the credential document
-for that date only when Claude Code gives none: it uses no token and sends nothing. A saved account in its home has the date
+for that date only when Claude Code gives no answer for that login: it uses no token and sends
+nothing. A saved account in its home has the date
 its profile records whenever on-n-off holds the login (a save, the move into or out of the home,
 a home taken back), so the listing reads no home's Keychain item for it; a profile an older
 version wrote is read once and the date recorded. A login replaced in its home outside on-n-off

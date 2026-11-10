@@ -11,7 +11,7 @@ pub struct Identity {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SignInDeadline {
     pub identity: Identity,
-    pub ends_at_ms: i64,
+    pub ends_at_ms: Option<i64>,
 }
 pub struct AccessToken(String);
 

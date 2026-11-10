@@ -52,7 +52,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
     .unwrap();
     *harness.native.deadline.borrow_mut() = Some(super::super::model::SignInDeadline {
         identity: a.clone(),
-        ends_at_ms: 1_792_081_900_000,
+        ends_at_ms: Some(1_792_081_900_000),
     });
 
     let roster = answered(&harness, AgentId::Claude).unwrap();

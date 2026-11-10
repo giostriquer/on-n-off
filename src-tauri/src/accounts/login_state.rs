@@ -48,7 +48,8 @@ impl SignInEnd {
     fn from_deadline(identity: &Identity, deadline: Option<&SignInDeadline>) -> Self {
         deadline
             .filter(|deadline| deadline.identity == *identity)
-            .map_or(Self::Unknown, |deadline| Self::At(deadline.ends_at_ms))
+            .and_then(|deadline| deadline.ends_at_ms)
+            .map_or(Self::Unknown, Self::At)
     }
 
     fn ends_at_ms(self) -> Option<i64> {
@@ -75,14 +76,8 @@ impl Deadline {
         native: Option<&SignInDeadline>,
         kept: Option<&Kept<'_>>,
     ) -> Self {
-        let native = native
-            .filter(|deadline| deadline.identity == profile.identity)
-            .map(|deadline| deadline.ends_at_ms);
-        match native {
-            Some(ends_at_ms) if !profile.pending_activation => Self {
-                ends_at_ms: Some(ends_at_ms),
-                read: None,
-            },
+        match native.filter(|deadline| deadline.identity == profile.identity) {
+            Some(deadline) if !profile.pending_activation => Self::at(deadline.ends_at_ms),
             _ => Self::saved(profile, kept),
         }
     }

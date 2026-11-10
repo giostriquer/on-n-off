@@ -44,7 +44,7 @@ fn deadline(profile: &Profile, date: Date) -> Deadline {
     };
     let native = SignInDeadline {
         identity: profile.identity.clone(),
-        ends_at_ms,
+        ends_at_ms: Some(ends_at_ms),
     };
     Deadline::of(profile, Some(&native), None)
 }
