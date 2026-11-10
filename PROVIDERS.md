@@ -412,7 +412,11 @@ mapper reads no renewal, expiry or cancellation field).
 A saved Claude account's card does say when its sign-in ends. Anthropic ends every Claude sign-in at a
 fixed date that renewing never moves, and Claude Code keeps that date beside the tokens as
 `refreshTokenExpiresAt`: Anthropic's `refresh_token_expires_in` at each renewal, or 30 days from
-sign-in when Anthropic gives none. Once the date passes, Claude Code's next renewal is refused, it
+sign-in when Anthropic gives none. From 2.1.318 it also reports the date, as `loginExpiresAt` in
+`claude auth status --json` and `credential_expires_at` on a `claude -p` JSON result: the stored
+date, or null when no claude.ai login with a refresh token is stored or the access token outlives
+the date by more than three days. **code** (2.1.322); **verified** (2026-11-10, one Max account:
+`loginExpiresAt` beside `authMethod` `claude.ai`). Once the date passes, Claude Code's next renewal is refused, it
 empties the login but keeps the date, and every session answers "Login expired · Please run /login".
 Claude Code's own notice ("Your login expires in N days") appears only in its terminal and only for
 the signed-in login in its last three days, so a saved account in its home never shows it. Through
@@ -423,12 +427,14 @@ and **Sign in again** as the card's button instead of Use account. Hover or focu
 device-local time. The date reaches the card as the profile's login state (`ending` or `ended` with
 its date, `loginState`; see Login state in `docs/architecture/accounts.md`) through the account
 listing (`accounts::list`), which reads it from the default store and from each saved account's own
-login (in the vault or its home), credited to the account that login's `oauthAccount` names. The
+login (in the vault or its home), credited to the account that login's `oauthAccount` names. For a
+Claude Code store the listing asks Claude Code first (`loginExpiresAt`) and keeps the stored date
+for when it gives no answer for that login (Homes in `docs/architecture/accounts.md`). The
 card reads only that state, never a per-provider switch, so a provider whose adapter reported a
 sign-in deadline would get the same tag, with its own name in the copy. A sign-in still awaiting Use account is
 newer than whatever the default store holds for that account, so it reads only its own login;
 otherwise the default store's date comes first. The listing reads the credential document
-only for that date: it uses no token and sends nothing. A saved account in its home has the date
+for that date only when Claude Code gives none: it uses no token and sends nothing. A saved account in its home has the date
 its profile records whenever on-n-off holds the login (a save, the move into or out of the home,
 a home taken back), so the listing reads no home's Keychain item for it; a profile an older
 version wrote is read once and the date recorded. A login replaced in its home outside on-n-off

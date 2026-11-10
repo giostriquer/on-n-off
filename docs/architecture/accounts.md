@@ -59,8 +59,9 @@ account's usage (`limits::claude_cli`), so on-n-off sends no request with that l
 grant for it. Muse's (`MuseHome`, `accounts/muse.rs`) keeps its login inline in the home's own
 `auth.json` and never renews (Provider adapters, below).
 
-Renewal never outlives the sign-in itself: Anthropic ends each one at the `refreshTokenExpiresAt`
-Claude Code stores with it, and only signing in again starts a new one. The account listing reads
+Renewal never outlives the sign-in itself: Anthropic ends each one at a fixed date, which Claude
+Code stores with it as `refreshTokenExpiresAt` and, from 2.1.318, reports as `loginExpiresAt`, and
+only signing in again starts a new one. The account listing reads
 that date from the default store (`NativeAccount::sign_in_deadline`) and from each saved login,
 credited only to the account the login's `oauthAccount` names: a login in the vault from its view
 (`LoginView::sign_in_deadline`), already decrypted, and a login in its home from the date its
@@ -68,8 +69,8 @@ profile records (`sign_in_end` on `Profile`, `SignInEnd` in `accounts/login_stat
 not a secret. on-n-off records it wherever it already holds the login: every save (save current,
 remembering, a sign-in's publication, a switch's capture of the outgoing login), the move into a
 home at check-in, the move out of it at check-out, and a forgotten home taken back. A profile an
-older version wrote has no record; its home is read once (`Home::sign_in_deadline`, through the
-store's own read) and what that read found, a date or none, is recorded with a metadata change
+older version wrote has no record; its home is read once (`Home::sign_in_deadline`, the store
+read below) and what that read found, a date or none, is recorded with a metadata change
 (`ChangeKind::Metadata`), so a home is read at most once, never once per listing. A read that
 fails, a Keychain prompt denied or unanswered or a file that cannot be read, records none too, on
 purpose, so it never asks again; that home shows no date until on-n-off next holds its login. The limit: a
@@ -82,6 +83,19 @@ for a saved account, in the vault or its home. It does not for a signed-in accou
 login: once Claude Code empties its ended login, the default store holds no login, so the account
 is no longer the signed-in one and lists as `missing`, its card offering Sign in without the
 Sign-in ended tag.
+
+Where the login sits in a Claude Code store, the default store or a home, the date is Claude Code's
+own answer for that store (`ClaudeNative::sign_in_deadline`): `claude auth status --json`, which
+reads only what is stored and asks Anthropic nothing, given five seconds (`LOGIN_END_PATIENCE`)
+because the listing waits for it. A `loginExpiresAt` that is a date is the deadline. A null one
+beside `authMethod` `claude.ai` is Claude Code holding a usable login it gives no date for (it
+withholds a stored date the access token outlives by more than three days), so there is none.
+Anything else is no answer for the stored login, and the `refreshTokenExpiresAt` stored beside it
+stands, read through the store as before: a Claude Code older than 2.1.318, which has no such
+field; a login Claude Code emptied, which it reports as signed out, so an ended sign-in keeps its
+date; another way of signing in; a date that cannot be read; no answer in time. A store whose
+config names no account is not asked. A login on-n-off holds outside a store, in the vault or while
+it moves one, has only the stored date, the one Claude Code reports from.
 
 Every saved Claude login lives in exactly one Claude Code store at a time: the default one for the
 signed-in account, or the account's home. The issuer replaces a refresh token each time it renews
@@ -219,7 +233,8 @@ card reads to ask for a new sign-in, for every provider:
 
 - `usable`: nothing says otherwise;
 - `ending`, with the date its sign-in ends: the adapter knows the date (Claude's
-  `refreshTokenExpiresAt`, Homes above; Codex and Muse report none) and it has not passed;
+  `loginExpiresAt` or stored `refreshTokenExpiresAt`, Homes above; Codex and Muse report none) and
+  it has not passed;
 - `ended`, with that date, once it has passed;
 - `refused`: the saved poll parked the login because its provider refused it or found it signed
   out;

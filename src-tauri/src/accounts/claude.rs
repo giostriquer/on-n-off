@@ -80,6 +80,8 @@ const LOST: &str = "Native credential coordination was lost. Protected recovery 
 
 const MANAGED_SETTINGS: &str = "/Library/Application Support/ClaudeCode/managed-settings.json";
 
+const LOGIN_END_PATIENCE: Duration = Duration::from_secs(5);
+
 fn store_error(error: StoreError) -> String {
     match error {
         StoreError::Keychain(why) => why,
@@ -221,6 +223,27 @@ impl ClaudeNative {
 
     fn stored(&self) -> Result<Stored, String> {
         claude_store::read(&self.storage_dir(), self.keychain()).map_err(store_error)
+    }
+
+    fn sign_in_deadline_within(&self, patience: Duration) -> Option<SignInDeadline> {
+        let config = native::read_json(&self.config_file).ok()?;
+        let account = config.get("oauthAccount")?;
+        let status = crate::limits::claude_cli::auth_status_within(&|| self.command(), patience);
+        match status.as_ref().and_then(LoginEnd::reported) {
+            Some(LoginEnd::At(ends_at_ms)) => Some(SignInDeadline {
+                identity: account_identity(account).ok()?,
+                ends_at_ms,
+            }),
+            Some(LoginEnd::Undated) => None,
+            None => {
+                let auth = self.stored().ok()?.document?;
+                ClaudeLogin {
+                    auth: &auth,
+                    account,
+                }
+                .sign_in_deadline()
+            }
+        }
     }
 
     fn keychain(&self) -> KeychainProbe {
@@ -432,14 +455,7 @@ impl NativeAccount for ClaudeNative {
     }
 
     fn sign_in_deadline(&self) -> Option<SignInDeadline> {
-        let auth = self.stored().ok()?.document?;
-        let config = native::read_json(&self.config_file).ok()?;
-        let account = config.get("oauthAccount")?;
-        ClaudeLogin {
-            auth: &auth,
-            account,
-        }
-        .sign_in_deadline()
+        self.sign_in_deadline_within(LOGIN_END_PATIENCE)
     }
 }
 
@@ -486,6 +502,27 @@ impl<'a> ClaudeLogin<'a> {
         Self {
             auth: &login.auth,
             account: &login.account,
+        }
+    }
+}
+
+enum LoginEnd {
+    At(i64),
+    Undated,
+}
+
+impl LoginEnd {
+    fn reported(status: &Value) -> Option<Self> {
+        match status.get("loginExpiresAt")? {
+            Value::String(at) => chrono::DateTime::parse_from_rfc3339(at)
+                .ok()
+                .map(|at| Self::At(at.timestamp_millis())),
+            Value::Null
+                if status.get("authMethod").and_then(Value::as_str) == Some("claude.ai") =>
+            {
+                Some(Self::Undated)
+            }
+            _ => None,
         }
     }
 }

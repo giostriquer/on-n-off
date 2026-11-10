@@ -339,16 +339,24 @@ fn a_homes_sign_in_says_when_it_ends_until_the_home_is_emptied() {
         ends_at_ms: 1_792_081_900_000,
     });
 
+    let bin = root.path().join("bin");
+    let asking = |status: &str| {
+        let claude_code = CliStub::new("claude").stdout(status).write(&bin);
+        crate::accounts::native::with_test_cli(&claude_code, || home.sign_in_deadline())
+    };
+    let before_the_date = r#"{"loggedIn":true,"authMethod":"claude.ai"}"#;
+    let signed_out = r#"{"loggedIn":false,"authMethod":"none","loginExpiresAt":null}"#;
+
     let ((live, ended, emptied), _) = keychain(|| {
         let locks = home.lock().unwrap();
         home.put(&dated("access-b1", "refresh-b1"), locks.as_ref())
             .unwrap();
-        let live = home.sign_in_deadline();
+        let live = asking(before_the_date);
         let back = home.put(&dated("", ""), locks.as_ref()).unwrap();
         assert!(back.is_none(), "Claude Code emptied the login");
-        let ended = home.sign_in_deadline();
+        let ended = asking(signed_out);
         home.clear(locks.as_ref()).unwrap();
-        (live, ended, home.sign_in_deadline())
+        (live, ended, asking(signed_out))
     });
 
     assert_eq!(live, ends);
