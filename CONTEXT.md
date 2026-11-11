@@ -81,6 +81,12 @@ A value on a reading other than a quota window: the credit balance, workspace cr
 spent, banked resets, the subscription term or a reset offer.
 _Avoid_: metric, extra
 
+**Desktop resets**:
+The banked resets Claude Desktop last saw for an account's organization, with when it saw them. A
+card shows them as its Banked resets row. Not a figure: no read returns them and no snapshot keeps
+them.
+_Avoid_: saved resets, limit resets
+
 **Account details**:
 The plan a read reports, with the label a card shows for it and its capacity: how many times a base
 plan's limits it holds, which weighs usage left when cards are ordered. It describes the account; a

@@ -108,3 +108,17 @@ describe("Claude Desktop on another account", () => {
     expect(Array.from(tags.children, tag => tag.textContent)).toEqual(["Sign-in ends Aug 20", "Desktop", "Max"]);
   });
 });
+
+describe("the banked resets Claude Desktop last saw", () => {
+  const seen = { observedAt: "2026-08-17T16:00:00Z", availableCount: 2, nextExpiresAt: "2026-12-01T00:00:00Z" };
+
+  it("are a row on the account's card, with nothing to spend them from here", async () => {
+    answer([okClaude({ desktopResets: seen }), desk()]);
+    renderLimits();
+    const card = await signedInCard();
+    expect((await within(card).findByRole("definition", { name: "Banked resets" })).textContent).toBe("2");
+    expect(within(card).getByRole("list", { name: "Banked resets Claude Desktop last saw" })).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Use banked reset" })).toBeNull();
+    expect(within(await desktopCard()).queryByRole("definition", { name: "Banked resets" })).toBeNull();
+  });
+});

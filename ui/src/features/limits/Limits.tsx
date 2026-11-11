@@ -14,7 +14,7 @@ import { ActiveAccountDot, LimitCardFrame, PendingCardFrame } from "./LimitCardF
 import { isSignedIn, limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
 import { CHECKING_LIMITS } from "./limitPresentation";
 import { useLimitsProviders } from "./useLimitsProviders";
-import { BankedResetsRow, ResetOfferRow } from "./BankedResets";
+import { BankedResetsRow, DesktopResetsRow, ResetOfferRow } from "./BankedResets";
 import { ResetAlertsContext } from "./resetAlerts";
 import { CreditsRows } from "./Credits";
 import { Meter, MeterRow } from "./Meter";
@@ -210,6 +210,7 @@ function AccountCard({
 
       <CreditsRows figures={figures} provider={provider} now={now} />
       <BankedResetsRow resetCredits={figures.bankedResets} now={now} />
+      <DesktopResetsRow seen={card.desktopResets} now={now} />
       <ResetOfferRow offer={figures.paidOffer} />
     </LimitCardFrame>
   );

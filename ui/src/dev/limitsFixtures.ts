@@ -5,7 +5,7 @@ import type { SubscriptionDate } from "$lib/subscriptionTypes";
 import type { AgentId } from "$lib/types";
 import { asColumn } from "./limitsColumn";
 
-type ReadCard = ProviderLimits & Pick<LimitsColumnEntry, "standing" | "desktopAccount">;
+type ReadCard = ProviderLimits & Pick<LimitsColumnEntry, "standing" | "desktopAccount" | "desktopResets">;
 
 const NOW = Date.parse("2026-08-24T20:00:00Z");
 
@@ -193,6 +193,17 @@ function limitsBandClaude(): ReadCard[] {
 
 function limitsBandCodex(): ReadCard[] {
   return band(CODEX[0]);
+}
+
+function claudeDesktopResets(): ReadCard[] {
+  const nextExpiresAt = at(118 * 24 * 60 + 9 * 60);
+  return [
+    { ...CLAUDE[0], desktopResets: { observedAt: at(-4 * 60), availableCount: 1, nextExpiresAt } },
+    {
+      ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true,
+      desktopResets: { observedAt: at(-3 * 24 * 60), availableCount: 2, nextExpiresAt },
+    },
+  ];
 }
 
 function bankedResetsCodex(): ReadCard[] {
@@ -407,6 +418,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   museIdle: () => ({ muse: museIdle }),
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
   claudeDesktop: () => ({ claude: () => [...CLAUDE, { ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, desktopAccount: true }] }),
+  claudeDesktopResets: () => ({ claude: claudeDesktopResets }),
   savedLogins: () => ({
     claude: () => savedLogins("claude", CLAUDE[0]), codex: () => savedLogins("codex", CODEX[0]), muse: () => savedLogins("muse", MUSE[0]),
     accounts: { claude: () => savedLoginsAccounts("claude"), codex: () => savedLoginsAccounts("codex"), muse: () => savedLoginsAccounts("muse") },

@@ -158,6 +158,12 @@ impl Cache {
         let mut column = self.column(entries);
         if let Some(home) = home {
             crate::limits::desktop_app::mark_desktop_account(self.provider, &mut column, home);
+            crate::limits::desktop_resets::attach_desktop_resets(
+                self.provider,
+                &mut column,
+                home,
+                chrono::Utc::now().timestamp_millis(),
+            );
         }
         column
     }

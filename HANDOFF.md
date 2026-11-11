@@ -108,7 +108,7 @@ signed. Do not publish its draft until the installer, its `.sig` file,
 2. Agent CLIs installed any usual way (`claude` native installer, `npm`/`nvm`/`volta`/`bun` for `codex`, Homebrew…). Finder launches apps with a minimal `PATH`; the app asks your login shell (`$SHELL -i -l`) for its `PATH` once at startup and also checks well-known folders (`~/.local/bin`, `/opt/homebrew/bin`, `~/.nvm/versions/node/*/bin`, `~/.volta/bin`, `~/.bun/bin`, …). If a CLI still shows missing, run `which <cli>` in Terminal and paste that path into **Settings → Binary**.
 3. Optional: Node/`npx` for `npx skills add …`, and the GitHub CLI (`brew install gh`, then `gh auth login`) for **Pull requests**. `gh auth token` reads `gh`'s own Keychain item, so no Keychain prompt appears for it.
 
-The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.on-n-off`, and Muse's `~/.config/muse` and `~/.local/share/muse`. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
+The app reads `~/.claude`, `~/.codex`, `~/.gemini`, `~/.cursor`, `~/.on-n-off`, and Muse's `~/.config/muse` and `~/.local/share/muse`. From Claude Desktop's app data it reads `config.json` and the cached usage answer of each Claude account's organization, nothing else. Because it inspects project folders (for project-scoped MCP/skills and transcripts), macOS may ask for access to **Documents** or **Desktop** the first time; declining only hides those project-scoped entries.
 
 ### Side notch
 

@@ -57,6 +57,12 @@ pub struct ProfileDto {
     sign_in_ends_at: Option<String>,
     login_state: login_state::LoginState,
 }
+impl ProfileDto {
+    pub(crate) fn identity(&self) -> &model::Identity {
+        &self.identity
+    }
+}
+
 #[derive(Default, Serialize)]
 #[serde(transparent)]
 pub struct CategoriesDto(

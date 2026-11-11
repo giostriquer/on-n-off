@@ -50,6 +50,8 @@ export type LimitsResetCredits = {
   resets?: LimitsBankedReset[];
 };
 
+export type DesktopResets = { observedAt: string; availableCount: number; nextExpiresAt?: string | null };
+
 export type LimitsBankedReset = {
   title?: string | null;
   expiresAt?: string | null;
@@ -106,4 +108,5 @@ export type LimitsColumnEntry = ProviderLimits & {
   replaced?: LimitsAccount[];
   unread?: boolean;
   desktopAccount?: boolean;
+  desktopResets?: DesktopResets | null;
 };

@@ -3,9 +3,10 @@ import * as api from "$lib/api";
 import { parseInvokeError } from "$lib/error";
 import { formatPrice, formatResetIn, formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitsResetOffer, ProviderLimits, ResetCreditOutcome } from "$lib/limitsTypes";
+import { formatAgo } from "$lib/timeFormat";
 import { actionButton } from "@/components/actionButton";
 import { ConfirmDialog } from "@/features/catalog/ConfirmDialog";
-import type { CardFigures } from "./limitCards";
+import type { CardFigures, LimitCard } from "./limitCards";
 import { latestObservedAt, usageLeftFigure } from "./limitPresentation";
 import { useResetSpendLimit } from "./resetAlerts";
 import { SummaryRow } from "./SummaryRow";
@@ -32,6 +33,16 @@ export function BankedResetsRow({ resetCredits, now }: { resetCredits: CardFigur
     ? { label: "Each banked reset", lines: resets.map(reset => describeReset(reset, now)) }
     : next ? `${lead} ${next}` : undefined;
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
+}
+
+export function DesktopResetsRow({ seen, now }: { seen: LimitCard["desktopResets"]; now: number }) {
+  if (!seen) return null;
+  const next = expiry(seen.nextExpiresAt, now);
+  const lines = [
+    `seen in ${seen.app} ${formatAgo(seen.observedAt, now)}`,
+    ...(next ? [`${seen.left > 1 ? "next expires" : "expires"} ${next}`] : []),
+  ];
+  return <SummaryRow label="Banked resets" value={seen.left} note={{ label: `Banked resets ${seen.app} last saw`, lines }} />;
 }
 
 function describeReset(reset: LimitsBankedReset, now: number): string {
