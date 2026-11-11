@@ -274,8 +274,27 @@ fn there_is_no_deadline_without_a_reported_or_stored_date_and_the_account_it_is_
 }
 
 #[test]
-#[ignore = "asks the Claude Code signed in at the home ON_N_OFF_PROBE_HOME names when its sign-in ends"]
+fn the_listing_gives_claude_code_time_to_answer_without_waiting_long_for_it() {
+    assert!(
+        LOGIN_END_PATIENCE >= Duration::from_secs(1),
+        "too short for Claude Code to start and answer"
+    );
+    assert!(
+        LOGIN_END_PATIENCE <= Duration::from_secs(10),
+        "the account listing waits for this"
+    );
+}
+
+#[test]
+#[ignore = "asks the Claude Code signed in at this process's own home, named in ON_N_OFF_PROBE_HOME, when its sign-in ends"]
 fn probe_real_home_sign_in_deadline() {
+    #[cfg(target_os = "macos")]
+    crate::accounts::with_real_keychain(print_real_home_sign_in_deadline);
+    #[cfg(not(target_os = "macos"))]
+    print_real_home_sign_in_deadline();
+}
+
+fn print_real_home_sign_in_deadline() {
     let home = crate::paths::probe_home();
     let native = ClaudeNative::resolve_from(&home, &|_| None).unwrap();
     let status = crate::limits::claude_cli::auth_status(&|| native.command());
