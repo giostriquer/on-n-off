@@ -80,7 +80,9 @@ configuration, transcripts and saved logins stay on your machine. The app itself
 - `github.com`, for the update feed and update downloads on GitHub Releases, which GitHub serves
   from its release download host (currently `release-assets.githubusercontent.com`).
 
-Claude limits come from Claude Code's own usage report: on-n-off sends nothing to Anthropic itself.
+Claude limits come from Claude Code's own usage report, and on macOS a Claude account's banked
+resets come from the usage answer Claude Desktop already keeps in its cache on disk: on-n-off sends
+nothing to Anthropic itself.
 The tools it starts (`claude`, `codex`, `agy`, `muse`, `gh` and `npx`) make their own requests as
 usual, including installs from sources you enter.
 

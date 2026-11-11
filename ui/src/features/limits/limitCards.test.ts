@@ -531,7 +531,7 @@ describe("the banked resets Claude Desktop last saw", () => {
 
   it("go on the account's card with the app that saw them and when", () => {
     const [card] = cards([okClaude({ desktopResets: seen })], AT_NOW, "claude");
-    expect(card.desktopResets).toEqual({ app: "Claude Desktop", observedAt: "2026-08-17T16:00:00Z", left: 2, nextExpiresAt: "2026-12-01T00:00:00Z" });
+    expect(card.desktopResets).toEqual({ app: "Claude Desktop", ...seen });
     expect(card.figures.bankedResets).toBeNull();
   });
 
@@ -541,13 +541,13 @@ describe("the banked resets Claude Desktop last saw", () => {
     expect(of(null)).toBeNull();
     expect(of({ ...seen, availableCount: 0 })).toBeNull();
     expect(of({ ...seen, nextExpiresAt: NOW })).toBeNull();
-    expect(of({ ...seen, nextExpiresAt: null })).toMatchObject({ left: 2, nextExpiresAt: null });
+    expect(of({ ...seen, nextExpiresAt: null })).toMatchObject({ availableCount: 2, nextExpiresAt: null });
   });
 
   it("stay on a saved account's card that no read has answered for", () => {
     const profile = saved("claude", "unread", "profile:unread", "unread@claude.example");
     const [card] = cards([{ ...unreadEntry(profile), desktopResets: seen }], AT_NOW, "claude");
     expect(card.reading).toBeNull();
-    expect(card.desktopResets?.left).toBe(2);
+    expect(card.desktopResets?.availableCount).toBe(2);
   });
 });

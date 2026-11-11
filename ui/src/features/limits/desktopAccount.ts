@@ -10,15 +10,14 @@ export type DesktopPresentation = {
   headline: string;
 };
 
-export type DesktopResetsPresentation = { app: string; observedAt: string; left: number; nextExpiresAt: string | null };
+export type DesktopResetsPresentation = DesktopResets & { app: string };
 
 function desktopApp(provider: LimitsProvider): string {
   return `${providerLabel(provider)} Desktop`;
 }
 
 export function desktopResetsPresentation(provider: LimitsProvider, seen: DesktopResets | null | undefined, now: number): DesktopResetsPresentation | null {
-  if (!seen || !unexpiredBankedResets(seen, now)) return null;
-  return { app: desktopApp(provider), observedAt: seen.observedAt, left: seen.availableCount, nextExpiresAt: seen.nextExpiresAt ?? null };
+  return seen && unexpiredBankedResets(seen, now) ? { ...seen, app: desktopApp(provider) } : null;
 }
 
 export function desktopPresentation(provider: LimitsProvider): DesktopPresentation {

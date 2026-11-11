@@ -10,6 +10,8 @@ const URL_LITERAL = /https:\/\/([a-z0-9-]+(?:\.[a-z0-9-]+)+)[^\s"'`)]*/g;
 const neverContacted = {
   "https://api.openai.com/auth": "the namespace of a claim in the Codex ID token",
   "https://auth.meta.com/": "the sign-in page Muse prints, opened in the browser",
+  "https://claude.ai/api/organizations/{organization}/usage?cedar_ember=1&skip_spend=1":
+    "the key of an entry in Claude Desktop's HTTP cache, read from disk",
   "https://cursor.com/install": "the install command shown for the Cursor CLI",
   "https://cursor.com/install?win32=true": "the install command shown for the Cursor CLI on Windows",
 };

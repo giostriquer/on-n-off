@@ -8,7 +8,6 @@ mod codex_sessions;
 mod column;
 pub(crate) mod credits_spent;
 pub(crate) mod desktop_app;
-pub(crate) mod desktop_resets;
 pub(crate) mod json;
 pub(crate) mod login;
 mod muse;

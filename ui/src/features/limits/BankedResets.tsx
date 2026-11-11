@@ -27,22 +27,22 @@ export function ResetOfferRow({ offer }: { offer?: LimitsResetOffer | null }) {
 export function BankedResetsRow({ resetCredits, now }: { resetCredits: CardFigures["bankedResets"]; now: number }) {
   if (!resetCredits) return null;
   const resets = resetCredits.resets ?? [];
-  const lead = resetCredits.availableCount > 1 ? "next expires" : "expires";
-  const next = expiry(resetCredits.nextExpiresAt, now);
   const note = resets.length > 1
     ? { label: "Each banked reset", lines: resets.map(reset => describeReset(reset, now)) }
-    : next ? `${lead} ${next}` : undefined;
+    : expiryLine(resetCredits.availableCount, resetCredits.nextExpiresAt, now) ?? undefined;
   return <SummaryRow label="Banked resets" value={resetCredits.availableCount} note={note} />;
 }
 
 export function DesktopResetsRow({ seen, now }: { seen: LimitCard["desktopResets"]; now: number }) {
   if (!seen) return null;
-  const next = expiry(seen.nextExpiresAt, now);
-  const lines = [
-    `seen in ${seen.app} ${formatAgo(seen.observedAt, now)}`,
-    ...(next ? [`${seen.left > 1 ? "next expires" : "expires"} ${next}`] : []),
-  ];
-  return <SummaryRow label="Banked resets" value={seen.left} note={{ label: `Banked resets ${seen.app} last saw`, lines }} />;
+  const expires = expiryLine(seen.availableCount, seen.nextExpiresAt, now);
+  const lines = [`seen in ${seen.app} ${formatAgo(seen.observedAt, now)}`, ...(expires ? [expires] : [])];
+  return <SummaryRow label="Banked resets" value={seen.availableCount} note={{ label: `Banked resets ${seen.app} last saw`, lines }} />;
+}
+
+function expiryLine(count: number, nextExpiresAt: string | null | undefined, now: number): string | null {
+  const next = expiry(nextExpiresAt, now);
+  return next ? `${count > 1 ? "next expires" : "expires"} ${next}` : null;
 }
 
 function describeReset(reset: LimitsBankedReset, now: number): string {

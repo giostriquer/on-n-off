@@ -135,6 +135,10 @@ impl Cache {
     }
 
     fn column(&self, entries: &[ProviderLimitsDto]) -> Vec<ColumnEntryDto> {
+        self.column_at(entries, chrono::Utc::now().timestamp_millis())
+    }
+
+    fn column_at(&self, entries: &[ProviderLimitsDto], now_ms: i64) -> Vec<ColumnEntryDto> {
         let (roster, ends) = {
             let listing = self.listing();
             (
@@ -142,12 +146,7 @@ impl Cache {
                 listing.ends.clone(),
             )
         };
-        crate::limits::column(
-            entries,
-            &roster,
-            &ends,
-            chrono::Utc::now().timestamp_millis(),
-        )
+        crate::limits::column(entries, &roster, &ends, now_ms)
     }
 
     fn served_column(
@@ -155,15 +154,10 @@ impl Cache {
         entries: &[ProviderLimitsDto],
         home: Option<&std::path::Path>,
     ) -> Vec<ColumnEntryDto> {
-        let mut column = self.column(entries);
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut column = self.column_at(entries, now_ms);
         if let Some(home) = home {
-            crate::limits::desktop_app::mark_desktop_account(self.provider, &mut column, home);
-            crate::limits::desktop_resets::attach_desktop_resets(
-                self.provider,
-                &mut column,
-                home,
-                chrono::Utc::now().timestamp_millis(),
-            );
+            crate::limits::desktop_app::annotate(self.provider, &mut column, home, now_ms);
         }
         column
     }

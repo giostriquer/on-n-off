@@ -351,6 +351,54 @@ fn a_roster_reread_racing_the_saved_poll_keeps_the_verdict_the_poll_parked() {
 }
 
 #[test]
+fn the_served_column_carries_the_banked_resets_claude_desktop_last_saw() {
+    let home = crate::paths::scratch_dir("served-desktop-resets");
+    for app in crate::paths::claude_desktop_apps_for(&home) {
+        std::fs::create_dir_all(app).unwrap();
+    }
+    std::fs::write(
+        home.join(".claude.json"),
+        r#"{"oauthAccount": {"accountUuid": "user-me", "organizationUuid": "org-me"}}"#,
+    )
+    .unwrap();
+    crate::limits::desktop_app::cache_an_unending_reset_for_test(&home, "org-me");
+    let me = Identity {
+        provider: AgentId::Claude,
+        user_id: "user-me".into(),
+        workspace_id: "org-me".into(),
+    };
+    let mut card = ProviderLimitsDto::for_test(AgentId::Claude, "replaced");
+    card.account = Some(crate::limits::scoped_account(
+        &me,
+        Some("me@claude.example".into()),
+    ));
+    let cards = [card];
+    let left = |column: Vec<ColumnEntryDto>| -> Vec<Option<u32>> {
+        column
+            .iter()
+            .map(|entry| {
+                entry
+                    .desktop_resets
+                    .as_ref()
+                    .map(|seen| seen.available_count)
+            })
+            .collect()
+    };
+
+    let claude = Cache::new(AgentId::Claude, Source::LimitsClaude);
+    assert_eq!(
+        left(claude.served_column(&cards, Some(&home))),
+        [cfg!(target_os = "macos").then_some(1)]
+    );
+    assert_eq!(left(claude.served_column(&cards, None)), [None]);
+    assert_eq!(
+        left(claude.column(&cards)),
+        [None],
+        "planning a removal or archive reads no Desktop file"
+    );
+}
+
+#[test]
 fn the_served_column_tags_the_card_claude_desktop_is_on_while_it_is_another_account() {
     let home = crate::paths::scratch_dir("served-desktop");
     let data = crate::paths::claude_desktop_data_for(&home);

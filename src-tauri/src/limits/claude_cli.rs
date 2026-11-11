@@ -106,6 +106,14 @@ pub(super) fn known_account(config_file: &Path) -> LimitsAccountDto {
     account_named(read_claude_config_account(config_file).as_ref())
 }
 
+pub(super) fn organization_named(config_file: &Path, account: &LimitsAccountDto) -> Option<String> {
+    let config = read_claude_config_account(config_file)?;
+    if card_account(&config).id != account.id {
+        return None;
+    }
+    config.identity.organization_id
+}
+
 fn account_named(account: Option<&ClaudeConfigAccount>) -> LimitsAccountDto {
     account.map_or_else(default_account, card_account)
 }

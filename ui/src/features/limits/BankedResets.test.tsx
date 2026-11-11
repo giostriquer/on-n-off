@@ -136,8 +136,8 @@ describe("DesktopResetsRow", () => {
     return within(list).getAllByRole("listitem").map(item => item.textContent ?? "");
   }
 
-  function row(left: number, nextExpiresAt: string | null) {
-    return <DesktopResetsRow seen={{ app: "Claude Desktop", observedAt: SEEN_AT, left, nextExpiresAt }} now={NOW} />;
+  function row(availableCount: number, nextExpiresAt: string | null) {
+    return <DesktopResetsRow seen={{ app: "Claude Desktop", observedAt: SEEN_AT, availableCount, nextExpiresAt }} now={NOW} />;
   }
 
   it("reads as a banked resets row that says where and how long ago the count was seen, then when it expires", () => {
