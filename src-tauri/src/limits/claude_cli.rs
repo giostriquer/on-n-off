@@ -202,14 +202,20 @@ fn signed_out(claude: &dyn Fn() -> Command) -> bool {
 }
 
 pub(crate) fn auth_status(claude: &dyn Fn() -> Command) -> Option<Value> {
+    auth_status_within(claude, STATUS_DEADLINE)
+}
+
+pub(crate) fn auth_status_within(
+    claude: &dyn Fn() -> Command,
+    deadline: Duration,
+) -> Option<Value> {
     let mut command = prepared(claude(), &["auth", "status", "--json"]);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let child = command.spawn().ok()?;
-    let Ok(CommandOutcome::Exited { stdout, .. }) = wait_with_deadline(child, STATUS_DEADLINE)
-    else {
+    let Ok(CommandOutcome::Exited { stdout, .. }) = wait_with_deadline(child, deadline) else {
         return None;
     };
     serde_json::from_str(&stdout).ok()

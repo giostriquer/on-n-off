@@ -336,24 +336,67 @@ fn a_homes_sign_in_says_when_it_ends_until_the_home_is_emptied() {
     };
     let ends = Some(SignInDeadline {
         identity: identity(),
-        ends_at_ms: 1_792_081_900_000,
+        ends_at_ms: Some(1_792_081_900_000),
     });
+
+    let bin = root.path().join("bin");
+    let asking = |status: &str| {
+        let claude_code = CliStub::new("claude").stdout(status).write(&bin);
+        crate::accounts::native::with_test_cli(&claude_code, || home.sign_in_deadline())
+    };
+    let before_the_date = r#"{"loggedIn":true,"authMethod":"claude.ai"}"#;
+    let signed_out = r#"{"loggedIn":false,"authMethod":"none","loginExpiresAt":null}"#;
 
     let ((live, ended, emptied), _) = keychain(|| {
         let locks = home.lock().unwrap();
         home.put(&dated("access-b1", "refresh-b1"), locks.as_ref())
             .unwrap();
-        let live = home.sign_in_deadline();
+        let live = asking(before_the_date);
         let back = home.put(&dated("", ""), locks.as_ref()).unwrap();
         assert!(back.is_none(), "Claude Code emptied the login");
-        let ended = home.sign_in_deadline();
+        let ended = asking(signed_out);
         home.clear(locks.as_ref()).unwrap();
-        (live, ended, home.sign_in_deadline())
+        (live, ended, asking(signed_out))
     });
 
     assert_eq!(live, ends);
     assert_eq!(ended, ends, "an emptied login keeps the date it ended at");
     assert_eq!(emptied, None, "on-n-off's sign-out keeps no date");
+}
+
+#[test]
+fn a_homes_store_asks_that_homes_claude_code_when_its_sign_in_ends() {
+    let root = tempfile::tempdir().unwrap();
+    let home = ClaudeHome::at(root.path());
+    let bin = root.path().join("bin");
+    let claude_code = CliStub::new("claude")
+        .log_env("CLAUDE_CONFIG_DIR", "config-dir.txt")
+        .stdout(
+            r#"{"loggedIn":true,"authMethod":"claude.ai","email":"you@example.com","orgId":"team","loginExpiresAt":"2026-10-12T16:31:40.250Z"}"#,
+        )
+        .write(&bin);
+
+    let (found, _) = keychain(|| {
+        let locks = home.lock().unwrap();
+        home.put(&login("b1"), locks.as_ref()).unwrap();
+        crate::accounts::native::with_test_cli(&claude_code, || {
+            ClaudeNative::home(root.path())
+                .sign_in_deadline_within(crate::cli_stub::ANSWER_DEADLINE)
+        })
+    });
+
+    assert_eq!(
+        found,
+        Some(SignInDeadline {
+            identity: identity(),
+            ends_at_ms: Some(1_791_822_700_250),
+        })
+    );
+    let asked_in = fs::read_to_string(bin.join("config-dir.txt")).unwrap();
+    assert_eq!(
+        Path::new(asked_in.trim()),
+        root.path().join(".claude").as_path()
+    );
 }
 
 fn touched(file: &std::path::Path, seconds: u64) {

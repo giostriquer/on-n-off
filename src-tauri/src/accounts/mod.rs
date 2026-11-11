@@ -364,7 +364,7 @@ impl Accounts {
         let recovery_required = db
             .recovery_target()
             .is_some_and(|profile| profile.identity.provider == provider);
-        let native_deadline = native.sign_in_deadline();
+        let native_deadline = std::cell::OnceCell::new();
         let homes = self.account_homes(provider);
         let homes = homes.as_ref().map(|homes| homes as &homes::Resolve<'_>);
         let mut read_ends = Vec::new();
@@ -377,8 +377,13 @@ impl Accounts {
             &mut |p| {
                 let active = current.as_ref() == Some(&p.identity);
                 let kept = usage::kept(p, homes);
-                let deadline =
-                    login_state::Deadline::of(p, native_deadline.as_ref(), kept.as_ref());
+                let deadline = login_state::Deadline::of(
+                    p,
+                    native_deadline
+                        .get_or_init(|| native.sign_in_deadline())
+                        .as_ref(),
+                    kept.as_ref(),
+                );
                 if let Some(end) = deadline.read() {
                     read_ends.push((p.id.clone(), p.home.clone(), end));
                 }

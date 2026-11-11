@@ -411,12 +411,32 @@ fn the_signed_in_accounts_state_is_its_deadline_alone() {
     harness.signed_in(Some(login));
     *harness.native.deadline.borrow_mut() = Some(SignInDeadline {
         identity,
-        ends_at_ms: AHEAD_MS,
+        ends_at_ms: Some(AHEAD_MS),
     });
 
     assert_eq!(
         login_states(&harness, AgentId::Claude),
         [json!({"state": "ending", "endsAt": "2100-01-01T00:00:00Z"})]
+    );
+}
+
+#[test]
+fn a_signed_in_account_whose_store_dates_no_end_shows_none_whatever_its_saved_copy_says() {
+    let harness = Harness::new();
+    let (identity, login) = you(AgentId::Claude, "g1");
+    harness.saved(identity.clone(), dated(login.clone(), PASSED_MS));
+    harness.signed_in(Some(login));
+    *harness.native.deadline.borrow_mut() = Some(SignInDeadline {
+        identity,
+        ends_at_ms: None,
+    });
+
+    let listed = harness.accounts().list(AgentId::Claude).unwrap();
+
+    assert_eq!(listed.profiles[0].sign_in_ends_at, None);
+    assert_eq!(
+        login_states(&harness, AgentId::Claude),
+        [json!({"state": "usable"})]
     );
 }
 
@@ -464,7 +484,7 @@ fn a_signed_in_account_without_a_saved_login_still_says_when_its_sign_in_ends() 
         harness.signed_in(Some(login));
         *harness.native.deadline.borrow_mut() = Some(SignInDeadline {
             identity,
-            ends_at_ms,
+            ends_at_ms: Some(ends_at_ms),
         });
 
         assert_eq!(login_states(&harness, AgentId::Claude), [expected]);
