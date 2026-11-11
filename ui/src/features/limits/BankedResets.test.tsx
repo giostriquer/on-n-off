@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { formatShortDate } from "$lib/limitsFormat";
 import type { LimitsBankedReset, LimitWindow, ProviderLimits } from "$lib/limitsTypes";
-import { BankedResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
+import { BankedResetsRow, DesktopResetsRow, ResetOfferRow, UseBankedReset } from "./BankedResets";
 import { ResetAlertsContext } from "./resetAlerts";
 
 const consumeCodexResetCredit = vi.hoisted(() => vi.fn());
@@ -123,6 +123,45 @@ describe("BankedResetsRow", () => {
 
   it("stays out of the card when the card has no banked resets to show", () => {
     const { container } = render(<BankedResetsRow resetCredits={null} now={NOW} />);
+    expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("DesktopResetsRow", () => {
+  const SEEN_AT = "2026-08-17T16:00:00Z";
+  const seenLine = "seen in Claude Desktop 4h ago";
+
+  function lines(): string[] {
+    const list = screen.getByRole("list", { name: "Banked resets Claude Desktop last saw" });
+    return within(list).getAllByRole("listitem").map(item => item.textContent ?? "");
+  }
+
+  function row(availableCount: number, nextExpiresAt: string | null) {
+    return <DesktopResetsRow seen={{ app: "Claude Desktop", observedAt: SEEN_AT, availableCount, nextExpiresAt }} now={NOW} />;
+  }
+
+  it("reads as a banked resets row that says where and how long ago the count was seen, then when it expires", () => {
+    render(row(1, "2026-08-29T15:00:00Z"));
+
+    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("1");
+    expect(lines()).toEqual([seenLine, `expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`]);
+  });
+
+  it("says the next one expires when more than one is left", () => {
+    render(row(2, "2026-08-29T15:00:00Z"));
+
+    expect(screen.getByRole("definition", { name: "Banked resets" }).textContent).toBe("2");
+    expect(lines()).toEqual([seenLine, `next expires in 11d 19h · ${formatShortDate("2026-08-29T15:00:00Z")}`]);
+  });
+
+  it("says only where it was seen when no expiry is known", () => {
+    render(row(1, null));
+
+    expect(lines()).toEqual([seenLine]);
+  });
+
+  it("stays out of the card when Desktop saw no banked reset", () => {
+    const { container } = render(<DesktopResetsRow seen={null} now={NOW} />);
     expect(container.innerHTML).toBe("");
   });
 });

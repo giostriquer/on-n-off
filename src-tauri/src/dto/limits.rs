@@ -109,6 +109,15 @@ pub struct LimitsBankedResetDto {
     pub expires_at: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DesktopResetsDto {
+    pub observed_at: String,
+    pub available_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_expires_at: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LimitsResetOfferDto {
@@ -259,6 +268,8 @@ pub struct ColumnEntryDto {
     pub unread: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub desktop_account: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub desktop_resets: Option<DesktopResetsDto>,
 }
 
 #[cfg(test)]

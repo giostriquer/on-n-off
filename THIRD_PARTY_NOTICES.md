@@ -13,6 +13,12 @@ from the running application on 2026-09-01 and re-measured by hand; no
 Codenotch source code, binaries, assets, or text are included in on-n-off, and
 the Swift, Rust, and TypeScript implementations are on-n-off's own.
 
+Reading Claude's banked resets from Claude Desktop's HTTP cache follows the
+approach of Codenotch's `ClaudeDesktopUsageCache`
+([vinzdg/codenotch](https://github.com/vinzdg/codenotch), MIT), read on
+2026-11-10. on-n-off's reader is its own Rust code and finds the entry by its
+file name instead of scanning the cache.
+
 ## T3 Code
 
 Portions of on-n-off's Usage analytics are derived from

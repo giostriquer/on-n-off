@@ -235,7 +235,11 @@ below) rather than naming it: a saved profile's legacy reading (`SnapshotStore::
 remembered file changes as it loads (`StoredSnapshot::into_dto`), whether a read asked about credits
 spent or the subscription term (`limits/reading.rs`), whether session rollouts are merged
 (`limits::read_limits_in`) and whose banked resets the monitor and the alert follow
-(`BANKED_RESETS_PROVIDER`, the one provider a compile-time check allows). The plan's label and
+(`BANKED_RESETS_PROVIDER`, the one provider a compile-time check allows). Claude's banked resets
+are no part of a reading: no read returns them, so on macOS `limits/desktop_app/resets.rs` takes
+what Claude Desktop last saw from one entry of Desktop's HTTP cache and the served column carries
+it beside the card (`desktopResets`), dated and display-only ([PROVIDERS.md](../../PROVIDERS.md), Claude, Banked
+resets). The plan's label and
 capacity hold by construction: `keep_remembered` drops whatever either reading carried and works
 them out again from the plan it kept.
 

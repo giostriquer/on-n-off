@@ -20,6 +20,11 @@ pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
     Some(claude_cli::known_account(claude.config_file()))
 }
 
+pub(super) fn signed_in_organization(home: &Path, account: &LimitsAccountDto) -> Option<String> {
+    let claude = SignedIn::resolve(home).ok()?;
+    claude_cli::organization_named(claude.config_file(), account)
+}
+
 pub(super) fn claude_current(home: &Path) -> Read {
     match SignedIn::resolve(home) {
         Ok(claude) => claude_cli::read_signed_in(

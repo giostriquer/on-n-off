@@ -14,14 +14,34 @@ struct ClaudeDesktopConfig {
     last_known_account: Option<String>,
 }
 
-pub(crate) fn mark_desktop_account(provider: AgentId, column: &mut [ColumnEntryDto], home: &Path) {
+mod resets;
+mod simple_cache;
+
+pub(crate) fn annotate(provider: AgentId, column: &mut [ColumnEntryDto], home: &Path, now_ms: i64) {
     let Some(app) = provider.limits_facts().desktop_app else {
         return;
     };
+    if !installed(app, home) {
+        return;
+    }
+    tag_account(app, column, home);
+    resets::attach(app, column, home, now_ms);
+}
+
+#[cfg(test)]
+pub(crate) fn cache_an_unending_reset_for_test(home: &Path, organization: &str) {
+    resets::tests::desktop_saw(
+        home,
+        organization,
+        &serde_json::json!({"cedar_ember": {"eligible": true, "grants": [{"resets_left": 1}]}}),
+    );
+}
+
+fn tag_account(app: DesktopApp, column: &mut [ColumnEntryDto], home: &Path) {
     if signed_in(app, column).is_none() {
         return;
     }
-    if let Some(desktop) = desktop_user(app, home) {
+    if let Some(desktop) = last_account(app, home) {
         mark(app, column, &desktop);
     }
 }
@@ -38,13 +58,6 @@ fn mark(app: DesktopApp, column: &mut [ColumnEntryDto], desktop: &str) {
 fn signed_in(app: DesktopApp, column: &[ColumnEntryDto]) -> Option<&str> {
     let entry = column.iter().find(|entry| entry.card.current_account)?;
     user_of(app, entry)
-}
-
-fn desktop_user(app: DesktopApp, home: &Path) -> Option<String> {
-    if !installed(app, home) {
-        return None;
-    }
-    last_account(app, home)
 }
 
 fn installed(app: DesktopApp, home: &Path) -> bool {

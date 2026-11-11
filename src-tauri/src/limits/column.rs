@@ -40,6 +40,7 @@ pub(crate) fn column(
                     .collect(),
                 unread: false,
                 desktop_account: false,
+                desktop_resets: None,
                 card: card.clone(),
             }
         })
@@ -98,6 +99,7 @@ fn unread(
         replaced: Vec::new(),
         unread: true,
         desktop_account: false,
+        desktop_resets: None,
     }
 }
 

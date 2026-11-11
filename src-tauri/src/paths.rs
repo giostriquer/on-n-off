@@ -112,6 +112,12 @@ pub fn claude_desktop_data_for(home: &std::path::Path) -> PathBuf {
     home.join("AppData").join("Roaming").join("Claude")
 }
 
+pub fn claude_desktop_cache_for(home: &std::path::Path) -> PathBuf {
+    claude_desktop_data_for(home)
+        .join("Cache")
+        .join("Cache_Data")
+}
+
 pub fn claude_desktop_apps_for(home: &std::path::Path) -> Vec<PathBuf> {
     claude_desktop_apps_from(home, &process_env)
 }

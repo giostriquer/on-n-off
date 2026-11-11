@@ -86,17 +86,51 @@ fn tags(column: &[ColumnEntryDto]) -> Vec<bool> {
 #[test]
 fn reads_the_account_an_installed_claude_desktop_last_signed_in_to() {
     assert_eq!(
-        desktop_user(DesktopApp::Claude, &desktop_on("desktop-user")),
+        last_account(DesktopApp::Claude, &desktop_on("desktop-user")),
         Some("desktop-user".to_owned())
     );
 }
 
+fn annotated(home: &std::path::Path) -> Vec<ColumnEntryDto> {
+    let me = identity("user-me", "org-me");
+    let desk = identity("user-desk", "org-desk");
+    let mut column = column_of(
+        AgentId::Claude,
+        &[
+            signed_in(&me, "me@claude.example"),
+            saved(&desk, "desk@claude.example"),
+        ],
+        &[(desk, "desk@claude.example")],
+    );
+    annotate(AgentId::Claude, &mut column, home, resets::tests::NOW_MS);
+    column
+}
+
 #[test]
-fn a_config_left_behind_by_an_uninstalled_desktop_names_no_account() {
-    let left_behind = home_with(Some(&config_naming("desktop-user")), false);
-    assert_eq!(desktop_user(DesktopApp::Claude, &left_behind), None);
+fn data_left_behind_by_an_uninstalled_desktop_tags_no_account_and_gives_no_resets() {
+    let installed = desktop_on("user-desk");
+    resets::tests::desktop_saw(&installed, "org-desk", &resets::tests::one_reset());
+    assert_eq!(tags(&annotated(&installed)), [false, true]);
+
+    let left_behind = home_with(Some(&config_naming("user-desk")), false);
+    resets::tests::desktop_saw(&left_behind, "org-desk", &resets::tests::one_reset());
+    let column = annotated(&left_behind);
+    assert_eq!(tags(&column), [false, false]);
+    assert_eq!(resets::tests::counts(&column), [None, None]);
+
     let never_signed_in = home_with(None, true);
-    assert_eq!(desktop_user(DesktopApp::Claude, &never_signed_in), None);
+    assert_eq!(tags(&annotated(&never_signed_in)), [false, false]);
+}
+
+#[test]
+fn an_installed_desktops_cached_resets_reach_the_account_on_macos_alone() {
+    let home = desktop_on("user-desk");
+    resets::tests::desktop_saw(&home, "org-desk", &resets::tests::one_reset());
+
+    assert_eq!(
+        resets::tests::counts(&annotated(&home)),
+        [None, cfg!(target_os = "macos").then_some(1)]
+    );
 }
 
 #[test]
@@ -110,7 +144,7 @@ fn names_no_desktop_account_without_a_config_that_names_one() {
         "[]",
     ] {
         assert_eq!(
-            desktop_user(DesktopApp::Claude, &home_with(Some(config), true)),
+            last_account(DesktopApp::Claude, &home_with(Some(config), true)),
             None,
             "{config}"
         );
@@ -254,7 +288,7 @@ fn marking_reads_the_desktop_app_of_a_provider_that_has_one() {
         ],
         &[],
     );
-    mark_desktop_account(AgentId::Claude, &mut claude, &home);
+    annotate(AgentId::Claude, &mut claude, &home, 0);
     assert_eq!(tags(&claude), [false, true]);
     let codex = |identity: &Identity| Identity {
         provider: AgentId::Codex,
@@ -271,8 +305,10 @@ fn marking_reads_the_desktop_app_of_a_provider_that_has_one() {
             "away@codex.example",
         )],
     );
-    mark_desktop_account(AgentId::Codex, &mut column, &home);
+    resets::tests::desktop_saw(&home, "org-desk", &resets::tests::one_reset());
+    annotate(AgentId::Codex, &mut column, &home, resets::tests::NOW_MS);
     assert_eq!(tags(&column), [false, false, false]);
+    assert_eq!(resets::tests::counts(&column), [None, None, None]);
 }
 
 #[test]

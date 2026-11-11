@@ -44,6 +44,7 @@ describe("which cards a provider shows", () => {
       login: { state: "usable" },
       signIn: null,
       desktop: null,
+      desktopResets: null,
       archived: false,
     });
   });
@@ -522,5 +523,31 @@ describe("a card's header tags", () => {
     expect(kinds(remembered)).toEqual(["remembered", "term", "plan"]);
     const [planless] = cards([okCodex({ ...savedRefreshPaused, plan: null, planLabel: null, planCapacity: null, subscription: renews })]);
     expect(kinds(planless)).toEqual(["usageStatus", "term"]);
+  });
+});
+
+describe("the banked resets Claude Desktop last saw", () => {
+  const seen = { observedAt: "2026-08-17T16:00:00Z", availableCount: 2, nextExpiresAt: "2026-12-01T00:00:00Z" };
+
+  it("go on the account's card with the app that saw them and when", () => {
+    const [card] = cards([okClaude({ desktopResets: seen })], AT_NOW, "claude");
+    expect(card.desktopResets).toEqual({ app: "Claude Desktop", ...seen });
+    expect(card.figures.bankedResets).toBeNull();
+  });
+
+  it("are left off a card Desktop saw none for, once none is left, and once the soonest has expired", () => {
+    const of = (desktopResets: LimitsColumnEntry["desktopResets"]) => cards([okClaude({ desktopResets })], AT_NOW, "claude")[0].desktopResets;
+    expect(of(undefined)).toBeNull();
+    expect(of(null)).toBeNull();
+    expect(of({ ...seen, availableCount: 0 })).toBeNull();
+    expect(of({ ...seen, nextExpiresAt: NOW })).toBeNull();
+    expect(of({ ...seen, nextExpiresAt: null })).toMatchObject({ availableCount: 2, nextExpiresAt: null });
+  });
+
+  it("stay on a saved account's card that no read has answered for", () => {
+    const profile = saved("claude", "unread", "profile:unread", "unread@claude.example");
+    const [card] = cards([{ ...unreadEntry(profile), desktopResets: seen }], AT_NOW, "claude");
+    expect(card.reading).toBeNull();
+    expect(card.desktopResets?.availableCount).toBe(2);
   });
 });

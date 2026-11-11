@@ -1,6 +1,6 @@
 [package]
 name = "on-n-off"
-version = "0.39.0"
+version = "0.40.0"
 description = "Desktop manager for Claude, Codex, Antigravity, Cursor, and Muse plugins, skills, MCP servers, and agent configuration"
 authors = ["Giovanne Striquer"]
 edition = "2021"
@@ -55,6 +55,8 @@ tauri-plugin-process = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 tokio = { version = "1", features = ["time"] }
+sha1 = { version = "0.11", default-features = false }
+ruzstd = { version = "0.9", default-features = false, features = ["std"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

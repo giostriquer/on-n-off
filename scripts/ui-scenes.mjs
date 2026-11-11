@@ -53,6 +53,8 @@ export const SCENES = [
     limitsColumns: 3,
     steps: [{ wait: "role=button[name='Claude Desktop account']" }],
   })),
+  { name: "limits-desktop-resets", url: "/limits?mock=claudeDesktopResets", steps: [{ wait: "role=list[name='Banked resets Claude Desktop last saw'] >> nth=1" }] },
+  { name: "limits-desktop-resets-light", url: "/limits?mock=claudeDesktopResets", theme: "light", steps: [{ wait: "role=list[name='Banked resets Claude Desktop last saw'] >> nth=1" }] },
   { name: "limits-saved-logins-1280", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, limitsColumns: 3, steps: [{ wait: "role=region[name='Codex limits · moved@example.com']" }] },
   { name: "limits-saved-logins-menu", url: "/limits?mock=savedLogins", viewport: { width: 1280, height: 980 }, steps: [
     { click: "role=region[name='Codex limits · refused@example.com'] >> role=button[name='More actions for refused@example.com']" },
