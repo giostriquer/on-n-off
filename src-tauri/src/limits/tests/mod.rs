@@ -103,6 +103,41 @@ fn a_provider_has_a_limits_reader_exactly_when_the_catalogue_says_so() {
 }
 
 #[test]
+fn only_a_forced_read_rereads_a_login_that_could_not_be_read() {
+    let home = scratch_dir("limits-reread-login");
+    let read = |force, reread_login: fn(&Path) -> bool| {
+        read_with(
+            AgentId::Muse,
+            Reader {
+                read: |_, _| Read::anonymous(ReadFailure::SignedOut),
+                login: |_| None,
+                reread_login,
+            },
+            force,
+            Sources {
+                home: &home,
+                now_ms: 0,
+            },
+        )
+        .login_reread
+    };
+    assert!(!read(false, |_| panic!(
+        "an unforced read keeps the login as it was read"
+    )));
+    assert!(read(true, |_| true));
+    assert!(!read(true, |_| false));
+}
+
+#[test]
+fn no_reader_rereads_a_login_where_no_lookup_failed() {
+    let home = scratch_dir("limits-no-reread");
+    for agent in crate::provider_catalogue::WITH_LIMITS {
+        let reader = limits_reader(agent).expect("a limits reader");
+        assert!(!(reader.reread_login)(&home), "{agent:?}");
+    }
+}
+
+#[test]
 fn every_provider_with_a_limits_reader_has_a_read_lock_of_its_own() {
     for (i, a) in crate::provider_catalogue::WITH_LIMITS
         .into_iter()

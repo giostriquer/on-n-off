@@ -299,12 +299,16 @@ fn read_provider(
     refresh_and_list: &dyn Fn(bool, &mut Vec<ProviderLimitsDto>) -> Option<Roster>,
     flag: &dyn Fn(&mut [ProviderLimitsDto]),
 ) -> ProviderRead {
-    let mut unarchived = false;
+    let mut accounts = false;
     let (served, reading) =
         read_through_cache(cache, interval, force, native.login, |force, refresh| {
             let (mut cards, outcome) = if refresh.native {
-                let NativeRead { mut cards, outcome } = (native.read)(force);
-                unarchived = unarchive(&cards);
+                let NativeRead {
+                    mut cards,
+                    outcome,
+                    login_reread,
+                } = (native.read)(force);
+                accounts = unarchive(&cards) || login_reread;
                 if !refresh.saved {
                     cards = keep_saved_cards(cards, refresh.previous);
                 }
@@ -323,7 +327,7 @@ fn read_provider(
         });
     let announced = Changed {
         limits: reading.replaced(),
-        accounts: unarchived,
+        accounts,
     };
     announced.send(cache.source);
     ProviderRead {

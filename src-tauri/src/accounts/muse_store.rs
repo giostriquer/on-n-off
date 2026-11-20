@@ -213,6 +213,17 @@ impl LoginCache {
         }
     }
 
+    pub(crate) fn ask_again(&self, config: &Path) -> bool {
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let failed = cache
+            .as_ref()
+            .is_some_and(|cached| cached.config == config && cached.secret.is_err());
+        if failed {
+            *cache = None;
+        }
+        failed
+    }
+
     pub(crate) fn login(
         &self,
         config: &Path,
@@ -373,6 +384,10 @@ pub(super) static SIGNED_IN: LoginCache = LoginCache::new();
 pub(crate) fn signed_in(config: &Path) -> Option<MuseLogin> {
     let now_secs = chrono::Utc::now().timestamp();
     SIGNED_IN.login(config, now_secs, &|| SystemKeychain.read())
+}
+
+pub(crate) fn ask_again(config: &Path) -> bool {
+    SIGNED_IN.ask_again(config)
 }
 
 #[cfg(test)]

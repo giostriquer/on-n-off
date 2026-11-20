@@ -9,7 +9,7 @@ use crate::http::HttpError;
 
 pub(super) mod mint;
 
-const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when Muse's login changes or after on-n-off restarts.";
+const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse's login changes or after on-n-off restarts.";
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
     match label
@@ -27,6 +27,10 @@ fn account_dto(label: Option<String>) -> LimitsAccountDto {
 
 pub(super) fn known_account(home: &Path) -> Option<LimitsAccountDto> {
     crate::accounts::muse_store::login_email(&crate::paths::muse_config_for(home)).map(account_dto)
+}
+
+pub(super) fn reread_login(home: &Path) -> bool {
+    crate::accounts::muse_store::ask_again(&crate::paths::muse_config_for(home))
 }
 
 pub(super) fn muse_current(home: &Path) -> Read {

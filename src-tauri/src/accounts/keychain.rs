@@ -231,7 +231,7 @@ pub(crate) fn with_real_keychain<T>(run: impl FnOnce() -> T) -> T {
 }
 
 #[cfg(all(target_os = "macos", test))]
-pub(super) fn with_test_runner<T>(
+pub(crate) fn with_test_runner<T>(
     runner: impl Fn(&str) -> CommandOutcome + 'static,
     run: impl FnOnce() -> T,
 ) -> (T, Vec<String>) {
@@ -243,7 +243,7 @@ pub(super) fn with_test_runner<T>(
 }
 
 #[cfg(all(target_os = "macos", test))]
-pub(super) fn fake_items(
+pub(crate) fn fake_items(
     items: &'static [(&'static str, &'static str)],
 ) -> impl Fn(&str) -> CommandOutcome + 'static {
     move |command| {

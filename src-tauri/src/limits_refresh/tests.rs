@@ -24,11 +24,12 @@ fn native_read(cards: Vec<ProviderLimitsDto>) -> NativeRead {
             failure: failed.then(why),
             login: None,
         },
+        login_reread: false,
     }
 }
 
 fn native(cards: Vec<ProviderLimitsDto>) -> (Vec<ProviderLimitsDto>, Option<NativeOutcome>) {
-    let NativeRead { cards, outcome } = native_read(cards);
+    let NativeRead { cards, outcome, .. } = native_read(cards);
     (cards, Some(outcome))
 }
 
@@ -312,6 +313,7 @@ fn a_provider_read_holds_a_forced_read_for_the_rate_limited_login_and_reads_anot
         NativeRead {
             cards: vec![snapshot("current", true, LimitsStatus::Failed)],
             outcome: rate_limited("login-a"),
+            login_reread: false,
         }
     };
     let current_login = || Some(login.borrow().to_string());
@@ -337,6 +339,36 @@ fn a_provider_read_holds_a_forced_read_for_the_rate_limited_login_and_reads_anot
     *login.borrow_mut() = "login-b";
     read(true);
     assert_eq!(reads.get(), 2, "another login is read at once");
+}
+
+#[test]
+fn a_read_that_reread_the_login_announces_the_accounts_too() {
+    for (login_reread, expected) in [
+        (false, vec![Source::LimitsMuse]),
+        (true, vec![Source::LimitsMuse, Source::Accounts]),
+    ] {
+        let cache = Cache::new(AgentId::Muse, Source::LimitsMuse);
+        let native = |_| NativeRead {
+            login_reread,
+            ..native_read(vec![snapshot("current", true, LimitsStatus::Ok)])
+        };
+        let native = Native {
+            read: &native,
+            login: &no_login,
+        };
+        read_revision::take_announced();
+        let read = read_provider(
+            &cache,
+            Duration::from_secs(300),
+            true,
+            &native,
+            &|_| false,
+            &|_, _| None,
+            &|_| {},
+        );
+        assert_eq!(read.announced.accounts, login_reread);
+        assert_eq!(read_revision::take_announced(), expected);
+    }
 }
 
 #[test]

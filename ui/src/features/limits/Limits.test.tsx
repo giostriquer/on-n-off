@@ -6,7 +6,7 @@ import type { AgentId, LimitsPollMinutes } from "$lib/types";
 import { SharedReads } from "$lib/sharedReads/announcements";
 import { refreshLimits } from "$lib/sharedReads/limits";
 import { Limits } from "./Limits";
-import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
+import { NOW, REMEMBERED, lastObserved, okClaude, okCodex, okMuse, staleCodex, statusOnly, withSavedProfiles } from "./readingFixtures";
 
 const readAccounts = vi.hoisted(() => vi.fn());
 const addAccount = vi.hoisted(() => vi.fn());
@@ -226,6 +226,43 @@ describe("Limits", () => {
     expect(within(claude).queryByText(/Claude Desktop usage/)).toBeNull();
     expect(within(claude).queryByText(/sign in/)).toBeNull();
     expect(within(claude).queryByRole("button", { name: /^Forget/ })).toBeNull();
+  });
+
+  it("offers Try again on the signed-in card whose read failed, and reads that provider again when asked", async () => {
+    const failed = okMuse({ status: "failed", standing: lastObserved("readPaused", "on-n-off could not read Muse's login.", "error") });
+    const again = deferred<LimitsColumnEntry[]>();
+    readLimits.mockImplementation((agentId: AgentId, force: boolean) =>
+      agentId === "muse" ? (force ? again.promise : Promise.resolve([failed])) : Promise.resolve([agentId === "claude" ? okClaude() : okCodex()]));
+    renderLimits();
+
+    const shown = () => within(card("Muse limits · you@muse.example"));
+    await screen.findByRole("region", { name: "Muse limits · you@muse.example" });
+    expect(shown().getByText("Refresh paused.")).toBeTruthy();
+    expect(within(card("Claude limits · me@claude.example")).queryByRole("button", { name: "Try again" })).toBeNull();
+    const retry = shown().getByRole<HTMLButtonElement>("button", { name: "Try again" });
+    expect(retry.disabled).toBe(false);
+
+    fireEvent.click(retry);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledWith("muse", true));
+    await waitFor(() => expect(retry.disabled).toBe(true));
+    expect(readLimits.mock.calls.filter(([, force]) => force)).toEqual([["muse", true]]);
+
+    await act(async () => { again.resolve([okMuse()]); });
+    await waitFor(() => expect(shown().queryByRole("button", { name: "Try again" })).toBeNull());
+    expect(shown().queryByText("Refresh paused.")).toBeNull();
+  });
+
+  it("offers Try again on a failed read that named no account, alone in the card's footer", async () => {
+    readLimits.mockImplementation((agentId: AgentId) =>
+      Promise.resolve(agentId === "claude" ? [statusOnly("claude", "failed", "The source said why.", "error")] : agentId === "codex" ? [okCodex()] : []));
+    renderLimits();
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    const footer = retry.closest("footer")!;
+    expect(card("Claude limits").contains(footer)).toBe(true);
+    expect(within(footer).getAllByRole("button").map(button => button.textContent)).toEqual(["Try again"]);
+    fireEvent.click(retry);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledWith("claude", true));
   });
 
   it("re-reads every provider on focus only after the configured interval", async () => {

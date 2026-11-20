@@ -389,7 +389,17 @@ reads Muse Code's signed-in device login, inline in its `auth.json` or else its 
 item. For the Muse Limits read (`limits/muse.rs`) it yields the login's email, which names the
 account on every path, and one `MuseCredential`: the access token, as `model::AccessToken`; an
 API key; an expired login; or a Keychain login it could not read. A login entry with no credential
-is no login. The mint read sends one POST per read to the key-mint endpoint the CLI calls itself
+is no login. The Keychain lookup's result is reused while `auth.json` stands, a failure included,
+so that no read on-n-off makes by itself raises the prompt twice; a prompt left unanswered would
+otherwise fail the card until the login changed or on-n-off restarted. A limits check the user
+asks for is the way out: every forced Limits read first forgets a lookup that failed
+(`limits::muse::reread_login`, `muse_store::ask_again`; one that answered is kept), so its read
+asks the Keychain again, and it announces the account list with its own replacement
+(`NativeRead::login_reread`), because the list's notice reports the same lookup. Every forced Muse
+read is one a click asked for: the card's Try again and Check limits now, the shell's Refresh, the
+popover's and the notch's, and the read that follows an unarchive. With automatic remembering on,
+its poll can hold the same failure as a notice of its own (`discovery::notice`), which the list
+shows in place of none until that poll runs again, at most 30 seconds after the retry. The mint read sends one POST per read to the key-mint endpoint the CLI calls itself
 (`limits/muse/mint.rs`) and keeps only the quota fields of the answer; Limits never starts Muse.
 Saved accounts use the same store for whole logins, as the next paragraph describes.
 
@@ -742,7 +752,7 @@ its message in place of the read's, and a refused login or another account keeps
 the ⋯ menu; ending shows its date through the last seven days; missing offers Sign in. The card frame
 (`LimitCardFrame`) draws each card's ⋯ menu and footer from the card action plan
 (`cardActionPlan.ts`), which decides every account action for every provider: Check limits now
-always, Edit category on every card with an account, the saved-login items and the footer's
+always, Try again in the footer of the signed-in card whose read failed, Edit category on every card with an account, the saved-login items and the footer's
 primary action wherever there is an account manager, and Archive account and Remove account on
 every card that is not signed in.
 Remove account and Archive account each send one command naming the card's account, from a card
