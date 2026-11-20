@@ -186,7 +186,7 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
     expect(describe_(checking).menu.split(" ").filter(entry => entry.endsWith("-"))).toEqual(["checkNow-"]);
   });
 
-  it("offers Try again beside the footer's own action, first", () => {
+  it("offers Try again beside the footer's own action", () => {
     const unsaved = { ...STATES["current failed"](provider), profiles: [] };
     expect(describe_(plan(provider, unsaved)).footer).toBe("tryAgain saveAccount");
   });

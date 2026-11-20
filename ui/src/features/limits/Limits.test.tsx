@@ -252,6 +252,19 @@ describe("Limits", () => {
     expect(shown().queryByText("Refresh paused.")).toBeNull();
   });
 
+  it("offers Try again on a failed read that named no account, alone in the card's footer", async () => {
+    readLimits.mockImplementation((agentId: AgentId) =>
+      Promise.resolve(agentId === "claude" ? [statusOnly("claude", "failed", "The source said why.", "error")] : agentId === "codex" ? [okCodex()] : []));
+    renderLimits();
+
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    const footer = retry.closest("footer")!;
+    expect(card("Claude limits").contains(footer)).toBe(true);
+    expect(within(footer).getAllByRole("button").map(button => button.textContent)).toEqual(["Try again"]);
+    fireEvent.click(retry);
+    await waitFor(() => expect(readLimits).toHaveBeenCalledWith("claude", true));
+  });
+
   it("re-reads every provider on focus only after the configured interval", async () => {
     answer([statusOnly("claude", "unauthenticated", "Access token expired", "muted")], [okCodex()]);
     renderLimits();

@@ -395,8 +395,8 @@ otherwise fail the card until the login changed or on-n-off restarted. A limits 
 asks for is the way out: every forced Limits read first forgets a lookup that failed
 (`limits::muse::reread_login`, `muse_store::ask_again`; one that answered is kept), so its read
 asks the Keychain again, and it announces the account list with its own replacement
-(`NativeRead::login_reread`), because the list's notice reports the same lookup. Every forced read
-is one a click asked for: the card's Try again and Check limits now, the shell's Refresh, the
+(`NativeRead::login_reread`), because the list's notice reports the same lookup. Every forced Muse
+read is one a click asked for: the card's Try again and Check limits now, the shell's Refresh, the
 popover's and the notch's, and the read that follows an unarchive. With automatic remembering on,
 its poll can hold the same failure as a notice of its own (`discovery::notice`), which the list
 shows in place of none until that poll runs again, at most 30 seconds after the retry. The mint read sends one POST per read to the key-mint endpoint the CLI calls itself
