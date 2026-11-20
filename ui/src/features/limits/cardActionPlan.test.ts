@@ -33,6 +33,7 @@ const CONTROLS = "the account controls";
 const LIST: AccountList<string> = { controls: CONTROLS, blocked: false, signingIn: null, runningClients: null };
 const RUNNING = ["Acme Studio (codex)"];
 const SPEND = { dueAt: "2026-08-17T20:08:00Z" };
+const FAILED = lastObserved("readPaused", "The source said why.", "error");
 
 type Setup = {
   entries: LimitsColumnEntry[];
@@ -64,9 +65,11 @@ function described({ action, enabled = true, busy = false }: { action: string; e
 
 function describe_(shown: CardActionPlan<string>): { menu: string; footer: string } {
   const menu = shown.menu.map(described).join(" ");
-  if (shown.footer === null) return { menu, footer: "" };
+  const retry = shown.retry && described({ ...shown.retry, action: "tryAgain" });
+  if (shown.footer === null) return { menu, footer: retry || "" };
   const { main, switchAlongside, resets } = shown.footer;
   const footer = [
+    retry,
     main && described(main),
     switchAlongside && described({ action: "switchAnyway", ...switchAlongside }),
     resets?.useBankedReset && described({ action: "useBankedReset", ...resets.useBankedReset }),
@@ -78,6 +81,9 @@ function describe_(shown: CardActionPlan<string>): { menu: string; footer: strin
 const STATES = {
   "current confirmed": (provider: LimitsProvider): Setup => ({
     entries: [reading(provider)], profiles: [profile(provider, { active: true })], nativeLogin: { observationId: accountId(provider), settled: true },
+  }),
+  "current failed": (provider: LimitsProvider): Setup => ({
+    entries: [reading(provider, { status: "failed", standing: FAILED })], profiles: [profile(provider, { active: true })], nativeLogin: { observationId: accountId(provider), settled: true },
   }),
   "current unconfirmed": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)] }),
   "current unsaved": (provider: LimitsProvider): Setup => ({ entries: [reading(provider)], nativeLogin: { observationId: accountId(provider), settled: true } }),
@@ -104,7 +110,7 @@ const STATES = {
 type State = keyof typeof STATES;
 type Expected = { menu: string; footer: string };
 
-const UNHELD = ["checkNow", "resetAlert", "cancelSignIn", "automaticSpend"];
+const UNHELD = ["checkNow", "tryAgain", "resetAlert", "cancelSignIn", "automaticSpend"];
 const SIGNED_IN = "checkNow category signInAgain removeLogin signOut";
 const SAVED = "checkNow category signInAgain archive remove";
 const CODEX_SAVED = "checkNow category signInAgain archive resetAlert remove";
@@ -112,6 +118,7 @@ const CODEX_SAVED = "checkNow category signInAgain archive resetAlert remove";
 const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
   claude: {
     "current confirmed": { menu: SIGNED_IN, footer: "" },
+    "current failed": { menu: SIGNED_IN, footer: "tryAgain" },
     "current unconfirmed": { menu: "checkNow category signOut-", footer: "saveAccount-" },
     "current unsaved": { menu: "checkNow category signOut", footer: "saveAccount" },
     saved: { menu: SAVED, footer: "useAccount" },
@@ -125,6 +132,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
   },
   codex: {
     "current confirmed": { menu: "checkNow category signInAgain removeLogin resetAlert signOut", footer: "useBankedReset" },
+    "current failed": { menu: "checkNow category signInAgain removeLogin resetAlert signOut", footer: "tryAgain" },
     "current unconfirmed": { menu: "checkNow category resetAlert signOut-", footer: "saveAccount- useBankedReset-" },
     "current unsaved": { menu: "checkNow category resetAlert signOut", footer: "saveAccount useBankedReset" },
     saved: { menu: CODEX_SAVED, footer: "useAccount" },
@@ -138,6 +146,7 @@ const TABLE: Record<LimitsProvider, Record<State, Expected>> = {
   },
   muse: {
     "current confirmed": { menu: SIGNED_IN, footer: "" },
+    "current failed": { menu: SIGNED_IN, footer: "tryAgain" },
     "current unconfirmed": { menu: "checkNow category signOut-", footer: "saveAccount-" },
     "current unsaved": { menu: "checkNow category signOut", footer: "saveAccount" },
     saved: { menu: SAVED, footer: "useAccount" },
@@ -171,10 +180,39 @@ describe.each(LIMITS_PROVIDERS)("the %s card action plan", provider => {
     expect(describe_(plan(provider, STATES.saved(provider), { checking: true })).menu.split(" ").filter(entry => entry.endsWith("-"))).toEqual(["checkNow-"]);
   });
 
+  it("disables Try again with Check limits now while the provider is being checked", () => {
+    const checking = plan(provider, STATES["current failed"](provider), { checking: true });
+    expect(checking.retry).toEqual({ action: "checkNow", enabled: false });
+    expect(describe_(checking).menu.split(" ").filter(entry => entry.endsWith("-"))).toEqual(["checkNow-"]);
+  });
+
+  it("offers Try again beside the footer's own action, first", () => {
+    const unsaved = { ...STATES["current failed"](provider), profiles: [] };
+    expect(describe_(plan(provider, unsaved)).footer).toBe("tryAgain saveAccount");
+  });
+
+  it("offers Try again on a failed read that named no account, with nothing else in the footer", () => {
+    const anonymous = limitCards({ provider, entries: [{ provider, status: "failed", currentAccount: true, windows: [], standing: unavailable("The source said why.", "error") }], nativeLogin: null, now: AT_NOW })![0];
+    expect(planFor(anonymous, { entries: [] })).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null, retry: { action: "checkNow", enabled: true } });
+  });
+
+  it.each<[string, Partial<LimitsColumnEntry>]>([
+    ["answered", {}],
+    ["found nobody signed in", { status: "signedOut", standing: unavailable("Sign in to see subscription limits.", "muted") }],
+    ["has no limits to show", { status: "unsupported", standing: unavailable("No subscription limits to show.", "muted") }],
+  ])("offers no Try again on the signed-in card whose read %s", (_case, overrides) => {
+    expect(plan(provider, { ...STATES["current confirmed"](provider), entries: [reading(provider, overrides)] }).retry).toBeNull();
+  });
+
+  it("offers no Try again on another account's card, which a sign-in or its own refresh mends", () => {
+    const saved = { entries: [reading(provider, { currentAccount: false, savedProfile: true, status: "failed", standing: lastObserved("savedRefreshPaused", "The source said why.", "error") })], profiles: [profile(provider)] };
+    expect(plan(provider, saved).retry).toBeNull();
+  });
+
   it("offers a card with no account only Check limits now, as it offers a card not yet read", () => {
     const anonymous = limitCards({ provider, entries: [{ provider, status: "signedOut", currentAccount: true, windows: [] }], nativeLogin: null, now: AT_NOW })![0];
     const shown = planFor(anonymous, { entries: [], pendingSpend: SPEND });
-    expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null });
+    expect(shown).toEqual({ account: null, menu: [{ action: "checkNow", enabled: true }], footer: null, retry: null });
     expect([checkNowEntry(false), checkNowEntry(true)]).toEqual([{ action: "checkNow", enabled: true }, { action: "checkNow", enabled: false }]);
   });
 });

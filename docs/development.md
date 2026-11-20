@@ -121,15 +121,14 @@ source carries no comments (see [Code comments](#code-comments)).
   actions a card offers, in what order and whether each is enabled, is the card action plan's
   alone (`cardActionPlan`, `cardActionPlan.ts`), for every provider and card state: the menu
   (`ActionMenu`, `ui/src/components/`), which always starts with Check limits now and ends with
-  the destructive items, and the footer: its main button, the Switch anyway confirmation and the
-  banked reset controls. Each entry carries what its handler needs (the account controls, the saved
+  the destructive items, and the footer: Try again on the signed-in card whose read failed (the
+  entry Check limits now is, `retry`, so one forced read has one definition), its main button, the
+  Switch anyway confirmation and the banked reset controls. Each entry carries what its handler needs (the account controls, the saved
   login, the clients still running, the reading and when its headline window resets by itself, the waiting spend), and `useCardActions`
   (`cardActions.tsx`) only binds a label and a handler to each, in one switch per surface; nothing
   else adds, removes or enables an action. A card not read yet (`PendingCardFrame`) offers only
-  Check limits now (`checkNowEntry`). The one button outside the plan is Try again, in the body of
-  the signed-in card whose read failed, under the read's message (`freshness.retry` in the card
-  model, `limitCards.ts`): it is that provider's forced read, as Check limits now is, placed where
-  the failure is said rather than behind the menu. The plan reads two facts from the card for who is signed in:
+  Check limits now (`checkNowEntry`). A failed read that named no account still offers Try again,
+  alone in its footer. The plan reads two facts from the card for who is signed in:
   its signed-in state (`signedIn`), for every decision about the signed-in login, and whether it
   shows the provider's own read (`leads`), which Use banked reset requires and Archive account in
   place of Use account refuses ([why](architecture/README.md#limits)). The card model and the plan

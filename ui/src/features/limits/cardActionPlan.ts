@@ -62,9 +62,10 @@ export type CardFooterPlan<C> = {
   resets: ResetControls | null;
 };
 
-export type CardActionPlan<C> =
+export type CardActionPlan<C> = { retry: CheckNowEntry | null } & (
   | { account: null; menu: CheckNowEntry[]; footer: null }
-  | { account: CardAccount; menu: MenuEntry<C>[]; footer: CardFooterPlan<C> };
+  | { account: CardAccount; menu: MenuEntry<C>[]; footer: CardFooterPlan<C> }
+);
 
 type Shown<C> = {
   card: LimitCard;
@@ -86,7 +87,8 @@ export function checkNowEntry(checking: boolean): CheckNowEntry {
 
 export function cardActionPlan<C>({ card, now, checking, accounts, archiving, removing, pendingSpend }: PlanInput<C>): CardActionPlan<C> {
   const checkNow = checkNowEntry(checking);
-  if (!card.account) return { account: null, menu: [checkNow], footer: null };
+  const retry = card.leads && card.freshness.readStatus === "failed" ? checkNow : null;
+  if (!card.account) return { account: null, menu: [checkNow], footer: null, retry };
   const can = !(accounts?.blocked ?? false) && !removing;
   const shown: Shown<C> = {
     card, profile: card.account.profile, accounts, can,
@@ -99,6 +101,7 @@ export function cardActionPlan<C>({ card, now, checking, accounts, archiving, re
     account: card.account,
     menu: [checkNow, ...menuOf(shown, displaced)],
     footer: { main, switchAlongside, resets: resetsOf(shown, switchAlongside !== null, pendingSpend) },
+    retry,
   };
 }
 

@@ -235,9 +235,11 @@ describe("Limits", () => {
       agentId === "muse" ? (force ? again.promise : Promise.resolve([failed])) : Promise.resolve([agentId === "claude" ? okClaude() : okCodex()]));
     renderLimits();
 
-    const muse = await screen.findByRole("region", { name: "Muse limits · you@muse.example" });
+    const shown = () => within(card("Muse limits · you@muse.example"));
+    await screen.findByRole("region", { name: "Muse limits · you@muse.example" });
+    expect(shown().getByText("Refresh paused.")).toBeTruthy();
     expect(within(card("Claude limits · me@claude.example")).queryByRole("button", { name: "Try again" })).toBeNull();
-    const retry = within(muse).getByRole<HTMLButtonElement>("button", { name: "Try again" });
+    const retry = shown().getByRole<HTMLButtonElement>("button", { name: "Try again" });
     expect(retry.disabled).toBe(false);
 
     fireEvent.click(retry);
@@ -246,8 +248,8 @@ describe("Limits", () => {
     expect(readLimits.mock.calls.filter(([, force]) => force)).toEqual([["muse", true]]);
 
     await act(async () => { again.resolve([okMuse()]); });
-    await waitFor(() => expect(within(muse).queryByRole("button", { name: "Try again" })).toBeNull());
-    expect(within(muse).queryByText("Refresh paused.")).toBeNull();
+    await waitFor(() => expect(shown().queryByRole("button", { name: "Try again" })).toBeNull());
+    expect(shown().queryByText("Refresh paused.")).toBeNull();
   });
 
   it("re-reads every provider on focus only after the configured interval", async () => {

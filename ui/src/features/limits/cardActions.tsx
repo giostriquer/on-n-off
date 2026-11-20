@@ -33,9 +33,15 @@ function signingIn(manager: AccountController, accountId: string | null): "runni
   return manager.busy === "cancelLogin" ? "canceling" : manager.busy === "login" ? "running" : null;
 }
 
-export function useCheckNow(provider: LimitsProvider): (entry: CheckNowEntry) => ActionMenuItem {
+type CheckNowItem = { id: "checkNow"; label: string; disabled: boolean; run: () => void };
+
+export function useCheckNow(provider: LimitsProvider): (entry: CheckNowEntry) => CheckNowItem {
   const client = useQueryClient();
   return ({ enabled }) => ({ id: "checkNow", label: "Check limits now", disabled: !enabled, run: () => void checkLimitsNow(client, provider).catch(() => {}) });
+}
+
+function tryAgain({ disabled, run }: CheckNowItem): ReactNode {
+  return <button className={button} disabled={disabled} onClick={run}>Try again</button>;
 }
 
 export function useCardActions({ provider, card, now, checking, onArchive, onRemove }: CardFrameInput): CardActions {
@@ -52,7 +58,8 @@ export function useCardActions({ provider, card, now, checking, onArchive, onRem
     card, now, checking, archiving, removing, pendingSpend: spend,
     accounts: manager && { controls: manager, blocked: manager.blocked, signingIn: signingIn(manager, accountId), runningClients: clients },
   });
-  if (plan.account === null) return { menu: plan.menu.map(checkNow), footer: null };
+  const retry = plan.retry && tryAgain(checkNow(plan.retry));
+  if (plan.account === null) return { menu: plan.menu.map(checkNow), footer: retry };
   const { account, footer: { main, switchAlongside, resets } } = plan;
 
   function archive() {
@@ -118,6 +125,7 @@ export function useCardActions({ provider, card, now, checking, onArchive, onRem
   return {
     menu: plan.menu.map(menuItem),
     footer: <>
+      {retry}
       {main && mainButtonFor(main)}
       {switchAlongside && <SwitchAlongsideConfirmation product={providerLabel(provider)} clients={switchAlongside.clients} disabled={!switchAlongside.enabled}
         onSwitch={() => { setClients(null); void switchAlongside.controls.action("useAlongsideClients", switchAlongside.profileId).catch(() => {}); }}
