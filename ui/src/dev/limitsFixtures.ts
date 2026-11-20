@@ -107,6 +107,14 @@ function museIdle(): ReadCard[] {
   }];
 }
 
+function museLoginUnread(): LimitsScenario {
+  const text = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse's login changes or after on-n-off restarts.";
+  return {
+    muse: () => [{ ...museIdle()[0], status: "failed", standing: { kind: "lastObserved", why: "readPaused", message: { text, tone: "error" } } }],
+    accounts: { muse: () => ({ ...savedMuseAccount(), nativeObservationId: null, nativeAccount: null, notice: "Keychain prompt was not answered in time" }) },
+  };
+}
+
 function subscriptionBadgesCodex(): ReadCard[] {
   const template = { ...CODEX[0], windows: CODEX[0].windows.filter(window => window.kind === "weekly"), credits: null };
   const cases: Array<[string, ReadCard["subscription"]]> = [
@@ -416,6 +424,7 @@ export const LIMITS_SCENARIOS: Record<string, () => LimitsScenario> = {
   claudeMissingReset: () => ({ claude: claudeWithoutReset }),
   claudeNoWeekly: () => ({ claude: claudeWithoutWeekly }),
   museIdle: () => ({ muse: museIdle }),
+  museLoginUnread,
   claudeSignIn: () => ({ claude: claudeSignIn, accounts: { claude: claudeSignInAccounts } }),
   claudeDesktop: () => ({ claude: () => [...CLAUDE, { ...CLAUDE[0], account: { id: "claude-2", label: "person@acme.example" }, currentAccount: false, savedProfile: true, desktopAccount: true }] }),
   claudeDesktopResets: () => ({ claude: claudeDesktopResets }),

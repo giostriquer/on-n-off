@@ -23,6 +23,26 @@ function cards(entries: LimitsColumnEntry[] | undefined, now = AT_NOW, provider 
 
 const labels = (shown: LimitCard[]) => shown.map(card => card.identity.label);
 
+describe("which card offers to try its read again", () => {
+  const failed = lastObserved("readPaused", "The source said why.", "error");
+  const retry = (entry: LimitsColumnEntry) => cards([entry])[0].freshness.retry;
+
+  it("is the signed-in card whose read failed, with or without figures left to show", () => {
+    expect(retry(okCodex({ status: "failed", standing: failed }))).toBe(true);
+    expect(retry(statusOnly("codex", "failed", "The source said why.", "error"))).toBe(true);
+  });
+
+  it("is no card whose read answered, was signed out or has no limits to show", () => {
+    expect(retry(okCodex())).toBe(false);
+    expect(retry(statusOnly("codex", "signedOut", "Sign in with `codex` to see subscription limits.", "muted"))).toBe(false);
+    expect(retry(statusOnly("codex", "unsupported", "Codex has no subscription limits to show.", "muted"))).toBe(false);
+  });
+
+  it("is never another account's card, which a sign-in or its own refresh mends", () => {
+    expect(retry(staleCodex({ status: "failed", standing: lastObserved("savedRefreshPaused", "The source said why.", "error") }))).toBe(false);
+  });
+});
+
 describe("which cards a provider shows", () => {
   it("is nothing until a read answers, and no card once a read answers with none", () => {
     expect(limitCards({ provider: "codex", entries: undefined, nativeLogin: null, now: AT_NOW })).toBeNull();
@@ -39,7 +59,7 @@ describe("which cards a provider shows", () => {
       reading: null, plan: null, status: null, signedIn: "no", leads: false, headline: null, rows: [],
       figures: { ownBalance: null, workspaceShare: null, creditsSpent: null, bankedResets: null, paidOffer: null },
       empty: { reason: "usageUnavailable", copy: "Usage unavailable." },
-      freshness: { updatedAt: null, message: null, readStatus: "ok" },
+      freshness: { updatedAt: null, message: null, readStatus: "ok", retry: false },
       subscription: null,
       login: { state: "usable" },
       signIn: null,

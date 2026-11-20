@@ -45,7 +45,9 @@ failure in a row, half what the other reads wait at each later step, until both 
 intervals or the hour. So a failing native read never delays the other provider, and a failing
 figure never delays the usage read it rides on. A forced read bypasses the native
 backoff but not the native read's Retry-After, nor a saved profile's backoff after a failure, nor a
-backend figure's. The native Retry-After holds only the login it was answered for: while it holds,
+backend figure's. A forced Muse read also asks the Keychain again for a login its last lookup could
+not read, and then announces the account list beside its own replacement
+([accounts.md](accounts.md#provider-adapters)). The native Retry-After holds only the login it was answered for: while it holds,
 the cache asks the provider's reader which account the native login names now
 (`limits::native_login`: the account `.claude.json` names for Claude, the login metadata's account
 for Codex, and for Muse only the email `auth.json` records (`muse_store::login_email`), so the

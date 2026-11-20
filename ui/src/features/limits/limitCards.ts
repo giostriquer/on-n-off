@@ -72,6 +72,7 @@ export type LimitCard = {
     updatedAt: string | null;
     message: StandingMessage | null;
     readStatus: LimitsStatus;
+    retry: boolean;
   };
   subscription: CardSubscription | null;
   login: LoginState | null;
@@ -180,6 +181,7 @@ function presentCard(slot: Slot, provider: LimitsProvider, index: number, native
       updatedAt: reading ? observedAtText(reading) : null,
       message,
       readStatus,
+      retry: leads && readStatus === "failed",
     },
     subscription: subscription(provider, account?.id ?? null, signedIn !== "no", reading),
     login,

@@ -356,3 +356,33 @@ fn the_native_login_is_the_account_a_read_records_without_asking_the_keychain() 
         );
     }
 }
+
+#[test]
+#[cfg(target_os = "macos")]
+fn a_forced_read_asks_the_keychain_again_after_a_lookup_that_went_unanswered() {
+    use crate::accounts::{fake_items, with_test_runner};
+    use crate::dto::LimitsStatus;
+    use crate::process::CommandOutcome;
+
+    let home = crate::paths::scratch_dir("muse-forced-reread");
+    let config = crate::paths::muse_config_for(&home);
+    std::fs::create_dir_all(&config).expect("config dir");
+    std::fs::write(
+        config.join("auth.json"),
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+    )
+    .expect("auth.json");
+    let read = |force| {
+        let cards = crate::limits::read_limits_at(AgentId::Muse, force, &home).cards;
+        let card = cards.into_iter().next().expect("the signed-in card");
+        (card.status, card.message)
+    };
+
+    let (unanswered, _) = with_test_runner(|_| CommandOutcome::TimedOut, || read(false));
+    assert_eq!(unanswered, (LimitsStatus::Failed, Some(UNREAD.to_string())));
+
+    let (forced, sent) =
+        with_test_runner(fake_items(&[("meta", r#"{"api_key":"k"}"#)]), || read(true));
+    assert_eq!(sent.len(), 1, "the forced read asks the Keychain once");
+    assert_eq!(forced.0, LimitsStatus::Unsupported);
+}

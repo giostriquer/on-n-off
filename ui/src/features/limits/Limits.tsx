@@ -1,6 +1,6 @@
 import { AccountControllers, AccountManager, useAccountManagement } from "@/features/accounts/AccountManager";
 import { useMemo, useRef, useState, type RefCallback, type RefObject } from "react";
-import type { UseQueryResult } from "@tanstack/react-query";
+import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
 import { AddAccount } from "@/features/accounts/AddAccount";
 import * as api from "$lib/api";
 import { withResetAlert } from "$lib/appSettings";
@@ -9,6 +9,8 @@ import { useFocusHandoff } from "$lib/focusHandoff";
 import type { LimitsColumnEntry } from "$lib/limitsTypes";
 import type { AgentId, LimitsPollMinutes, ResetAlert } from "$lib/types";
 import { hasSavedAccounts, providerLabel, type LimitsProvider } from "$lib/providers";
+import { checkLimitsNow } from "$lib/sharedReads/limits";
+import { actionButton } from "@/components/actionButton";
 import { ArchivedAccounts } from "./ArchivedAccounts";
 import { ActiveAccountDot, LimitCardFrame, PendingCardFrame } from "./LimitCardFrame";
 import { isSignedIn, limitColumn, type CardAccount, type CardWindow, type LimitCard } from "./limitCards";
@@ -182,6 +184,8 @@ function AccountCard({
   menuButtonRef: RefCallback<HTMLButtonElement>;
 }) {
   const { provider, freshness, figures } = card;
+  const client = useQueryClient();
+  const hasWindows = card.headline !== null || card.rows.length > 0;
   return (
     <LimitCardFrame provider={provider} card={card} now={now} checking={checking} menuButtonRef={menuButtonRef} onArchive={onArchive} onRemove={onRemove}>
       {error ? <p className="px-3.5 pt-3 text-[13px] text-[var(--trip)]">{error}</p> : null}
@@ -192,12 +196,19 @@ function AccountCard({
         <p className="px-3.5 pt-3 text-[13px] text-[var(--mute)]">Remembered account.</p>
       ) : null}
 
-      {freshness.message ? (
-        <p
-          className={`px-3.5 ${card.headline || card.rows.length > 0 ? "pt-1.5" : "py-4"} text-[13px] ${freshness.message.tone === "error" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}
-        >
-          {freshness.message.text}
-        </p>
+      {freshness.message || freshness.retry ? (
+        <div className={`flex flex-col items-start gap-2 px-3.5 ${hasWindows ? "pt-1.5" : "py-4"}`}>
+          {freshness.message ? (
+            <p className={`text-[13px] ${freshness.message.tone === "error" ? "text-[var(--trip)]" : "text-[var(--mute)]"}`}>
+              {freshness.message.text}
+            </p>
+          ) : null}
+          {freshness.retry ? (
+            <button className={actionButton} disabled={checking} onClick={() => void checkLimitsNow(client, provider).catch(() => {})}>
+              Try again
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {card.headline ? <HeadlineWindow signedIn={isSignedIn(card)} window={card.headline} provider={provider} /> : null}

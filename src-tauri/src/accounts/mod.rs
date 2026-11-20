@@ -24,7 +24,7 @@ mod keychain;
 mod muse;
 pub(crate) mod muse_store;
 #[cfg(all(target_os = "macos", test))]
-pub(crate) use keychain::with_real_keychain;
+pub(crate) use keychain::{fake_items, with_real_keychain, with_test_runner};
 pub(crate) mod native;
 
 pub(crate) mod activity;

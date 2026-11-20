@@ -389,7 +389,13 @@ reads Muse Code's signed-in device login, inline in its `auth.json` or else its 
 item. For the Muse Limits read (`limits/muse.rs`) it yields the login's email, which names the
 account on every path, and one `MuseCredential`: the access token, as `model::AccessToken`; an
 API key; an expired login; or a Keychain login it could not read. A login entry with no credential
-is no login. The mint read sends one POST per read to the key-mint endpoint the CLI calls itself
+is no login. The Keychain lookup's result is reused while `auth.json` stands, a failure included,
+so that no read on-n-off makes by itself raises the prompt twice; a prompt left unanswered would
+otherwise fail the card until the login changed or on-n-off restarted. A limits check the user
+asks for is the way out: a forced Limits read first forgets a lookup that failed
+(`limits::muse::reread_login`, `muse_store::ask_again`; one that answered is kept), so its read
+asks the Keychain again, and it announces the account list with its own replacement
+(`NativeRead::login_reread`), because the list's notice reports the same lookup. The mint read sends one POST per read to the key-mint endpoint the CLI calls itself
 (`limits/muse/mint.rs`) and keeps only the quota fields of the answer; Limits never starts Muse.
 Saved accounts use the same store for whole logins, as the next paragraph describes.
 

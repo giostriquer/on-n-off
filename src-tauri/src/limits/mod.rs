@@ -108,6 +108,7 @@ struct Sources<'a> {
 pub(crate) struct NativeRead {
     pub(crate) cards: Vec<ProviderLimitsDto>,
     pub(crate) outcome: NativeOutcome,
+    pub(crate) login_reread: bool,
 }
 
 pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
@@ -124,6 +125,7 @@ pub(crate) fn read_limits(agent: AgentId, force: bool) -> NativeRead {
             return NativeRead {
                 cards: vec![card],
                 outcome,
+                login_reread: false,
             };
         }
     };
@@ -199,6 +201,7 @@ pub(crate) fn forget_history(
 struct Reader {
     read: fn(&Path, bool) -> Read,
     login: fn(&Path) -> Option<LimitsAccountDto>,
+    reread_login: fn(&Path) -> bool,
 }
 
 fn limits_reader(agent: AgentId) -> Option<Reader> {
@@ -206,14 +209,17 @@ fn limits_reader(agent: AgentId) -> Option<Reader> {
         AgentId::Claude => Some(Reader {
             read: |home, _| claude::claude_current(home),
             login: claude::known_account,
+            reread_login: |_| false,
         }),
         AgentId::Codex => Some(Reader {
             read: codex::codex_read,
             login: codex_app_server::known_account,
+            reread_login: |_| false,
         }),
         AgentId::Muse => Some(Reader {
             read: |home, _| muse::muse_current(home),
             login: muse::known_account,
+            reread_login: muse::reread_login,
         }),
         AgentId::Antigravity | AgentId::Cursor => None,
     }
@@ -228,10 +234,19 @@ fn read_limits_in(agent: AgentId, force: bool, sources: Sources<'_>) -> NativeRe
         return NativeRead {
             cards: vec![card],
             outcome,
+            login_reread: false,
         };
     };
+    read_with(agent, reader, force, sources)
+}
+
+fn read_with(agent: AgentId, reader: Reader, force: bool, sources: Sources<'_>) -> NativeRead {
     let _provider_guard = provider_read_guard(agent);
-    read_accounts(agent, sources, |home| (reader.read)(home, force))
+    let login_reread = force && (reader.reread_login)(sources.home);
+    NativeRead {
+        login_reread,
+        ..read_accounts(agent, sources, |home| (reader.read)(home, force))
+    }
 }
 
 fn read_accounts(
@@ -254,7 +269,11 @@ fn read_accounts(
         }
         None => {}
     }
-    NativeRead { cards, outcome }
+    NativeRead {
+        cards,
+        outcome,
+        login_reread: false,
+    }
 }
 
 fn provider_read_lock(agent: AgentId) -> &'static Mutex<()> {

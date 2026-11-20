@@ -260,6 +260,39 @@ fn a_denied_lookup_is_remembered_until_auth_json_changes() {
 }
 
 #[test]
+fn asking_again_reads_a_failed_lookup_again_and_keeps_one_that_answered() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let answers = Cell::new(false);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        if answers.get() {
+            keychain_token()
+        } else {
+            denied()
+        }
+    };
+    let cache = LoginCache::new();
+    let read = || state(&cache.login(&config, NOW, &lookup).expect("login"));
+    assert_eq!(read(), "unread");
+    answers.set(true);
+    assert!(
+        !cache.ask_again(&config_with_auth(KEYCHAIN_AUTH)),
+        "another login's failed lookup is not this one's"
+    );
+    assert_eq!(read(), "unread");
+    assert_eq!(calls.get(), 1, "the failure stands until it is asked again");
+
+    assert!(cache.ask_again(&config));
+    assert_eq!(read(), "Bearer keychain-token");
+    assert_eq!(calls.get(), 2);
+
+    assert!(!cache.ask_again(&config), "a lookup that answered is kept");
+    assert_eq!(read(), "Bearer keychain-token");
+    assert_eq!(calls.get(), 2);
+}
+
+#[test]
 #[cfg(not(target_os = "macos"))]
 fn off_macos_a_keychain_stored_login_reads_as_unread() {
     assert_eq!(SystemKeychain.read(), Err(UNREACHABLE.to_string()));
