@@ -108,7 +108,7 @@ function museIdle(): ReadCard[] {
 }
 
 function museLoginUnread(): LimitsScenario {
-  const text = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse's login changes or after on-n-off restarts.";
+  const text = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse signs in to another account or after on-n-off restarts.";
   return {
     muse: () => [{ ...museIdle()[0], status: "failed", standing: { kind: "lastObserved", why: "readPaused", message: { text, tone: "error" } } }],
     accounts: { muse: () => ({ ...savedMuseAccount(), nativeObservationId: null, nativeAccount: null, notice: "Keychain prompt was not answered in time" }) },

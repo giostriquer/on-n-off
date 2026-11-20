@@ -386,3 +386,88 @@ fn a_forced_read_asks_the_keychain_again_after_a_lookup_that_went_unanswered() {
     assert_eq!(sent.len(), 1, "the forced read asks the Keychain once");
     assert_eq!(forced.0, LimitsStatus::Unsupported);
 }
+
+#[test]
+fn a_refused_login_is_read_once_more_only_when_the_store_forgot_a_kept_token() {
+    let root = crate::paths::scratch_dir("muse-once-more");
+    let failing = |failure: &ReadFailure| Read {
+        account: None,
+        answer: Err(failure.clone()),
+    };
+    let refused = ReadFailure::LoginRefused;
+    let down = ReadFailure::RequestFailed("down".into());
+    for (answers, forgot, reads_expected, told_expected, answered) in [
+        ([Some(&refused), None], true, 2, 1, true),
+        ([Some(&refused), Some(&refused)], true, 2, 2, false),
+        ([Some(&refused), None], false, 1, 1, false),
+        ([Some(&ReadFailure::SignedOut), None], true, 1, 0, false),
+        ([Some(&down), None], true, 1, 0, false),
+    ] {
+        let mut reads = 0;
+        let mut told = 0;
+        let read = once_more_if_refused(
+            || {
+                reads += 1;
+                match answers[reads - 1] {
+                    Some(failure) => failing(failure),
+                    None => minted(&root, None),
+                }
+            },
+            || {
+                told += 1;
+                forgot && told == 1
+            },
+        );
+        assert_eq!(read.answer.is_ok(), answered, "{answers:?}");
+        assert_eq!(
+            (reads, told),
+            (reads_expected, told_expected),
+            "{answers:?}"
+        );
+    }
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn muse_rewriting_its_login_between_reads_asks_the_keychain_nothing() {
+    use crate::accounts::{fake_items, with_test_runner};
+    use crate::dto::LimitsStatus;
+
+    let home = crate::paths::scratch_dir("muse-rewrite-no-prompt");
+    let config = crate::paths::muse_config_for(&home);
+    std::fs::create_dir_all(&config).expect("config dir");
+    let auth = config.join("auth.json");
+    std::fs::write(
+        &auth,
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+    )
+    .expect("auth.json");
+    let read = || {
+        let cards = crate::limits::read_limits_at(AgentId::Muse, false, &home).cards;
+        cards.into_iter().next().expect("the signed-in card").status
+    };
+    let item = fake_items(&[("meta", r#"{"api_key":"k"}"#)]);
+
+    let (first, sent) = with_test_runner(item, read);
+    assert_eq!((first, sent.len()), (LimitsStatus::Unsupported, 1));
+
+    let later =
+        std::fs::metadata(&auth).unwrap().modified().unwrap() + std::time::Duration::from_secs(60);
+    std::fs::write(
+        &auth,
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","subs_active":true,"user_email":"you@example.com"}}}"#,
+    )
+    .expect("Muse's rewrite");
+    std::fs::File::options()
+        .write(true)
+        .open(&auth)
+        .and_then(|file| file.set_modified(later))
+        .expect("mtime");
+
+    let (second, sent) = with_test_runner(fake_items(&[("meta", r#"{"api_key":"k"}"#)]), read);
+    assert_eq!(second, LimitsStatus::Unsupported);
+    assert!(
+        sent.is_empty(),
+        "Muse's rewrite asks the Keychain nothing: {sent:?}"
+    );
+}

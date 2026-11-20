@@ -9,7 +9,7 @@ use crate::http::HttpError;
 
 pub(super) mod mint;
 
-const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse's login changes or after on-n-off restarts.";
+const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse signs in to another account or after on-n-off restarts.";
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
     match label
@@ -34,12 +34,30 @@ pub(super) fn reread_login(home: &Path) -> bool {
 }
 
 pub(super) fn muse_current(home: &Path) -> Read {
-    read_current(
-        home,
-        || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
-        crate::accounts::muse_store::signed_in,
-        |token| mint::fetch(mint::KEY_ENDPOINT, token),
+    once_more_if_refused(
+        || {
+            read_current(
+                home,
+                || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
+                crate::accounts::muse_store::signed_in,
+                |token| mint::fetch(mint::KEY_ENDPOINT, token),
+            )
+        },
+        || crate::accounts::muse_store::refused(&crate::paths::muse_config_for(home)),
     )
+}
+
+fn once_more_if_refused(mut read: impl FnMut() -> Read, mut refused: impl FnMut() -> bool) -> Read {
+    let refuses = |read: &Read| matches!(read.answer, Err(ReadFailure::LoginRefused));
+    let first = read();
+    if !refuses(&first) || !refused() {
+        return first;
+    }
+    let again = read();
+    if refuses(&again) {
+        refused();
+    }
+    again
 }
 
 fn read_current(

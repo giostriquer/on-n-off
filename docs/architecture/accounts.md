@@ -389,10 +389,15 @@ reads Muse Code's signed-in device login, inline in its `auth.json` or else its 
 item. For the Muse Limits read (`limits/muse.rs`) it yields the login's email, which names the
 account on every path, and one `MuseCredential`: the access token, as `model::AccessToken`; an
 API key; an expired login; or a Keychain login it could not read. A login entry with no credential
-is no login. The Keychain lookup's result is reused while `auth.json` stands, a failure included,
-so that no read on-n-off makes by itself raises the prompt twice; a prompt left unanswered would
-otherwise fail the card until the login changed or on-n-off restarted. A limits check the user
-asks for is the way out: every forced Limits read first forgets a lookup that failed
+is no login. The Keychain lookup's result is reused while `auth.json` names the same account, a
+failure included. Every Muse run rewrites `auth.json` and the item, and each rewrite leaves the
+item's partition list with Meta's team alone, so keying the answer on the file would raise the
+prompt after every Muse run (PROVIDERS.md, Muse's Usage / Limits row). A token kept over such a
+rewrite is read again once when the mint refuses it, in the same read (`muse_store::refused`),
+since a sign-in to the same account may have replaced it; a token refused once read fresh waits for
+a forced read, so a login Meta refuses never prompts after every Muse run. A prompt left
+unanswered fails the card until Muse signs in to another account or on-n-off restarts. A limits
+check the user asks for is the way out: every forced Limits read first forgets a lookup that failed or a token Meta refused
 (`limits::muse::reread_login`, `muse_store::ask_again`; one that answered is kept), so its read
 asks the Keychain again, and it announces the account list with its own replacement
 (`NativeRead::login_reread`), because the list's notice reports the same lookup. Every forced Muse
