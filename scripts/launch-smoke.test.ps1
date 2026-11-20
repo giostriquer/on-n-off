@@ -43,7 +43,7 @@ function Invoke-SmokeWith {
 }
 
 function Invoke-Smoke {
-    param([string] $Mode, [int] $Seconds, [string] $WindowClass)
+    param([string] $Mode, [int] $Seconds, [string] $WindowClass, [int] $WindowSeconds)
 
     $dump = Join-Path $fixtureRoot ("dump-" + [guid]::NewGuid().ToString("N") + ".json")
     $arguments = @(
@@ -53,6 +53,9 @@ function Invoke-Smoke {
     )
     if ($WindowClass) {
         $arguments += @("-WindowClass", $WindowClass)
+    }
+    if ($WindowSeconds) {
+        $arguments += @("-WindowSeconds", $WindowSeconds)
     }
     $result = Invoke-SmokeWith $arguments
     $seen = $null
@@ -140,6 +143,8 @@ switch ($Mode) {
     "crash" { exit $crash }
     "quit" { exit 0 }
     "window" { Open-Window; Start-Sleep -Seconds 600 }
+    "slow" { Start-Sleep -Seconds 5; Open-Window; Start-Sleep -Seconds 600 }
+    "dies" { Start-Sleep -Seconds 5; exit $crash }
     "late" { if ($IsWindows) { Open-Window }; Start-Sleep -Seconds 2; exit $crash }
     default { Start-Sleep -Seconds 600 }
 }
@@ -208,6 +213,21 @@ switch ($Mode) {
         Assert-Passed $window "an app that opens the expected window"
         Assert-Stopped $window "an app that opens the expected window"
 
+        $slow = Invoke-Smoke -Mode "slow" -Seconds 2 -WindowSeconds 90 -WindowClass "Static"
+        Assert-Passed $slow "an app whose window opens after the run time, within the window wait"
+        Assert-Stopped $slow "an app whose window opens after the run time, within the window wait"
+        if ((Get-Plain $slow.Output) -notmatch "'Static' window after (\d+)\.\d s" -or [int] $Matches[1] -lt 5) {
+            throw "The smoke should say when the window opened, no sooner than the app opened it. Output: $($slow.Output)"
+        }
+
+        $unopened = Invoke-Smoke -Mode "stay" -Seconds 2 -WindowSeconds 6 -WindowClass "on-n-off launch smoke test class"
+        Assert-Failed $unopened "kept running for 6 s but never opened a 'on-n-off launch smoke test class' window" "an app without the expected window by the end of the window wait"
+        Assert-Stopped $unopened "an app without the expected window by the end of the window wait"
+
+        $died = Invoke-Smoke -Mode "dies" -Seconds 2 -WindowSeconds 90 -WindowClass "on-n-off launch smoke test class"
+        Assert-Failed $died "exited with code $crashCode" "an app that crashes while its window is awaited"
+        Assert-Stopped $died "an app that crashes while its window is awaited"
+
         $standInRoot = Join-Path $fixtureRoot "stand-in-repository"
         $standIn = Join-Path $standInRoot "src-tauri" "target" "release" "on-n-off.exe"
         New-Item -ItemType Directory -Path (Split-Path -Parent $standIn) -Force | Out-Null
@@ -215,11 +235,21 @@ switch ($Mode) {
         if (-not (Test-Path -LiteralPath $standIn)) {
             throw "Could not build the stand-in app"
         }
-        $withoutNotch = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $standInRoot, "-Seconds", 2)
-        Assert-Failed $withoutNotch "never opened a 'on-n-off Side notch' window" "an nsis build without the notch window"
+        $withoutNotch = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $standInRoot, "-Seconds", 2, "-WindowSeconds", 4)
+        Assert-Failed $withoutNotch "kept running for 4 s but never opened a 'on-n-off Side notch' window" "an nsis build without the notch window"
         if (Get-Process | Where-Object { $_.Path -eq $standIn }) {
             throw "The smoke left the nsis stand-in running"
         }
+
+        $shortLivedRoot = Join-Path $fixtureRoot "short-lived-repository"
+        $shortLived = Join-Path $shortLivedRoot "src-tauri" "target" "release" "on-n-off.exe"
+        New-Item -ItemType Directory -Path (Split-Path -Parent $shortLived) -Force | Out-Null
+        & powershell.exe -NoProfile -NonInteractive -Command "Add-Type -OutputType ConsoleApplication -OutputAssembly '$shortLived' -TypeDefinition 'public static class StandIn { public static int Main() { System.Threading.Thread.Sleep(6000); return 7; } }'"
+        if (-not (Test-Path -LiteralPath $shortLived)) {
+            throw "Could not build the short-lived stand-in app"
+        }
+        $stillAwaited = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $shortLivedRoot, "-Seconds", 2)
+        Assert-Failed $stillAwaited "exited with code 7 \(0x00000007\)" "an nsis build, whose notch window is awaited past its run time"
     }
 
     Write-Output "launch-smoke tests passed"
