@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory, ParameterSetName = "App")] [string] $App,
     [Parameter(ParameterSetName = "App")] [string] $AppArguments = "",
     [Parameter(ParameterSetName = "App")] [string] $WindowClass,
-    [ValidateRange(1, 600)] [int] $Seconds = 20
+    [ValidateRange(1, 600)] [int] $Seconds = 20,
+    [ValidateRange(1, 600)] [int] $WindowSeconds
 )
 
 Set-StrictMode -Version Latest
@@ -14,11 +15,17 @@ $ErrorActionPreference = "Stop"
 if ($PSCmdlet.ParameterSetName -eq "Build") {
     $releaseRoot = Join-Path $RepositoryRoot "src-tauri" "target" "release"
     $targets = @{
-        nsis = @{ App = Join-Path $releaseRoot "on-n-off.exe"; WindowClass = "on-n-off Side notch" }
-        dmg  = @{ App = Join-Path $releaseRoot "bundle" "macos" "on-n-off.app" "Contents" "MacOS" "on-n-off"; WindowClass = $null }
+        nsis = @{ App = Join-Path $releaseRoot "on-n-off.exe"; WindowClass = "on-n-off Side notch"; WindowSeconds = 90 }
+        dmg  = @{ App = Join-Path $releaseRoot "bundle" "macos" "on-n-off.app" "Contents" "MacOS" "on-n-off"; WindowClass = $null; WindowSeconds = $Seconds }
     }
     $App = $targets[$InstallerKind].App
     $WindowClass = $targets[$InstallerKind].WindowClass
+    if (-not $PSBoundParameters.ContainsKey("WindowSeconds")) {
+        $WindowSeconds = $targets[$InstallerKind].WindowSeconds
+    }
+}
+if (-not $WindowClass -or -not $WindowSeconds) {
+    $WindowSeconds = $Seconds
 }
 if (-not (Test-Path -LiteralPath $App -PathType Leaf)) {
     throw "The app to launch does not exist: $App"
@@ -72,21 +79,24 @@ try {
     if (-not $started) {
         throw "Failed to start $App"
     }
+    $windowAfter = $null
     $windowSeen = -not $WindowClass
-    while ($clock.Elapsed.TotalSeconds -lt $Seconds) {
+    while ($clock.Elapsed.TotalSeconds -lt $Seconds -or (-not $windowSeen -and $clock.Elapsed.TotalSeconds -lt $WindowSeconds)) {
         if ($process.HasExited) {
             $code = if ($IsWindows) { "{0} (0x{0:X8})" -f $process.ExitCode } else { "$($process.ExitCode)" }
             throw ("on-n-off exited with code {0} after {1:N1} s with the side notch on. See OS.md, Packaging and updates." -f $code, $clock.Elapsed.TotalSeconds)
         }
         if (-not $windowSeen -and (Test-OwnsWindow -ProcessId $process.Id -ClassName $WindowClass)) {
             $windowSeen = $true
+            $windowAfter = $clock.Elapsed.TotalSeconds
         }
         Start-Sleep -Milliseconds 250
     }
     if (-not $windowSeen) {
-        throw "on-n-off kept running for $Seconds s but never opened a '$WindowClass' window, so the side notch path did not run."
+        throw "on-n-off kept running for $WindowSeconds s but never opened a '$WindowClass' window, so the side notch path did not run."
     }
-    Write-Output ("launched={0} ran {1:N0} s" -f $App, $clock.Elapsed.TotalSeconds)
+    $opened = if ($null -eq $windowAfter) { "" } else { ", '{0}' window after {1} s" -f $WindowClass, $windowAfter.ToString("0.0", [cultureinfo]::InvariantCulture) }
+    Write-Output ("launched={0} ran {1:N0} s{2}" -f $App, $clock.Elapsed.TotalSeconds, $opened)
 } finally {
     if ($started -and -not $process.HasExited) {
         $process.Kill($true)
