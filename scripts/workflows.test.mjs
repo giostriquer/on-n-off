@@ -538,8 +538,10 @@ test("bundle and release launch the app they built, with the side notch on, befo
     "a release build that crashes at launch is never kept");
   const notchClass = /const CLASS: PCWSTR = w!\("([^"]+)"\);/.exec(readFileSync(join(root, "src-tauri", "src", "side_notch", "win_window.rs"), "utf8"));
   assert.ok(notchClass, "win_window.rs names the notch window class");
-  assert.ok(readFileSync(join(root, "scripts", "launch-smoke.ps1"), "utf8").includes(`WindowClass = "${notchClass[1]}"`),
-    `launch-smoke.ps1 waits for the "${notchClass[1]}" window the notch opens`);
+  const smoke = readFileSync(join(root, "scripts", "launch-smoke.ps1"), "utf8");
+  assert.ok(smoke.includes(`WindowClass = "${notchClass[1]}"`), `launch-smoke.ps1 waits for the "${notchClass[1]}" window the notch opens`);
+  const windowWait = /\[int\] \$WindowSeconds = (\d+)/.exec(smoke);
+  assert.ok(windowWait && Number(windowWait[1]) >= 60, "the notch window is awaited past the cold starts a fresh runner takes (OS.md, Packaging and updates)");
 });
 
 test("every pull request generates the license notice, so a new license fails before it reaches main", { skip }, () => {

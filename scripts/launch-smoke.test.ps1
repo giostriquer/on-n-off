@@ -43,7 +43,7 @@ function Invoke-SmokeWith {
 }
 
 function Invoke-Smoke {
-    param([string] $Mode, [int] $Seconds, [string] $WindowClass)
+    param([string] $Mode, [int] $Seconds, [string] $WindowClass, [int] $WindowSeconds)
 
     $dump = Join-Path $fixtureRoot ("dump-" + [guid]::NewGuid().ToString("N") + ".json")
     $arguments = @(
@@ -54,6 +54,9 @@ function Invoke-Smoke {
     if ($WindowClass) {
         $arguments += @("-WindowClass", $WindowClass)
     }
+    if ($WindowSeconds) {
+        $arguments += @("-WindowSeconds", $WindowSeconds)
+    }
     $result = Invoke-SmokeWith $arguments
     $seen = $null
     if (Test-Path -LiteralPath $dump) {
@@ -61,6 +64,19 @@ function Invoke-Smoke {
     }
     $result | Add-Member -NotePropertyName Seen -NotePropertyValue $seen
     return $result
+}
+
+function New-StandInBuild {
+    param([string] $Name, [string] $Main)
+
+    $root = Join-Path $fixtureRoot $Name
+    $app = Join-Path $root "src-tauri" "target" "release" "on-n-off.exe"
+    New-Item -ItemType Directory -Path (Split-Path -Parent $app) -Force | Out-Null
+    & powershell.exe -NoProfile -NonInteractive -Command "Add-Type -OutputType ConsoleApplication -OutputAssembly '$app' -TypeDefinition 'public static class StandIn { $Main }'"
+    if (-not (Test-Path -LiteralPath $app)) {
+        throw "Could not build the stand-in app $Name"
+    }
+    return [pscustomobject]@{ Root = $root; App = $app }
 }
 
 function Get-Plain {
@@ -140,6 +156,9 @@ switch ($Mode) {
     "crash" { exit $crash }
     "quit" { exit 0 }
     "window" { Open-Window; Start-Sleep -Seconds 600 }
+    "slow" { Start-Sleep -Seconds 5; Open-Window; Start-Sleep -Seconds 600 }
+    "slowlate" { Start-Sleep -Seconds 5; Open-Window; Start-Sleep -Seconds 2; exit $crash }
+    "dies" { Start-Sleep -Seconds 5; exit $crash }
     "late" { if ($IsWindows) { Open-Window }; Start-Sleep -Seconds 2; exit $crash }
     default { Start-Sleep -Seconds 600 }
 }
@@ -187,8 +206,8 @@ switch ($Mode) {
     }
 
     if ($IsWindows) {
-        $noWindow = Invoke-Smoke -Mode "stay" -Seconds 3 -WindowClass "on-n-off launch smoke test class"
-        Assert-Failed $noWindow "never opened a 'on-n-off launch smoke test class' window" "an app without the expected window"
+        $noWindow = Invoke-Smoke -Mode "stay" -Seconds 3 -WindowSeconds 3 -WindowClass "on-n-off launch smoke test class"
+        Assert-Failed $noWindow "kept running for 3 s but never opened a 'on-n-off launch smoke test class' window" "an app without the expected window"
         Assert-Stopped $noWindow "an app without the expected window"
 
         Add-Type -Namespace LaunchSmokeTest -Name Windows -MemberDefinition $windowType
@@ -197,8 +216,8 @@ switch ($Mode) {
             throw "Could not open a window for another process"
         }
         try {
-            $notOwned = Invoke-Smoke -Mode "stay" -Seconds 3 -WindowClass "Static"
-            Assert-Failed $notOwned "never opened a 'Static' window" "a window of another process"
+            $notOwned = Invoke-Smoke -Mode "stay" -Seconds 3 -WindowSeconds 3 -WindowClass "Static"
+            Assert-Failed $notOwned "kept running for 3 s but never opened a 'Static' window" "a window of another process"
             Assert-Stopped $notOwned "a window of another process"
         } finally {
             [LaunchSmokeTest.Windows]::DestroyWindow($foreign) | Out-Null
@@ -208,18 +227,43 @@ switch ($Mode) {
         Assert-Passed $window "an app that opens the expected window"
         Assert-Stopped $window "an app that opens the expected window"
 
-        $standInRoot = Join-Path $fixtureRoot "stand-in-repository"
-        $standIn = Join-Path $standInRoot "src-tauri" "target" "release" "on-n-off.exe"
-        New-Item -ItemType Directory -Path (Split-Path -Parent $standIn) -Force | Out-Null
-        & powershell.exe -NoProfile -NonInteractive -Command "Add-Type -OutputType ConsoleApplication -OutputAssembly '$standIn' -TypeDefinition 'public static class StandIn { public static void Main() { System.Threading.Thread.Sleep(600000); } }'"
-        if (-not (Test-Path -LiteralPath $standIn)) {
-            throw "Could not build the stand-in app"
+        $slow = Invoke-Smoke -Mode "slow" -Seconds 2 -WindowSeconds 90 -WindowClass "Static"
+        Assert-Passed $slow "an app whose window opens after the run time, within the window wait"
+        Assert-Stopped $slow "an app whose window opens after the run time, within the window wait"
+        if ((Get-Plain $slow.Output) -notmatch "ran (\d+) s, 'Static' window after (\d+)\.\d s") {
+            throw "The smoke should say how long it ran and when the window opened. Output: $($slow.Output)"
         }
-        $withoutNotch = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $standInRoot, "-Seconds", 2)
-        Assert-Failed $withoutNotch "never opened a 'on-n-off Side notch' window" "an nsis build without the notch window"
-        if (Get-Process | Where-Object { $_.Path -eq $standIn }) {
+        $ran = [int] $Matches[1]
+        $openedAfter = [int] $Matches[2]
+        if ($openedAfter -lt 5) {
+            throw "The smoke should say the window opened no sooner than the app opened it. Output: $($slow.Output)"
+        }
+        if ($ran -lt $openedAfter + 2 -or $ran -gt $openedAfter + 10) {
+            throw "The smoke should end 2 s after the window opened, not at the end of the window wait. Output: $($slow.Output)"
+        }
+
+        $lateCrash = Invoke-Smoke -Mode "slowlate" -Seconds 3 -WindowSeconds 90 -WindowClass "Static"
+        Assert-Failed $lateCrash "exited with code $crashCode" "an app that crashes after a window that opened past the run time"
+        Assert-Stopped $lateCrash "an app that crashes after a window that opened past the run time"
+
+        $unopened = Invoke-Smoke -Mode "stay" -Seconds 2 -WindowSeconds 6 -WindowClass "on-n-off launch smoke test class"
+        Assert-Failed $unopened "kept running for 6 s but never opened a 'on-n-off launch smoke test class' window" "an app without the expected window by the end of the window wait"
+        Assert-Stopped $unopened "an app without the expected window by the end of the window wait"
+
+        $died = Invoke-Smoke -Mode "dies" -Seconds 2 -WindowSeconds 90 -WindowClass "on-n-off launch smoke test class"
+        Assert-Failed $died "exited with code $crashCode" "an app that crashes while its window is awaited"
+        Assert-Stopped $died "an app that crashes while its window is awaited"
+
+        $standIn = New-StandInBuild -Name "stand-in-repository" -Main "public static void Main() { System.Threading.Thread.Sleep(600000); }"
+        $withoutNotch = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $standIn.Root, "-Seconds", 2, "-WindowSeconds", 4)
+        Assert-Failed $withoutNotch "kept running for 4 s but never opened a 'on-n-off Side notch' window" "an nsis build without the notch window"
+        if (Get-Process | Where-Object { $_.Path -eq $standIn.App }) {
             throw "The smoke left the nsis stand-in running"
         }
+
+        $shortLived = New-StandInBuild -Name "short-lived-repository" -Main "public static int Main() { System.Threading.Thread.Sleep(6000); return 7; }"
+        $stillAwaited = Invoke-SmokeWith @("-InstallerKind", "nsis", "-RepositoryRoot", $shortLived.Root, "-Seconds", 2)
+        Assert-Failed $stillAwaited "exited with code 7 \(0x00000007\)" "an nsis build, whose notch window is awaited past its run time"
     }
 
     Write-Output "launch-smoke tests passed"
