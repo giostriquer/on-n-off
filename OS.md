@@ -97,14 +97,14 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
   The notifications in `settings.json` stay off: the GitHub monitor's first poll waits the whole
   20 s, and on macOS the limit alerts would ask for notification permission. On Windows the smoke
   also needs an `on-n-off Side notch` window from that process, so it keeps covering the in-process
-  notch; `workflows.test.mjs` checks that name against `win_window.rs`. That window has a wait of
-  its own, 90 s (`-WindowSeconds`), and the smoke ends as soon as the 20 s have passed and the
-  window is open; a process that exits during either wait still fails it. The notch and the tray
-  open from the setup hook, which the first launch on a fresh runner reaches only after WebView2
-  starts cold: 6.9 s and 19.1 s on two runners, and 0.5 s on every later launch (**verified**
-  2026-11-20, `windows-2025-vs2026` image 20261116.315.1). With one 20 s limit for both, the
-  v0.40.1 release build failed the smoke twice while Bundle passed it on the same commit. The smoke
-  prints when the window opened. v0.36.0 to v0.38.0 crashed
+  notch; `workflows.test.mjs` checks that name against `win_window.rs`. The smoke waits up to 90 s
+  for that window (`-WindowSeconds`), then requires the app to stay up the 20 s from the moment it
+  opened; a process that exits during either wait fails it, and it prints when the window opened.
+  The notch and the tray open from the setup hook, which the first launch on a fresh runner
+  reaches only after WebView2 starts cold: 6.9 s, 19.1 s and 27.2 s on three runners, and 0.5 s on
+  every later launch (**verified** 2026-11-20, `windows-2025-vs2026` image 20261116.315.1). When
+  one 20 s limit from launch covered both, the v0.40.1 release build failed the smoke twice while
+  Bundle passed it on the same commit. v0.36.0 to v0.38.0 crashed
   at launch whenever the notch was on, and a crash that early also stops the in-app updater, whose
   check runs in the window after it loads: the only way out was the installer on the release page.
   The smoke fails that build with `0xC0000005` in about a second. On Windows, run it locally only
