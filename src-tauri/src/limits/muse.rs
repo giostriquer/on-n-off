@@ -34,30 +34,50 @@ pub(super) fn reread_login(home: &Path) -> bool {
 }
 
 pub(super) fn muse_current(home: &Path) -> Read {
+    let config = crate::paths::muse_config_for(home);
     once_more_if_refused(
         || {
-            read_current(
+            read_noting_refusal(
                 home,
                 || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
                 crate::accounts::muse_store::signed_in,
                 |token| mint::fetch(mint::KEY_ENDPOINT, token),
             )
         },
-        || crate::accounts::muse_store::refused(&crate::paths::muse_config_for(home)),
+        |token| crate::accounts::muse_store::record_refusal(&config, token),
     )
 }
 
-fn once_more_if_refused(mut read: impl FnMut() -> Read, mut refused: impl FnMut() -> bool) -> Read {
-    let refuses = |read: &Read| matches!(read.answer, Err(ReadFailure::LoginRefused));
-    let first = read();
-    if !refuses(&first) || !refused() {
+fn once_more_if_refused(
+    mut read: impl FnMut() -> (Read, Option<AccessToken>),
+    mut record_refusal: impl FnMut(&AccessToken) -> bool,
+) -> Read {
+    let (first, refused) = read();
+    if !refused.is_some_and(|token| record_refusal(&token)) {
         return first;
     }
-    let again = read();
-    if refuses(&again) {
-        refused();
+    let (again, refused) = read();
+    if let Some(token) = refused {
+        record_refusal(&token);
     }
     again
+}
+
+fn read_noting_refusal(
+    home: &Path,
+    installed: impl FnOnce() -> bool,
+    signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
+    mint: impl FnOnce(&AccessToken) -> Result<mint::MintResponse, HttpError>,
+) -> (Read, Option<AccessToken>) {
+    let mut refused = None;
+    let read = read_current(home, installed, signed_in, |token| {
+        let answer = mint(token);
+        if matches!(answer, Err(HttpError::Unauthorized)) {
+            refused = Some(token.clone());
+        }
+        answer
+    });
+    (read, refused)
 }
 
 fn read_current(

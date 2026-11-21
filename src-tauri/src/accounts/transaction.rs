@@ -20,6 +20,9 @@ pub trait Native {
     fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
         Ok(Box::new(()))
     }
+    fn lock_observed(&self) -> Result<Box<dyn NativeGuard>, String> {
+        self.lock()
+    }
     fn write_locked(
         &self,
         login: Option<&Login>,

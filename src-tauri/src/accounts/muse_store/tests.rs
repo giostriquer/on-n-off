@@ -366,6 +366,10 @@ fn a_missing_item_is_looked_up_again_once_auth_json_changes() {
     assert_eq!(calls.get(), 2);
 }
 
+fn refused_token() -> AccessToken {
+    AccessToken::new("keychain-token")
+}
+
 #[test]
 fn a_refused_token_kept_over_a_rewrite_is_read_again_once_until_asked() {
     let config = config_with_auth(KEYCHAIN_AUTH);
@@ -380,20 +384,30 @@ fn a_refused_token_kept_over_a_rewrite_is_read_again_once_until_asked() {
     muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
     read();
     assert!(
-        !cache.refused(&config_with_auth(KEYCHAIN_AUTH)),
+        !cache.record_refusal(&config_with_auth(KEYCHAIN_AUTH), &refused_token()),
         "another login's answer is not this one's"
+    );
+    assert!(
+        !cache.record_refusal(&config, &AccessToken::new("another-token")),
+        "a refusal of another token is not this answer's"
     );
     assert_eq!(calls.get(), 1);
 
-    assert!(cache.refused(&config), "a kept token is read again");
+    assert!(
+        cache.record_refusal(&config, &refused_token()),
+        "a kept token is read again"
+    );
     assert_eq!(state(&read()), "Bearer keychain-token");
     assert_eq!(calls.get(), 2);
-    assert!(!cache.refused(&config), "a fresh read is kept");
+    assert!(
+        !cache.record_refusal(&config, &refused_token()),
+        "a fresh read is kept"
+    );
 
     muse_rewrites(&config, KEYCHAIN_AUTH);
     read();
     assert!(
-        !cache.refused(&config),
+        !cache.record_refusal(&config, &refused_token()),
         "a token refused after a fresh read is not read again"
     );
     read();
@@ -417,11 +431,53 @@ fn a_token_refused_as_soon_as_it_was_read_is_kept_over_a_rewrite() {
     };
     let cache = LoginCache::new();
     cache.login(&config, NOW, &lookup).expect("login");
-    assert!(!cache.refused(&config));
+    assert!(!cache.record_refusal(&config, &refused_token()));
     muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
     cache.login(&config, NOW, &lookup).expect("login");
-    assert!(!cache.refused(&config));
+    assert!(!cache.record_refusal(&config, &refused_token()));
     assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn a_kept_answer_is_forgotten_for_an_account_operation_and_a_current_one_is_not() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    let read = || cache.login(&config, NOW, &lookup).expect("login");
+    read();
+    cache.forget_kept(&config);
+    read();
+    assert_eq!(calls.get(), 1, "an answer read under this auth.json stands");
+
+    muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+    read();
+    assert_eq!(calls.get(), 1);
+    cache.forget_kept(&config);
+    read();
+    assert_eq!(calls.get(), 2, "the operation reads the login as it stands");
+}
+
+#[test]
+fn a_login_without_an_email_is_read_again_whenever_auth_json_changes() {
+    let body = r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}"#;
+    let config = config_with_auth(body);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    cache.login(&config, NOW, &lookup).expect("login");
+    muse_rewrites(
+        &config,
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","subs_active":true}}}"#,
+    );
+    cache.login(&config, NOW, &lookup).expect("login");
+    assert_eq!(calls.get(), 2, "no email names the same account");
 }
 
 #[test]

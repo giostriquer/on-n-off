@@ -388,43 +388,94 @@ fn a_forced_read_asks_the_keychain_again_after_a_lookup_that_went_unanswered() {
 }
 
 #[test]
-fn a_refused_login_is_read_once_more_only_when_the_store_forgot_a_kept_token() {
-    let root = crate::paths::scratch_dir("muse-once-more");
-    let failing = |failure: &ReadFailure| Read {
-        account: None,
-        answer: Err(failure.clone()),
+fn only_metas_refusal_of_a_token_is_noted_never_an_expired_login() {
+    let root = crate::paths::scratch_dir("muse-noted-refusal");
+    let noted = |credential: MuseCredential, answer: Result<(), HttpError>| {
+        let (read, noted) = read_noting_refusal(
+            &root,
+            installed,
+            |_| login(Some("you@example.com"), credential),
+            |_| answer.map(|()| mint_response(mint_body())),
+        );
+        (read.answer.err(), noted.map(|token| token.authorization()))
     };
-    let refused = ReadFailure::LoginRefused;
-    let down = ReadFailure::RequestFailed("down".into());
-    for (answers, forgot, reads_expected, told_expected, answered) in [
-        ([Some(&refused), None], true, 2, 1, true),
-        ([Some(&refused), Some(&refused)], true, 2, 2, false),
-        ([Some(&refused), None], false, 1, 1, false),
-        ([Some(&ReadFailure::SignedOut), None], true, 1, 0, false),
-        ([Some(&down), None], true, 1, 0, false),
+    let token = || MuseCredential::Token(AccessToken::new("device-token"));
+    assert_eq!(
+        noted(token(), Err(HttpError::Unauthorized)),
+        (
+            Some(ReadFailure::LoginRefused),
+            Some("Bearer device-token".into())
+        )
+    );
+    assert_eq!(
+        noted(MuseCredential::Expired, Ok(())),
+        (Some(ReadFailure::LoginRefused), None)
+    );
+    assert_eq!(noted(token(), Err(HttpError::Status(500))).1, None);
+    assert_eq!(noted(token(), Ok(())), (None, None));
+}
+
+#[test]
+fn a_noted_refusal_is_read_once_more_only_when_the_store_forgot_a_kept_token() {
+    let root = crate::paths::scratch_dir("muse-once-more");
+    let token = AccessToken::new("device-token");
+    let refused = || {
+        (
+            Read {
+                account: None,
+                answer: Err(ReadFailure::LoginRefused),
+            },
+            Some(token.clone()),
+        )
+    };
+    let answered = || (minted(&root, None), None);
+    for (second_refused, forgot, reads_expected, recorded_expected, answered_expected) in [
+        (false, true, 2, 1, true),
+        (true, true, 2, 2, false),
+        (false, false, 1, 1, false),
     ] {
         let mut reads = 0;
-        let mut told = 0;
+        let mut recorded = 0;
         let read = once_more_if_refused(
             || {
                 reads += 1;
-                match answers[reads - 1] {
-                    Some(failure) => failing(failure),
-                    None => minted(&root, None),
+                if reads == 1 || second_refused {
+                    refused()
+                } else {
+                    answered()
                 }
             },
-            || {
-                told += 1;
-                forgot && told == 1
+            |noted| {
+                assert_eq!(noted.authorization(), "Bearer device-token");
+                recorded += 1;
+                forgot && recorded == 1
             },
         );
-        assert_eq!(read.answer.is_ok(), answered, "{answers:?}");
-        assert_eq!(
-            (reads, told),
-            (reads_expected, told_expected),
-            "{answers:?}"
-        );
+        assert_eq!(read.answer.is_ok(), answered_expected);
+        assert_eq!((reads, recorded), (reads_expected, recorded_expected));
     }
+
+    let mut recorded = 0;
+    let read = once_more_if_refused(
+        || {
+            (
+                Read {
+                    account: None,
+                    answer: Err(ReadFailure::LoginRefused),
+                },
+                None,
+            )
+        },
+        |_| {
+            recorded += 1;
+            true
+        },
+    );
+    assert_eq!(read.answer.err(), Some(ReadFailure::LoginRefused));
+    assert_eq!(
+        recorded, 0,
+        "a refusal the mint did not answer is not recorded"
+    );
 }
 
 #[test]

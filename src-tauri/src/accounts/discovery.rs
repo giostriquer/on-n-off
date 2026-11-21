@@ -117,7 +117,7 @@ fn publish(
             if !eligible(db, &identity, &login)? {
                 return Ok(None);
             }
-            let locks = native.lock()?;
+            let locks = native.lock_observed()?;
             if native.read()?.as_ref() != Some(&login) {
                 return Err("The CLI login changed before it could be saved. Automatic remembering will check again.".into());
             }
