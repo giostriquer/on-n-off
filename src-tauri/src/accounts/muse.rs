@@ -1,7 +1,7 @@
 use super::{
     clients::Client,
     model::{self, AccessToken, Identity, LoginView},
-    muse_store::{self, Keychain, MuseCredential, SystemKeychain, SIGNED_IN},
+    muse_store::{self, signed_in_cache, Keychain, MuseCredential, SystemKeychain},
     native::{self, CUSTOM_HOME},
     store::Login,
     transaction::{Native, NativeGuard},
@@ -166,8 +166,17 @@ impl MuseNative {
 }
 
 impl Native for MuseNative {
+    fn lock(&self) -> Result<Box<dyn NativeGuard>, String> {
+        signed_in_cache().forget_kept(&self.config);
+        Ok(Box::new(()))
+    }
+
+    fn lock_observed(&self) -> Result<Box<dyn NativeGuard>, String> {
+        Ok(Box::new(()))
+    }
+
     fn read(&self) -> Result<Option<Login>, String> {
-        Ok(SIGNED_IN
+        Ok(signed_in_cache()
             .native(&self.config, self.keychain())?
             .map(|native| Login {
                 auth: Value::Object(native.secret),
@@ -187,10 +196,15 @@ impl Native for MuseNative {
             )),
             None => None,
         };
-        SIGNED_IN.write(&self.config, self.keychain(), parts)
+        signed_in_cache().write(&self.config, self.keychain(), parts)
     }
 
     fn verify(&self) -> Result<(), String> {
+        signed_in_cache().forget_kept(&self.config);
+        self.verify_observed()
+    }
+
+    fn verify_observed(&self) -> Result<(), String> {
         let login = self.read()?.ok_or("Muse has no login to verify.")?;
         let identity = self.identify(&login)?;
         let token = MuseView::of(&login)

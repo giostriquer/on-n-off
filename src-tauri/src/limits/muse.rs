@@ -9,7 +9,7 @@ use crate::http::HttpError;
 
 pub(super) mod mint;
 
-const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse's login changes or after on-n-off restarts.";
+const UNREAD: &str = "on-n-off could not read Muse's login, so it did not ask Meta for usage. It reads the login again when you ask it to check limits, when Muse signs in to another account or after on-n-off restarts.";
 
 fn account_dto(label: Option<String>) -> LimitsAccountDto {
     match label
@@ -34,12 +34,50 @@ pub(super) fn reread_login(home: &Path) -> bool {
 }
 
 pub(super) fn muse_current(home: &Path) -> Read {
-    read_current(
-        home,
-        || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
-        crate::accounts::muse_store::signed_in,
-        |token| mint::fetch(mint::KEY_ENDPOINT, token),
-    )
+    muse_current_with(home, |token| mint::fetch(mint::KEY_ENDPOINT, token))
+}
+
+fn muse_current_with(
+    home: &Path,
+    mint: impl Fn(&AccessToken) -> Result<mint::MintResponse, HttpError>,
+) -> Read {
+    let config = crate::paths::muse_config_for(home);
+    read_again_if_told(|| {
+        read_recording_refusal(
+            home,
+            || resolve_provider_cli(AgentId::Muse, "muse").is_some(),
+            crate::accounts::muse_store::signed_in,
+            &mint,
+            |token| crate::accounts::muse_store::record_refusal(&config, token),
+        )
+    })
+}
+
+fn read_again_if_told(mut read: impl FnMut() -> (Read, bool)) -> Read {
+    let (first, again) = read();
+    if again {
+        read().0
+    } else {
+        first
+    }
+}
+
+fn read_recording_refusal(
+    home: &Path,
+    installed: impl FnOnce() -> bool,
+    signed_in: impl FnOnce(&Path) -> Option<MuseLogin>,
+    mint: impl FnOnce(&AccessToken) -> Result<mint::MintResponse, HttpError>,
+    record_refusal: impl FnOnce(&AccessToken) -> bool,
+) -> (Read, bool) {
+    let mut read_again = false;
+    let read = read_current(home, installed, signed_in, |token| {
+        let answer = mint(token);
+        if matches!(answer, Err(HttpError::Unauthorized)) {
+            read_again = record_refusal(token);
+        }
+        answer
+    });
+    (read, read_again)
 }
 
 fn read_current(

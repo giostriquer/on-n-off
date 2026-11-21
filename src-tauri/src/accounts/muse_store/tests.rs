@@ -206,7 +206,7 @@ fn a_cached_login_expires_without_a_new_lookup() {
 }
 
 #[test]
-fn the_keychain_is_read_again_only_when_auth_json_changes() {
+fn the_keychain_is_read_again_only_when_auth_json_names_another_login() {
     let config = config_with_auth(KEYCHAIN_AUTH);
     let path = config.join("auth.json");
     let stamp = std::fs::metadata(&path)
@@ -244,7 +244,7 @@ fn the_keychain_is_read_again_only_when_auth_json_changes() {
 }
 
 #[test]
-fn a_denied_lookup_is_remembered_until_auth_json_changes() {
+fn a_denied_lookup_is_remembered() {
     let config = config_with_auth(KEYCHAIN_AUTH);
     let calls = Cell::new(0);
     let denied = || {
@@ -290,6 +290,194 @@ fn asking_again_reads_a_failed_lookup_again_and_keeps_one_that_answered() {
     assert!(!cache.ask_again(&config), "a lookup that answered is kept");
     assert_eq!(read(), "Bearer keychain-token");
     assert_eq!(calls.get(), 2);
+}
+
+fn muse_rewrites(config: &Path, body: &str) {
+    let path = config.join("auth.json");
+    let later = std::fs::metadata(&path)
+        .and_then(|metadata| metadata.modified())
+        .expect("mtime")
+        + std::time::Duration::from_secs(60);
+    std::fs::write(&path, body).expect("rewrite auth.json");
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .and_then(|file| file.set_modified(later))
+        .expect("move the mtime");
+}
+
+const KEYCHAIN_AUTH_REWRITTEN: &str = r#"{"schema_version":2,"providers":{"meta":{"mechanism":"oauth","storage":"keychain","subs_active":true,"user_email":"You@Example.com"}}}"#;
+
+#[test]
+fn muse_rewriting_the_same_login_keeps_the_answer_without_asking_the_keychain() {
+    for (answer, expected) in [
+        (keychain_token as fn() -> Lookup, "Bearer keychain-token"),
+        (denied, "unread"),
+    ] {
+        let config = config_with_auth(KEYCHAIN_AUTH);
+        let calls = Cell::new(0);
+        let lookup = || {
+            calls.set(calls.get() + 1);
+            answer()
+        };
+        let cache = LoginCache::new();
+        assert_eq!(
+            state(&cache.login(&config, NOW, &lookup).unwrap()),
+            expected
+        );
+        muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+        assert_eq!(
+            state(&cache.login(&config, NOW, &lookup).unwrap()),
+            expected
+        );
+        let native = cache.native(
+            &config,
+            Some(&FakeKeychain::holding(r#"{"access_token":"other"}"#)),
+        );
+        match native {
+            Ok(login) => assert_eq!(login.unwrap().secret["access_token"], "keychain-token"),
+            Err(_) => assert_eq!(expected, "unread"),
+        }
+        assert_eq!(
+            calls.get(),
+            1,
+            "{expected}: Muse's own rewrite asks nothing"
+        );
+    }
+}
+
+#[test]
+fn a_missing_item_is_looked_up_again_once_auth_json_changes() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            no_keychain()
+        } else {
+            keychain_token()
+        }
+    };
+    let cache = LoginCache::new();
+    assert!(cache.login(&config, NOW, &lookup).is_none());
+    muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+    let login = cache.login(&config, NOW, &lookup).expect("login");
+    assert_eq!(state(&login), "Bearer keychain-token");
+    assert_eq!(calls.get(), 2);
+}
+
+fn refused_token() -> AccessToken {
+    AccessToken::new("keychain-token")
+}
+
+#[test]
+fn a_refused_token_kept_over_a_rewrite_is_read_again_once_until_asked() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    let read = || cache.login(&config, NOW, &lookup).expect("login");
+    read();
+    muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+    read();
+    assert!(
+        !cache.record_refusal(&config_with_auth(KEYCHAIN_AUTH), &refused_token()),
+        "another login's answer is not this one's"
+    );
+    assert!(
+        !cache.record_refusal(&config, &AccessToken::new("another-token")),
+        "a refusal of another token is not this answer's"
+    );
+    assert_eq!(calls.get(), 1);
+
+    assert!(
+        cache.record_refusal(&config, &refused_token()),
+        "a kept token is read again"
+    );
+    assert_eq!(state(&read()), "Bearer keychain-token");
+    assert_eq!(calls.get(), 2);
+    assert!(
+        !cache.record_refusal(&config, &refused_token()),
+        "a fresh read is kept"
+    );
+
+    muse_rewrites(&config, KEYCHAIN_AUTH);
+    read();
+    assert!(
+        !cache.record_refusal(&config, &refused_token()),
+        "a token refused after a fresh read is not read again"
+    );
+    read();
+    assert_eq!(calls.get(), 2);
+
+    assert!(
+        cache.ask_again(&config),
+        "asking again forgets a refused token"
+    );
+    read();
+    assert_eq!(calls.get(), 3);
+}
+
+#[test]
+fn a_token_refused_as_soon_as_it_was_read_is_kept_over_a_rewrite() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    cache.login(&config, NOW, &lookup).expect("login");
+    assert!(!cache.record_refusal(&config, &refused_token()));
+    muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+    cache.login(&config, NOW, &lookup).expect("login");
+    assert!(!cache.record_refusal(&config, &refused_token()));
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
+fn a_kept_answer_is_forgotten_for_an_account_operation_and_a_current_one_is_not() {
+    let config = config_with_auth(KEYCHAIN_AUTH);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    let read = || cache.login(&config, NOW, &lookup).expect("login");
+    read();
+    cache.forget_kept(&config);
+    read();
+    assert_eq!(calls.get(), 1, "an answer read under this auth.json stands");
+
+    muse_rewrites(&config, KEYCHAIN_AUTH_REWRITTEN);
+    read();
+    assert_eq!(calls.get(), 1);
+    cache.forget_kept(&config);
+    read();
+    assert_eq!(calls.get(), 2, "the operation reads the login as it stands");
+}
+
+#[test]
+fn a_login_without_an_email_is_read_again_whenever_auth_json_changes() {
+    let body = r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain"}}}"#;
+    let config = config_with_auth(body);
+    let calls = Cell::new(0);
+    let lookup = || {
+        calls.set(calls.get() + 1);
+        keychain_token()
+    };
+    let cache = LoginCache::new();
+    cache.login(&config, NOW, &lookup).expect("login");
+    muse_rewrites(
+        &config,
+        r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","subs_active":true}}}"#,
+    );
+    cache.login(&config, NOW, &lookup).expect("login");
+    assert_eq!(calls.get(), 2, "no email names the same account");
 }
 
 #[test]

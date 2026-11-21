@@ -179,7 +179,34 @@ fn parsed(lookup: Lookup) -> Secret {
 struct Cached {
     config: PathBuf,
     stamp: String,
+    account: Option<String>,
     secret: Secret,
+    refused: bool,
+}
+
+impl Cached {
+    fn answers(&self, config: &Path, stamp: &str, account: Option<&str>) -> bool {
+        self.config == config
+            && (self.stamp == stamp
+                || (account.is_some()
+                    && self.account.as_deref() == account
+                    && !matches!(self.secret, Ok(None))))
+    }
+
+    fn holds(&self, token: &AccessToken) -> bool {
+        matches!(&self.secret, Ok(Some(secret))
+        if token_of(secret).is_some_and(|held| {
+            AccessToken::new(&held).authorization() == token.authorization()
+        }))
+    }
+}
+
+fn account_of(meta: &Meta) -> Option<String> {
+    identity(&meta.email()?).map(|identity| identity.user_id)
+}
+
+fn current_stamp(config: &Path) -> Option<String> {
+    read_auth(config).ok()?.map(|(_, stamp)| stamp)
 }
 
 pub(crate) struct LoginCache(Mutex<Option<Cached>>);
@@ -189,11 +216,17 @@ impl LoginCache {
         Self(Mutex::new(None))
     }
 
-    fn keychain(&self, config: &Path, stamp: &str, lookup: &dyn Fn() -> Lookup) -> Secret {
+    fn keychain(
+        &self,
+        config: &Path,
+        stamp: &str,
+        account: Option<String>,
+        lookup: &dyn Fn() -> Lookup,
+    ) -> Secret {
         let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(cached) = cache
             .as_ref()
-            .filter(|cached| cached.config == config && cached.stamp == stamp)
+            .filter(|cached| cached.answers(config, stamp, account.as_deref()))
         {
             return cached.secret.clone();
         }
@@ -201,7 +234,9 @@ impl LoginCache {
         *cache = Some(Cached {
             config: config.to_path_buf(),
             stamp: stamp.to_string(),
+            account,
             secret: answer.clone(),
+            refused: false,
         });
         answer
     }
@@ -213,11 +248,43 @@ impl LoginCache {
         }
     }
 
+    pub(super) fn forget_kept(&self, config: &Path) {
+        let Some(stamp) = current_stamp(config) else {
+            return;
+        };
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        if cache
+            .as_ref()
+            .is_some_and(|cached| cached.config == config && cached.stamp != stamp)
+        {
+            *cache = None;
+        }
+    }
+
+    pub(crate) fn record_refusal(&self, config: &Path, token: &AccessToken) -> bool {
+        let Some(stamp) = current_stamp(config) else {
+            return false;
+        };
+        let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
+        let Some(cached) = cache
+            .as_mut()
+            .filter(|cached| cached.config == config && cached.holds(token))
+        else {
+            return false;
+        };
+        if cached.stamp != stamp && !cached.refused {
+            *cache = None;
+            return true;
+        }
+        cached.refused = true;
+        false
+    }
+
     pub(crate) fn ask_again(&self, config: &Path) -> bool {
         let mut cache = self.0.lock().unwrap_or_else(PoisonError::into_inner);
-        let failed = cache
-            .as_ref()
-            .is_some_and(|cached| cached.config == config && cached.secret.is_err());
+        let failed = cache.as_ref().is_some_and(|cached| {
+            cached.config == config && (cached.secret.is_err() || cached.refused)
+        });
         if failed {
             *cache = None;
         }
@@ -241,7 +308,8 @@ impl LoginCache {
         } else {
             match storage {
                 Storage::Inline => credential_of(&meta.inline)?,
-                Storage::Keychain => match self.keychain(config, &stamp, lookup) {
+                Storage::Keychain => match self.keychain(config, &stamp, account_of(&meta), lookup)
+                {
                     Ok(secret) => credential_of(&secret?)?,
                     Err(_) => MuseCredential::Unread,
                 },
@@ -269,7 +337,7 @@ impl LoginCache {
             Some(Storage::Inline) => meta.inline,
             Some(Storage::Keychain) => {
                 let keychain = keychain.ok_or(UNREACHABLE)?;
-                match self.keychain(config, &stamp, &|| keychain.read())? {
+                match self.keychain(config, &stamp, account_of(&meta), &|| keychain.read())? {
                     Some(secret) => secret,
                     None => return Ok(None),
                 }
@@ -379,15 +447,32 @@ pub(crate) fn login_email(config: &Path) -> Option<Option<String>> {
     Some(meta.email())
 }
 
-pub(super) static SIGNED_IN: LoginCache = LoginCache::new();
+#[cfg(not(test))]
+static SIGNED_IN: LoginCache = LoginCache::new();
+
+pub(super) fn signed_in_cache() -> &'static LoginCache {
+    #[cfg(test)]
+    {
+        thread_local! {
+            static SIGNED_IN: &'static LoginCache = Box::leak(Box::new(LoginCache::new()));
+        }
+        SIGNED_IN.with(|cache| *cache)
+    }
+    #[cfg(not(test))]
+    &SIGNED_IN
+}
 
 pub(crate) fn signed_in(config: &Path) -> Option<MuseLogin> {
     let now_secs = chrono::Utc::now().timestamp();
-    SIGNED_IN.login(config, now_secs, &|| SystemKeychain.read())
+    signed_in_cache().login(config, now_secs, &|| SystemKeychain.read())
 }
 
 pub(crate) fn ask_again(config: &Path) -> bool {
-    SIGNED_IN.ask_again(config)
+    signed_in_cache().ask_again(config)
+}
+
+pub(crate) fn record_refusal(config: &Path, token: &AccessToken) -> bool {
+    signed_in_cache().record_refusal(config, token)
 }
 
 #[cfg(test)]

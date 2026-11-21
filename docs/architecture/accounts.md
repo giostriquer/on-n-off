@@ -389,10 +389,30 @@ reads Muse Code's signed-in device login, inline in its `auth.json` or else its 
 item. For the Muse Limits read (`limits/muse.rs`) it yields the login's email, which names the
 account on every path, and one `MuseCredential`: the access token, as `model::AccessToken`; an
 API key; an expired login; or a Keychain login it could not read. A login entry with no credential
-is no login. The Keychain lookup's result is reused while `auth.json` stands, a failure included,
-so that no read on-n-off makes by itself raises the prompt twice; a prompt left unanswered would
-otherwise fail the card until the login changed or on-n-off restarted. A limits check the user
-asks for is the way out: every forced Limits read first forgets a lookup that failed
+is no login. The Keychain lookup's result is reused while `auth.json` names the same account (an
+email, the login's identity), a failure included. Every Muse run rewrites `auth.json` and the item,
+and each rewrite leaves the item's partition list with Meta's team alone, so keying the answer on
+the file would raise the prompt after every Muse run (PROVIDERS.md, Muse's Usage / Limits row). An
+answer kept over such a rewrite serves reads made in the background, Limits and automatic
+remembering's poll, its verification and its save (`Native::verify_observed` and
+`Native::lock_observed`), and the account listing's identity read, which may therefore lag behind a
+sign-in to the same account. Every account operation the user asks for reads the login as it
+stands: taking Muse's native lock or verifying its login (`MuseNative::lock`, `MuseNative::verify`,
+which a switch, a recovery and saving the current login do before reading) forgets a kept answer,
+so a switch saves the outgoing login Muse last wrote, as the switch contract below requires, and
+saving the current login verifies the token it saves. Making plain reads current and the
+background ones opt in was weighed and set aside: the listing and the subscription read are
+background reads through the same `Native::read`, so every refresh of the account list would have
+prompted after a Muse run. Sign-out still reads the kept answer, only to ignore its fingerprint
+before Muse's own logout. In a test build
+the cache is one per test thread (`muse_store::signed_in_cache`), as the Keychain test runner is,
+so parallel tests cannot evict each other's answers. When the mint refuses (401) a token kept over a rewrite, the same Limits
+read forgets it and reads the login once more (`muse_store::record_refusal`), since a sign-in to
+the same account may have replaced it; a token refused once read fresh waits for a forced read, so
+a login Meta refuses never prompts after every Muse run. An expired login never counts as a
+refusal: it is decided from `auth.json` without asking Meta. A prompt left unanswered fails the
+card until Muse signs in to another account or on-n-off restarts. A limits check the user asks for
+is the way out: every forced Limits read first forgets a lookup that failed or a token Meta refused
 (`limits::muse::reread_login`, `muse_store::ask_again`; one that answered is kept), so its read
 asks the Keychain again, and it announces the account list with its own replacement
 (`NativeRead::login_reread`), because the list's notice reports the same lookup. Every forced Muse
@@ -413,8 +433,8 @@ metadata. Muse 1.4.10 stores the signed-in login either inline in
 renews and on-n-off never renews one: an expired saved login asks for Sign in again.
 `accounts/muse_store.rs` owns both files: one parse of `auth.json` (an inline secret, else the
 Keychain item when the metadata says `storage: "keychain"` or the login is OAuth), one Keychain
-lookup and one writer. The lookup is cached in memory by `auth.json`'s path, content and
-modification time, and the cache keeps only the parsed `{access_token, api_key}`; a store that
+lookup and one writer. The lookup is cached in memory by `auth.json`'s path and the account it
+names (above), and the cache keeps only the parsed `{access_token, api_key}`; a store that
 cannot reach the Keychain (Windows, a disposable QA home, a saved login's home) never reads it
 from the cache. A denied lookup is an error for accounts, never "no login". A login with any
 credential is a login: an API-key login fails identification, so a switch is refused rather than

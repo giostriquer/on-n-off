@@ -388,7 +388,9 @@ overlay. Its typography is not judged by eye at all — see
   Limits runs `claude -p /usage --safe-mode` and `codex app-server` and makes outbound HTTPS calls
   for Codex and for Muse (its key-mint call to `api.meta.ai` with the stored device login, read
   on macOS from Muse's own Keychain item through `/usr/bin/security`, which can prompt again
-  only after `auth.json` changes or, once a lookup has failed, when a limits check is asked for);
+  only after Muse signs in to another account, when a token kept over Muse's own rewrite is
+  refused, in an account operation after Muse rewrote its login, or, once a lookup has failed or a
+  token was refused, when a limits check is asked for);
   on-n-off itself sends nothing to Anthropic. Limits also reads
   Claude Desktop's `config.json` and, for each Claude account's organization, one entry of its
   HTTP cache. On macOS the account controls on Limits

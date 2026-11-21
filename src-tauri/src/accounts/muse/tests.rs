@@ -595,6 +595,166 @@ mod keychain {
             .iter()
             .any(|command| command.starts_with("add-generic-password")));
     }
+
+    fn stateful_item(
+        item: std::rc::Rc<std::cell::RefCell<String>>,
+    ) -> impl Fn(&str) -> crate::process::CommandOutcome + 'static {
+        move |command: &str| {
+            let exited = |stdout: String| crate::process::CommandOutcome::Exited {
+                success: true,
+                stdout,
+                stderr: String::new(),
+            };
+            if let Some(hex) = command
+                .strip_prefix("add-generic-password")
+                .and_then(|rest| rest.split("-X \"").nth(1))
+            {
+                let hex = hex.trim_end().trim_end_matches('"');
+                let bytes = (0..hex.len())
+                    .step_by(2)
+                    .map(|at| u8::from_str_radix(&hex[at..at + 2], 16).unwrap())
+                    .collect();
+                *item.borrow_mut() = String::from_utf8(bytes).unwrap();
+            } else if command.starts_with("find-generic-password") {
+                return exited(if command.contains(" -w ") {
+                    format!("{}\n", item.borrow())
+                } else {
+                    "    \"acct\"<blob>=\"meta\"\n".into()
+                });
+            }
+            exited(String::new())
+        }
+    }
+
+    #[test]
+    fn only_an_operation_lock_reads_the_login_muse_rewrote_for_the_same_account() {
+        let dir = scratch_dir("muse-keychain-lock-reads");
+        let store = native(&dir);
+        fs::create_dir_all(&store.config).unwrap();
+        let auth = store.auth_file();
+        fs::write(
+            &auth,
+            r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","user_email":"you@example.com"}}}"#,
+        )
+        .unwrap();
+        let item = || fake_items(&[("meta", r#"{"access_token":"t1"}"#)]);
+        with_test_runner(item(), || store.read()).0.unwrap();
+        let later = fs::metadata(&auth).unwrap().modified().unwrap() + Duration::from_secs(60);
+        fs::write(
+            &auth,
+            r#"{"providers":{"meta":{"mechanism":"oauth","storage":"keychain","subs_active":true,"user_email":"you@example.com"}}}"#,
+        )
+        .unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&auth)
+            .and_then(|file| file.set_modified(later))
+            .unwrap();
+
+        let finds = |lock: &dyn Fn() -> Box<dyn NativeGuard>| {
+            let (_, sent) = with_test_runner(item(), || {
+                let _locks = lock();
+                store.read().unwrap()
+            });
+            sent.iter()
+                .filter(|command| command.starts_with("find-generic-password"))
+                .count()
+        };
+        assert_eq!(finds(&|| store.lock_observed().unwrap()), 0);
+        assert_eq!(finds(&|| store.lock().unwrap()), 1);
+        assert_eq!(finds(&|| store.lock().unwrap()), 0);
+    }
+
+    #[test]
+    fn only_a_verification_the_user_asked_for_reads_the_login_muse_rewrote() {
+        let dir = scratch_dir("muse-keychain-verify-reads");
+        let store = native(&dir);
+        fs::create_dir_all(&store.config).unwrap();
+        let auth = store.auth_file();
+        let body = |extra: &str| {
+            format!(
+                r#"{{"providers":{{"meta":{{"mechanism":"oauth","storage":"keychain",{extra}"user_email":"you@example.com"}}}}}}"#
+            )
+        };
+        fs::write(&auth, body("")).unwrap();
+        let item = || fake_items(&[("meta", r#"{"access_token":"t1"}"#)]);
+        with_test_runner(item(), || store.read()).0.unwrap();
+        let later = fs::metadata(&auth).unwrap().modified().unwrap() + Duration::from_secs(60);
+        fs::write(&auth, body(r#""subs_active":true,"#)).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&auth)
+            .and_then(|file| file.set_modified(later))
+            .unwrap();
+
+        let finds = |verify: &dyn Fn(&MuseNative) -> Result<(), String>| {
+            let (url, served) = serve_once("200 OK", &mint("you@example.com"));
+            let verifier = MuseNative {
+                urls: urls(url),
+                ..native(&dir)
+            };
+            let (verified, sent) = with_test_runner(item(), || verify(&verifier));
+            served.join().unwrap();
+            verified.unwrap();
+            sent.iter()
+                .filter(|command| command.starts_with("find-generic-password"))
+                .count()
+        };
+        assert_eq!(finds(&|store| store.verify_observed()), 0);
+        assert_eq!(finds(&|store| store.verify()), 1);
+    }
+
+    #[test]
+    fn a_switch_saves_the_login_muse_rewrote_for_the_same_account() {
+        let dir = scratch_dir("muse-keychain-switch-latest");
+        let (url, served) = serve_once("200 OK", &mint("you@example.com"));
+        let store = MuseNative {
+            urls: urls(url),
+            ..native(&dir)
+        };
+        fs::create_dir_all(&store.config).unwrap();
+        let auth = |extra: &str| {
+            format!(
+                r#"{{"providers":{{"meta":{{"mechanism":"oauth","storage":"keychain",{extra}"user_email":"old@example.com"}}}}}}"#
+            )
+        };
+        fs::write(store.auth_file(), auth("")).unwrap();
+        let item = std::rc::Rc::new(std::cell::RefCell::new(String::from(
+            r#"{"secret_schema_version":3,"api_key":"key-a","access_token":"old-1"}"#,
+        )));
+        let (first, _) = with_test_runner(stateful_item(item.clone()), || store.read());
+        assert_eq!(first.unwrap().unwrap().auth["access_token"], "old-1");
+
+        let later =
+            fs::metadata(store.auth_file()).unwrap().modified().unwrap() + Duration::from_secs(60);
+        fs::write(store.auth_file(), auth(r#""obtained_via":"device_code","#)).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(store.auth_file())
+            .and_then(|file| file.set_modified(later))
+            .unwrap();
+        *item.borrow_mut() =
+            r#"{"secret_schema_version":3,"api_key":"key-b","access_token":"old-2"}"#.into();
+
+        let mut db = crate::accounts::store::Database::default();
+        let id = db
+            .save(you(), login("you@example.com", "t1"), None)
+            .unwrap();
+        let (switched, _) = with_test_runner(stateful_item(item.clone()), || {
+            crate::accounts::transaction::activate(&mut db, &store, &id, false, &mut |_| Ok(()))
+        });
+        served.join().unwrap();
+        switched.unwrap();
+        let old = muse_store::identity("old@example.com").unwrap();
+        let captured = db
+            .profiles
+            .iter()
+            .find(|profile| profile.identity == old)
+            .and_then(|profile| profile.login.clone())
+            .expect("the outgoing login is saved");
+        assert_eq!(captured.auth["access_token"], "old-2");
+        assert_eq!(captured.auth["api_key"], "key-b");
+    }
 }
 
 #[test]
