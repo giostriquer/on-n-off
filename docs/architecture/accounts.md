@@ -394,11 +394,17 @@ email, the login's identity), a failure included. Every Muse run rewrites `auth.
 and each rewrite leaves the item's partition list with Meta's team alone, so keying the answer on
 the file would raise the prompt after every Muse run (PROVIDERS.md, Muse's Usage / Limits row). An
 answer kept over such a rewrite serves reads made in the background, Limits and automatic
-remembering's poll and its save (`Native::lock_observed`, the lock remembering takes), which may
-therefore lag behind a sign-in to the same account. Every account operation the user asks for
-reads the login as it stands: taking Muse's native lock (`MuseNative::lock`, which a switch, a
-recovery and saving the current login take before reading) forgets a kept answer, so a switch
-saves the outgoing login Muse last wrote, as the switch contract below requires. In a test build
+remembering's poll, its verification and its save (`Native::verify_observed` and
+`Native::lock_observed`), and the account listing's identity read, which may therefore lag behind a
+sign-in to the same account. Every account operation the user asks for reads the login as it
+stands: taking Muse's native lock or verifying its login (`MuseNative::lock`, `MuseNative::verify`,
+which a switch, a recovery and saving the current login do before reading) forgets a kept answer,
+so a switch saves the outgoing login Muse last wrote, as the switch contract below requires, and
+saving the current login verifies the token it saves. Making plain reads current and the
+background ones opt in was weighed and set aside: the listing and the subscription read are
+background reads through the same `Native::read`, so every refresh of the account list would have
+prompted after a Muse run. Sign-out still reads the kept answer, only to ignore its fingerprint
+before Muse's own logout. In a test build
 the cache is one per test thread (`muse_store::signed_in_cache`), as the Keychain test runner is,
 so parallel tests cannot evict each other's answers. When the mint refuses (401) a token kept over a rewrite, the same Limits
 read forgets it and reads the login once more (`muse_store::record_refusal`), since a sign-in to

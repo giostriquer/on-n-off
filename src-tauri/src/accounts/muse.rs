@@ -200,6 +200,11 @@ impl Native for MuseNative {
     }
 
     fn verify(&self) -> Result<(), String> {
+        signed_in_cache().forget_kept(&self.config);
+        self.verify_observed()
+    }
+
+    fn verify_observed(&self) -> Result<(), String> {
         let login = self.read()?.ok_or("Muse has no login to verify.")?;
         let identity = self.identify(&login)?;
         let token = MuseView::of(&login)

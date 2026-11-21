@@ -666,6 +666,45 @@ mod keychain {
     }
 
     #[test]
+    fn only_a_verification_the_user_asked_for_reads_the_login_muse_rewrote() {
+        let dir = scratch_dir("muse-keychain-verify-reads");
+        let store = native(&dir);
+        fs::create_dir_all(&store.config).unwrap();
+        let auth = store.auth_file();
+        let body = |extra: &str| {
+            format!(
+                r#"{{"providers":{{"meta":{{"mechanism":"oauth","storage":"keychain",{extra}"user_email":"you@example.com"}}}}}}"#
+            )
+        };
+        fs::write(&auth, body("")).unwrap();
+        let item = || fake_items(&[("meta", r#"{"access_token":"t1"}"#)]);
+        with_test_runner(item(), || store.read()).0.unwrap();
+        let later = fs::metadata(&auth).unwrap().modified().unwrap() + Duration::from_secs(60);
+        fs::write(&auth, body(r#""subs_active":true,"#)).unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&auth)
+            .and_then(|file| file.set_modified(later))
+            .unwrap();
+
+        let finds = |verify: &dyn Fn(&MuseNative) -> Result<(), String>| {
+            let (url, served) = serve_once("200 OK", &mint("you@example.com"));
+            let verifier = MuseNative {
+                urls: urls(url),
+                ..native(&dir)
+            };
+            let (verified, sent) = with_test_runner(item(), || verify(&verifier));
+            served.join().unwrap();
+            verified.unwrap();
+            sent.iter()
+                .filter(|command| command.starts_with("find-generic-password"))
+                .count()
+        };
+        assert_eq!(finds(&|store| store.verify_observed()), 0);
+        assert_eq!(finds(&|store| store.verify()), 1);
+    }
+
+    #[test]
     fn a_switch_saves_the_login_muse_rewrote_for_the_same_account() {
         let dir = scratch_dir("muse-keychain-switch-latest");
         let (url, served) = serve_once("200 OK", &mint("you@example.com"));

@@ -195,7 +195,9 @@ impl Cached {
 
     fn holds(&self, token: &AccessToken) -> bool {
         matches!(&self.secret, Ok(Some(secret))
-            if token_of(secret).is_some_and(|held| AccessToken::new(&held) == *token))
+        if token_of(secret).is_some_and(|held| {
+            AccessToken::new(&held).authorization() == token.authorization()
+        }))
     }
 }
 

@@ -388,94 +388,59 @@ fn a_forced_read_asks_the_keychain_again_after_a_lookup_that_went_unanswered() {
 }
 
 #[test]
-fn only_metas_refusal_of_a_token_is_noted_never_an_expired_login() {
-    let root = crate::paths::scratch_dir("muse-noted-refusal");
-    let noted = |credential: MuseCredential, answer: Result<(), HttpError>| {
-        let (read, noted) = read_noting_refusal(
+fn only_metas_refusal_of_a_token_is_recorded_never_an_expired_login() {
+    let root = crate::paths::scratch_dir("muse-recorded-refusal");
+    let recorded = |credential: MuseCredential, answer: Result<(), HttpError>| {
+        let mut recorded = None;
+        let (read, again) = read_recording_refusal(
             &root,
             installed,
             |_| login(Some("you@example.com"), credential),
             |_| answer.map(|()| mint_response(mint_body())),
+            |token| {
+                recorded = Some(token.authorization());
+                true
+            },
         );
-        (read.answer.err(), noted.map(|token| token.authorization()))
+        (read.answer.err(), recorded, again)
     };
     let token = || MuseCredential::Token(AccessToken::new("device-token"));
     assert_eq!(
-        noted(token(), Err(HttpError::Unauthorized)),
+        recorded(token(), Err(HttpError::Unauthorized)),
         (
             Some(ReadFailure::LoginRefused),
-            Some("Bearer device-token".into())
+            Some("Bearer device-token".into()),
+            true
         )
     );
     assert_eq!(
-        noted(MuseCredential::Expired, Ok(())),
-        (Some(ReadFailure::LoginRefused), None)
+        recorded(MuseCredential::Expired, Ok(())),
+        (Some(ReadFailure::LoginRefused), None, false)
     );
-    assert_eq!(noted(token(), Err(HttpError::Status(500))).1, None);
-    assert_eq!(noted(token(), Ok(())), (None, None));
+    assert_eq!(recorded(token(), Err(HttpError::Status(500))).1, None);
+    assert_eq!(recorded(token(), Ok(())), (None, None, false));
 }
 
 #[test]
-fn a_noted_refusal_is_read_once_more_only_when_the_store_forgot_a_kept_token() {
+fn a_read_is_made_once_more_only_when_the_store_asks_for_it() {
     let root = crate::paths::scratch_dir("muse-once-more");
-    let token = AccessToken::new("device-token");
-    let refused = || {
-        (
-            Read {
-                account: None,
-                answer: Err(ReadFailure::LoginRefused),
-            },
-            Some(token.clone()),
-        )
+    let refused = || Read {
+        account: None,
+        answer: Err(ReadFailure::LoginRefused),
     };
-    let answered = || (minted(&root, None), None);
-    for (second_refused, forgot, reads_expected, recorded_expected, answered_expected) in [
-        (false, true, 2, 1, true),
-        (true, true, 2, 2, false),
-        (false, false, 1, 1, false),
-    ] {
+    for (told, reads_expected, answered) in [(true, 2, true), (false, 1, false)] {
         let mut reads = 0;
-        let mut recorded = 0;
-        let read = once_more_if_refused(
-            || {
-                reads += 1;
-                if reads == 1 || second_refused {
-                    refused()
-                } else {
-                    answered()
-                }
-            },
-            |noted| {
-                assert_eq!(noted.authorization(), "Bearer device-token");
-                recorded += 1;
-                forgot && recorded == 1
-            },
-        );
-        assert_eq!(read.answer.is_ok(), answered_expected);
-        assert_eq!((reads, recorded), (reads_expected, recorded_expected));
+        let read = read_again_if_told(|| {
+            reads += 1;
+            if reads == 1 {
+                (refused(), told)
+            } else {
+                (minted(&root, None), true)
+            }
+        });
+        assert_eq!(read.answer.is_ok(), answered);
+        assert_eq!(reads, reads_expected);
     }
-
-    let mut recorded = 0;
-    let read = once_more_if_refused(
-        || {
-            (
-                Read {
-                    account: None,
-                    answer: Err(ReadFailure::LoginRefused),
-                },
-                None,
-            )
-        },
-        |_| {
-            recorded += 1;
-            true
-        },
-    );
-    assert_eq!(read.answer.err(), Some(ReadFailure::LoginRefused));
-    assert_eq!(
-        recorded, 0,
-        "a refusal the mint did not answer is not recorded"
-    );
 }
 
 #[test]
@@ -520,5 +485,93 @@ fn muse_rewriting_its_login_between_reads_asks_the_keychain_nothing() {
     assert!(
         sent.is_empty(),
         "Muse's rewrite asks the Keychain nothing: {sent:?}"
+    );
+}
+
+#[test]
+#[cfg(target_os = "macos")]
+fn a_refused_kept_token_reads_the_login_once_more_and_a_fresh_refusal_waits() {
+    use crate::accounts::with_test_runner;
+    use crate::process::CommandOutcome;
+    use std::{cell::RefCell, rc::Rc};
+
+    let home = crate::paths::scratch_dir("muse-refused-kept-token");
+    let config = crate::paths::muse_config_for(&home);
+    std::fs::create_dir_all(&config).expect("config dir");
+    let auth = config.join("auth.json");
+    let muse_rewrites = |extra: &str| {
+        let later = std::fs::metadata(&auth)
+            .and_then(|metadata| metadata.modified())
+            .map_or(std::time::SystemTime::now(), |at| {
+                at + std::time::Duration::from_secs(60)
+            });
+        std::fs::write(
+            &auth,
+            format!(
+                r#"{{"providers":{{"meta":{{"mechanism":"oauth","storage":"keychain",{extra}"user_email":"you@example.com"}}}}}}"#
+            ),
+        )
+        .expect("auth.json");
+        std::fs::File::options()
+            .write(true)
+            .open(&auth)
+            .and_then(|file| file.set_modified(later))
+            .expect("mtime");
+    };
+    let item = Rc::new(RefCell::new(String::from(r#"{"access_token":"A"}"#)));
+    let runner = || {
+        let item = item.clone();
+        move |command: &str| CommandOutcome::Exited {
+            success: true,
+            stdout: if command.starts_with("find-generic-password") {
+                format!("{}\n", item.borrow())
+            } else {
+                String::new()
+            },
+            stderr: String::new(),
+        }
+    };
+    let seen = RefCell::new(Vec::new());
+    let read = |accepted: &'static [&'static str]| {
+        seen.borrow_mut().clear();
+        let (read, sent) = with_test_runner(runner(), || {
+            muse_current_with(&home, |token| {
+                let bearer = token.authorization();
+                seen.borrow_mut().push(bearer.clone());
+                if accepted.iter().any(|token| bearer.ends_with(token)) {
+                    Ok(mint_response(mint_body()))
+                } else {
+                    Err(HttpError::Unauthorized)
+                }
+            })
+        });
+        let finds = sent
+            .iter()
+            .filter(|command| command.starts_with("find-generic-password"))
+            .count();
+        (read.answer.is_ok(), finds, seen.borrow().clone())
+    };
+
+    muse_rewrites("");
+    assert_eq!(read(&["A"]), (true, 1, vec!["Bearer A".to_string()]));
+
+    muse_rewrites(r#""subs_active":true,"#);
+    *item.borrow_mut() = r#"{"access_token":"B"}"#.into();
+    assert_eq!(
+        read(&["B"]),
+        (
+            true,
+            1,
+            vec!["Bearer A".to_string(), "Bearer B".to_string()]
+        ),
+        "Meta refused the token kept over the rewrite, so the login is read once more"
+    );
+
+    assert_eq!(read(&[]), (false, 0, vec!["Bearer B".to_string()]));
+    muse_rewrites("");
+    assert_eq!(
+        read(&[]),
+        (false, 0, vec!["Bearer B".to_string()]),
+        "a token refused right after a fresh read waits for a forced read"
     );
 }

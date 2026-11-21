@@ -13,7 +13,6 @@ pub struct SignInDeadline {
     pub identity: Identity,
     pub ends_at_ms: Option<i64>,
 }
-#[derive(Clone, PartialEq, Eq)]
 pub struct AccessToken(String);
 
 impl AccessToken {
