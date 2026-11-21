@@ -299,3 +299,89 @@ fn turning_remembering_on_rejects_earlier_checks_and_is_allowed_during_recovery(
     assert!(enabled(home.path()).unwrap());
     assert!(loaded(home.path()).recovery().is_some());
 }
+
+struct Recording {
+    client: Client,
+    calls: RefCell<Vec<&'static str>>,
+}
+impl Recording {
+    fn new() -> Self {
+        Self {
+            client: client(),
+            calls: RefCell::new(Vec::new()),
+        }
+    }
+    fn called(&self, call: &'static str) {
+        self.calls.borrow_mut().push(call);
+    }
+}
+impl Native for Recording {
+    fn lock(&self) -> Result<Box<dyn super::super::transaction::NativeGuard>, String> {
+        self.called("lock");
+        Ok(Box::new(()))
+    }
+    fn read(&self) -> Result<Option<Login>, String> {
+        self.client.read()
+    }
+    fn identify(&self, login: &Login) -> Result<Identity, String> {
+        self.client.identify(login)
+    }
+    fn write(&self, login: Option<&Login>) -> Result<(), String> {
+        self.client.write(login)
+    }
+    fn verify(&self) -> Result<(), String> {
+        self.called("verify");
+        self.client.verify()
+    }
+}
+struct Observing(Recording);
+impl Native for Observing {
+    fn lock(&self) -> Result<Box<dyn super::super::transaction::NativeGuard>, String> {
+        self.0.lock()
+    }
+    fn lock_observed(&self) -> Result<Box<dyn super::super::transaction::NativeGuard>, String> {
+        self.0.called("lock_observed");
+        Ok(Box::new(()))
+    }
+    fn read(&self) -> Result<Option<Login>, String> {
+        self.0.read()
+    }
+    fn identify(&self, login: &Login) -> Result<Identity, String> {
+        self.0.identify(login)
+    }
+    fn write(&self, login: Option<&Login>) -> Result<(), String> {
+        self.0.write(login)
+    }
+    fn verify(&self) -> Result<(), String> {
+        self.0.verify()
+    }
+    fn verify_observed(&self) -> Result<(), String> {
+        self.0.called("verify_observed");
+        self.0.client.verify()
+    }
+}
+
+fn remembered(native: &dyn Native) -> bool {
+    let home = vault();
+    let db = loaded(home.path());
+    let ticket = db.ticket(Guard::SignIn).unwrap();
+    let found = candidate(native, &db).unwrap().unwrap();
+    publish(open(home.path()), &ticket, native, found, true).unwrap()
+}
+
+#[test]
+fn remembering_verifies_and_saves_through_the_observed_variants_only() {
+    let native = Observing(Recording::new());
+    assert!(remembered(&native));
+    assert_eq!(
+        *native.0.calls.borrow(),
+        ["verify_observed", "lock_observed"]
+    );
+}
+
+#[test]
+fn the_observed_variants_default_to_the_native_lock_and_verification() {
+    let native = Recording::new();
+    assert!(remembered(&native));
+    assert_eq!(*native.calls.borrow(), ["verify", "lock"]);
+}
