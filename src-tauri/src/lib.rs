@@ -51,6 +51,10 @@ mod tray;
 mod updater_build;
 mod usage;
 
+#[cfg(all(test, target_env = "msvc"))]
+#[link(name = "resource", kind = "dylib")]
+extern "C" {}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default();

@@ -37,7 +37,7 @@ describe("CreditsRows", () => {
     const shown = rows({ workspaceShare: share({ used: "25000", usedPercent: 100, reached: true }) });
 
     expect(shown.filled).toBe("100");
-    expect(shown.figure).toHaveStyle({ color: "var(--trip)" });
+    expect(screen.getByText("100%").style.color).toBe("var(--trip)");
     expect(shown.note).toBe("all 25,000 used · resets Oct 1");
   });
 

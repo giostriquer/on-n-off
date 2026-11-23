@@ -212,7 +212,7 @@ describe("Limits", () => {
     renderLimits();
 
     const claude = await screen.findByRole("region", { name: "Claude limits · me@claude.example" });
-    expect(within(claude).getByText("95%")).toHaveStyle({ color: "var(--trip)" });
+    expect(within(claude).getByText("95%").style.color).toBe("var(--trip)");
   });
 
   it("says the signed-in account's refresh is paused above its message, with nothing to sign into or forget", async () => {
