@@ -15,5 +15,9 @@ fn main() {
         println!("cargo:rustc-env=ON_N_OFF_UPDATER_TARGET={target}");
     }
 
-    tauri_build::build()
+    tauri_build::build();
+    if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+        let out = std::env::var("OUT_DIR").expect("build output");
+        println!("cargo:rustc-link-search=native={out}");
+    }
 }

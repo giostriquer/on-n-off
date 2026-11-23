@@ -10,8 +10,8 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
-      $lib: path.resolve(__dirname, "ui/src/lib"),
-      "@": path.resolve(__dirname, "ui/src"),
+      $lib: path.resolve(import.meta.dirname, "ui/src/lib"),
+      "@": path.resolve(import.meta.dirname, "ui/src"),
     },
   },
   clearScreen: false,
@@ -34,7 +34,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: path.resolve(__dirname, "ui/dist"),
+    outDir: path.resolve(import.meta.dirname, "ui/dist"),
     emptyOutDir: true,
     manifest: true,
     assetsInlineLimit: 0,

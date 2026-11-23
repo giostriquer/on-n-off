@@ -7,8 +7,8 @@ export default defineConfig({
   plugins: [tailwindcss(), react()],
   resolve: {
     alias: {
-      $lib: path.resolve(__dirname, "ui/src/lib"),
-      "@": path.resolve(__dirname, "ui/src"),
+      $lib: path.resolve(import.meta.dirname, "ui/src/lib"),
+      "@": path.resolve(import.meta.dirname, "ui/src"),
     },
     conditions: ["browser"],
   },

@@ -64,6 +64,10 @@ The GitHub CLI (`gh`, used by the Pull requests screen) is found the same way; i
 - Windows: native notifications must be tested from an installed build; a development build can use
   PowerShell's app name and icon instead of on-n-off's identity.
 
+The Windows library test executable links the same `resource.lib` that Tauri builds for the
+application binary. Its manifest selects Common Controls v6, which the dialog plugin needs for
+`TaskDialogIndirect`. Without it the Windows loader can exit before the first test runs.
+
 ## Packaging and updates
 
 - Windows: NSIS only (`ON_N_OFF_INSTALLER_KIND=nsis` is a `rerun-if-env-changed` build input, so each
