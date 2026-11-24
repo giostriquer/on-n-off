@@ -1,3 +1,4 @@
+use jiff::Timestamp;
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
@@ -5,7 +6,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use tauri::{async_runtime, AppHandle};
 
@@ -146,7 +146,7 @@ trait Io {
         share: SpendShare,
     ) -> Result<ResetCreditOutcome, String>;
     fn notify(&self, notice: Notice);
-    fn now(&self) -> DateTime<Utc>;
+    fn now(&self) -> Timestamp;
 }
 
 struct App {
@@ -205,8 +205,8 @@ impl Io for App {
         monitor::notify(&self.app, "limits monitor", title, body, Sound::Default);
     }
 
-    fn now(&self) -> DateTime<Utc> {
-        Utc::now()
+    fn now(&self) -> Timestamp {
+        Timestamp::now()
     }
 }
 
@@ -232,7 +232,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             .await
             .unwrap_or_default();
         let watched = watched_providers(&settings);
-        let polled_at = Utc::now();
+        let polled_at = Timestamp::now();
         let poll_delay = if !watched.is_empty() {
             if let Err(error) =
                 poll_once(&io, waiting, &mut state, &settings, watched, polled_at).await
@@ -249,7 +249,7 @@ async fn run(app: AppHandle, mut wake_receiver: async_runtime::Receiver<()>) {
             poll_delay,
             waiting.read(Waiting::next_due),
             polled_at,
-            Utc::now(),
+            Timestamp::now(),
         );
         wait_for_wake_or_deadline(&mut wake_receiver, delay).await;
     }
@@ -271,13 +271,13 @@ fn minutes(minutes: u16) -> Duration {
 
 fn next_wake(
     poll_delay: Duration,
-    next_due: Option<DateTime<Utc>>,
-    polled_at: DateTime<Utc>,
-    now: DateTime<Utc>,
+    next_due: Option<Timestamp>,
+    polled_at: Timestamp,
+    now: Timestamp,
 ) -> Duration {
     next_due
         .filter(|due| *due > polled_at)
-        .map(|due| (due - now).to_std().unwrap_or_default())
+        .map(|due| Duration::try_from(due - now).unwrap_or_default())
         .map_or(poll_delay, |until_due| until_due.min(poll_delay))
         .max(Duration::from_secs(1))
 }
@@ -298,7 +298,7 @@ async fn poll_once(
     state: &mut MonitorState,
     settings: &crate::settings::AppSettings,
     watched: &[AgentId],
-    polled_at: DateTime<Utc>,
+    polled_at: Timestamp,
 ) -> Result<(), String> {
     let fresh = waiting
         .read(|waiting| waiting.any_due(polled_at))
@@ -436,9 +436,9 @@ fn observe_window(
     resets_at: Option<&str>,
     observed_at: &str,
 ) -> Option<(WindowObservation, Option<LimitEventKind>)> {
-    let incoming_at = chrono::DateTime::parse_from_rfc3339(observed_at).ok()?;
+    let incoming_at = crate::timestamp::parse(observed_at).ok()?;
     if let Some(before) = before {
-        let is_stale = chrono::DateTime::parse_from_rfc3339(&before.observed_at)
+        let is_stale = crate::timestamp::parse(&before.observed_at)
             .is_ok_and(|previous_at| incoming_at <= previous_at);
         if is_stale {
             return Some((before.clone(), None));
@@ -454,7 +454,7 @@ fn observe_window(
                 used_percent,
                 reset: resets_at.and_then(ResetInstant::parse),
             },
-            incoming_at.with_timezone(&Utc),
+            incoming_at,
         )
     });
     let was_exhausted =

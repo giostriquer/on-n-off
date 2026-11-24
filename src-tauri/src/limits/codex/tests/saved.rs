@@ -1,6 +1,9 @@
 use super::*;
 use crate::dto::ProviderLimitsDto;
 use crate::http::{never_asked, serve_once, serve_once_capturing, was_asked};
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::Timestamp;
 use serde_json::Value;
 
 fn identity(provider: AgentId) -> Identity {
@@ -342,11 +345,11 @@ fn codex_quota_for_another_account_is_rejected() {
 
 const CODEX_BUSINESS_USAGE: &str = r#"{"plan_type":"self_serve_business_prolite","rate_limit":{"primary_window":{"used_percent":12,"limit_window_seconds":604800}},"credits":{"has_credits":true,"unlimited":false,"balance":"0"}}"#;
 
-fn spending(days: &[(u64, &[f64])]) -> String {
-    let today = chrono::Utc::now().date_naive();
+fn spending(days: &[(i64, &[f64])]) -> String {
+    let today = Timestamp::now().utc_date();
     json!({
         "data": days.iter().map(|(back, credits)| json!({
-            "date": (today - chrono::Days::new(*back)).format("%Y-%m-%d").to_string(),
+            "date": (today - jiff::Span::new().days(*back)).to_string(),
             "product_surface_usage_values": {"cli": 1.0},
             "premium_usage_values": {"total_usage_credits": {}, "credit_usage_credits": {}},
             "models": credits.iter().map(|credits| json!({"model": "model-a", "credits": credits})).collect::<Vec<_>>(),
@@ -435,14 +438,14 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
         ("200 OK", &[], &breakdown),
     ]);
     let base = url.trim_end_matches("/graphql");
-    let before = chrono::Utc::now().date_naive();
+    let before = Timestamp::now().utc_date();
     let dto = read_codex_spending(
         &member("spent"),
         &format!("{base}/wham/usage"),
         &format!("{base}/wham/usage/daily-workspace-user-token-usage-breakdown"),
     )
     .unwrap();
-    let after = chrono::Utc::now().date_naive();
+    let after = Timestamp::now().utc_date();
     let requests = requests.join().unwrap();
 
     let asked = requests[1]
@@ -451,11 +454,11 @@ fn saved_codex_reads_what_a_workspace_member_spent() {
         .next()
         .unwrap_or_default()
         .to_string();
-    let window = |today: chrono::NaiveDate| {
+    let window = |today: Date| {
         format!(
             "/wham/usage/daily-workspace-user-token-usage-breakdown?start_date={}&end_date={}&group_by=day ",
-            (today - chrono::Days::new(29)).format("%Y-%m-%d"),
-            today.format("%Y-%m-%d"),
+            (today - jiff::Span::new().days(29)),
+            today,
         )
     };
     assert!(

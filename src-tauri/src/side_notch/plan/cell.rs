@@ -4,7 +4,7 @@ use crate::dto::CiState;
 use crate::limits::window_at::{WindowAt, UNREADABLE};
 use crate::side_notch::model::frame::CellData;
 use crate::side_notch::model::{meter_color, CellMetrics, InnerRing, TRIP_RED, UNREADABLE_INK};
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 pub(super) const TRACK_INK: Color = [44, 44, 44, 255];
 pub(super) const FABLE_ORANGE: Color = [204, 98, 64, 255];
@@ -70,7 +70,7 @@ pub(super) fn cell(
     active: bool,
     metrics: &CellMetrics,
     typeset: &Typesetter,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> CellPlan {
     let centre = (
         rect.mid_x(),

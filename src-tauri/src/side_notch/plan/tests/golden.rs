@@ -1,6 +1,8 @@
 use super::*;
 use crate::side_notch::model::{GithubList, NotchSize};
 use crate::side_notch::sessions::SessionStatus;
+use crate::timestamp::TimestampExt;
+use jiff::SignedDuration;
 
 fn rect(r: &R) -> String {
     format!("{} {} {} {}", r.x, r.y, r.w, r.h)
@@ -147,7 +149,8 @@ fn session(name: &str, status: SessionStatus, minutes_ago: i64) -> LiveSession {
         place: "Terminal".into(),
         project: "webapp".into(),
         status,
-        last_active_at: (now() - chrono::Duration::minutes(minutes_ago)).to_rfc3339(),
+        last_active_at: (now().timestamp() - SignedDuration::from_mins(minutes_ago))
+            .utc_offset_text(),
     }
 }
 

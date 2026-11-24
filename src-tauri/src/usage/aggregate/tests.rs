@@ -1,14 +1,15 @@
 use super::*;
 use crate::dto::UsageSummaryInput;
+use crate::timestamp::TimestampExt;
 use crate::usage::files::testing::UsageHistory;
 use crate::usage::files::FoldedRow;
 
 fn record(overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {
     let mut r = UsageRecord {
         provider: UsageProvider::Claude,
-        timestamp_ms: chrono::DateTime::parse_from_rfc3339("2026-08-07T04:05:13.944Z")
+        timestamp_ms: crate::timestamp::parse("2026-08-07T04:05:13.944Z")
             .unwrap()
-            .timestamp_millis(),
+            .epoch_millis(),
         model: "claude-fable-5".into(),
         session_id: "session-a".into(),
         totals: TokenTotals {
@@ -123,9 +124,9 @@ fn add_says_whether_the_record_was_counted() {
     let mut agg = UsageAggregator::new(&window, &rates);
     assert!(agg.add(&record(|r| r.copy_key = Some("msg_1:".into()))));
     assert!(!agg.add(&record(|r| {
-        r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-09-01T00:00:00Z")
+        r.timestamp_ms = crate::timestamp::parse("2026-09-01T00:00:00Z")
             .unwrap()
-            .timestamp_millis();
+            .epoch_millis();
     })));
     let result = agg.finish();
     assert_eq!(result.buckets.len(), 1);
@@ -134,12 +135,12 @@ fn add_says_whether_the_record_was_counted() {
 
 #[test]
 fn hourly_window_includes_its_start_and_excludes_its_end() {
-    let since = chrono::DateTime::parse_from_rfc3339("2026-08-06T04:37:00.000Z")
+    let since = crate::timestamp::parse("2026-08-06T04:37:00.000Z")
         .unwrap()
-        .timestamp_millis();
-    let until = chrono::DateTime::parse_from_rfc3339("2026-08-07T04:37:00.000Z")
+        .epoch_millis();
+    let until = crate::timestamp::parse("2026-08-07T04:37:00.000Z")
         .unwrap()
-        .timestamp_millis();
+        .epoch_millis();
     let at = |timestamp_ms: i64, output: u64| {
         record(|r| {
             r.timestamp_ms = timestamp_ms;
@@ -181,14 +182,14 @@ fn unknown_timezone_falls_back_to_utc() {
 #[test]
 fn hourly_buckets_anchor_to_window_start() {
     let a = record(|r| {
-        r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-08-07T02:40:13.944Z")
+        r.timestamp_ms = crate::timestamp::parse("2026-08-07T02:40:13.944Z")
             .unwrap()
-            .timestamp_millis();
+            .epoch_millis();
     });
     let b = record(|r| {
-        r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2026-08-07T03:40:13.944Z")
+        r.timestamp_ms = crate::timestamp::parse("2026-08-07T03:40:13.944Z")
             .unwrap()
-            .timestamp_millis();
+            .epoch_millis();
     });
     let result = aggregate(&[a, b], &a_day_from_0437("America/Los_Angeles"));
     let pairs: Vec<_> = result
@@ -209,9 +210,9 @@ fn hourly_buckets_anchor_to_window_start() {
 fn out_of_window_day_dropped() {
     let result = aggregate(
         &[record(|r| {
-            r.timestamp_ms = chrono::DateTime::parse_from_rfc3339("2025-01-01T00:00:00Z")
+            r.timestamp_ms = crate::timestamp::parse("2025-01-01T00:00:00Z")
                 .unwrap()
-                .timestamp_millis();
+                .epoch_millis();
         })],
         &august("UTC"),
     );
@@ -220,9 +221,7 @@ fn out_of_window_day_dropped() {
 }
 
 fn at(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 fn read_with(window: &UsageWindow, feed: impl FnOnce(&mut UsageAggregator)) -> AggregateResult {

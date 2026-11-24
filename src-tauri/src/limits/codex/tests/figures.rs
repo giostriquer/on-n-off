@@ -1,11 +1,10 @@
 use super::*;
 use crate::accounts::model::AccessToken;
 use crate::http::{never_asked, was_asked};
+use jiff::Timestamp;
 
-fn now() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
+fn now() -> Timestamp {
+    crate::timestamp::parse("2026-09-24T12:00:00Z").unwrap()
 }
 
 fn account(name: &str) -> String {

@@ -6,6 +6,8 @@ use super::{
 };
 use crate::dto::AgentId;
 use crate::limits::outcome::Parked;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
@@ -64,7 +66,7 @@ impl Roster {
             home,
             provider,
             &crate::limits::archived(home, provider),
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
             &mut |p| Facts {
                 active: false,
                 deadline: Deadline::recorded(p),

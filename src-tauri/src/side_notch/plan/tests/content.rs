@@ -2,6 +2,7 @@ use super::cell::{CREDITS_INK, CREDITS_TRACK, FABLE_ORANGE, FABLE_TRACK, TRACK_I
 use super::*;
 use crate::dto::CiState;
 use crate::side_notch::model::frame::PrSegment;
+use jiff::tz::TimeZone;
 
 fn rail_cell(cell: CellData) -> CellPlan {
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
@@ -362,8 +363,8 @@ fn reset_notes_read_in_the_zone_of_the_clock_the_plan_is_given() {
         (13, "Resets Thu 13:00", "Resets Jan 2"),
         (-13, "Resets Wed 11:00", "Resets Dec 31"),
     ] {
-        let zone = chrono::FixedOffset::east_opt(hours * 3600).unwrap();
-        let popover = popover_plan_at(member(), now().with_timezone(&zone))
+        let zone = TimeZone::fixed(jiff::tz::offset(hours));
+        let popover = popover_plan_at(member(), now().with_time_zone(zone))
             .popover
             .expect("the popover is open");
         let notes: Vec<&str> = popover

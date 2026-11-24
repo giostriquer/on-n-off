@@ -2,6 +2,7 @@ use super::fixtures::{mint_body, mint_response, scoped_you};
 use super::*;
 use crate::dto::{LimitWindowKind, LimitsStatus};
 use crate::http::{refused_url, serve_once};
+use jiff::Timestamp;
 use serde_json::Value;
 
 fn identity() -> Identity {
@@ -163,7 +164,9 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 scope: Scope::AllModels,
                 length: Some(ONE_WEEK),
                 used_percent: 22.0,
-                reset: DateTime::from_timestamp(1_760_500_000, 0).map(ResetInstant::from),
+                reset: Timestamp::from_second(1_760_500_000)
+                    .ok()
+                    .map(ResetInstant::from),
                 role: None,
                 cycle_starts_on_first_message: false,
             },
@@ -172,7 +175,9 @@ fn a_mint_response_maps_to_its_account_plan_and_both_windows() {
                 scope: Scope::AllModels,
                 length: Some(FIVE_HOURS),
                 used_percent: 41.0,
-                reset: DateTime::from_timestamp(1_760_000_000, 0).map(ResetInstant::from),
+                reset: Timestamp::from_second(1_760_000_000)
+                    .ok()
+                    .map(ResetInstant::from),
                 role: None,
                 cycle_starts_on_first_message: true,
             },
@@ -192,7 +197,9 @@ fn a_usage_and_a_reset_are_handed_on_as_meta_reports_them() {
     assert_eq!(used, [140.0, -3.0]);
     assert_eq!(
         session(&facts).reset,
-        DateTime::from_timestamp_millis(1_760_000_000_500).map(ResetInstant::from)
+        Timestamp::from_millisecond(1_760_000_000_500)
+            .ok()
+            .map(ResetInstant::from)
     );
     assert_eq!(facts[0].reset, None);
 }

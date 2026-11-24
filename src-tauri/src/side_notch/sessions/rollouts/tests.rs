@@ -1,12 +1,15 @@
 use super::*;
 use crate::dto::AgentId;
 use crate::side_notch::sessions::MAX_SESSIONS;
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::Timestamp;
 
-fn codex(home: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
+fn codex(home: &Path, now: Timestamp) -> Vec<LiveSession> {
     crate::side_notch::sessions::read(AgentId::Codex, home, now)
 }
 
-fn muse(data: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
+fn muse(data: &Path, now: Timestamp) -> Vec<LiveSession> {
     read(&MUSE, data, now)
 }
 
@@ -33,7 +36,7 @@ fn jsonl(path: &Path, lines: &[Value]) {
     fs::write(path, body.join("\n") + "\n").unwrap();
 }
 
-fn codex_rollout(home: &Path, day: NaiveDate, name: &str, lines: &[Value]) -> PathBuf {
+fn codex_rollout(home: &Path, day: Date, name: &str, lines: &[Value]) -> PathBuf {
     let path = day_dir(&home.join(".codex").join("sessions"), day).join(name);
     jsonl(&path, lines);
     path
@@ -47,7 +50,7 @@ fn event(kind: &str) -> Value {
     serde_json::json!({"type": "event_msg", "payload": {"type": kind}})
 }
 
-fn muse_transcript(data: &Path, day: NaiveDate, id: &str, lines: &[Value]) -> PathBuf {
+fn muse_transcript(data: &Path, day: Date, id: &str, lines: &[Value]) -> PathBuf {
     let path = day_dir(&data.join("sessions"), day)
         .join(id)
         .join("session.jsonl");
@@ -98,11 +101,11 @@ fn a_turn_reads_as_working_only_while_it_is_fresh() {
 #[test]
 fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
     let home = crate::paths::scratch_dir("notch-codex-sessions");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     let newer = codex_rollout(
         &home,
-        now.date_naive(),
+        now.utc_date(),
         "rollout-a.jsonl",
         &[
             meta(
@@ -119,7 +122,7 @@ fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
     set_mtime(&newer, now_ms - 60_000);
     let older = codex_rollout(
         &home,
-        now.date_naive(),
+        now.utc_date(),
         "rollout-b.jsonl",
         &[
             meta("01a0-bbbb-77", "/Users/me/Documents/acme", "codex_cli_rs"),
@@ -130,7 +133,7 @@ fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
     set_mtime(&older, now_ms - 5 * 60_000);
     codex_rollout(
         &home,
-        now.date_naive(),
+        now.utc_date(),
         "not-a-session.jsonl",
         &[serde_json::json!({"type": "event_msg", "payload": {"type": "task_started"}})],
     );
@@ -150,29 +153,29 @@ fn codex_reads_recent_rollouts_and_infers_work_from_task_boundaries() {
     assert_eq!(idle.place, "Terminal");
     assert_eq!(idle.last_active_at, rfc3339(now_ms - 5 * 60_000, now));
 
-    let later = now + Duration::minutes(20);
+    let later = now + jiff::SignedDuration::from_mins(20);
     let stale = codex(&home, later);
     assert_eq!(stale.len(), 2);
     assert!(stale.iter().all(|s| s.status == SessionStatus::Idle));
-    assert!(codex(&home, now + Duration::hours(2)).is_empty());
+    assert!(codex(&home, now + jiff::SignedDuration::from_hours(2)).is_empty());
     fs::remove_dir_all(home).unwrap();
 }
 
 #[test]
 fn codex_treats_a_transcript_still_being_written_as_work_without_boundaries_in_the_tail() {
     let home = crate::paths::scratch_dir("notch-codex-tail");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let mut lines = vec![meta("01a0-cccc-01", "/tmp/project", "codex_cli_rs")];
     lines.push(event("task_started"));
     let filler = "x".repeat(4096);
     for _ in 0..40 {
         lines.push(serde_json::json!({"type": "response_item", "payload": {"type": "text", "text": filler}}));
     }
-    codex_rollout(&home, now.date_naive(), "rollout-long.jsonl", &lines);
+    codex_rollout(&home, now.utc_date(), "rollout-long.jsonl", &lines);
     let sessions = codex(&home, now);
     assert_eq!(sessions[0].status, SessionStatus::Working);
     assert_eq!(
-        codex(&home, now + Duration::minutes(5))[0].status,
+        codex(&home, now + jiff::SignedDuration::from_mins(5))[0].status,
         SessionStatus::Idle
     );
     fs::remove_dir_all(home).unwrap();
@@ -181,10 +184,10 @@ fn codex_treats_a_transcript_still_being_written_as_work_without_boundaries_in_t
 #[test]
 fn codex_head_and_tail_reads_reach_past_sixteen_kib_of_long_lines() {
     let home = crate::paths::scratch_dir("notch-codex-long-lines");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let mut long_meta = meta("01a0-aaaa-1a", "/Users/me/acme", "codex_cli_rs");
     long_meta["payload"]["base_instructions"] = Value::String("x".repeat(16 * 1024));
-    codex_rollout(&home, now.date_naive(), "long-meta.jsonl", &[long_meta]);
+    codex_rollout(&home, now.utc_date(), "long-meta.jsonl", &[long_meta]);
     let mut lines = vec![
         meta("01a0-aaaa-1b", "/Users/me/webapp", "codex_cli_rs"),
         event("task_started"),
@@ -193,8 +196,8 @@ fn codex_head_and_tail_reads_reach_past_sixteen_kib_of_long_lines() {
     for _ in 0..4 {
         lines.push(serde_json::json!({"type": "response_item", "payload": {"type": "text", "text": filler}}));
     }
-    codex_rollout(&home, now.date_naive(), "long-output.jsonl", &lines);
-    let sessions = codex(&home, now + Duration::minutes(5));
+    codex_rollout(&home, now.utc_date(), "long-output.jsonl", &lines);
+    let sessions = codex(&home, now + jiff::SignedDuration::from_mins(5));
     assert_eq!(names(&sessions), ["acme-1a", "webapp-1b"]);
     let open = sessions.iter().find(|s| s.id == "01a0-aaaa-1b").unwrap();
     assert_eq!(open.status, SessionStatus::Working);
@@ -204,10 +207,10 @@ fn codex_head_and_tail_reads_reach_past_sixteen_kib_of_long_lines() {
 #[test]
 fn muse_lists_registered_and_recent_sessions_with_working_state() {
     let data = crate::paths::scratch_dir("notch-muse-sessions");
-    let now = Utc::now();
+    let now = Timestamp::now();
     muse_transcript(
         &data,
-        now.date_naive(),
+        now.utc_date(),
         "aaaa-1111-2222-3333-444455556666",
         &[
             muse_record("/Users/me/Documents/acme/webapp"),
@@ -223,7 +226,7 @@ fn muse_lists_registered_and_recent_sessions_with_working_state() {
     );
     muse_transcript(
         &data,
-        now.date_naive(),
+        now.utc_date(),
         "bbbb-1111-2222-3333-444455557777",
         &[
             muse_record("/Users/me/Documents/acme"),
@@ -251,7 +254,7 @@ fn muse_lists_registered_and_recent_sessions_with_working_state() {
     assert_eq!(idle.project, "acme");
     assert_eq!(idle.status, SessionStatus::Idle);
 
-    let later = muse(&data, now + Duration::minutes(90));
+    let later = muse(&data, now + jiff::SignedDuration::from_mins(90));
     assert_eq!(later.len(), 1);
     assert_eq!(later[0].status, SessionStatus::Idle);
     fs::remove_dir_all(data).unwrap();
@@ -260,15 +263,15 @@ fn muse_lists_registered_and_recent_sessions_with_working_state() {
 #[test]
 fn muse_missing_dirs_list_nothing() {
     let data = crate::paths::scratch_dir("notch-muse-missing");
-    assert!(muse(&data, Utc::now()).is_empty());
+    assert!(muse(&data, Timestamp::now()).is_empty());
     fs::remove_dir_all(data).unwrap();
 }
 
 #[test]
 fn codex_walks_jsonl_rollouts_no_older_than_yesterday() {
     let home = crate::paths::scratch_dir("notch-codex-days");
-    let now = Utc::now();
-    let today = now.date_naive();
+    let now = Timestamp::now();
+    let today = now.utc_date();
     for (offset, id) in [
         (0, "01a0-aaaa-01"),
         (1, "01a0-aaaa-02"),
@@ -276,7 +279,7 @@ fn codex_walks_jsonl_rollouts_no_older_than_yesterday() {
     ] {
         codex_rollout(
             &home,
-            today - Duration::days(offset),
+            today - jiff::Span::new().days(offset),
             "rollout.jsonl",
             &[meta(id, "/Users/me/acme", "codex_cli_rs")],
         );
@@ -295,13 +298,13 @@ fn codex_walks_jsonl_rollouts_no_older_than_yesterday() {
 #[test]
 fn codex_reads_only_the_48_newest_rollouts() {
     let home = crate::paths::scratch_dir("notch-codex-cap");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     let noise: Vec<PathBuf> = (0..48)
         .map(|index| {
             let path = codex_rollout(
                 &home,
-                now.date_naive(),
+                now.utc_date(),
                 &format!("noise-{index:02}.jsonl"),
                 &[event("task_started")],
             );
@@ -311,7 +314,7 @@ fn codex_reads_only_the_48_newest_rollouts() {
         .collect();
     let older = codex_rollout(
         &home,
-        now.date_naive(),
+        now.utc_date(),
         "older.jsonl",
         &[meta("01a0-aaaa-99", "/Users/me/acme", "codex_cli_rs")],
     );
@@ -328,8 +331,8 @@ fn codex_reads_only_the_48_newest_rollouts() {
 #[test]
 fn codex_names_a_session_from_its_meta_line() {
     let home = crate::paths::scratch_dir("notch-codex-meta");
-    let now = Utc::now();
-    let today = now.date_naive();
+    let now = Timestamp::now();
+    let today = now.utc_date();
     codex_rollout(
         &home,
         today,
@@ -374,8 +377,8 @@ fn codex_names_a_session_from_its_meta_line() {
 #[test]
 fn codex_working_follows_the_last_event_message_marker_and_its_age() {
     let home = crate::paths::scratch_dir("notch-codex-turns");
-    let now = Utc::now();
-    let today = now.date_naive();
+    let now = Timestamp::now();
+    let today = now.utc_date();
     let start = meta("01a0-aaaa-0a", "/Users/me/open", "codex_cli_rs");
     codex_rollout(
         &home,
@@ -414,7 +417,7 @@ fn codex_working_follows_the_last_event_message_marker_and_its_age() {
         ],
     );
     let status = |minutes: i64, project: &str| {
-        codex(&home, now + Duration::minutes(minutes))
+        codex(&home, now + jiff::SignedDuration::from_mins(minutes))
             .into_iter()
             .find(|s| s.project == project)
             .unwrap()
@@ -437,24 +440,24 @@ fn codex_working_follows_the_last_event_message_marker_and_its_age() {
 #[test]
 fn muse_walks_visible_session_folders_and_keeps_the_newest_day_of_an_id() {
     let data = crate::paths::scratch_dir("notch-muse-walk");
-    let now = Utc::now();
-    let today = now.date_naive();
+    let now = Timestamp::now();
+    let today = now.utc_date();
     muse_transcript(&data, today, "aaaa-01", &[muse_record("/Users/me/today")]);
     muse_transcript(
         &data,
-        today - Duration::days(1),
+        today - jiff::Span::new().days(1),
         "aaaa-01",
         &[muse_record("/Users/me/yesterday")],
     );
     muse_transcript(
         &data,
-        today - Duration::days(1),
+        today - jiff::Span::new().days(1),
         "aaaa-02",
         &[muse_record("/Users/me/acme")],
     );
     muse_transcript(
         &data,
-        today - Duration::days(2),
+        today - jiff::Span::new().days(2),
         "aaaa-03",
         &[muse_record("/Users/me/acme")],
     );
@@ -469,13 +472,13 @@ fn muse_walks_visible_session_folders_and_keeps_the_newest_day_of_an_id() {
 #[test]
 fn muse_reads_only_the_48_newest_transcripts() {
     let data = crate::paths::scratch_dir("notch-muse-cap");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     for index in 0..48 {
-        let path = muse_transcript(&data, now.date_naive(), &format!("bbbb-{index:02}"), &[]);
+        let path = muse_transcript(&data, now.utc_date(), &format!("bbbb-{index:02}"), &[]);
         set_mtime(&path, now_ms - 60_000 * (index + 1));
     }
-    let old = muse_transcript(&data, now.date_naive(), "cccc-99", &[]);
+    let old = muse_transcript(&data, now.utc_date(), "cccc-99", &[]);
     set_mtime(&old, now_ms - 50 * 60_000);
     register_muse(&data, "cccc-99", Some("acme-late"), "acme");
     let sessions = muse(&data, now);
@@ -490,11 +493,11 @@ fn muse_reads_only_the_48_newest_transcripts() {
 #[test]
 fn muse_activity_is_the_later_write_but_working_follows_the_transcript() {
     let data = crate::paths::scratch_dir("notch-muse-activity");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     let started = muse_event("model_response_created");
     for (id, minutes) in [("dddd-10", 10), ("dddd-20", 20)] {
-        let path = muse_transcript(&data, now.date_naive(), id, std::slice::from_ref(&started));
+        let path = muse_transcript(&data, now.utc_date(), id, std::slice::from_ref(&started));
         set_mtime(&path, now_ms - minutes * 60_000);
         let registration = register_muse(&data, id, None, "");
         set_mtime(&registration, now_ms - 1_000);
@@ -514,8 +517,8 @@ fn muse_activity_is_the_later_write_but_working_follows_the_transcript() {
 #[test]
 fn muse_workspace_is_the_first_head_line_naming_one() {
     let data = crate::paths::scratch_dir("notch-muse-workspace");
-    let now = Utc::now();
-    let today = now.date_naive();
+    let now = Timestamp::now();
+    let today = now.utc_date();
     muse_transcript(
         &data,
         today,
@@ -541,14 +544,14 @@ fn muse_workspace_is_the_first_head_line_naming_one() {
 #[test]
 fn muse_registry_entries_name_by_file_stem_and_skip_blank_oversize_and_foreign_files() {
     let data = crate::paths::scratch_dir("notch-muse-registry");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     let registry = data.join("runtime/muse/sessions");
     fs::create_dir_all(&registry).unwrap();
     for id in ["ffff-01", "ffff-02", "ffff-03", "ffff-04", "ffff-05"] {
         let path = muse_transcript(
             &data,
-            now.date_naive(),
+            now.utc_date(),
             id,
             &[serde_json::json!({"workspace_root": "/Users/me/acme"})],
         );
@@ -592,7 +595,7 @@ fn muse_registry_entries_name_by_file_stem_and_skip_blank_oversize_and_foreign_f
 #[test]
 fn muse_counts_every_start_and_end_marker_kind() {
     let data = crate::paths::scratch_dir("notch-muse-markers");
-    let now = Utc::now();
+    let now = Timestamp::now();
     let cases = [
         (
             "gggg-01",
@@ -622,18 +625,18 @@ fn muse_counts_every_start_and_end_marker_kind() {
     ];
     for (id, kinds, _) in &cases {
         let lines: Vec<Value> = kinds.iter().map(|kind| muse_event(kind)).collect();
-        muse_transcript(&data, now.date_naive(), id, &lines);
+        muse_transcript(&data, now.utc_date(), id, &lines);
     }
     muse_transcript(
         &data,
-        now.date_naive(),
+        now.utc_date(),
         "gggg-06",
         &[
             muse_event("model_response_created"),
             serde_json::json!({"payload": {"event": {"kind": "tool_call_started", "target": "terminal"}}}),
         ],
     );
-    let later = now + Duration::minutes(5);
+    let later = now + jiff::SignedDuration::from_mins(5);
     let sessions = muse(&data, later);
     for (id, _, status) in cases {
         assert_eq!(
@@ -654,9 +657,9 @@ fn muse_counts_every_start_and_end_marker_kind() {
 fn the_walk_reads_the_day_a_zone_east_of_utc_has_already_reached() {
     let home = crate::paths::scratch_dir("notch-codex-east");
     let data = crate::paths::scratch_dir("notch-muse-east");
-    let now = Utc::now();
-    let today = now.date_naive();
-    let tomorrow = today + Duration::days(1);
+    let now = Timestamp::now();
+    let today = now.utc_date();
+    let tomorrow = today + jiff::Span::new().days(1);
     codex_rollout(
         &home,
         tomorrow,
@@ -709,15 +712,16 @@ fn around_utc_midnight_the_walk_holds_every_zones_local_today() {
         ),
     ];
     for (instant, walked) in rows {
-        let now: DateTime<Utc> = instant.parse().unwrap();
+        let now: Timestamp = instant.parse().unwrap();
         let walk = days(now);
         assert_eq!(
             walk,
-            walked.map(|day| day.parse::<NaiveDate>().unwrap()),
+            walked.map(|day| day.parse::<Date>().unwrap()),
             "{instant}"
         );
         for quarter_hours in -12 * 4..=14 * 4 {
-            let local_today = (now + Duration::minutes(15 * quarter_hours)).date_naive();
+            let local_today =
+                (now + jiff::SignedDuration::from_mins(15 * quarter_hours)).utc_date();
             assert!(
                 walk.contains(&local_today),
                 "{instant} at UTC{:+} min",

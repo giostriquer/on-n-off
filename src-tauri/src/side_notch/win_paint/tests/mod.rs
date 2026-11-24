@@ -7,12 +7,12 @@ use crate::side_notch::plan::tests::{
     settings, tagged_rows, window, CLAUDE, PERSONAL, WORK,
 };
 use crate::side_notch::plan::{CellId, Hover};
-use chrono::{DateTime, Utc};
+use jiff::ZonedDateTime;
 
 mod render;
 mod strokes;
 
-fn plan(displays: &[Display], data: &RailData, hover: Hover, now: DateTime<Utc>) -> Option<Plan> {
+fn plan(displays: &[Display], data: &RailData, hover: Hover, now: ZonedDateTime) -> Option<Plan> {
     crate::side_notch::plan::plan(displays, data, hover, now, &DirectWrite)
 }
 

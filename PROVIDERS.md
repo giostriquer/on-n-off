@@ -14,6 +14,8 @@ adapter assumes today (change the adapter and this file together).
 
 ## Common shape
 
+Provider reset and observation timestamps use RFC 3339. Limits compare the instants in UTC and format reset times in the local zone for display. Usage assigns records to days in the zone supplied by the UI.
+
 - Home: `~/.<provider>` under `user_home()` — `ON_N_OFF_HOME` overrides the home for **all**
   providers (QA fixtures). `%USERPROFILE%` on Windows, `$HOME` elsewhere. A test build has no
   user home; tests hand each adapter its root. Muse is the exception: its state splits the

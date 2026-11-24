@@ -1,9 +1,10 @@
 use super::*;
 use crate::accounts::model::Identity;
 use crate::dto::AgentId;
+use jiff::Timestamp;
 use serde_json::json;
 
-fn now() -> DateTime<Utc> {
+fn now() -> Timestamp {
     "2026-09-10T12:00:00Z".parse().unwrap()
 }
 fn claims() -> Value {
@@ -204,4 +205,21 @@ fn a_busy_saved_account_vault_is_retryable_not_an_absent_date() {
         Ok(None),
         "a legacy workspace key never opens the vault"
     );
+}
+
+#[test]
+fn subscription_dates_normalize_offsets_and_keep_millisecond_microsecond_and_nanosecond_precision()
+{
+    for (fraction, normalized) in [
+        ("", ""),
+        (".1", ".100"),
+        (".1234", ".123400"),
+        (".1234567", ".123456700"),
+    ] {
+        let mut payload = claims();
+        payload["chatgpt_subscription_active_until"] =
+            json!(format!("2026-10-10T09:00:00{fraction}-03:00"));
+        let term = parse_claims(&payload, "account-a", now()).unwrap();
+        assert_eq!(term.date, format!("2026-10-10T12:00:00{normalized}+00:00"));
+    }
 }

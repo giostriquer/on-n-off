@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 mod auth;
 mod connection;
 mod contributions;
@@ -18,8 +20,6 @@ use std::collections::HashSet;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-
-use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::cli::AgentCli;
 use crate::dto::{GithubPrDto, GithubPrsData, GithubPrsDto, GithubStatus};
@@ -129,7 +129,7 @@ fn read_prs_locked(force: bool) -> (GithubPrsDto, Reading) {
         }
     };
     let cli = AgentCli::new("gh");
-    let now_secs = Utc::now().timestamp();
+    let now_secs = Timestamp::now().epoch_seconds();
     read_prs_in(
         &Sources {
             home: &home,
@@ -280,6 +280,7 @@ fn stale_or(failure: GithubPrsDto, remembered: Option<GithubPrsData>) -> GithubP
 }
 
 fn rfc3339(epoch_secs: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp(epoch_secs, 0)
-        .map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
+    Timestamp::from_second(epoch_secs)
+        .ok()
+        .map(|at| at.utc_seconds_text())
 }

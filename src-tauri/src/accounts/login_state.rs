@@ -4,6 +4,8 @@ use super::{
     usage::Kept,
 };
 use crate::limits::outcome::Parked;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -122,8 +124,9 @@ impl Deadline {
     }
 
     pub(super) fn spelled(&self) -> Option<String> {
-        chrono::DateTime::from_timestamp_millis(self.ends_at_ms?)
-            .map(|at| at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+        Timestamp::from_millisecond(self.ends_at_ms?)
+            .ok()
+            .map(|at| at.utc_seconds_text())
     }
 
     fn state(&self, now_ms: i64) -> Option<LoginState> {

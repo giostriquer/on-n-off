@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 pub(crate) mod model;
 pub(crate) mod vault;
 
@@ -379,7 +381,7 @@ impl Accounts {
             home,
             provider,
             &crate::limits::archived(home, provider),
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
             &mut |p| {
                 let active = current.as_ref() == Some(&p.identity);
                 let kept = usage::kept(p, homes);

@@ -1,6 +1,7 @@
 use super::*;
 use crate::dto::LimitWindowKind;
 use crate::limits::window::fixture;
+use jiff::SignedDuration;
 use serde_json::{json, Value};
 
 fn observed(
@@ -226,7 +227,7 @@ fn a_count_lapses_at_its_expiry_itself() {
     let at = parse_observed_at(expires_at).unwrap();
     let expiry = resets.next_expires_at.as_deref();
     assert!(passed(expiry, at));
-    assert!(!passed(expiry, at - chrono::Duration::seconds(1)));
+    assert!(!passed(expiry, at - SignedDuration::from_secs(1)));
     assert!(!passed(None, at), "no known expiry never lapses");
 }
 

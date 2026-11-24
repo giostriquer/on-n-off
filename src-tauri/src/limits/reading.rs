@@ -1,4 +1,5 @@
-use chrono::{DateTime, SecondsFormat, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 use crate::dto::{LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading};
 
@@ -91,7 +92,7 @@ impl Reading {
         }
     }
 
-    pub(super) fn known_at(self, now: DateTime<Utc>) -> Self {
+    pub(super) fn known_at(self, now: Timestamp) -> Self {
         Self {
             reset_credits: self
                 .reset_credits
@@ -106,7 +107,7 @@ impl Reading {
     }
 }
 
-fn passed(at: Option<&str>, now: DateTime<Utc>) -> bool {
+fn passed(at: Option<&str>, now: Timestamp) -> bool {
     at.and_then(parse_observed_at).is_some_and(|at| at <= now)
 }
 
@@ -118,7 +119,7 @@ fn merged(
     mut windows: Vec<LimitWindowDto>,
     remembered: Vec<LimitWindowDto>,
 ) -> Vec<LimitWindowDto> {
-    let newest = newest(&remembered).map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true));
+    let newest = newest(&remembered).map(|at| at.utc_millis_text());
     for mut incoming in remembered {
         if let (true, Some(newest)) = (incoming.observed_at.is_empty(), &newest) {
             incoming.observed_at.clone_from(newest);
@@ -155,17 +156,15 @@ fn is_newer(incoming: &LimitWindowDto, existing: &LimitWindowDto) -> bool {
     }
 }
 
-pub(super) fn newest(windows: &[LimitWindowDto]) -> Option<DateTime<Utc>> {
+pub(super) fn newest(windows: &[LimitWindowDto]) -> Option<Timestamp> {
     windows
         .iter()
         .filter_map(|window| parse_observed_at(&window.observed_at))
         .max()
 }
 
-pub(super) fn parse_observed_at(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|observed_at| observed_at.with_timezone(&Utc))
+pub(super) fn parse_observed_at(value: &str) -> Option<Timestamp> {
+    crate::timestamp::parse(value).ok()
 }
 
 #[cfg(test)]

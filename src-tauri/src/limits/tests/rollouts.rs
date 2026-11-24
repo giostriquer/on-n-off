@@ -1,4 +1,5 @@
 use super::*;
+use crate::timestamp::TimestampExt;
 
 const ROLLOUT: &str = r#"{"timestamp":"2026-08-20T06:58:07.093Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","limit_name":null,"primary":{"used_percent":96.0,"window_minutes":10080,"resets_at":1787614473},"secondary":null}}}"#;
 
@@ -37,9 +38,9 @@ fn weekly_used(cards: &[ProviderLimitsDto]) -> Option<f64> {
 
 #[test]
 fn a_read_merges_session_rollouts_only_for_a_provider_whose_facts_name_them() {
-    let now_ms = chrono::DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
+    let now_ms = crate::timestamp::parse("2026-08-20T14:00:00Z")
         .unwrap()
-        .timestamp_millis();
+        .epoch_millis();
     for provider in crate::provider_catalogue::WITH_LIMITS {
         let home = scratch_dir(&format!("limits-rollouts-{}", provider.key()));
         let sessions = home.join(".codex/sessions/2026/08/20");

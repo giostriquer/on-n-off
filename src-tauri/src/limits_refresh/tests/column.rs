@@ -1,6 +1,7 @@
 use super::*;
 use crate::accounts::model::Identity;
 use crate::accounts::roster_for_test;
+use crate::timestamp::TimestampExt;
 use std::sync::mpsc;
 
 fn saved(user: &str) -> Identity {
@@ -239,9 +240,9 @@ fn an_account_list_hands_its_sign_in_ends_and_a_roster_reread_over_in_one_replac
     read(&cache, "me", false, &|_, _| Some(roster_of(&["me"], &[])));
     let me = saved("me").observation_key();
     let ms = |at: &str| {
-        chrono::DateTime::parse_from_rfc3339(at)
+        crate::timestamp::parse(at)
             .expect("an instant")
-            .timestamp_millis()
+            .epoch_millis()
     };
     let ends = SignInDeadlines::from([(me.clone(), ms("2026-09-30T12:00:00Z"))]);
     let listed = || Some(roster_of(&["me"], &[(me.as_str(), "Client A")]));

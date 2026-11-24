@@ -7,10 +7,9 @@ use crate::side_notch::model::frame::RailData;
 use crate::side_notch::model::{Display, NotchProvider, NotchSettings, ShowMode, RAIL_ORDER};
 use crate::side_notch::plan::{plan, CellId, Hover, TextWeight};
 use crate::side_notch::sessions::LiveSession;
-use chrono::{DateTime, Utc};
 
-fn now() -> DateTime<Utc> {
-    "2026-09-03T10:30:00Z".parse().unwrap()
+fn now() -> jiff::ZonedDateTime {
+    "2026-09-03T10:30:00Z[UTC]".parse().unwrap()
 }
 
 fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {

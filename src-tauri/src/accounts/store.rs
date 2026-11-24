@@ -1,6 +1,8 @@
 use super::{login_state::SignInEnd, model::Identity, transaction::Recovery};
 use crate::dto::AgentId;
 use crate::file_lease::FileLease;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -407,7 +409,7 @@ impl Database {
             profile.usage_renewal_owned = false;
             profile.sign_in_end = SignInEnd::of(&identity, &login);
             profile.login = Some(login);
-            profile.saved_at = chrono::Utc::now().to_rfc3339();
+            profile.saved_at = Timestamp::now().utc_offset_text();
             return Ok(profile.id.clone());
         }
         let id = uuid::Uuid::new_v4().to_string();
@@ -421,7 +423,7 @@ impl Database {
             label: email.clone().unwrap_or_else(|| "Email unavailable".into()),
             email,
             category,
-            saved_at: chrono::Utc::now().to_rfc3339(),
+            saved_at: Timestamp::now().utc_offset_text(),
             login: Some(login),
             pending_activation: false,
             usage_renewal_owned: false,

@@ -1,6 +1,6 @@
+use jiff::Timestamp;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -181,7 +181,7 @@ fn reset(value: &MintWindow) -> Option<ResetInstant> {
     value
         .resets_at
         .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
-        .and_then(|seconds| DateTime::<Utc>::from_timestamp_millis((seconds * 1000.0) as i64))
+        .and_then(|seconds| Timestamp::from_millisecond((seconds * 1000.0) as i64).ok())
         .map(ResetInstant::from)
 }
 

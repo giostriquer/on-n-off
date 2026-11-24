@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 pub mod deps;
 pub mod fetch;
 pub mod manifest;
@@ -621,7 +623,7 @@ fn repo_key(source: &registry::ItemSource) -> RepoRef {
 }
 
 fn now() -> String {
-    chrono::Utc::now().to_rfc3339()
+    Timestamp::now().utc_offset_text()
 }
 
 fn root_for(roots: &ItemRoots, kind: ItemKind) -> Option<&Path> {

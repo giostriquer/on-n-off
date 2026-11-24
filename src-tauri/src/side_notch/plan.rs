@@ -1,3 +1,4 @@
+use jiff::ZonedDateTime;
 mod cell;
 mod popover;
 mod text;
@@ -14,8 +15,6 @@ use super::model::{
     TRIP_RED,
 };
 use crate::dto::AgentId;
-use chrono::{DateTime, TimeZone, Utc};
-use std::fmt;
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct R {
@@ -266,18 +265,15 @@ impl Plan {
     }
 }
 
-pub fn plan<Tz: TimeZone>(
+pub fn plan(
     displays: &[Display],
     data: &RailData,
     hover: Hover,
-    now: DateTime<Tz>,
+    now: ZonedDateTime,
     text_metrics: &dyn TextMetrics,
-) -> Option<Plan>
-where
-    Tz::Offset: fmt::Display,
-{
-    let zone = now.timezone();
-    let now = now.with_timezone(&Utc);
+) -> Option<Plan> {
+    let zone = now.time_zone();
+    let now = now.timestamp();
     let settings = &data.settings;
     let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
@@ -311,7 +307,7 @@ where
             scale,
             text_metrics,
             now,
-            &zone,
+            zone,
         );
         let content_h = contents.bottom() + chrome.padding;
         let tail = chrome.tail_length;

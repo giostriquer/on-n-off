@@ -1,11 +1,11 @@
 use super::*;
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct Cases {
-    pub(super) now: DateTime<Utc>,
+    pub(super) now: Timestamp,
     pub(super) time_zone: String,
     pub(super) windows: Vec<Case<WindowInput>>,
     pub(super) shares: Vec<Case<ShareInput>>,

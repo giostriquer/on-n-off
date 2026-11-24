@@ -1,5 +1,3 @@
-use chrono::{DateTime, Utc};
-
 use super::*;
 use crate::dto::{AgentId, LimitWindowDto, LimitWindowKind, ProviderLimitsDto, Reading};
 use crate::paths::scratch_dir;
@@ -43,9 +41,7 @@ fn a_newer_session_observation_updates_the_uniquely_matching_remembered_account(
         remembered("acct-old", "2026-08-24T23:34:33Z"),
         remembered("acct-other", "2026-08-27T13:56:01Z"),
     ];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -69,9 +65,7 @@ fn a_merged_window_is_the_one_the_window_module_builds_for_the_observation() {
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33+00:00")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 1);
 
@@ -112,9 +106,7 @@ fn a_session_observation_advances_the_window_the_reader_built_for_its_slot() {
         current_account: false,
         ..read
     }];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 1);
 
@@ -138,9 +130,7 @@ fn a_session_observation_three_seconds_off_the_remembered_reset_is_another_windo
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
@@ -157,9 +147,7 @@ fn a_session_observation_from_the_remembered_instant_is_not_newer() {
     )
     .unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
@@ -177,9 +165,7 @@ fn session_reconciliation_never_reads_an_unbounded_file_prefix() {
     content.push_str(&"x".repeat(300 * 1024));
     fs::write(sessions.join("rollout.jsonl"), content).unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -199,9 +185,7 @@ fn session_reconciliation_reads_a_limit_event_inside_the_bounded_tail() {
     );
     fs::write(sessions.join("rollout.jsonl"), content).unwrap();
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -230,16 +214,14 @@ fn a_tail_reader_stops_at_the_snapshotted_end_while_preserving_existing_events()
 "#,
         )
         .unwrap();
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
     let mut observations = Vec::new();
 
     read_file_range(
         file,
         start,
         length - start,
-        now - Duration::days(LOOKBACK_DAYS),
+        now - jiff::SignedDuration::from_hours(24 * LOOKBACK_DAYS),
         now,
         &mut observations,
     );
@@ -262,9 +244,7 @@ fn session_reconciliation_has_a_bounded_file_count() {
         fs::write(sessions.join(format!("rollout-{index:04}.jsonl")), "{}\n").unwrap();
     }
     let mut accounts = vec![remembered("acct-old", "2026-08-24T23:34:33Z")];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -286,9 +266,7 @@ fn an_ambiguous_session_observation_does_not_change_any_account() {
         remembered("acct-a", "2026-08-24T23:34:33Z"),
         remembered("acct-b", "2026-08-24T23:34:33Z"),
     ];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -315,9 +293,7 @@ fn history_a_scoped_card_replaced_is_never_the_account_an_observation_updates() 
         remembered("acct-old", "2026-08-24T23:34:33Z"),
         remembered("acct-kept", "2026-08-24T23:34:33Z"),
     ];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     let updates = merge_recent(&home, now, &mut accounts);
 
@@ -343,9 +319,7 @@ fn a_session_observation_does_not_match_a_window_without_an_exact_duration() {
     .unwrap();
     let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];
     accounts[0].reading.windows[0].window_seconds = None;
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
@@ -363,9 +337,7 @@ fn a_session_slot_without_a_duration_never_advances_a_window_without_one() {
     .unwrap();
     let mut accounts = vec![remembered("acct-a", "2026-08-24T23:34:33Z")];
     accounts[0].reading.windows[0].window_seconds = None;
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);
@@ -387,9 +359,7 @@ fn duplicate_matching_windows_in_one_account_are_ambiguous() {
         .windows
         .push(account.reading.windows[0].clone());
     let mut accounts = vec![account];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert!(accounts[0]
@@ -412,9 +382,7 @@ fn an_unattributed_session_observation_never_overrides_the_current_account() {
     let mut current = remembered("acct-current", "2026-08-24T23:34:33Z");
     current.current_account = true;
     let mut accounts = vec![current];
-    let now = DateTime::parse_from_rfc3339("2026-08-20T14:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let now = crate::timestamp::parse("2026-08-20T14:00:00Z").unwrap();
 
     assert_eq!(merge_recent(&home, now, &mut accounts), 0);
     assert_eq!(accounts[0].reading.windows[0].used_percent, 86.0);

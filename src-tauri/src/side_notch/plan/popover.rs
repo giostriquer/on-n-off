@@ -9,8 +9,8 @@ use crate::limits::window_at::WindowAt;
 use crate::side_notch::model::frame::{CellData, Notice, PrCell, PrList, PrRow, ProviderCell};
 use crate::side_notch::model::{meter_color, workspace_share_wording, PopoverMetrics};
 use crate::side_notch::sessions::{LiveSession, SessionStatus};
-use chrono::{DateTime, TimeZone, Utc};
-use std::fmt::Display;
+use jiff::tz::TimeZone;
+use jiff::Timestamp;
 
 const WHITE: Color = [255, 255, 255, 255];
 const NO_CHECKS_RING: Color = [89, 89, 89, 255];
@@ -129,28 +129,25 @@ struct Block {
     detail: Option<String>,
 }
 
-struct Composer<'a, Tz: TimeZone> {
+struct Composer<'a> {
     scale: Scale,
     typeset: Typesetter<'a>,
-    now: DateTime<Utc>,
-    zone: &'a Tz,
+    now: Timestamp,
+    zone: &'a TimeZone,
     x: f64,
     inner_w: f64,
     out: Contents,
 }
 
-pub(super) fn contents<Tz: TimeZone>(
+pub(super) fn contents(
     cell: &CellData,
     action_error: Option<&str>,
     chrome: &PopoverMetrics,
     scale: Scale,
     text_metrics: &dyn TextMetrics,
-    now: DateTime<Utc>,
-    zone: &Tz,
-) -> Contents
-where
-    Tz::Offset: Display,
-{
+    now: Timestamp,
+    zone: &TimeZone,
+) -> Contents {
     let mut composer = Composer {
         scale,
         typeset: Typesetter::new(text_metrics, scale.display),
@@ -176,10 +173,7 @@ where
     composer.out
 }
 
-impl<Tz: TimeZone> Composer<'_, Tz>
-where
-    Tz::Offset: Display,
-{
+impl Composer<'_> {
     fn v(&self, points: f64) -> f64 {
         self.scale.value(points)
     }
@@ -604,11 +598,11 @@ where
     }
 }
 
-fn age_text(last_active_at: &str, now: DateTime<Utc>) -> String {
-    let Some(instant) = last_active_at.parse::<DateTime<Utc>>().ok() else {
+fn age_text(last_active_at: &str, now: Timestamp) -> String {
+    let Some(instant) = last_active_at.parse::<Timestamp>().ok() else {
         return String::new();
     };
-    let minutes = (now - instant).num_minutes();
+    let minutes = (now - instant).as_mins();
     if minutes < 1 {
         "just now".into()
     } else if minutes < 60 {

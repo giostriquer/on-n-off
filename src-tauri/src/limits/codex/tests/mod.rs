@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 mod figures;
 mod saved;
 
@@ -48,7 +50,9 @@ fn maps_app_server_buckets_without_duplicating_the_legacy_mirror() {
             scope: Scope::AllModels,
             length: Some(Duration::from_secs(604_800)),
             used_percent: 14.0,
-            reset: DateTime::<Utc>::from_timestamp(1_787_838_960, 0).map(ResetInstant::from),
+            reset: Timestamp::from_second(1_787_838_960)
+                .ok()
+                .map(ResetInstant::from),
             role: None,
             cycle_starts_on_first_message: false,
         }]
@@ -294,7 +298,9 @@ fn orders_weekly_before_session_even_when_app_server_returns_primary_first() {
 }
 
 fn expires(epoch: i64) -> Option<String> {
-    DateTime::<Utc>::from_timestamp(epoch, 0).map(|at| at.to_rfc3339())
+    Timestamp::from_second(epoch)
+        .ok()
+        .map(|at| at.utc_offset_text())
 }
 
 #[test]

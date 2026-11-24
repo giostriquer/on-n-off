@@ -1,3 +1,4 @@
+use jiff::Timestamp;
 use std::cell::{Cell, RefCell};
 
 use super::*;
@@ -18,7 +19,7 @@ struct Fake {
     read_fails: Cell<bool>,
     save_fails: Cell<bool>,
     outcome: RefCell<Result<ResetCreditOutcome, String>>,
-    clock: Cell<DateTime<Utc>>,
+    clock: Cell<Timestamp>,
     log: RefCell<Vec<Effect>>,
     keys: RefCell<Vec<String>>,
     saved: RefCell<Option<MonitorState>>,
@@ -104,7 +105,7 @@ impl Io for Fake {
         self.log.borrow_mut().push(Effect::Told(title, body));
     }
 
-    fn now(&self) -> DateTime<Utc> {
+    fn now(&self) -> Timestamp {
         self.clock.get()
     }
 }

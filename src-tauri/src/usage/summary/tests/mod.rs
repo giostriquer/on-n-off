@@ -809,14 +809,14 @@ fn an_hourly_window_of_exactly_a_day_is_read_into_hour_buckets() {
 #[ignore = "real-home performance probe; not part of CI"]
 fn bench_real_home_usage_summary() {
     let home = crate::paths::probe_home();
-    let until = chrono::Local::now().date_naive();
+    let until = jiff::ZonedDateTime::now().date();
     let mut output = Vec::new();
     let windows = [("7d", 7), ("30d", 30), ("90d", 90)];
     for (label, days) in windows {
-        let since = until - chrono::Duration::days(days - 1);
+        let since = until - jiff::Span::new().days(days - 1);
         let input = UsageSummaryInput {
-            since_day: since.format("%Y-%m-%d").to_string(),
-            until_day: until.format("%Y-%m-%d").to_string(),
+            since_day: since.to_string(),
+            until_day: until.to_string(),
             time_zone: "America/Sao_Paulo".into(),
             resolution: Some("day".into()),
             since_time: None,
@@ -863,7 +863,7 @@ fn bench_real_home_usage_summary() {
 
     let full_time = UsageSummaryInput {
         since_day: "2020-01-01".into(),
-        until_day: until.format("%Y-%m-%d").to_string(),
+        until_day: until.to_string(),
         time_zone: "America/Sao_Paulo".into(),
         resolution: Some("day".into()),
         since_time: None,

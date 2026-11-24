@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -39,7 +41,7 @@ impl NativeState {
             } else {
                 0
             },
-            retry_floor: outcome.retry_floor(chrono::Utc::now().timestamp()),
+            retry_floor: outcome.retry_floor(Timestamp::now().epoch_seconds()),
             outcome,
         }
     }
@@ -135,7 +137,7 @@ impl Cache {
     }
 
     fn column(&self, entries: &[ProviderLimitsDto]) -> Vec<ColumnEntryDto> {
-        self.column_at(entries, chrono::Utc::now().timestamp_millis())
+        self.column_at(entries, Timestamp::now().epoch_millis())
     }
 
     fn column_at(&self, entries: &[ProviderLimitsDto], now_ms: i64) -> Vec<ColumnEntryDto> {
@@ -154,7 +156,7 @@ impl Cache {
         entries: &[ProviderLimitsDto],
         home: Option<&std::path::Path>,
     ) -> Vec<ColumnEntryDto> {
-        let now_ms = chrono::Utc::now().timestamp_millis();
+        let now_ms = Timestamp::now().epoch_millis();
         let mut column = self.column_at(entries, now_ms);
         if let Some(home) = home {
             crate::limits::desktop_app::annotate(self.provider, &mut column, home, now_ms);
@@ -234,7 +236,7 @@ pub fn read_column(agent: AgentId, force: bool) -> Vec<ColumnEntryDto> {
             &entries,
             &Roster::default(),
             &SignInDeadlines::new(),
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
         ),
     }
 }

@@ -1,16 +1,16 @@
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 use super::{Kept, Notice, Offer, WaitingSpend, SPEND_DELAY_MINUTES};
 use crate::dto::ResetCreditOutcome;
 
 impl Offer {
-    pub(super) fn notice(&self, now: DateTime<Utc>) -> Notice {
+    pub(super) fn notice(&self, now: Timestamp) -> Notice {
         let account = self
             .account_label
             .as_deref()
             .map(|label| format!("{label} has "))
             .unwrap_or_else(|| "Codex has ".to_string());
-        let hours = (self.cycle.at() - now).num_hours().max(0);
+        let hours = (self.cycle.at() - now).as_hours().max(0);
         let renews = if hours >= 24 {
             format!("{}d {}h", hours / 24, hours % 24)
         } else {

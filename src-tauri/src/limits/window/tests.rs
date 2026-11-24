@@ -1,10 +1,9 @@
 use super::*;
 use crate::dto::LimitsWorkspaceCreditsDto;
+use jiff::Timestamp;
 
-fn at(text: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(text)
-        .unwrap()
-        .with_timezone(&Utc)
+fn at(text: &str) -> Timestamp {
+    crate::timestamp::parse(text).unwrap()
 }
 
 fn reset(text: &str) -> ResetInstant {
@@ -236,11 +235,11 @@ fn every_reset_is_spelled_once_in_utc_to_the_millisecond() {
         (at("2026-08-24T13:59:59+00:00"), "2026-08-24T13:59:59.000Z"),
         (at("2026-08-24T10:59:59-03:00"), "2026-08-24T13:59:59.000Z"),
         (
-            DateTime::<Utc>::from_timestamp(1_787_838_960, 0).unwrap(),
+            Timestamp::from_second(1_787_838_960).unwrap(),
             "2026-08-27T13:56:00.000Z",
         ),
         (
-            DateTime::<Utc>::from_timestamp_millis(1_760_000_000_500).unwrap(),
+            Timestamp::from_millisecond(1_760_000_000_500).unwrap(),
             "2025-10-09T08:53:20.500Z",
         ),
     ] {

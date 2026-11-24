@@ -1,4 +1,5 @@
-use chrono::{DateTime, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
@@ -10,7 +11,7 @@ pub struct SubscriptionDate {
     pub checked_at: Option<String>,
 }
 
-fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<SubscriptionDate> {
+fn parse_claims(claims: &Value, account_id: &str, now: Timestamp) -> Option<SubscriptionDate> {
     if crate::accounts::codex_store::observation_key(
         claims.get("chatgpt_account_id")?.as_str()?,
         claims,
@@ -21,7 +22,7 @@ fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<
     let date = claims
         .get("chatgpt_subscription_active_until")?
         .as_str()?
-        .parse::<DateTime<Utc>>()
+        .parse::<Timestamp>()
         .ok()?;
     if date <= now {
         return None;
@@ -29,24 +30,20 @@ fn parse_claims(claims: &Value, account_id: &str, now: DateTime<Utc>) -> Option<
     let checked_at = claims
         .get("chatgpt_subscription_last_checked")
         .and_then(Value::as_str)
-        .and_then(|value| value.parse::<DateTime<Utc>>().ok())
+        .and_then(|value| value.parse::<Timestamp>().ok())
         .filter(|checked| *checked <= now)
-        .map(|checked| checked.to_rfc3339());
+        .map(|checked| checked.utc_offset_text());
     Some(SubscriptionDate {
-        date: date.to_rfc3339(),
+        date: date.utc_offset_text(),
         checked_at,
     })
 }
 
 pub fn read(home: &Path, account: &str) -> Result<Option<SubscriptionDate>, String> {
-    read_at(home, account, Utc::now())
+    read_at(home, account, Timestamp::now())
 }
 
-fn read_at(
-    home: &Path,
-    account: &str,
-    now: DateTime<Utc>,
-) -> Result<Option<SubscriptionDate>, String> {
+fn read_at(home: &Path, account: &str, now: Timestamp) -> Result<Option<SubscriptionDate>, String> {
     let native = crate::accounts::codex_store::metadata(&home.join(".codex"))
         .ok()
         .flatten()

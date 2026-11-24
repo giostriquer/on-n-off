@@ -1,4 +1,5 @@
-use chrono::{SecondsFormat, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 use super::{window, Parsed};
 use crate::dto::{AgentId, LimitWindowKind, LimitsStatus, ProviderLimitsDto};
@@ -13,7 +14,7 @@ pub(super) fn finish(
     super::plan::describe_reading(provider, &mut parsed.reading);
     let windows = &mut parsed.reading.windows;
     windows.sort_by_key(|window| kind_rank(window.kind));
-    let observed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let observed_at = Timestamp::now().utc_millis_text();
     for window in windows {
         if window.observed_at.is_empty() {
             window.observed_at.clone_from(&observed_at);

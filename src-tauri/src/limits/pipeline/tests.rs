@@ -137,7 +137,7 @@ fn every_window_leaves_with_an_observation_time() {
         "2026-08-17T10:00:00.000Z"
     );
     assert!(
-        chrono::DateTime::parse_from_rfc3339(&card.reading.windows[1].observed_at).is_ok(),
+        crate::timestamp::parse(&card.reading.windows[1].observed_at).is_ok(),
         "{}",
         card.reading.windows[1].observed_at
     );

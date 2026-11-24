@@ -4,6 +4,7 @@ use crate::accounts::{roster_for_test, roster_with_logins_for_test};
 use crate::dto::{AgentId, LimitWindowKind, LimitsAccountDto, LimitsStatus, Reading};
 use crate::limits::outcome::Parked;
 use crate::limits::window::fixture;
+use crate::timestamp::TimestampExt;
 
 fn identity(provider: AgentId, user: &str, workspace: &str) -> Identity {
     Identity {
@@ -59,9 +60,9 @@ fn no_ends() -> SignInDeadlines {
 }
 
 fn ms(at: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(at)
+    crate::timestamp::parse(at)
         .expect("an instant")
-        .timestamp_millis()
+        .epoch_millis()
 }
 
 fn ids(column: &[ColumnEntryDto]) -> Vec<&str> {

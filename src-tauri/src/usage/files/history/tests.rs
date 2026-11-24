@@ -1,11 +1,10 @@
 use super::*;
 use crate::paths::scratch_dir;
+use crate::timestamp::TimestampExt;
 use crate::usage::files::lock;
 
 fn ms(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 fn record(at: &str, overrides: impl FnOnce(&mut UsageRecord)) -> UsageRecord {

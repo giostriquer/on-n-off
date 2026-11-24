@@ -46,6 +46,7 @@ mod sha;
 mod side_notch;
 mod sort;
 mod subscription;
+mod timestamp;
 mod tray;
 #[cfg(test)]
 mod updater_build;

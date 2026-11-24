@@ -2,6 +2,7 @@ use super::super::reached;
 use super::super::tests::{cases, Case, MeterCase, ShareInput, WindowInput};
 use super::*;
 use crate::dto::LimitWindowKind;
+use jiff::tz::TimeZone;
 
 fn window(input: &WindowInput) -> LimitWindowDto {
     LimitWindowDto {
@@ -36,7 +37,7 @@ fn kind(cycle: Cycle) -> &'static str {
     }
 }
 
-fn when(at: &WindowAt, zone: &chrono_tz::Tz) -> Option<String> {
+fn when(at: &WindowAt, zone: &TimeZone) -> Option<String> {
     match at.cycle {
         Cycle::Pending(reset) | Cycle::Renewed(reset) => Some(at.subject.when(reset, zone)),
         Cycle::Idle | Cycle::Unknown => None,
@@ -53,7 +54,7 @@ fn meter_matches(meter: Meter, case: &MeterCase) -> bool {
     }
 }
 
-fn assert_case<Input>(case: &Case<Input>, at: WindowAt, zone: &chrono_tz::Tz) {
+fn assert_case<Input>(case: &Case<Input>, at: WindowAt, zone: &TimeZone) {
     let name = &case.name;
     assert_eq!(at.used_now(), case.used_now, "{name}: used now");
     assert_eq!(
@@ -78,7 +79,7 @@ fn assert_case<Input>(case: &Case<Input>, at: WindowAt, zone: &chrono_tz::Tz) {
 #[test]
 fn every_window_case_reads_the_same_at_the_pinned_instant() {
     let cases = cases();
-    let zone: chrono_tz::Tz = cases.time_zone.parse().expect("an IANA zone");
+    let zone: TimeZone = TimeZone::get(&cases.time_zone).expect("an IANA zone");
     assert!(!cases.windows.is_empty());
     for case in &cases.windows {
         assert_case(case, WindowAt::of(&window(&case.input), cases.now), &zone);
@@ -88,7 +89,7 @@ fn every_window_case_reads_the_same_at_the_pinned_instant() {
 #[test]
 fn every_share_case_reads_the_same_at_the_pinned_instant() {
     let cases = cases();
-    let zone: chrono_tz::Tz = cases.time_zone.parse().expect("an IANA zone");
+    let zone: TimeZone = TimeZone::get(&cases.time_zone).expect("an IANA zone");
     assert!(!cases.shares.is_empty());
     for case in &cases.shares {
         assert_case(

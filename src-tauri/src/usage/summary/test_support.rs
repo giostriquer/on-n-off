@@ -1,9 +1,8 @@
+use crate::timestamp::TimestampExt;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::{Duration, SystemTime};
-
-use chrono::DateTime;
 
 use super::*;
 use crate::dto::AgentId;
@@ -160,8 +159,8 @@ pub(super) fn write_single_claude_record(
 }
 
 pub(super) fn age_file(path: &Path) {
-    let opens = DateTime::parse_from_rfc3339(&format!("{AUGUST_OPENS}T00:00:00Z")).unwrap();
-    let modified = SystemTime::from(opens) - Duration::from_secs(180 * 24 * 60 * 60);
+    let opens = crate::timestamp::parse(&format!("{AUGUST_OPENS}T00:00:00Z")).unwrap();
+    let modified = SystemTime::try_from(opens).unwrap() - Duration::from_secs(180 * 24 * 60 * 60);
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();
@@ -246,13 +245,11 @@ pub(super) fn claude_scanned_files(summary: &UsageSummaryDto) -> u64 {
 }
 
 pub(super) fn at(iso: &str) -> i64 {
-    DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 pub(super) fn set_mtime(path: &Path, iso: &str) {
-    let modified = SystemTime::from(DateTime::parse_from_rfc3339(iso).unwrap());
+    let modified = SystemTime::try_from(crate::timestamp::parse(iso).unwrap()).unwrap();
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();

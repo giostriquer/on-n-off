@@ -1,3 +1,4 @@
+use jiff::Timestamp;
 mod due;
 mod offers;
 
@@ -14,11 +15,11 @@ fn without_banked_resets() -> crate::dto::AgentId {
         .expect("a provider without banked resets")
 }
 
-fn at(value: &str) -> DateTime<Utc> {
+fn at(value: &str) -> Timestamp {
     instant(value).unwrap()
 }
 
-fn now() -> DateTime<Utc> {
+fn now() -> Timestamp {
     at(NOW)
 }
 
@@ -204,7 +205,7 @@ fn the_numbers_the_ui_restates_are_the_ones_the_rule_keeps() {
     let shares = [1, 3, 5, 6, 40].map(|left| [left, share(left)]);
     let rule = serde_json::json!({
         "spendCapPercent": share(u8::MAX),
-        "autoSpendDelayMinutes": delay.num_minutes(),
+        "autoSpendDelayMinutes": delay.as_mins(),
         "defaultAlert": ResetAlert::default(),
         "bounds": {
             "maxLeftPercent": {"min": least_share, "max": most_share},

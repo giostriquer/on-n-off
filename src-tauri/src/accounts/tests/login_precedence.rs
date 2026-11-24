@@ -6,6 +6,8 @@ use super::super::{
 use super::fixture::{claude, identity};
 use crate::dto::AgentId;
 use crate::limits::outcome::Parked;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 const NOW_MS: i64 = 1_800_000_000_000;
 
@@ -50,9 +52,9 @@ fn deadline(profile: &Profile, date: Date) -> Deadline {
 }
 
 fn spelled(ends_at_ms: i64) -> String {
-    chrono::DateTime::from_timestamp_millis(ends_at_ms)
+    Timestamp::from_millisecond(ends_at_ms)
         .unwrap()
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        .utc_seconds_text()
 }
 
 fn dated(date: Date) -> Option<LoginState> {

@@ -1,14 +1,13 @@
 use super::*;
 use crate::http::{never_asked, refused_url, serve_once, was_asked};
+use jiff::Timestamp;
 
 const INTERVAL: Duration = Duration::from_secs(60);
 use serde_json::json;
 use std::time::Duration;
 
-fn now() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-25T12:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
+fn now() -> Timestamp {
+    crate::timestamp::parse("2026-09-25T12:00:00Z").unwrap()
 }
 
 fn projection(key: &str) -> CodexAccess {

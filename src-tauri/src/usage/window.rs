@@ -1,12 +1,14 @@
-use chrono::{DateTime, NaiveDate, NaiveTime, SecondsFormat, TimeDelta, TimeZone, Utc};
-use chrono_tz::Tz;
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::tz::{AmbiguousOffset, TimeZone};
+use jiff::SignedDuration;
+use jiff::Timestamp;
 
 use crate::dto::{AdapterError, UsageSummaryInput};
 
 const HOUR_MS: i64 = 60 * 60 * 1000;
 const MAX_HOURLY_MS: i64 = 24 * HOUR_MS;
 const MTIME_ALLOWANCE_MS: i64 = 36 * HOUR_MS;
-const DAY_SEARCH_MS: i64 = 48 * HOUR_MS;
 const HOURLY_GROUP: &str = "hour";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -17,8 +19,8 @@ pub struct Span {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Period {
-    day: NaiveDate,
-    hour_start: Option<DateTime<Utc>>,
+    day: Date,
+    hour_start: Option<Timestamp>,
 }
 
 impl Period {
@@ -27,8 +29,7 @@ impl Period {
     }
 
     pub fn hour_start(self) -> Option<String> {
-        self.hour_start
-            .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
+        self.hour_start.map(|at| at.utc_millis_text())
     }
 }
 
@@ -56,10 +57,10 @@ enum Resolution {
 
 #[derive(Debug, Clone)]
 pub struct UsageWindow {
-    since_day: NaiveDate,
-    until_day: NaiveDate,
+    since_day: Date,
+    until_day: Date,
     time_zone: String,
-    zone: Tz,
+    zone: TimeZone,
     resolution: Resolution,
     span: Span,
 }
@@ -79,16 +80,21 @@ impl UsageWindow {
         } else {
             Resolution::Day
         };
-        let zone: Tz = input.time_zone.parse().unwrap_or(chrono_tz::UTC);
+        let zone = TimeZone::get(&input.time_zone)
+            .ok()
+            .filter(|zone| zone.iana_name() == Some(input.time_zone.as_str()))
+            .unwrap_or(TimeZone::UTC);
         let span = match resolution {
             Resolution::Hour => hours(input)?,
             Resolution::Day => {
                 let after_until = until_day
-                    .succ_opt()
-                    .ok_or_else(|| not_a_day("untilDay", &input.until_day))?;
+                    .tomorrow()
+                    .map_err(|_| not_a_day("untilDay", &input.until_day))?;
                 Span {
-                    start_ms: first_instant(since_day, zone),
-                    end_ms: first_instant(after_until, zone),
+                    start_ms: first_instant(since_day, &zone)
+                        .map_err(|_| not_a_day("sinceDay", &input.since_day))?,
+                    end_ms: first_instant(after_until, &zone)
+                        .map_err(|_| not_a_day("untilDay", &input.until_day))?,
                 }
             }
         };
@@ -111,9 +117,8 @@ impl UsageWindow {
             Resolution::Hour => self.span.start_ms,
             Resolution::Day => self
                 .since_day
-                .and_time(NaiveTime::MIN)
-                .and_utc()
-                .timestamp_millis(),
+                .duration_since(jiff::civil::date(1970, 1, 1))
+                .as_millis() as i64,
         };
         opening_ms.saturating_sub(MTIME_ALLOWANCE_MS)
     }
@@ -123,11 +128,11 @@ impl UsageWindow {
         if !(start_ms..end_ms).contains(&at_ms) {
             return None;
         }
-        let at = Utc.timestamp_millis_opt(at_ms).single()?;
+        let at = Timestamp::from_millisecond(at_ms).ok()?;
         Some(Period {
-            day: at.with_timezone(&self.zone).date_naive(),
+            day: self.zone.to_datetime(at).date(),
             hour_start: (self.resolution == Resolution::Hour)
-                .then(|| at - TimeDelta::milliseconds((at_ms - start_ms) % HOUR_MS)),
+                .then(|| at - SignedDuration::from_millis((at_ms - start_ms) % HOUR_MS)),
         })
     }
 
@@ -154,8 +159,8 @@ impl UsageWindow {
     }
 }
 
-fn day(field: &str, text: &str) -> Result<NaiveDate, AdapterError> {
-    NaiveDate::parse_from_str(text, "%Y-%m-%d")
+fn day(field: &str, text: &str) -> Result<Date, AdapterError> {
+    text.parse::<Date>()
         .ok()
         .filter(|day| text.len() == 10 && day_text(*day) == text)
         .ok_or_else(|| not_a_day(field, text))
@@ -168,8 +173,8 @@ fn not_a_day(field: &str, text: &str) -> AdapterError {
 fn hours(input: &UsageSummaryInput) -> Result<Span, AdapterError> {
     let instant = |text: &Option<String>| {
         text.as_deref()
-            .and_then(|text| DateTime::parse_from_rfc3339(text).ok())
-            .map(|at| at.timestamp_millis())
+            .and_then(|text| crate::timestamp::parse(text).ok())
+            .map(|at| at.epoch_millis())
     };
     let (Some(since_ms), Some(until_ms)) = (instant(&input.since_time), instant(&input.until_time))
     else {
@@ -189,32 +194,21 @@ fn hours(input: &UsageSummaryInput) -> Result<Span, AdapterError> {
     })
 }
 
-fn first_instant(day: NaiveDate, zone: Tz) -> i64 {
-    let midnight = day.and_time(NaiveTime::MIN);
-    if let Some(at) = zone.from_local_datetime(&midnight).earliest() {
-        return at.timestamp_millis();
-    }
-    let naive_ms = midnight.and_utc().timestamp_millis();
-    let (mut before, mut from) = (naive_ms - DAY_SEARCH_MS, naive_ms + DAY_SEARCH_MS);
-    while from - before > 1 {
-        let probe = before + (from - before) / 2;
-        if local_day(probe, zone).is_some_and(|local| local >= day) {
-            from = probe;
-        } else {
-            before = probe;
-        }
-    }
-    from
+fn first_instant(day: Date, zone: &TimeZone) -> Result<i64, jiff::Error> {
+    let midnight = zone.to_ambiguous_timestamp(day.at(0, 0, 0, 0));
+    let at = if matches!(midnight.offset(), AmbiguousOffset::Gap { .. }) {
+        let before = midnight.earlier()?;
+        zone.following(before)
+            .next()
+            .map_or(midnight.later()?, |transition| transition.timestamp())
+    } else {
+        midnight.earlier()?
+    };
+    Ok(at.as_millisecond())
 }
 
-fn local_day(at_ms: i64, zone: Tz) -> Option<NaiveDate> {
-    Utc.timestamp_millis_opt(at_ms)
-        .single()
-        .map(|at| at.with_timezone(&zone).date_naive())
-}
-
-fn day_text(day: NaiveDate) -> String {
-    day.format("%Y-%m-%d").to_string()
+fn day_text(day: Date) -> String {
+    day.to_string()
 }
 
 #[cfg(test)]

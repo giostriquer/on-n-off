@@ -1,7 +1,7 @@
+use crate::timestamp::TimestampExt;
 use std::io::Read;
 use std::path::Path;
 
-use chrono::DateTime;
 use ruzstd::decoding::StreamingDecoder;
 use sha1::{Digest, Sha1};
 
@@ -67,9 +67,10 @@ fn sent_at_ms(response_headers: &[u8]) -> Option<i64> {
                 .position(|window| window == name)?;
             let value = response_headers.get(at + name.len()..)?;
             let value = value.split(|byte| *byte == 0).next()?;
-            let sent =
-                DateTime::parse_from_rfc2822(std::str::from_utf8(value).ok()?.trim()).ok()?;
-            Some(sent.timestamp_millis())
+            let sent = jiff::fmt::rfc2822::DateTimeParser::new()
+                .parse_timestamp(std::str::from_utf8(value).ok()?.trim())
+                .ok()?;
+            Some(sent.epoch_millis())
         })
 }
 

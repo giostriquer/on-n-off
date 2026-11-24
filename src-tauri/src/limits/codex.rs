@@ -1,4 +1,5 @@
-use chrono::{DateTime, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -226,7 +227,7 @@ fn quota_window(id: String, scope: Scope, entry: &RateLimitWindow) -> QuotaWindo
 
 fn reset_at_epoch(epoch: Option<i64>) -> Option<ResetInstant> {
     epoch
-        .and_then(|epoch| DateTime::<Utc>::from_timestamp(epoch, 0))
+        .and_then(|epoch| Timestamp::from_second(epoch).ok())
         .map(ResetInstant::from)
 }
 
@@ -312,7 +313,7 @@ fn price(price: Option<&serde_json::Value>) -> Option<LimitsPriceDto> {
 
 fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCreditsDto> {
     let summary = value?;
-    let mut available: Vec<(Option<DateTime<Utc>>, Option<String>)> = summary
+    let mut available: Vec<(Option<Timestamp>, Option<String>)> = summary
         .credits
         .iter()
         .flatten()
@@ -320,7 +321,7 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
         .map(|credit| {
             let expires_at = credit
                 .expires_at
-                .and_then(|at| DateTime::<Utc>::from_timestamp(at, 0));
+                .and_then(|at| Timestamp::from_second(at).ok());
             let title = credit
                 .title
                 .as_deref()
@@ -337,12 +338,12 @@ fn reset_credits(value: Option<&RateLimitResetCredits>) -> Option<LimitsResetCre
         available_count,
         next_expires_at: available
             .first()
-            .and_then(|(at, _)| at.map(|at| at.to_rfc3339())),
+            .and_then(|(at, _)| at.map(|at| at.utc_offset_text())),
         resets: available
             .into_iter()
             .map(|(expires_at, title)| LimitsBankedResetDto {
                 title,
-                expires_at: expires_at.map(|at| at.to_rfc3339()),
+                expires_at: expires_at.map(|at| at.utc_offset_text()),
             })
             .collect(),
     })
@@ -353,7 +354,7 @@ pub(super) fn codex_read(home: &Path, force: bool) -> Read {
         home,
         force,
         |card: &mut Parsed, access: Option<&CodexAccess>| {
-            backend_figures(card, access, CODEX, Utc::now());
+            backend_figures(card, access, CODEX, Timestamp::now());
         },
     )
 }
@@ -434,7 +435,7 @@ pub(crate) fn read_saved_codex(
         workspace_id: identity.workspace_id.clone(),
         token,
     };
-    backend_figures(&mut card, Some(&access), urls, Utc::now());
+    backend_figures(&mut card, Some(&access), urls, Timestamp::now());
     saved_card(identity, card)
 }
 
@@ -442,7 +443,7 @@ fn backend_figures(
     card: &mut Parsed,
     access: Option<&CodexAccess>,
     urls: CodexEndpoints<'_>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) {
     let access = access.filter(|access| {
         card.account.as_ref().map(|account| account.id.as_str())
@@ -533,11 +534,7 @@ fn wham_reset_credits(summary: &Value, details: Option<&Value>) -> Option<Value>
             .map(|credit| {
                 let expires_at = match credit.get("expires_at") {
                     None | Some(Value::Null) => None,
-                    Some(at) => Some(
-                        chrono::DateTime::parse_from_rfc3339(at.as_str()?)
-                            .ok()?
-                            .timestamp(),
-                    ),
+                    Some(at) => Some(crate::timestamp::parse(at.as_str()?).ok()?.epoch_seconds()),
                 };
                 Some(json!({
                     "status": credit.get("status")?.as_str()?,

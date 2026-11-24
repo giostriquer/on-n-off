@@ -1,4 +1,6 @@
-use chrono::{DateTime, Days, NaiveDate, SecondsFormat, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::Timestamp;
 use serde_json::Value;
 use std::time::Duration;
 
@@ -22,25 +24,24 @@ pub(crate) fn asks_what_was_spent(card: &ProviderLimitsDto) -> bool {
         .is_some_and(super::plan::is_codex_workspace_plan)
 }
 
-pub(crate) fn query_url(base: &str, today: NaiveDate) -> String {
-    let start = today - Days::new(LONG_WINDOW_DAYS - 1);
+pub(crate) fn query_url(base: &str, today: Date) -> String {
+    let start = today - jiff::Span::new().days(LONG_WINDOW_DAYS - 1);
     format!(
         "{base}?start_date={}&end_date={}&group_by=day",
-        start.format("%Y-%m-%d"),
-        today.format("%Y-%m-%d")
+        start, today
     )
 }
 
-const LONG_WINDOW_DAYS: u64 = 30;
-const SHORT_WINDOW_DAYS: u64 = 7;
+const LONG_WINDOW_DAYS: i64 = 30;
+const SHORT_WINDOW_DAYS: i64 = 7;
 
-pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCreditsSpentDto> {
-    let today = now.date_naive();
+pub(crate) fn parse(payload: &Value, now: Timestamp) -> Option<LimitsCreditsSpentDto> {
+    let today = now.utc_date();
     if payload.get("units").and_then(Value::as_str) != Some("credits") {
         return None;
     }
-    let long_start = today - Days::new(LONG_WINDOW_DAYS - 1);
-    let short_start = today - Days::new(SHORT_WINDOW_DAYS - 1);
+    let long_start = today - jiff::Span::new().days(LONG_WINDOW_DAYS - 1);
+    let short_start = today - jiff::Span::new().days(SHORT_WINDOW_DAYS - 1);
     let mut spent = LimitsCreditsSpentDto {
         last_7_days: 0.0,
         last_30_days: 0.0,
@@ -48,11 +49,8 @@ pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCredits
             payload
                 .get("data_freshness_ts")
                 .and_then(Value::as_str)
-                .filter(|at| DateTime::parse_from_rfc3339(at).is_ok())
-                .map_or_else(
-                    || now.to_rfc3339_opts(SecondsFormat::Secs, true),
-                    str::to_string,
-                ),
+                .filter(|at| crate::timestamp::parse(at).is_ok())
+                .map_or_else(|| now.utc_seconds_text(), str::to_string),
         ),
     };
     for row in payload.get("data")?.as_array()? {
@@ -60,7 +58,7 @@ pub(crate) fn parse(payload: &Value, now: DateTime<Utc>) -> Option<LimitsCredits
             .get("date")
             .and_then(Value::as_str)
             .and_then(|date| date.get(..10))
-            .and_then(|date| NaiveDate::parse_from_str(date, "%Y-%m-%d").ok())
+            .and_then(|date| date.parse::<Date>().ok())
         else {
             continue;
         };
@@ -87,11 +85,11 @@ pub(crate) fn read(
     token: &AccessToken,
     workspace_id: &str,
     url: &str,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Option<LimitsCreditsSpentDto> {
     let authorization = token.authorization();
     let payload = crate::http::get_json(
-        &query_url(url, now.date_naive()),
+        &query_url(url, now.utc_date()),
         &[
             ("Authorization", authorization.as_str()),
             ("ChatGPT-Account-Id", workspace_id),
@@ -107,7 +105,7 @@ pub(super) fn read_backed_off(
     access: &CodexAccess,
     url: &str,
     interval: Duration,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Option<LimitsCreditsSpentDto> {
     MEMO.read_backed_off(&access.observation_key, interval, || {
         read(&access.token, &access.workspace_id, url, now)
