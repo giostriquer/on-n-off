@@ -1,0 +1,62 @@
+name: Windows time compatibility proof
+on:
+  push:
+    branches: [test/windows-time-v0.40.5]
+permissions:
+  contents: read
+env:
+  CARGO_INCREMENTAL: 0
+  CARGO_PROFILE_DEV_DEBUG: 0
+  CARGO_TERM_COLOR: always
+jobs:
+  clock:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+      - id: toolchain
+        run: ./scripts/read-rust-toolchain.ps1
+      - uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: ${{ steps.toolchain.outputs.channel }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+        with:
+          workspaces: src-tauri
+          shared-key: verify-test-windows
+          save-if: false
+      - name: Build frontend
+        run: |
+          bun install --frozen-lockfile
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          bun run build
+      - name: Install pinned mutation runner
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP mutants.zip
+          Invoke-WebRequest -Uri 'https://github.com/sourcefrog/cargo-mutants/releases/download/v27.1.0/cargo-mutants-x86_64-pc-windows-msvc.zip' -OutFile $archive
+          if ((Get-FileHash -Algorithm SHA256 $archive).Hash -ne '2a2f00e47d4b458262a41501b0820aa26015fd35779903d2c8b30b2993f36791') { throw 'Unexpected tool archive digest' }
+          $tool = Join-Path $env:RUNNER_TEMP mutants-bin
+          Expand-Archive $archive $tool
+          (Get-ChildItem $tool -Recurse -Filter cargo-mutants.exe).DirectoryName >> $env:GITHUB_PATH
+      - name: Run Windows clock and rendering tests
+        working-directory: src-tauri
+        run: cargo test --locked --lib -- side_notch::win_window::clock::tests side_notch::win_window::tests side_notch::win_paint::tests
+      - name: Check Windows clock mutations
+        working-directory: src-tauri
+        run: |
+          $patch = Join-Path $env:RUNNER_TEMP clock.patch
+          $report = Join-Path $env:RUNNER_TEMP clock-proof
+          git diff -M --relative --unified=0 f637ed3831ff228b8838019dfd7bd1ee39738cd3..f0ac04b50c598f6a94a14b8b809b459139b25693 -- src | Set-Content -Encoding utf8 $patch
+          cargo mutants --no-config --in-place --cap-lints=false --package on-n-off --test-package on-n-off --cargo-arg=--lib --cargo-arg=--locked --in-diff $patch --file 'src/side_notch/win_window.rs' --file 'src/side_notch/win_window/clock.rs' --output $report -- -- side_notch::win_window::clock::tests side_notch::win_window::tests side_notch::win_paint::tests
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: windows-clock-mutations
+          path: ${{ runner.temp }}/clock-proof
+          if-no-files-found: warn
