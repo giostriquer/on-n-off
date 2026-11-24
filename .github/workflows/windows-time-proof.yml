@@ -47,12 +47,36 @@ jobs:
       - name: Run Windows clock and rendering tests
         working-directory: src-tauri
         run: cargo test --locked --lib -- side_notch::win_window::clock::tests side_notch::win_window::tests side_notch::win_paint::tests
+      - name: Demonstrate the native launch smoke detects the missing notch window
+        run: |
+          bun run tauri build --debug --no-bundle
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $exe = 'src-tauri/target/debug/on-n-off.exe'
+          ./scripts/launch-smoke.ps1 -App $exe -WindowClass 'on-n-off Side notch' -Seconds 2
+          $source = 'src-tauri/src/side_notch/win_window.rs'
+          $original = [IO.File]::ReadAllText($source)
+          $start = 'fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {'
+          if (-not $original.Contains($start)) { throw 'Missing Windows window entry point' }
+          try {
+            [IO.File]::WriteAllText($source, $original.Replace($start, $start + ' if std::hint::black_box(true) { return; }'))
+            bun run tauri build --debug --no-bundle
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            try {
+              ./scripts/launch-smoke.ps1 -App $exe -WindowClass 'on-n-off Side notch' -Seconds 2 -WindowSeconds 8
+              throw 'Missing notch window was accepted'
+            } catch {
+              if ($_.Exception.Message -notmatch 'did not create|did not show|never created') { throw }
+              Write-Host "Detected disabled window entry: $($_.Exception.Message)"
+            }
+          } finally {
+            [IO.File]::WriteAllText($source, $original)
+          }
       - name: Check Windows clock mutations
         working-directory: src-tauri
         run: |
           $patch = Join-Path $env:RUNNER_TEMP clock.patch
           $report = Join-Path $env:RUNNER_TEMP clock-proof
-          git diff -M --relative --unified=0 f637ed3831ff228b8838019dfd7bd1ee39738cd3..f0ac04b50c598f6a94a14b8b809b459139b25693 -- src | Set-Content -Encoding utf8 $patch
+          git diff -M --relative --unified=0 f637ed3831ff228b8838019dfd7bd1ee39738cd3..37fdf1057630cd82d848547885b86c9a9382b44f -- src | Set-Content -Encoding utf8 $patch
           cargo mutants --no-config --in-place --cap-lints=false --package on-n-off --test-package on-n-off --cargo-arg=--lib --cargo-arg=--locked --in-diff $patch --file 'src/side_notch/win_window.rs' --file 'src/side_notch/win_window/clock.rs' --output $report -- -- side_notch::win_window::clock::tests side_notch::win_window::tests side_notch::win_paint::tests
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
