@@ -148,4 +148,9 @@ fn a_summary_from_before_time_zone_rules_were_recorded_is_recomputed() {
     store_summary(&lock(), &path, &legacy, "same-files", &sample_dto());
     let current = summary_key(&window, None, "none");
     assert!(load_summary_hit(&path, &current, "same-files").is_none());
+    assert!(current
+        .key
+        .contains(&format!("|tzdb:{}|", jiff_tzdb::VERSION)));
+    store_summary(&lock(), &path, &current, "same-files", &sample_dto());
+    assert!(load_summary_hit(&path, &current, "same-files").is_some());
 }
