@@ -1,4 +1,4 @@
-use jiff::ZonedDateTime;
+use jiff::{civil::DateTime, Timestamp};
 mod cell;
 mod popover;
 mod text;
@@ -265,15 +265,30 @@ impl Plan {
     }
 }
 
+pub trait ViewerClock {
+    fn now(&self) -> Timestamp;
+    fn local_at(&self, at: Timestamp) -> DateTime;
+}
+
+#[cfg(test)]
+impl ViewerClock for jiff::ZonedDateTime {
+    fn now(&self) -> Timestamp {
+        self.timestamp()
+    }
+
+    fn local_at(&self, at: Timestamp) -> DateTime {
+        self.time_zone().to_datetime(at)
+    }
+}
+
 pub fn plan(
     displays: &[Display],
     data: &RailData,
     hover: Hover,
-    now: ZonedDateTime,
+    clock: &dyn ViewerClock,
     text_metrics: &dyn TextMetrics,
 ) -> Option<Plan> {
-    let zone = now.time_zone();
-    let now = now.timestamp();
+    let now = clock.now();
     let settings = &data.settings;
     let rail = R::from(layout(settings, displays, data.cells.len())?);
     let display = selected_display(settings, displays)?;
@@ -306,8 +321,7 @@ pub fn plan(
             &chrome,
             scale,
             text_metrics,
-            now,
-            zone,
+            clock,
         );
         let content_h = contents.bottom() + chrome.padding;
         let tail = chrome.tail_length;

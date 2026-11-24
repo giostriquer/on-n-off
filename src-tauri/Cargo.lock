@@ -1963,6 +1963,7 @@ checksum = "c5e77cbfb9fff4798e283c2d69dff39fc2c45e7da017e5ce95b654e46ea41236"
 dependencies = [
  "jiff-core 1.0.1",
  "jiff-static 1.0.2",
+ "jiff-tzdb 1.0.0",
  "jiff-tzdb-platform 1.0.0",
  "log",
  "portable-atomic",
@@ -2672,6 +2673,7 @@ dependencies = [
  "filetime",
  "flate2",
  "jiff 1.0.2",
+ "jiff-tzdb 1.0.0",
  "keyring",
  "objc2",
  "objc2-foundation",

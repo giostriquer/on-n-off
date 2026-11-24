@@ -202,7 +202,7 @@ fn visual_dump() {
         active: Some(CellId::of(&d2.cells[0])),
         ..Hover::default()
     };
-    let planned = plan(&scale2, &d2, hover2, now(), &DirectWrite).expect("scale2 popover");
+    let planned = plan(&scale2, &d2, hover2, &now(), &DirectWrite).expect("scale2 popover");
     std::fs::write(
         format!("{out}/scale2-popover.png"),
         render(&planned).encode_png().unwrap(),
@@ -214,7 +214,7 @@ fn visual_dump() {
             active: Some(CellId::of(&data.cells[cell])),
             ..Hover::default()
         };
-        let Some(planned) = plan(&displays, &data, hover, now(), &DirectWrite) else {
+        let Some(planned) = plan(&displays, &data, hover, &now(), &DirectWrite) else {
             panic!("cell {cell} should plan");
         };
         let pix = render(&planned);
@@ -226,7 +226,7 @@ fn visual_dump() {
         let _ = cell;
     }
 
-    let planned = plan(&displays, &data, Hover::default(), now(), &DirectWrite).expect("rail");
+    let planned = plan(&displays, &data, Hover::default(), &now(), &DirectWrite).expect("rail");
     std::fs::write(
         format!("{out}/rail.png"),
         render(&planned).encode_png().unwrap(),
@@ -248,7 +248,7 @@ fn visual_dump() {
                 cap_hovered: true,
                 ..Hover::default()
             },
-            now(),
+            &now(),
             &DirectWrite,
         )
         .expect("cap");
@@ -269,7 +269,7 @@ fn visual_dump() {
             action_error: None,
         },
         Hover::default(),
-        now(),
+        &now(),
         &DirectWrite,
     )
     .expect("pill");
@@ -293,7 +293,7 @@ fn visual_dump() {
             active: Some(CellId::of(&top_data.cells[0])),
             ..Hover::default()
         },
-        now(),
+        &now(),
         &DirectWrite,
     )
     .expect("top rail");
@@ -319,7 +319,7 @@ fn visual_dump() {
                 cap_hovered: true,
                 ..Hover::default()
             },
-            now(),
+            &now(),
             &DirectWrite,
         )
         .expect("cap");
@@ -351,7 +351,7 @@ fn visual_dump() {
             active: long.cells.last().map(CellId::of),
             ..Hover::default()
         },
-        now(),
+        &now(),
         &DirectWrite,
     )
     .expect("overflowing popover");

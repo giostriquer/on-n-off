@@ -13,7 +13,7 @@ mod render;
 mod strokes;
 
 fn plan(displays: &[Display], data: &RailData, hover: Hover, now: ZonedDateTime) -> Option<Plan> {
-    crate::side_notch::plan::plan(displays, data, hover, now, &DirectWrite)
+    crate::side_notch::plan::plan(displays, data, hover, &now, &DirectWrite)
 }
 
 fn popover_render(provider: ProviderCell) -> (Plan, tiny_skia::Pixmap) {

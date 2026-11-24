@@ -1,5 +1,7 @@
 #![allow(unsafe_code)]
 
+mod clock;
+
 use super::model::frame::RailData;
 use super::plan::Plan;
 use super::presenter::WinAction;
@@ -278,7 +280,7 @@ fn window_main(msg_rx: Receiver<WindowMsg>, action_tx: Sender<WinAction>) {
         }
 
         if presenter.take_dirty() {
-            match presenter.present(jiff::ZonedDateTime::now()) {
+            match presenter.present(clock::WindowsClock(jiff::Timestamp::now())) {
                 Some(plan) => {
                     present(hwnd, plan);
                     if !was_visible {

@@ -132,6 +132,17 @@ fn a_window_opening_at_a_midnight_the_clocks_skip_starts_when_its_day_does() {
 }
 
 #[test]
+fn a_gap_straddling_midnight_opens_at_the_transition() {
+    let toronto = window(input("1919-03-31", "1919-03-31", "America/Toronto"));
+    assert_eq!(toronto.span().start_ms, ms("1919-03-31T04:30:00Z"));
+    assert_eq!(period(&toronto, "1919-03-31T04:29:59.999Z"), None);
+    assert_eq!(
+        period(&toronto, "1919-03-31T04:30:00Z"),
+        day_of("1919-03-31")
+    );
+}
+
+#[test]
 fn a_midnight_the_clocks_repeat_starts_its_day_at_the_first_pass() {
     let before = window(input("2018-10-28", "2018-11-03", "America/Havana"));
     assert_eq!(before.span().end_ms, ms("2018-11-04T04:00:00Z"));
@@ -406,8 +417,8 @@ fn in_every_zone_a_days_span_holds_exactly_the_instants_on_that_local_day() {
     const WEEK_MS: i64 = 7 * DAY_MS;
     let (from, to) = (ms("2020-01-01T00:00:00Z"), ms("2030-01-01T00:00:00Z"));
     let (mut transitions, mut probes) = (0, 0);
-    for name in jiff::tz::db().available() {
-        let zone = &TimeZone::get(name.as_str()).unwrap();
+    for name in TimeZoneDatabase::bundled().available() {
+        let zone = &TimeZoneDatabase::bundled().get(name.as_str()).unwrap();
         let mut week = from;
         let mut week_offset = offset_seconds(week, zone);
         while week < to {
@@ -451,4 +462,14 @@ fn hourly_bounds_preserve_pre_epoch_fractions_and_require_rfc3339_instants() {
             "{invalid}"
         );
     }
+}
+
+#[test]
+fn a_leap_second_and_a_signed_offset_keep_their_epoch_milliseconds() {
+    let leap = window(hourly(
+        "2016-12-31T22:59:60.125−01:00",
+        "2017-01-01T00:01:00Z",
+        "UTC",
+    ));
+    assert_eq!(leap.span().start_ms, 1_483_228_800_125);
 }

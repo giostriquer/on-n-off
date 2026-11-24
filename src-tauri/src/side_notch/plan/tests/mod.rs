@@ -17,7 +17,7 @@ mod spacing;
 mod text;
 
 fn plan(displays: &[Display], data: &RailData, hover: Hover, now: ZonedDateTime) -> Option<Plan> {
-    super::plan(displays, data, hover, now, &FixedAdvance)
+    super::plan(displays, data, hover, &now, &FixedAdvance)
 }
 
 pub fn open_on(cell: CellId) -> Hover {

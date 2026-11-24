@@ -1,6 +1,6 @@
 use crate::timestamp::TimestampExt;
 use jiff::civil::Date;
-use jiff::tz::{AmbiguousOffset, TimeZone};
+use jiff::tz::{AmbiguousOffset, TimeZone, TimeZoneDatabase};
 use jiff::SignedDuration;
 use jiff::Timestamp;
 
@@ -80,7 +80,8 @@ impl UsageWindow {
         } else {
             Resolution::Day
         };
-        let zone = TimeZone::get(&input.time_zone)
+        let zone = TimeZoneDatabase::bundled()
+            .get(&input.time_zone)
             .ok()
             .filter(|zone| zone.iana_name() == Some(input.time_zone.as_str()))
             .unwrap_or(TimeZone::UTC);

@@ -10,14 +10,20 @@ use regex::Regex;
 
 pub(crate) fn parse(text: &str) -> Result<Timestamp, Error> {
     static RFC3339: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(?x)\A [0-9]{4}-[0-9]{2}-[0-9]{2} [Tt\x20] [0-9]{2}:[0-9]{2}:[0-9]{2} (?:\.[0-9]+)? (?P<zone>[Zz]|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9]) \z").unwrap()
+        Regex::new(
+            r"(?x)\A
+            [0-9]{4}-[0-9]{2}-[0-9]{2} [Tt\x20] [0-9]{2}:[0-9]{2}:[0-9]{2}
+            (?:\.[0-9]+)? (?P<zone>[Zz]|[+−-](?:[01][0-9]|2[0-3]):[0-5][0-9]) \z",
+        )
+        .unwrap()
     });
     let fields = RFC3339
         .captures(text)
         .ok_or_else(|| Error::from_args(format_args!("invalid RFC 3339 timestamp")))?;
     let zone = fields.name("zone").unwrap();
-    let at: Timestamp = if zone.start() > 29 {
-        format!("{}{}", &text[..29], zone.as_str()).parse()?
+    let at: Timestamp = if zone.start() > 29 || zone.as_str().starts_with('−') {
+        let zone_text = zone.as_str().replace('−', "-");
+        format!("{}{zone_text}", &text[..zone.start().min(29)]).parse()?
     } else {
         text.parse()?
     };
@@ -26,6 +32,33 @@ pub(crate) fn parse(text: &str) -> Result<Timestamp, Error> {
     } else {
         Ok(at)
     }
+}
+
+pub(crate) fn parse_stored(text: &str) -> Option<Timestamp> {
+    let text = text.trim();
+    if let Ok(at) = parse(text) {
+        return Some(at);
+    }
+    static STORED: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(
+            r"(?ix)\A
+            ([0-9]{1,4})\s*-\s*([0-9]{1,2})\s*-\s*([0-9]{1,2}) [T\x20]\s*
+            ([0-9]{1,2})\s*:\s*([0-9]{1,2})\s*:\s*([0-9]{1,2}) (\.[0-9]+)? \s*
+            (?: UTC | Z | ([+−-][0-9]{2})[:\s]*([0-9]{2}) ) \z",
+        )
+        .unwrap()
+    });
+    let fields = STORED.captures(text)?;
+    let fraction = fields.get(7).map_or("", |part| part.as_str());
+    let offset = fields.get(8).map_or_else(
+        || "Z".to_owned(),
+        |hours| format!("{}:{}", hours.as_str(), &fields[9]),
+    );
+    parse(&format!(
+        "{:0>4}-{:0>2}-{:0>2}T{:0>2}:{:0>2}:{:0>2}{fraction}{offset}",
+        &fields[1], &fields[2], &fields[3], &fields[4], &fields[5], &fields[6]
+    ))
+    .ok()
 }
 
 pub(crate) trait TimestampExt {

@@ -39,7 +39,9 @@ fn kind(cycle: Cycle) -> &'static str {
 
 fn when(at: &WindowAt, zone: &TimeZone) -> Option<String> {
     match at.cycle {
-        Cycle::Pending(reset) | Cycle::Renewed(reset) => Some(at.subject.when(reset, zone)),
+        Cycle::Pending(reset) | Cycle::Renewed(reset) => {
+            Some(at.subject.when(zone.to_datetime(reset.at())))
+        }
         Cycle::Idle | Cycle::Unknown => None,
     }
 }
@@ -73,7 +75,11 @@ fn assert_case<Input>(case: &Case<Input>, at: WindowAt, zone: &TimeZone) {
     assert_eq!(kind(at.cycle), case.note.kind, "{name}: cycle");
     assert_eq!(at.renewed(), case.note.kind == "renewed", "{name}: renewed");
     assert_eq!(when(&at, zone), case.note.when, "{name}: reset instant");
-    assert_eq!(at.notch_note(zone), case.note.notch, "{name}: notch note");
+    assert_eq!(
+        at.notch_note(|instant| zone.to_datetime(instant)),
+        case.note.notch,
+        "{name}: notch note"
+    );
 }
 
 #[test]

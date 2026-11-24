@@ -1,4 +1,4 @@
-use jiff::tz::TimeZone;
+use jiff::civil::DateTime;
 use jiff::Timestamp;
 
 use super::super::window::ResetInstant;
@@ -44,8 +44,7 @@ enum Subject {
 }
 
 impl Subject {
-    fn when(self, reset: ResetInstant, zone: &TimeZone) -> String {
-        let local = zone.to_datetime(reset.at());
+    fn when(self, local: DateTime) -> String {
         match self {
             Self::Window => local.strftime("%a %H:%M"),
             Self::Share => local.strftime("%b %-d"),
@@ -122,10 +121,10 @@ impl WindowAt {
         }
     }
 
-    pub(crate) fn notch_note(&self, zone: &TimeZone) -> String {
+    pub(crate) fn notch_note(&self, local_at: impl FnOnce(Timestamp) -> DateTime) -> String {
         match self.cycle {
-            Cycle::Pending(reset) => format!("Resets {}", self.subject.when(reset, zone)),
-            Cycle::Renewed(reset) => format!("Reset {}", self.subject.when(reset, zone)),
+            Cycle::Pending(reset) => format!("Resets {}", self.subject.when(local_at(reset.at()))),
+            Cycle::Renewed(reset) => format!("Reset {}", self.subject.when(local_at(reset.at()))),
             Cycle::Idle => STARTS_ON_FIRST_MESSAGE.into(),
             Cycle::Unknown => self.subject.unknown_reset().into(),
         }

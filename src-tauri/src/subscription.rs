@@ -19,18 +19,15 @@ fn parse_claims(claims: &Value, account_id: &str, now: Timestamp) -> Option<Subs
     {
         return None;
     }
-    let date = claims
-        .get("chatgpt_subscription_active_until")?
-        .as_str()?
-        .parse::<Timestamp>()
-        .ok()?;
+    let date =
+        crate::timestamp::parse_stored(claims.get("chatgpt_subscription_active_until")?.as_str()?)?;
     if date <= now {
         return None;
     }
     let checked_at = claims
         .get("chatgpt_subscription_last_checked")
         .and_then(Value::as_str)
-        .and_then(|value| value.parse::<Timestamp>().ok())
+        .and_then(crate::timestamp::parse_stored)
         .filter(|checked| *checked <= now)
         .map(|checked| checked.utc_offset_text());
     Some(SubscriptionDate {

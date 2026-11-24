@@ -45,7 +45,14 @@ fn token_date_is_the_paid_through_date_with_its_check_time() {
 #[test]
 fn token_rejects_wrong_account_elapsed_missing_and_invalid_dates() {
     assert!(parse_claims(&claims(), "account-b", now()).is_none());
-    for value in ["2026-09-09T12:00:00Z", "bad", "2026-09-10T12:00:00Z"] {
+    for value in [
+        "2026-09-09T12:00:00Z",
+        "bad",
+        "2026-09-10T12:00:00Z",
+        "2026-12-01T12:00Z",
+        "20261201T120000Z",
+        "2026-12-01T12:00:00Z[UTC]",
+    ] {
         let mut payload = claims();
         payload["chatgpt_subscription_active_until"] = json!(value);
         assert!(parse_claims(&payload, "account-a", now()).is_none());
@@ -221,5 +228,22 @@ fn subscription_dates_normalize_offsets_and_keep_millisecond_microsecond_and_nan
             json!(format!("2026-10-10T09:00:00{fraction}-03:00"));
         let term = parse_claims(&payload, "account-a", now()).unwrap();
         assert_eq!(term.date, format!("2026-10-10T12:00:00{normalized}+00:00"));
+    }
+}
+
+#[test]
+fn saved_claims_accept_legacy_utc_and_offset_spellings_and_long_fractions() {
+    for (suffix, time) in [("Z", "12:30"), (" UTC", "12:30"), ("+0130", "11:00")] {
+        let mut payload = claims();
+        payload["chatgpt_subscription_active_until"] =
+            json!(format!("2026-10-10T12:30:00.1234567891{suffix}"));
+        payload["chatgpt_subscription_last_checked"] =
+            json!(format!("2026-09-09T12:30:00.1234567891{suffix}"));
+        let term = parse_claims(&payload, "account-a", now()).unwrap();
+        assert_eq!(term.date, format!("2026-10-10T{time}:00.123456789+00:00"));
+        assert_eq!(
+            term.checked_at,
+            Some(format!("2026-09-09T{time}:00.123456789+00:00"))
+        );
     }
 }
