@@ -1,11 +1,7 @@
-use jiff::{
-    civil::DateTime,
-    tz::{Offset, TimeZone},
-    Timestamp,
-};
+use jiff::{civil::DateTime, tz::TimeZone, Timestamp};
 use windows::Win32::Foundation::SYSTEMTIME;
 use windows::Win32::System::Time::{
-    GetDynamicTimeZoneInformation, SystemTimeToTzSpecificLocalTimeEx, DYNAMIC_TIME_ZONE_INFORMATION,
+    GetTimeZoneInformationForYear, SystemTimeToTzSpecificLocalTime, TIME_ZONE_INFORMATION,
 };
 
 use crate::side_notch::plan::ViewerClock;
@@ -18,22 +14,17 @@ impl ViewerClock for WindowsClock {
     }
 
     fn local_at(&self, at: Timestamp) -> DateTime {
-        let mut settings = DYNAMIC_TIME_ZONE_INFORMATION::default();
-        if unsafe { GetDynamicTimeZoneInformation(&mut settings) } != u32::MAX {
-            if let Some(local) = local_time(at, &settings) {
-                return local;
-            }
-        }
-        TimeZone::system().to_datetime(at)
+        let utc = TimeZone::UTC.to_datetime(at);
+        let mut settings = TIME_ZONE_INFORMATION::default();
+        let native = u16::try_from(utc.year()).ok().and_then(|year| {
+            unsafe { GetTimeZoneInformationForYear(year, None, &mut settings) }.ok()?;
+            local_time(utc, &settings)
+        });
+        native.unwrap_or_else(|| TimeZone::system().to_datetime(at))
     }
 }
 
-fn local_time(at: Timestamp, settings: &DYNAMIC_TIME_ZONE_INFORMATION) -> Option<DateTime> {
-    if settings.DynamicDaylightTimeDisabled {
-        let seconds = (settings.Bias + settings.StandardBias).checked_mul(-60)?;
-        return Some(Offset::from_seconds(seconds).ok()?.to_datetime(at));
-    }
-    let utc = TimeZone::UTC.to_datetime(at);
+fn local_time(utc: DateTime, settings: &TIME_ZONE_INFORMATION) -> Option<DateTime> {
     let input = SYSTEMTIME {
         wYear: utc.year().try_into().ok()?,
         wMonth: utc.month() as u16,
@@ -44,7 +35,7 @@ fn local_time(at: Timestamp, settings: &DYNAMIC_TIME_ZONE_INFORMATION) -> Option
         ..Default::default()
     };
     let mut local = SYSTEMTIME::default();
-    unsafe { SystemTimeToTzSpecificLocalTimeEx(Some(settings), &input, &mut local) }.ok()?;
+    unsafe { SystemTimeToTzSpecificLocalTime(Some(settings), &input, &mut local) }.ok()?;
     DateTime::new(
         local.wYear.try_into().ok()?,
         local.wMonth as i8,
@@ -62,17 +53,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn disabling_daylight_adjustment_keeps_summer_resets_on_standard_time() {
-        let settings = DYNAMIC_TIME_ZONE_INFORMATION {
+    fn summer_resets_follow_disabled_and_fixed_daylight_rules() {
+        let standard_only = TIME_ZONE_INFORMATION {
             Bias: 480,
             DaylightBias: -60,
-            DynamicDaylightTimeDisabled: true,
             ..Default::default()
         };
-        let summer = "2026-07-01T07:30:00Z".parse().unwrap();
+        let recurring = TIME_ZONE_INFORMATION {
+            StandardDate: SYSTEMTIME {
+                wMonth: 11,
+                wDay: 1,
+                wHour: 2,
+                ..Default::default()
+            },
+            DaylightDate: SYSTEMTIME {
+                wMonth: 3,
+                wDay: 2,
+                wHour: 2,
+                ..Default::default()
+            },
+            ..standard_only
+        };
+        let summer = jiff::civil::date(2026, 7, 1).at(7, 30, 0, 0);
         assert_eq!(
-            local_time(summer, &settings).unwrap(),
+            local_time(summer, &standard_only).unwrap(),
             jiff::civil::date(2026, 6, 30).at(23, 30, 0, 0)
+        );
+        assert_eq!(
+            local_time(summer, &recurring).unwrap(),
+            jiff::civil::date(2026, 7, 1).at(0, 30, 0, 0)
+        );
+        let winter = jiff::civil::date(2026, 1, 1).at(8, 30, 0, 0);
+        assert_eq!(
+            local_time(winter, &recurring).unwrap(),
+            jiff::civil::date(2026, 1, 1).at(0, 30, 0, 0)
         );
     }
 }
