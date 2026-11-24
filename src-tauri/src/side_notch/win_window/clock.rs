@@ -53,6 +53,22 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_viewer_clock_uses_the_observation_for_now_and_the_reset_for_local_time() {
+        let observed = "2026-02-01T08:40:00Z".parse().unwrap();
+        let reset = "2026-07-01T07:30:12.345678Z".parse().unwrap();
+        let clock = WindowsClock(observed);
+        let mut settings = TIME_ZONE_INFORMATION::default();
+        unsafe { GetTimeZoneInformationForYear(2026, None, &mut settings) }.unwrap();
+        let expected = local_time(
+            jiff::civil::date(2026, 7, 1).at(7, 30, 12, 345_678_000),
+            &settings,
+        )
+        .unwrap();
+        assert_eq!(clock.now(), observed);
+        assert_eq!(clock.local_at(reset), expected);
+    }
+
+    #[test]
     fn summer_resets_follow_disabled_and_fixed_daylight_rules() {
         let standard_only = TIME_ZONE_INFORMATION {
             Bias: 480,
@@ -74,14 +90,14 @@ mod tests {
             },
             ..standard_only
         };
-        let summer = jiff::civil::date(2026, 7, 1).at(7, 30, 0, 0);
+        let summer = jiff::civil::date(2026, 7, 1).at(7, 30, 12, 0);
         assert_eq!(
             local_time(summer, &standard_only).unwrap(),
-            jiff::civil::date(2026, 6, 30).at(23, 30, 0, 0)
+            jiff::civil::date(2026, 6, 30).at(23, 30, 12, 0)
         );
         assert_eq!(
             local_time(summer, &recurring).unwrap(),
-            jiff::civil::date(2026, 7, 1).at(0, 30, 0, 0)
+            jiff::civil::date(2026, 7, 1).at(0, 30, 12, 0)
         );
         let winter = jiff::civil::date(2026, 1, 1).at(8, 30, 0, 0);
         assert_eq!(
