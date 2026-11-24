@@ -4,6 +4,7 @@ use super::{
     store::{Guard, Login, Profile, Store, Ticket},
     Home,
 };
+use crate::timestamp::TimestampExt;
 use crate::{
     dto::{AgentId, LimitsStatus, ProviderLimitsDto, Reading},
     limits::{
@@ -11,6 +12,7 @@ use crate::{
         Accepted, ReadFailure, SavedReadUrls,
     },
 };
+use jiff::Timestamp;
 use std::{
     collections::HashMap,
     path::Path,
@@ -396,7 +398,7 @@ fn verdict_of(
         profile.identity.provider,
         saved,
         failure,
-        chrono::Utc::now().timestamp(),
+        Timestamp::now().epoch_seconds(),
     ))
 }
 
@@ -404,7 +406,7 @@ fn fetch_profile(profile: &Profile, open: &dyn Fn() -> Result<Store, String>) ->
     fetch_profile_at(
         profile,
         open,
-        chrono::Utc::now().timestamp_millis(),
+        Timestamp::now().epoch_millis(),
         &SavedReadUrls::LIVE,
     )
 }
@@ -428,7 +430,7 @@ fn fetch_profile_at(
                 super::usage_renew::request(
                     profile.identity.provider,
                     login,
-                    chrono::Utc::now().timestamp_millis(),
+                    Timestamp::now().epoch_millis(),
                 )
             })
             .map_err(|_| {

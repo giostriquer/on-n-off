@@ -6,6 +6,7 @@ use crate::dto::{
 use crate::side_notch::model::frame::{self, ProviderCell};
 use crate::side_notch::model::{NotchProvider, NotchPullRequests, NotchSettings};
 use crate::side_notch::sessions::LiveSession;
+use jiff::ZonedDateTime;
 
 mod chrome;
 mod content;
@@ -15,16 +16,8 @@ mod layout;
 mod spacing;
 mod text;
 
-fn plan<Tz: TimeZone>(
-    displays: &[Display],
-    data: &RailData,
-    hover: Hover,
-    now: DateTime<Tz>,
-) -> Option<Plan>
-where
-    Tz::Offset: fmt::Display,
-{
-    super::plan(displays, data, hover, now, &FixedAdvance)
+fn plan(displays: &[Display], data: &RailData, hover: Hover, now: ZonedDateTime) -> Option<Plan> {
+    super::plan(displays, data, hover, &now, &FixedAdvance)
 }
 
 pub fn open_on(cell: CellId) -> Hover {
@@ -35,8 +28,8 @@ pub fn open_on(cell: CellId) -> Hover {
 }
 pub const CLAUDE: CellId = CellId::Provider(AgentId::Claude);
 
-pub fn now() -> DateTime<Utc> {
-    "2026-09-03T10:30:00Z".parse().unwrap()
+pub fn now() -> jiff::ZonedDateTime {
+    "2026-09-03T10:30:00Z[UTC]".parse().unwrap()
 }
 
 pub fn display(id: &str, x: f64, y: f64, width: f64, height: f64, scale: f64) -> Display {
@@ -205,10 +198,7 @@ fn codex_member(share: LimitsWorkspaceCreditsDto) -> ProviderCell {
 fn popover_plan(provider: ProviderCell) -> Plan {
     popover_plan_at(provider, now())
 }
-fn popover_plan_at<Tz: TimeZone>(provider: ProviderCell, now: DateTime<Tz>) -> Plan
-where
-    Tz::Offset: fmt::Display,
-{
+fn popover_plan_at(provider: ProviderCell, now: ZonedDateTime) -> Plan {
     let opened = open_on(CellId::Provider(provider.provider));
     let displays = vec![display("d1", 0.0, 0.0, 1920.0, 1080.0, 1.0)];
     plan(

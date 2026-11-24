@@ -3,6 +3,7 @@ use crate::dto::{
     AgentId, LimitWindowDto, LimitWindowKind, LimitsStatus, ProviderLimitsDto, Reading,
 };
 use crate::paths::scratch_dir;
+use jiff::Timestamp;
 use std::fs;
 
 fn snapshot(
@@ -672,10 +673,8 @@ fn automatic_only() -> crate::settings::AppSettings {
     settings
 }
 
-fn at(value: &str) -> chrono::DateTime<chrono::Utc> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .unwrap()
-        .with_timezone(&chrono::Utc)
+fn at(value: &str) -> Timestamp {
+    crate::timestamp::parse(value).unwrap()
 }
 
 #[test]

@@ -11,6 +11,7 @@ use super::{
     Home, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::AgentId;
+use crate::timestamp::TimestampExt;
 use serde_json::{json, Value};
 use std::{
     ffi::OsString,
@@ -512,9 +513,9 @@ struct ReportedEnd(Option<i64>);
 impl ReportedEnd {
     fn of(status: &Value) -> Option<Self> {
         match status.get("loginExpiresAt")? {
-            Value::String(at) => chrono::DateTime::parse_from_rfc3339(at)
+            Value::String(at) => crate::timestamp::parse(at)
                 .ok()
-                .map(|at| Self(Some(at.timestamp_millis()))),
+                .map(|at| Self(Some(at.epoch_millis()))),
             Value::Null
                 if status.get("authMethod").and_then(Value::as_str) == Some("claude.ai") =>
             {

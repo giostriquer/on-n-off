@@ -1,7 +1,9 @@
 use super::*;
+use jiff::SignedDuration;
+use jiff::Timestamp;
 
-fn minutes_after_now(minutes: i64) -> DateTime<Utc> {
-    now() + chrono::Duration::minutes(minutes)
+fn minutes_after_now(minutes: i64) -> Timestamp {
+    now() + SignedDuration::from_mins(minutes)
 }
 
 fn live(used: f64, renews: &str) -> ProviderLimitsDto {
@@ -42,7 +44,7 @@ fn falls_due(
     waiting: &mut Waiting,
     readings: &[ProviderLimitsDto],
     alerts: &HashMap<String, ResetAlert>,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Vec<Due> {
     falls_due_after(waiting, readings, None, alerts, at)
 }
@@ -52,7 +54,7 @@ fn falls_due_after(
     readings: &[ProviderLimitsDto],
     failure: Option<ReadFailure>,
     alerts: &HashMap<String, ResetAlert>,
-    at: DateTime<Utc>,
+    at: Timestamp,
 ) -> Vec<Due> {
     let read = Served {
         provider: crate::provider_catalogue::BANKED_RESETS_PROVIDER,
@@ -450,6 +452,6 @@ fn the_next_spend_due_is_the_earliest_of_those_waiting() {
     waiting.schedule(&[for_account("earliest")], now());
 
     assert_eq!(waiting.next_due(), Some(minutes_after_now(10)));
-    assert!(!waiting.any_due(minutes_after_now(10) - chrono::Duration::seconds(1)));
+    assert!(!waiting.any_due(minutes_after_now(10) - SignedDuration::from_secs(1)));
     assert!(waiting.any_due(minutes_after_now(10)));
 }

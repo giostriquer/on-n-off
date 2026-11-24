@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, PoisonError};
 
@@ -463,7 +465,7 @@ pub(super) fn signed_in_cache() -> &'static LoginCache {
 }
 
 pub(crate) fn signed_in(config: &Path) -> Option<MuseLogin> {
-    let now_secs = chrono::Utc::now().timestamp();
+    let now_secs = Timestamp::now().epoch_seconds();
     signed_in_cache().login(config, now_secs, &|| SystemKeychain.read())
 }
 

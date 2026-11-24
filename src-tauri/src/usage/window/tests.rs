@@ -1,5 +1,4 @@
-use chrono::Offset;
-use chrono_tz::TZ_VARIANTS;
+use crate::timestamp::TimestampExt;
 
 use super::*;
 
@@ -29,9 +28,7 @@ fn window(input: UsageSummaryInput) -> UsageWindow {
 }
 
 fn ms(iso: &str) -> i64 {
-    DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 fn span(start: &str, end: &str) -> Span {
@@ -131,6 +128,17 @@ fn a_window_opening_at_a_midnight_the_clocks_skip_starts_when_its_day_does() {
     assert_eq!(
         period(&sao_paulo, "2018-11-04T03:00:00Z"),
         day_of("2018-11-04")
+    );
+}
+
+#[test]
+fn a_gap_straddling_midnight_opens_at_the_transition() {
+    let toronto = window(input("1919-03-31", "1919-03-31", "America/Toronto"));
+    assert_eq!(toronto.span().start_ms, ms("1919-03-31T04:30:00Z"));
+    assert_eq!(period(&toronto, "1919-03-31T04:29:59.999Z"), None);
+    assert_eq!(
+        period(&toronto, "1919-03-31T04:30:00Z"),
+        day_of("1919-03-31")
     );
 }
 
@@ -357,26 +365,29 @@ fn a_day_window_is_its_own_cache_group_and_hourly_windows_share_one() {
     assert_eq!(respelled, earlier);
 }
 
-fn offset_seconds(at_ms: i64, zone: Tz) -> i32 {
-    Utc.timestamp_millis_opt(at_ms)
-        .unwrap()
-        .with_timezone(&zone)
-        .offset()
-        .fix()
-        .local_minus_utc()
+fn offset_seconds(at_ms: i64, zone: &TimeZone) -> i32 {
+    zone.to_offset(Timestamp::from_millisecond(at_ms).unwrap())
+        .seconds()
 }
 
-fn days_around_agree(zone: Tz, from_ms: i64, to_ms: i64) -> usize {
-    let first = local_day(from_ms, zone).unwrap().pred_opt().unwrap();
-    let last = local_day(to_ms, zone).unwrap().succ_opt().unwrap();
+fn local_day(at_ms: i64, zone: &TimeZone) -> Date {
+    zone.to_datetime(Timestamp::from_millisecond(at_ms).unwrap())
+        .date()
+}
+
+fn days_around_agree(zone: &TimeZone, from_ms: i64, to_ms: i64) -> usize {
+    let first = local_day(from_ms, zone).yesterday().unwrap();
+    let last = local_day(to_ms, zone).tomorrow().unwrap();
     let mut probes = 0;
-    for day in first.iter_days().take_while(|day| *day <= last) {
+    for day in
+        std::iter::successors(Some(first), |day| day.tomorrow().ok()).take_while(|day| *day <= last)
+    {
         let text = day_text(day);
-        let single = window(input(&text, &text, zone.name()));
+        let single = window(input(&text, &text, zone.iana_name().unwrap()));
         let around = window(input(
-            &day_text(day.pred_opt().unwrap()),
-            &day_text(day.succ_opt().unwrap()),
-            zone.name(),
+            &day_text(day.yesterday().unwrap()),
+            &day_text(day.tomorrow().unwrap()),
+            zone.iana_name().unwrap(),
         ));
         let Span { start_ms, end_ms } = single.span();
         for at in [start_ms - 1, start_ms, end_ms - 1, end_ms] {
@@ -386,9 +397,14 @@ fn days_around_agree(zone: Tz, from_ms: i64, to_ms: i64) -> usize {
                 single.period_of(at).is_some(),
                 in_span,
                 "{} {text} at {at}",
-                zone.name()
+                zone.iana_name().unwrap()
             );
-            assert_eq!(on_day, in_span, "{} {text} at {at}", zone.name());
+            assert_eq!(
+                on_day,
+                in_span,
+                "{} {text} at {at}",
+                zone.iana_name().unwrap()
+            );
             probes += 1;
         }
     }
@@ -401,7 +417,8 @@ fn in_every_zone_a_days_span_holds_exactly_the_instants_on_that_local_day() {
     const WEEK_MS: i64 = 7 * DAY_MS;
     let (from, to) = (ms("2020-01-01T00:00:00Z"), ms("2030-01-01T00:00:00Z"));
     let (mut transitions, mut probes) = (0, 0);
-    for zone in TZ_VARIANTS {
+    for name in TimeZoneDatabase::bundled().available() {
+        let zone = &TimeZoneDatabase::bundled().get(name.as_str()).unwrap();
         let mut week = from;
         let mut week_offset = offset_seconds(week, zone);
         while week < to {
@@ -420,4 +437,39 @@ fn in_every_zone_a_days_span_holds_exactly_the_instants_on_that_local_day() {
     }
     assert!(transitions > 1000, "{transitions} transitions");
     assert!(probes > transitions * 12, "{probes} probes");
+}
+
+#[test]
+fn zone_names_keep_their_iana_spelling() {
+    let utc = window(input("2026-08-07", "2026-08-07", "UTC"));
+    let unknown = window(input("2026-08-07", "2026-08-07", "america/los_angeles"));
+    assert_eq!(unknown.span(), utc.span());
+}
+
+#[test]
+fn hourly_bounds_preserve_pre_epoch_fractions_and_require_rfc3339_instants() {
+    let end = "1970-01-01T01:00:00Z";
+    let before_epoch = window(hourly("1970-01-01 00:59:59.999999999987+01:00", end, "UTC"));
+    assert_eq!(before_epoch.span().start_ms, -1);
+    for invalid in [
+        "19700101T000000Z",
+        "1970-01-01T00:00Z",
+        "1970-01-01T00:00:00+00",
+        "1970-01-01T00:00:00Z[UTC]",
+    ] {
+        assert!(
+            UsageWindow::of(&hourly(invalid, end, "UTC")).is_err(),
+            "{invalid}"
+        );
+    }
+}
+
+#[test]
+fn a_leap_second_and_a_signed_offset_keep_their_epoch_milliseconds() {
+    let leap = window(hourly(
+        "2016-12-31T22:59:60.125−01:00",
+        "2017-01-01T00:01:00Z",
+        "UTC",
+    ));
+    assert_eq!(leap.span().start_ms, 1_483_228_800_125);
 }

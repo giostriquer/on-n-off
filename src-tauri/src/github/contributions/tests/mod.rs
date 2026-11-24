@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 mod discovery;
 mod tracking;
 
@@ -42,9 +44,7 @@ fn store_path(prefix: &str) -> PathBuf {
 }
 
 fn at(secs: i64) -> String {
-    chrono::DateTime::from_timestamp(secs, 0)
-        .unwrap()
-        .to_rfc3339()
+    Timestamp::from_second(secs).unwrap().utc_offset_text()
 }
 
 fn push(id: u64, repo: &str, git_ref: &str, pushed_at: i64) -> Value {

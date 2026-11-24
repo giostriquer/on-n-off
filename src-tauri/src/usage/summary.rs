@@ -1,8 +1,8 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-
-use chrono::{SecondsFormat, TimeZone, Utc};
 
 use crate::dto::{
     AdapterError, UsageBucketDto, UsageCostSource, UsagePricingDto, UsageSourceDto,
@@ -130,11 +130,11 @@ fn summary_of(
         })
         .collect();
     let aggregated = aggregator.finish();
-    let read_at = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
+    let read_at = Timestamp::now().utc_millis_text();
     let fetched_at = rates.fetched_at_ms.and_then(|ms| {
-        Utc.timestamp_millis_opt(ms)
-            .single()
-            .map(|dt| dt.to_rfc3339_opts(SecondsFormat::Millis, true))
+        Timestamp::from_millisecond(ms)
+            .ok()
+            .map(|dt| dt.utc_millis_text())
     });
 
     UsageSummaryDto {

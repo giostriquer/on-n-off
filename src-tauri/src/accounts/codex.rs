@@ -8,7 +8,9 @@ use super::{
     usage_renew, IsolatedSignIn, NativeAccount,
 };
 use crate::dto::AgentId;
+use crate::timestamp::TimestampExt;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use jiff::Timestamp;
 use serde_json::Value;
 use std::{
     ffi::OsString,
@@ -330,9 +332,10 @@ impl<'a> CodexLogin<'a> {
             }
         }
         auth["last_refresh"] = Value::String(
-            chrono::DateTime::from_timestamp_millis(now_ms)
+            Timestamp::from_millisecond(now_ms)
+                .ok()
                 .ok_or("Invalid renewal time.")?
-                .to_rfc3339(),
+                .utc_offset_text(),
         );
         Ok(Login {
             auth,

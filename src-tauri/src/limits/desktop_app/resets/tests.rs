@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
@@ -435,7 +437,7 @@ fn probe_real_home_desktop_resets() {
         seen(
             &paths::claude_desktop_cache_for(&home),
             organization,
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
         )
     });
     println!(

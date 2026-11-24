@@ -1,17 +1,18 @@
 use super::*;
 use crate::http::{never_asked, was_asked};
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::Timestamp;
 use serde_json::json;
 
 const INTERVAL: Duration = Duration::from_secs(60);
 
-fn now() -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339("2026-09-24T12:00:00Z")
-        .unwrap()
-        .with_timezone(&Utc)
+fn now() -> Timestamp {
+    crate::timestamp::parse("2026-09-24T12:00:00Z").unwrap()
 }
 
-fn today() -> NaiveDate {
-    now().date_naive()
+fn today() -> Date {
+    now().utc_date()
 }
 
 fn breakdown(days: &[(&str, &[f64])]) -> Value {

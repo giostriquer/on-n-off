@@ -1,6 +1,8 @@
+use crate::timestamp::TimestampExt;
+use jiff::SignedDuration;
+use jiff::Timestamp;
 use std::collections::HashMap;
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::dto::{
@@ -142,7 +144,7 @@ pub struct WaitingSpend {
     account_id: String,
     account_label: Option<String>,
     cycle: ResetInstant,
-    due_at: DateTime<Utc>,
+    due_at: Timestamp,
     idempotency_key: String,
 }
 
@@ -175,7 +177,7 @@ pub(crate) fn plan(
     waiting: &mut Waiting,
     reads: &[Served],
     alerts: &HashMap<String, ResetAlert>,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Plan {
     let banking = reads
         .iter()
@@ -196,7 +198,7 @@ pub(crate) fn plan(
 }
 
 impl Offered {
-    pub fn commit(self, waiting: &mut Waiting, now: DateTime<Utc>) -> Vec<Notice> {
+    pub fn commit(self, waiting: &mut Waiting, now: Timestamp) -> Vec<Notice> {
         let mut notices = self.told;
         notices.extend(waiting.schedule(&self.automatic, now));
         notices
@@ -212,7 +214,7 @@ impl AlertMemory {
         &mut self,
         readings: &[ProviderLimitsDto],
         alerts: &HashMap<String, ResetAlert>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Vec<Offer> {
         self.0.retain(|account, _| alerts.contains_key(account));
         let mut offers = Vec::new();
@@ -260,7 +262,7 @@ fn banks_resets(card: &ProviderLimitsDto) -> bool {
 fn low_reading(
     card: &ProviderLimitsDto,
     alert: &ResetAlert,
-    now: DateTime<Utc>,
+    now: Timestamp,
 ) -> Option<(LowReading, Offer)> {
     let account = signed_in_with_banked_resets(card)?;
     let left = left_percent(&card.reading)?;
@@ -274,7 +276,7 @@ fn low_reading(
         .find(|window| window.kind == LimitWindowKind::Weekly)?;
     let cycle = weekly.resets_at.as_deref()?;
     let renews_at = ResetInstant::parse(cycle)?;
-    if renews_at.at() - now < chrono::Duration::hours(i64::from(alert.min_hours_to_renewal)) {
+    if renews_at.at() - now < SignedDuration::from_hours(i64::from(alert.min_hours_to_renewal)) {
         return None;
     }
     let banked = card.reading.reset_credits.as_ref()?;
@@ -301,10 +303,8 @@ fn low_reading(
     ))
 }
 
-fn instant(value: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .ok()
-        .map(|at| at.with_timezone(&Utc))
+fn instant(value: &str) -> Option<Timestamp> {
+    crate::timestamp::parse(value).ok()
 }
 
 fn saved_cycle_is(saved: &str, cycle: ResetInstant) -> bool {
@@ -345,12 +345,12 @@ impl Waiting {
         &mut self,
         banking: Option<&Served>,
         alerts: &HashMap<String, ResetAlert>,
-        now: DateTime<Utc>,
+        now: Timestamp,
     ) -> Vec<Due> {
         self.0
             .retain(|account, _| alerts.get(account).is_some_and(|alert| alert.automatic));
         let late = |spend: &WaitingSpend| {
-            spend.due_at + chrono::Duration::minutes(LATE_AFTER_MINUTES) < now
+            spend.due_at + SignedDuration::from_mins(LATE_AFTER_MINUTES) < now
         };
         let banking = banking_now(banking);
         let decided = !matches!(banking, BankingNow::Unknown);
@@ -376,13 +376,13 @@ impl Waiting {
             .collect()
     }
 
-    fn schedule(&mut self, offers: &[Offer], now: DateTime<Utc>) -> Vec<Notice> {
+    fn schedule(&mut self, offers: &[Offer], now: Timestamp) -> Vec<Notice> {
         for offer in offers {
             let spend = WaitingSpend {
                 account_id: offer.account_id.clone(),
                 account_label: offer.account_label.clone(),
                 cycle: offer.cycle,
-                due_at: now + chrono::Duration::minutes(SPEND_DELAY_MINUTES),
+                due_at: now + SignedDuration::from_mins(SPEND_DELAY_MINUTES),
                 idempotency_key: uuid::Uuid::new_v4().to_string(),
             };
             self.0.insert(spend.account_id.clone(), spend);
@@ -390,11 +390,11 @@ impl Waiting {
         offers.iter().map(Offer::scheduled_notice).collect()
     }
 
-    pub fn any_due(&self, now: DateTime<Utc>) -> bool {
+    pub fn any_due(&self, now: Timestamp) -> bool {
         self.0.values().any(|spend| spend.due_at <= now)
     }
 
-    pub fn next_due(&self) -> Option<DateTime<Utc>> {
+    pub fn next_due(&self) -> Option<Timestamp> {
         self.0.values().map(|spend| spend.due_at).min()
     }
 
@@ -403,7 +403,7 @@ impl Waiting {
             .values()
             .map(|spend| PendingResetSpendDto {
                 account_id: spend.account_id.clone(),
-                due_at: spend.due_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+                due_at: spend.due_at.utc_seconds_text(),
             })
             .collect()
     }

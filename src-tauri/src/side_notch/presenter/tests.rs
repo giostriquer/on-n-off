@@ -4,6 +4,7 @@ use crate::dto::{LimitWindowDto, LimitWindowKind, Reading};
 use crate::side_notch::model::frame;
 use crate::side_notch::model::{Display, GithubList, NotchProvider, NotchSettings};
 use crate::side_notch::plan::{CellId, FixedAdvance, R};
+use jiff::tz::TimeZone;
 
 const CLAUDE: Option<CellId> = Some(CellId::Provider(AgentId::Claude));
 
@@ -59,8 +60,8 @@ pub fn data(show: ShowMode) -> RailData {
     )
 }
 
-fn clock() -> chrono::DateTime<chrono::Utc> {
-    "2026-09-03T10:30:00Z".parse().unwrap()
+fn clock() -> jiff::ZonedDateTime {
+    "2026-09-03T10:30:00Z[UTC]".parse().unwrap()
 }
 
 fn cell_rect(presenter: &mut Presenter) -> R {
@@ -687,9 +688,9 @@ fn weekly_resetting(at: &str) -> RailData {
 fn the_presented_popover_words_its_reset_in_the_zone_of_the_clock_it_is_given() {
     let mut presenter = pinned_on_screen(weekly_resetting("2099-01-01T00:00:00Z"), CLAUDE.unwrap());
     for (hours, note) in [(13, "Resets Thu 13:00"), (-13, "Resets Wed 11:00")] {
-        let zone = chrono::FixedOffset::east_opt(hours * 3600).unwrap();
+        let zone = TimeZone::fixed(jiff::tz::offset(hours));
         let notes: Vec<String> = presenter
-            .present(clock().with_timezone(&zone))
+            .present(clock().with_time_zone(zone))
             .expect("plan")
             .popover
             .as_ref()

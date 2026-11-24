@@ -1,6 +1,5 @@
-use std::fmt::Display;
-
-use chrono::{DateTime, TimeZone, Utc};
+use jiff::civil::DateTime;
+use jiff::Timestamp;
 
 use super::super::window::ResetInstant;
 use super::{readable, text_of};
@@ -28,7 +27,7 @@ enum Cycle {
 }
 
 impl Cycle {
-    fn of(reset: Option<ResetInstant>, starts_on_first_message: bool, now: DateTime<Utc>) -> Self {
+    fn of(reset: Option<ResetInstant>, starts_on_first_message: bool, now: Timestamp) -> Self {
         match reset {
             Some(reset) if reset.passed_by(now) => Self::Renewed(reset),
             Some(reset) => Self::Pending(reset),
@@ -45,14 +44,10 @@ enum Subject {
 }
 
 impl Subject {
-    fn when<Tz: TimeZone>(self, reset: ResetInstant, zone: &Tz) -> String
-    where
-        Tz::Offset: Display,
-    {
-        let local = reset.at().with_timezone(zone);
+    fn when(self, local: DateTime) -> String {
         match self {
-            Self::Window => local.format("%a %H:%M"),
-            Self::Share => local.format("%b %-d"),
+            Self::Window => local.strftime("%a %H:%M"),
+            Self::Share => local.strftime("%b %-d"),
         }
         .to_string()
     }
@@ -73,7 +68,7 @@ pub(crate) struct WindowAt {
 }
 
 impl WindowAt {
-    pub(crate) fn of(window: &LimitWindowDto, now: DateTime<Utc>) -> Self {
+    pub(crate) fn of(window: &LimitWindowDto, now: Timestamp) -> Self {
         Self::new(
             window.used_percent,
             Cycle::of(
@@ -85,7 +80,7 @@ impl WindowAt {
         )
     }
 
-    pub(crate) fn of_share(share: &LimitsWorkspaceCreditsDto, now: DateTime<Utc>) -> Self {
+    pub(crate) fn of_share(share: &LimitsWorkspaceCreditsDto, now: Timestamp) -> Self {
         let reset = share.resets_at.as_deref().and_then(ResetInstant::parse);
         Self::new(
             share.used_percent,
@@ -126,13 +121,10 @@ impl WindowAt {
         }
     }
 
-    pub(crate) fn notch_note<Tz: TimeZone>(&self, zone: &Tz) -> String
-    where
-        Tz::Offset: Display,
-    {
+    pub(crate) fn notch_note(&self, local_at: impl FnOnce(Timestamp) -> DateTime) -> String {
         match self.cycle {
-            Cycle::Pending(reset) => format!("Resets {}", self.subject.when(reset, zone)),
-            Cycle::Renewed(reset) => format!("Reset {}", self.subject.when(reset, zone)),
+            Cycle::Pending(reset) => format!("Resets {}", self.subject.when(local_at(reset.at()))),
+            Cycle::Renewed(reset) => format!("Reset {}", self.subject.when(local_at(reset.at()))),
             Cycle::Idle => STARTS_ON_FIRST_MESSAGE.into(),
             Cycle::Unknown => self.subject.unknown_reset().into(),
         }

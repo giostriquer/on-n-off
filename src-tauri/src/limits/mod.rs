@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 mod backend_memo;
 mod claude;
 pub(crate) mod claude_cli;
@@ -37,8 +39,6 @@ pub(crate) use window::{cycle_turned_over, Observation, ResetInstant};
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
-
-use chrono::Utc;
 
 use crate::accounts::model::Identity;
 #[cfg(test)]
@@ -138,7 +138,7 @@ fn read_limits_at(agent: AgentId, force: bool, home: &Path) -> NativeRead {
         force,
         Sources {
             home,
-            now_ms: Utc::now().timestamp_millis(),
+            now_ms: Timestamp::now().epoch_millis(),
         },
     )
 }
@@ -255,8 +255,9 @@ fn read_accounts(
     read: impl FnOnce(&Path) -> Read,
 ) -> NativeRead {
     let home = sources.home;
-    let observed_at =
-        chrono::DateTime::<Utc>::from_timestamp_millis(sources.now_ms).unwrap_or_else(Utc::now);
+    let observed_at = Timestamp::from_millisecond(sources.now_ms)
+        .ok()
+        .unwrap_or_else(Timestamp::now);
     let (current, outcome) = outcome::signed_in(agent, read(home));
     let store = SnapshotStore::for_home(home);
     let mut cards = aggregate_accounts(&store, current);

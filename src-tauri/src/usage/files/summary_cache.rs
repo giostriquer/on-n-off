@@ -44,8 +44,9 @@ pub fn summary_key(
 ) -> SummaryKey {
     SummaryKey {
         key: format!(
-            "{}|rates:{}|history:{history_fingerprint}",
+            "{}|tzdb:{}|rates:{}|history:{history_fingerprint}",
             window.key(),
+            jiff_tzdb::VERSION,
             rates_fetched_at_ms.unwrap_or(0)
         ),
         group: window.group().to_string(),

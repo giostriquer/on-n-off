@@ -1,3 +1,5 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 mod history;
 mod sources;
 mod summary_cache;
@@ -6,8 +8,6 @@ use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
-
-use chrono::{SecondsFormat, TimeZone, Utc};
 
 use crate::dto::{AdapterError, UsageHistoryState, UsageHistoryStatusDto, UsageSummaryDto};
 use crate::paths::user_home;
@@ -168,9 +168,9 @@ impl UsageFiles {
     pub fn status(&self) -> UsageHistoryStatusDto {
         let store = HistoryStore::open(self.history_path.clone());
         let iso = |ms: i64| {
-            Utc.timestamp_millis_opt(ms)
-                .single()
-                .map(|at| at.to_rfc3339_opts(SecondsFormat::Millis, true))
+            Timestamp::from_millisecond(ms)
+                .ok()
+                .map(|at| at.utc_millis_text())
         };
         let (state, kept_since, folded_through) = match store.history() {
             None => (UsageHistoryState::Unreadable, None, None),

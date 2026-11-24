@@ -139,11 +139,10 @@ the owner.
 What stays with each drawer is what depends on the clock, since they redraw between reads (a
 window's percent now, its reset note, a session's age, the percent under a provider's ring), and
 what is only style: provider names and marks, the inks of each tone, list titles and tags set in
-capitals, the CI dot's colour, "Nothing open." and "N of M". The rules for what a window reads at
-an instant are still one, `limits/window_at.rs`, which the Windows plan asks with the clock its
-window passes in (a `DateTime` in the viewer's zone, so reset times are worded in it: the window
-passes `chrono::Local::now()`, tests a fixed zone, and the plan reads no zone of its own) and
-NotchCore restates; both, and the card, read the cases in
+capitals, the CI dot's colour, "Nothing open." and "N of M". The Windows plan evaluates each window at the current instant with
+`limits/window_at.rs`. It formats reset labels using the Windows settings for the reset instant,
+including the viewer's daylight-saving preference. Tests supply a fixed zone. NotchCore, the
+Windows plan and the card share the cases in
 `limits/window_at/fixtures/window-cases.json` ([why](README.md#limits)). The review request copied from a row is
 still worded by each drawer. What VoiceOver says for a rail cell is built in NotchCore
 (`ProviderCell.spoken`, `PullRequestCell.spoken`, pinned by NotchCoreChecks) from the decided

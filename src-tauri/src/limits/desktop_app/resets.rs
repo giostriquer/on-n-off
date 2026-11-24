@@ -1,7 +1,8 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use chrono::{DateTime, SecondsFormat};
 use serde_json::Value;
 
 use super::simple_cache;
@@ -110,9 +111,9 @@ impl Bound {
     fn of(value: Option<&Value>) -> Option<Self> {
         match value {
             None | Some(Value::Null) => Some(Self::Open),
-            Some(Value::String(at)) => DateTime::parse_from_rfc3339(at)
+            Some(Value::String(at)) => crate::timestamp::parse(at)
                 .ok()
-                .map(|at| Self::At(at.timestamp_millis())),
+                .map(|at| Self::At(at.epoch_millis())),
             Some(_) => None,
         }
     }
@@ -126,7 +127,9 @@ impl Bound {
 }
 
 fn spelled(at_ms: i64) -> Option<String> {
-    DateTime::from_timestamp_millis(at_ms).map(|at| at.to_rfc3339_opts(SecondsFormat::Secs, true))
+    Timestamp::from_millisecond(at_ms)
+        .ok()
+        .map(|at| at.utc_seconds_text())
 }
 
 #[cfg(test)]

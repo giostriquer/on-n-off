@@ -1,3 +1,4 @@
+use crate::timestamp::TimestampExt;
 mod claude;
 mod codex;
 mod muse;
@@ -254,13 +255,13 @@ fn positive_int(value: &Value) -> u64 {
 
 fn parse_timestamp_ms(value: &Value) -> Option<i64> {
     let raw = value.as_str()?;
-    chrono::DateTime::parse_from_rfc3339(raw)
+    crate::timestamp::parse(raw)
         .ok()
-        .map(|dt| dt.timestamp_millis())
+        .map(|dt| dt.epoch_millis())
         .or_else(|| {
-            chrono::DateTime::parse_from_rfc3339(&format!("{raw}Z"))
+            crate::timestamp::parse(&format!("{raw}Z"))
                 .ok()
-                .map(|dt| dt.timestamp_millis())
+                .map(|dt| dt.epoch_millis())
         })
 }
 

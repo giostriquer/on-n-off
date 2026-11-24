@@ -1,5 +1,6 @@
 use crate::dto::AgentId;
-use chrono::{DateTime, SecondsFormat, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path, time::SystemTime};
 
@@ -31,7 +32,7 @@ struct Observed {
     last_active_ms: i64,
 }
 
-pub fn read(agent: AgentId, home: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
+pub fn read(agent: AgentId, home: &Path, now: Timestamp) -> Vec<LiveSession> {
     match agent {
         AgentId::Claude => read_claude(
             &crate::paths::claude_root_for(home).join("sessions"),
@@ -61,7 +62,7 @@ struct ClaudeSessionFile {
 
 fn read_claude(
     dir: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
     live: impl FnOnce(&[u32]) -> HashSet<u32>,
 ) -> Vec<LiveSession> {
     let Ok(entries) = fs::read_dir(dir) else {
@@ -212,10 +213,11 @@ fn mtime_ms(path: &Path) -> i64 {
         .map_or(0, |duration| duration.as_millis() as i64)
 }
 
-fn rfc3339(ms: i64, now: DateTime<Utc>) -> String {
-    DateTime::<Utc>::from_timestamp_millis(ms)
+fn rfc3339(ms: i64, now: Timestamp) -> String {
+    Timestamp::from_millisecond(ms)
+        .ok()
         .unwrap_or(now)
-        .to_rfc3339_opts(SecondsFormat::Secs, true)
+        .utc_seconds_text()
 }
 
 #[cfg(test)]

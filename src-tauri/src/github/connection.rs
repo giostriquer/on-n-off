@@ -1,6 +1,6 @@
+use crate::timestamp::TimestampExt;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use chrono::DateTime;
 use serde_json::Value;
 
 use super::auth::{read_token_with, GhTokenMemo, TokenError, TOKEN_DEADLINE};
@@ -207,8 +207,8 @@ impl HttpGithub<'_> {
 
     fn low_budget_until(&self, reset_at: &str) -> Option<i64> {
         let now = self.now_secs;
-        match DateTime::parse_from_rfc3339(reset_at) {
-            Ok(at) => Some(at.timestamp()).filter(|at| *at > now),
+        match crate::timestamp::parse(reset_at) {
+            Ok(at) => Some(at.epoch_seconds()).filter(|at| *at > now),
             Err(_) => Some(now + RATE_LIMIT_FALLBACK_SECS),
         }
     }

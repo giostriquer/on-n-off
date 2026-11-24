@@ -1,9 +1,10 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::cmp::Reverse;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::reading::{keep_remembered, newest, parse_observed_at};
@@ -57,7 +58,7 @@ impl SnapshotStore {
             }
         }
         if let Some(remembered) = existing.clone().or_else(|| self.predecessor(&card)) {
-            keep_remembered(&mut card, remembered.into_dto(Utc::now()).reading);
+            keep_remembered(&mut card, remembered.into_dto(Timestamp::now()).reading);
         }
         let saved = write_over(&path, &card, existing.as_ref());
         Remembered { card, saved }
@@ -112,11 +113,11 @@ impl SnapshotStore {
     }
 
     fn stored(&self, provider: AgentId) -> Vec<ProviderLimitsDto> {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let Ok(entries) = fs::read_dir(&self.dir) else {
             return Vec::new();
         };
-        let mut snapshots: Vec<(Option<DateTime<Utc>>, ProviderLimitsDto)> = entries
+        let mut snapshots: Vec<(Option<Timestamp>, ProviderLimitsDto)> = entries
             .flatten()
             .filter(|entry| is_snapshot_file(provider, &entry.file_name().to_string_lossy()))
             .filter_map(|entry| {
@@ -261,7 +262,7 @@ impl SnapshotStore {
 }
 
 impl StoredSnapshot {
-    fn from_dto(dto: &ProviderLimitsDto, observed_at: DateTime<Utc>) -> Self {
+    fn from_dto(dto: &ProviderLimitsDto, observed_at: Timestamp) -> Self {
         Self {
             schema_version: SNAPSHOT_SCHEMA_VERSION,
             provider: dto.provider,
@@ -272,18 +273,18 @@ impl StoredSnapshot {
                 reset_offer: None,
                 ..dto.reading.clone()
             },
-            observed_at: Some(observed_at.to_rfc3339_opts(SecondsFormat::Millis, true)),
+            observed_at: Some(observed_at.utc_millis_text()),
         }
     }
 
-    fn latest_observed_at(&self) -> Option<DateTime<Utc>> {
+    fn latest_observed_at(&self) -> Option<Timestamp> {
         self.observed_at
             .as_deref()
             .and_then(parse_observed_at)
             .or_else(|| newest(&self.reading.windows))
     }
 
-    fn into_dto(self, now: DateTime<Utc>) -> ProviderLimitsDto {
+    fn into_dto(self, now: Timestamp) -> ProviderLimitsDto {
         let mut reading = self.reading.known_at(now);
         super::window::keep_in_range(&mut reading);
         super::plan::describe_reading(self.provider, &mut reading);
@@ -326,8 +327,9 @@ fn write_over(
     if !dto.reading.has_observations() {
         return Err("snapshot has no observations".to_string());
     }
-    let incoming_latest = newest(&dto.reading.windows)
-        .or_else(|| (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Utc::now));
+    let incoming_latest = newest(&dto.reading.windows).or_else(|| {
+        (dto.status == LimitsStatus::Ok && dto.reading.has_figures()).then(Timestamp::now)
+    });
     let incoming_latest =
         incoming_latest.ok_or_else(|| "snapshot has no dated observations".to_string())?;
     if existing

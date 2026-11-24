@@ -1,8 +1,9 @@
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Datelike, Duration, SecondsFormat, Utc};
 use serde::Deserialize;
 
 use super::codex::{main_windows, RateLimitWindow};
@@ -16,7 +17,7 @@ const SESSION_FILE_TAIL_BYTES: u64 = 256 * 1024;
 
 struct SessionWindow {
     window: QuotaWindow,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 }
 
 #[derive(Deserialize)]
@@ -43,7 +44,7 @@ struct SessionRateLimits {
 
 pub(super) fn merge_recent(
     home: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
     accounts: &mut [ProviderLimitsDto],
 ) -> usize {
     let mut observations = read_recent(home, now);
@@ -80,9 +81,7 @@ pub(super) fn merge_recent(
         }
         let (account_index, window_index) = matches[0];
         accounts[account_index].reading.windows[window_index] = LimitWindowDto {
-            observed_at: observation
-                .observed_at
-                .to_rfc3339_opts(SecondsFormat::Millis, true),
+            observed_at: observation.observed_at.utc_millis_text(),
             ..observed
         };
         updates += 1;
@@ -90,11 +89,11 @@ pub(super) fn merge_recent(
     updates
 }
 
-fn read_recent(home: &Path, now: DateTime<Utc>) -> Vec<SessionWindow> {
+fn read_recent(home: &Path, now: Timestamp) -> Vec<SessionWindow> {
     let mut observations = Vec::new();
     let mut scanned_files = 0;
     for offset in 0..=LOOKBACK_DAYS {
-        let day = (now - Duration::days(offset)).date_naive();
+        let day = now.utc_date() - jiff::Span::new().days(offset);
         let dir = home
             .join(".codex")
             .join("sessions")
@@ -107,7 +106,7 @@ fn read_recent(home: &Path, now: DateTime<Utc>) -> Vec<SessionWindow> {
             }
             read_file(
                 &path,
-                now - Duration::days(LOOKBACK_DAYS),
+                now - jiff::SignedDuration::from_hours(24 * LOOKBACK_DAYS),
                 now,
                 &mut observations,
             );
@@ -135,8 +134,8 @@ fn jsonl_files(dir: &Path) -> Vec<PathBuf> {
 
 fn read_file(
     path: &Path,
-    cutoff: DateTime<Utc>,
-    now: DateTime<Utc>,
+    cutoff: Timestamp,
+    now: Timestamp,
     observations: &mut Vec<SessionWindow>,
 ) {
     let Ok(file) = File::open(path) else {
@@ -153,8 +152,8 @@ fn read_file_range(
     mut file: File,
     start: u64,
     length: u64,
-    cutoff: DateTime<Utc>,
-    now: DateTime<Utc>,
+    cutoff: Timestamp,
+    now: Timestamp,
     observations: &mut Vec<SessionWindow>,
 ) {
     let starts_at_line_boundary = if start == 0 {
@@ -201,8 +200,7 @@ fn parse_event(line: &str) -> Vec<SessionWindow> {
     let Some(timestamp) = event
         .timestamp
         .as_deref()
-        .and_then(|timestamp| DateTime::parse_from_rfc3339(timestamp).ok())
-        .map(|timestamp| timestamp.with_timezone(&Utc))
+        .and_then(|timestamp| crate::timestamp::parse(timestamp).ok())
     else {
         return Vec::new();
     };
@@ -225,7 +223,7 @@ fn parse_event(line: &str) -> Vec<SessionWindow> {
 fn matches_window(
     window: &LimitWindowDto,
     observed: &LimitWindowDto,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 ) -> bool {
     window.id == observed.id
         && window.kind == observed.kind
@@ -233,8 +231,7 @@ fn matches_window(
         && ResetInstant::of(window)
             .zip(ResetInstant::of(observed))
             .is_some_and(|(remembered, seen)| remembered.same_cycle_as(seen))
-        && DateTime::parse_from_rfc3339(&window.observed_at)
-            .is_ok_and(|existing| observed_at > existing.with_timezone(&Utc))
+        && crate::timestamp::parse(&window.observed_at).is_ok_and(|existing| observed_at > existing)
 }
 
 #[cfg(test)]

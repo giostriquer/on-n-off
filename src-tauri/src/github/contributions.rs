@@ -1,8 +1,8 @@
+use crate::timestamp::TimestampExt;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use chrono::DateTime;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
@@ -521,9 +521,9 @@ fn first_error(reply: &Value) -> String {
 
 fn timestamp(value: &Value) -> Option<i64> {
     Some(
-        DateTime::parse_from_rfc3339(value.as_str()?)
+        crate::timestamp::parse(value.as_str()?)
             .ok()?
-            .timestamp(),
+            .epoch_seconds(),
     )
 }
 

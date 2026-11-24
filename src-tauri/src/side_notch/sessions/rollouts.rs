@@ -1,5 +1,7 @@
 use super::{finish, mtime_ms, project_name, rfc3339, LiveSession, Observed, SessionStatus};
-use chrono::{DateTime, Datelike, Duration, NaiveDate, Utc};
+use crate::timestamp::TimestampExt;
+use jiff::civil::Date;
+use jiff::Timestamp;
 use serde::Deserialize;
 use serde_json::Value;
 use std::{
@@ -144,7 +146,7 @@ struct Registration {
 
 type Registered = HashMap<String, Registration>;
 
-pub(super) fn read(rollouts: &Rollouts, root: &Path, now: DateTime<Utc>) -> Vec<LiveSession> {
+pub(super) fn read(rollouts: &Rollouts, root: &Path, now: Timestamp) -> Vec<LiveSession> {
     let found = match &rollouts.layout {
         Layout::Files(files) => files.found(root, now),
         Layout::Folders(folders) => folders.found(root, now),
@@ -159,12 +161,12 @@ pub(super) fn read(rollouts: &Rollouts, root: &Path, now: DateTime<Utc>) -> Vec<
 
 fn newest<K>(
     root: &Path,
-    now: DateTime<Utc>,
+    now: Timestamp,
     mut session_at: impl FnMut(PathBuf) -> Option<(K, PathBuf)>,
     registered: impl Fn(&K) -> bool,
 ) -> Vec<Candidate<K>> {
     let dated = root.join("sessions");
-    let now_ms = now.timestamp_millis();
+    let now_ms = now.epoch_millis();
     let mut candidates = Vec::new();
     for day in days(now) {
         let Ok(entries) = fs::read_dir(day_dir(&dated, day)) else {
@@ -190,7 +192,7 @@ fn newest<K>(
 }
 
 impl Files {
-    fn found(&self, root: &Path, now: DateTime<Utc>) -> Vec<Found> {
+    fn found(&self, root: &Path, now: Timestamp) -> Vec<Found> {
         newest(root, now, |path| self.rollout_at(path), |()| false)
             .into_iter()
             .filter_map(|candidate| self.meta.name(candidate))
@@ -245,7 +247,7 @@ impl Meta {
 }
 
 impl Folders {
-    fn found(&self, root: &Path, now: DateTime<Utc>) -> Vec<Found> {
+    fn found(&self, root: &Path, now: Timestamp) -> Vec<Found> {
         let registered = self.registry.read(root);
         let mut seen = HashSet::new();
         newest(
@@ -296,10 +298,10 @@ impl Folders {
 }
 
 impl Found {
-    fn observe(self, markers: &Markers, now: DateTime<Utc>) -> Observed {
+    fn observe(self, markers: &Markers, now: Timestamp) -> Observed {
         let status = markers
             .turn(&self.transcript)
-            .status(now.timestamp_millis() - self.written_ms);
+            .status(now.epoch_millis() - self.written_ms);
         let name = self
             .name
             .unwrap_or_else(|| suffixed(&self.project, &self.id));
@@ -488,11 +490,11 @@ fn muse_registry(dir: &Path) -> Registered {
     out
 }
 
-fn days(now: DateTime<Utc>) -> [NaiveDate; 3] {
-    [1, 0, -1].map(|offset| (now + Duration::days(offset)).date_naive())
+fn days(now: Timestamp) -> [Date; 3] {
+    [1, 0, -1].map(|offset| now.utc_date() + jiff::Span::new().days(offset))
 }
 
-fn day_dir(root: &Path, day: NaiveDate) -> PathBuf {
+fn day_dir(root: &Path, day: Date) -> PathBuf {
     root.join(format!("{:04}", day.year()))
         .join(format!("{:02}", day.month()))
         .join(format!("{:02}", day.day()))

@@ -3,6 +3,8 @@ use crate::cli_stub::CliStub;
 use crate::github::fixtures::{authorization, gh, gh_runs};
 use crate::http::{head_header, refused_url, serve_sequence};
 use crate::paths::scratch_dir;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde_json::json;
 
 const NOW: i64 = 1_787_000_000;
@@ -28,9 +30,9 @@ fn budget(remaining: u64, reset_at: &str) -> String {
 }
 
 fn at(epoch_secs: i64) -> String {
-    chrono::DateTime::from_timestamp(epoch_secs, 0)
+    Timestamp::from_second(epoch_secs)
         .unwrap()
-        .to_rfc3339()
+        .utc_offset_text()
 }
 
 fn ask(

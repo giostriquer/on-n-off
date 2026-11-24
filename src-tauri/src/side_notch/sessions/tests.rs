@@ -1,4 +1,6 @@
 use super::*;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 fn claude_file(dir: &Path, pid: u32, body: serde_json::Value) {
     fs::write(dir.join(format!("{pid}.json")), body.to_string()).unwrap();
@@ -7,8 +9,8 @@ fn claude_file(dir: &Path, pid: u32, body: serde_json::Value) {
 #[test]
 fn claude_lists_live_interactive_sessions_newest_first() {
     let dir = crate::paths::scratch_dir("notch-claude-sessions");
-    let now = Utc::now();
-    let now_ms = now.timestamp_millis();
+    let now = Timestamp::now();
+    let now_ms = now.epoch_millis();
     claude_file(
         &dir,
         100,
@@ -66,7 +68,7 @@ fn claude_lists_live_interactive_sessions_newest_first() {
 #[test]
 fn claude_desktop_sessions_without_status_fall_back_to_idle_and_file_time() {
     let dir = crate::paths::scratch_dir("notch-claude-desktop");
-    let now = Utc::now();
+    let now = Timestamp::now();
     claude_file(
         &dir,
         18437,
@@ -97,7 +99,9 @@ fn claude_skips_oversize_session_files_without_reading_them() {
         serde_json::json!({"pid": 7, "name": "big", "note": padding}),
     );
     claude_file(&dir, 8, serde_json::json!({"pid": 8, "name": "small"}));
-    let sessions = read_claude(&dir, Utc::now(), |pids| pids.iter().copied().collect());
+    let sessions = read_claude(&dir, Timestamp::now(), |pids| {
+        pids.iter().copied().collect()
+    });
     assert_eq!(
         sessions.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(),
         ["small"]
@@ -108,8 +112,8 @@ fn claude_skips_oversize_session_files_without_reading_them() {
 #[test]
 fn other_providers_have_no_sessions_and_ordering_caps_the_list() {
     let home = crate::paths::scratch_dir("notch-sessions-home");
-    assert!(read(AgentId::Cursor, &home, Utc::now()).is_empty());
-    assert!(read(AgentId::Antigravity, &home, Utc::now()).is_empty());
+    assert!(read(AgentId::Cursor, &home, Timestamp::now()).is_empty());
+    assert!(read(AgentId::Antigravity, &home, Timestamp::now()).is_empty());
     let observed: Vec<Observed> = (0..20)
         .map(|index| Observed {
             session: LiveSession {

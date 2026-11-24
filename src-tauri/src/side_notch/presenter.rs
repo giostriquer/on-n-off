@@ -1,8 +1,7 @@
 use super::model::frame::RailData;
 use super::model::{Display, NotchSettings, ShowMode};
+use super::plan::ViewerClock;
 use super::plan::{self, CellId, Hit, Hover, Page, Plan, TextMetrics, Zone};
-use chrono::{DateTime, TimeZone};
-use std::fmt;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -103,11 +102,8 @@ impl Presenter {
         super::model::selected_display(self.settings()?, &self.displays)
     }
 
-    pub fn present<Tz: TimeZone>(&mut self, now: DateTime<Tz>) -> Option<&Plan>
-    where
-        Tz::Offset: fmt::Display,
-    {
-        let mut next = self.plan(now.clone());
+    pub fn present(&mut self, clock: impl ViewerClock) -> Option<&Plan> {
+        let mut next = self.plan(&clock);
         let moved = match (&self.presented, &next) {
             (Some(shown), Some(next)) => next.moved_from(shown),
             (None, Some(_)) => true,
@@ -117,16 +113,13 @@ impl Presenter {
             self.pinned = None;
             self.hovered_cell = None;
             self.hover = Hover::default();
-            next = self.plan(now);
+            next = self.plan(&clock);
         }
         self.presented = next;
         self.presented.as_ref()
     }
 
-    fn plan<Tz: TimeZone>(&self, now: DateTime<Tz>) -> Option<Plan>
-    where
-        Tz::Offset: fmt::Display,
-    {
+    fn plan(&self, clock: &dyn ViewerClock) -> Option<Plan> {
         if self.suppressed {
             return None;
         }
@@ -134,7 +127,7 @@ impl Presenter {
         if !data.settings.enabled {
             return None;
         }
-        plan::plan(&self.displays, data, self.hover, now, self.text_metrics)
+        plan::plan(&self.displays, data, self.hover, clock, self.text_metrics)
     }
 
     pub fn take_dirty(&mut self) -> bool {

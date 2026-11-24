@@ -1,5 +1,6 @@
 use super::cell::ci_color;
 use super::text::{TextMetrics, TextWeight, Typesetter};
+use super::ViewerClock;
 use super::{
     provider_color, tone_color, Color, MarkKind, Page, PopItem, Scale, Text, Zone, MUTED_INK, R,
     WARN_AMBER, WORKSPACE_CREDITS,
@@ -9,8 +10,7 @@ use crate::limits::window_at::WindowAt;
 use crate::side_notch::model::frame::{CellData, Notice, PrCell, PrList, PrRow, ProviderCell};
 use crate::side_notch::model::{meter_color, workspace_share_wording, PopoverMetrics};
 use crate::side_notch::sessions::{LiveSession, SessionStatus};
-use chrono::{DateTime, TimeZone, Utc};
-use std::fmt::Display;
+use jiff::Timestamp;
 
 const WHITE: Color = [255, 255, 255, 255];
 const NO_CHECKS_RING: Color = [89, 89, 89, 255];
@@ -129,33 +129,27 @@ struct Block {
     detail: Option<String>,
 }
 
-struct Composer<'a, Tz: TimeZone> {
+struct Composer<'a> {
     scale: Scale,
     typeset: Typesetter<'a>,
-    now: DateTime<Utc>,
-    zone: &'a Tz,
+    clock: &'a dyn ViewerClock,
     x: f64,
     inner_w: f64,
     out: Contents,
 }
 
-pub(super) fn contents<Tz: TimeZone>(
+pub(super) fn contents(
     cell: &CellData,
     action_error: Option<&str>,
     chrome: &PopoverMetrics,
     scale: Scale,
     text_metrics: &dyn TextMetrics,
-    now: DateTime<Utc>,
-    zone: &Tz,
-) -> Contents
-where
-    Tz::Offset: Display,
-{
+    clock: &dyn ViewerClock,
+) -> Contents {
     let mut composer = Composer {
         scale,
         typeset: Typesetter::new(text_metrics, scale.display),
-        now,
-        zone,
+        clock,
         x: chrome.padding,
         inner_w: chrome.width - 2.0 * chrome.padding,
         out: Contents::default(),
@@ -176,10 +170,7 @@ where
     composer.out
 }
 
-impl<Tz: TimeZone> Composer<'_, Tz>
-where
-    Tz::Offset: Display,
-{
+impl Composer<'_> {
     fn v(&self, points: f64) -> f64 {
         self.scale.value(points)
     }
@@ -258,12 +249,12 @@ where
             .iter()
             .map(|window| Block {
                 label: window.label.clone(),
-                at: WindowAt::of(window, self.now),
+                at: WindowAt::of(window, self.clock.now()),
                 detail: None,
             })
             .collect();
         if let Some(share) = reading.and_then(|reading| reading.workspace_credits.as_ref()) {
-            let at = WindowAt::of_share(share, self.now);
+            let at = WindowAt::of_share(share, self.clock.now());
             let wording = workspace_share_wording(share);
             blocks.push(Block {
                 label: WORKSPACE_CREDITS.into(),
@@ -293,7 +284,7 @@ where
     fn quota_block(&mut self, card: &mut Stack, block: Block, provider: AgentId) {
         let (x, inner_w) = (self.x, self.inner_w);
         let note = self.typeset.ellipsize(
-            &block.at.notch_note(self.zone),
+            &block.at.notch_note(|at| self.clock.local_at(at)),
             inner_w * 0.6,
             self.v(10.0),
             TextWeight::Regular,
@@ -393,7 +384,7 @@ where
         );
         self.out.text_right(
             R::new(x, detail_at, inner_w, self.line_h(10.0)),
-            age_text(&session.last_active_at, self.now),
+            age_text(&session.last_active_at, self.clock.now()),
             self.v(10.0),
             TextWeight::Regular,
             MUTED_INK,
@@ -604,11 +595,11 @@ where
     }
 }
 
-fn age_text(last_active_at: &str, now: DateTime<Utc>) -> String {
-    let Some(instant) = last_active_at.parse::<DateTime<Utc>>().ok() else {
+fn age_text(last_active_at: &str, now: Timestamp) -> String {
+    let Some(instant) = crate::timestamp::parse_stored(last_active_at) else {
         return String::new();
     };
-    let minutes = (now - instant).num_minutes();
+    let minutes = (now - instant).as_mins();
     if minutes < 1 {
         "just now".into()
     } else if minutes < 60 {

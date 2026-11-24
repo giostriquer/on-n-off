@@ -1,4 +1,5 @@
 use super::*;
+use jiff::SignedDuration;
 
 fn opted_in(account: &str) -> HashMap<String, ResetAlert> {
     alerts_for(account, alert(5, false))
@@ -382,7 +383,8 @@ fn the_notification_counts_hours_under_a_day_and_days_from_a_full_day() {
         account_id: "acct".into(),
         account_label: None,
         left_percent: 2.0,
-        cycle: (now() + chrono::Duration::hours(hours) + chrono::Duration::minutes(minutes)).into(),
+        cycle: (now() + SignedDuration::from_hours(hours) + SignedDuration::from_mins(minutes))
+            .into(),
         automatic: false,
     };
 

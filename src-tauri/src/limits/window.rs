@@ -1,7 +1,6 @@
+use jiff::Timestamp;
 use std::fmt;
 use std::time::Duration;
-
-use chrono::{DateTime, SecondsFormat, Utc};
 
 use crate::dto::{LimitWindowDto, LimitWindowKind, Reading, WindowRole};
 
@@ -133,29 +132,27 @@ pub(super) fn keep_in_range(reading: &mut Reading) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) struct ResetInstant(DateTime<Utc>);
+pub(crate) struct ResetInstant(Timestamp);
 
 impl ResetInstant {
     pub(crate) fn parse(text: &str) -> Option<Self> {
-        DateTime::parse_from_rfc3339(text)
-            .ok()
-            .map(|at| Self(at.with_timezone(&Utc)))
+        crate::timestamp::parse(text).ok().map(Self)
     }
 
     pub(crate) fn of(window: &LimitWindowDto) -> Option<Self> {
         window.resets_at.as_deref().and_then(Self::parse)
     }
 
-    pub(crate) fn at(self) -> DateTime<Utc> {
+    pub(crate) fn at(self) -> Timestamp {
         self.0
     }
 
-    pub(crate) fn passed_by(self, at: DateTime<Utc>) -> bool {
+    pub(crate) fn passed_by(self, at: Timestamp) -> bool {
         self.0 <= at
     }
 
     pub(crate) fn same_cycle_as(self, other: Self) -> bool {
-        (self.0 - other.0).num_seconds().abs() <= RESET_TOLERANCE_SECONDS
+        (self.0 - other.0).as_secs().abs() <= RESET_TOLERANCE_SECONDS
     }
 
     pub(crate) fn later_than(self, other: Self) -> bool {
@@ -163,15 +160,15 @@ impl ResetInstant {
     }
 }
 
-impl From<DateTime<Utc>> for ResetInstant {
-    fn from(at: DateTime<Utc>) -> Self {
+impl From<Timestamp> for ResetInstant {
+    fn from(at: Timestamp) -> Self {
         Self(at)
     }
 }
 
 impl fmt::Display for ResetInstant {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0.to_rfc3339_opts(SecondsFormat::Millis, true))
+        write!(formatter, "{:.3}", self.0)
     }
 }
 
@@ -184,7 +181,7 @@ pub(crate) struct Observation {
 pub(crate) fn cycle_turned_over(
     before: Observation,
     after: Observation,
-    observed_at: DateTime<Utc>,
+    observed_at: Timestamp,
 ) -> bool {
     let Some(saved) = before.reset else {
         return false;

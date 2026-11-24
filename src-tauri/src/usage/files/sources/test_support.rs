@@ -1,12 +1,11 @@
+use crate::timestamp::TimestampExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
 use crate::usage::window::Span;
 
 pub(super) fn at(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 pub(super) fn month_start(month: u32) -> i64 {

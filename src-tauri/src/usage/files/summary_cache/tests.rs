@@ -135,3 +135,22 @@ fn a_stored_summary_replaces_the_entries_of_its_group() {
     assert!(!kept(&august));
     let _ = std::fs::remove_dir_all(home);
 }
+
+#[test]
+fn a_summary_from_before_time_zone_rules_were_recorded_is_recomputed() {
+    let home = scratch_dir("usage-cache-zone-rules");
+    let path = summary_cache_path_for(&home);
+    let window = days("2026-08-01", "2026-08-13");
+    let legacy = SummaryKey {
+        key: format!("{}|rates:0|history:none", window.key()),
+        group: window.group().into(),
+    };
+    store_summary(&lock(), &path, &legacy, "same-files", &sample_dto());
+    let current = summary_key(&window, None, "none");
+    assert!(load_summary_hit(&path, &current, "same-files").is_none());
+    assert!(current
+        .key
+        .contains(&format!("|tzdb:{}|", jiff_tzdb::VERSION)));
+    store_summary(&lock(), &path, &current, "same-files", &sample_dto());
+    assert!(load_summary_hit(&path, &current, "same-files").is_some());
+}

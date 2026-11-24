@@ -1,4 +1,6 @@
 use super::*;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 #[test]
 fn a_test_resolves_the_codex_store_inside_its_own_home_whatever_the_machine_exports() {
@@ -278,7 +280,7 @@ fn codex_signs_in_reports_and_signs_out_through_its_own_commands() {
 fn a_codex_login_close_to_its_access_tokens_expiry_renews_soon() {
     let root = tempfile::tempdir().unwrap();
     let store = CodexNative::resolve(root.path()).unwrap();
-    let now = chrono::Utc::now().timestamp();
+    let now = Timestamp::now().epoch_seconds();
     let expiring = |exp: i64| Login {
         auth: json!({"tokens": {
             "access_token": format!("header.{}.signature", URL_SAFE_NO_PAD.encode(json!({"exp": exp}).to_string())),

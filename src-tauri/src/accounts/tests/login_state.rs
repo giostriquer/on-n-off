@@ -3,6 +3,8 @@ use super::fixture::{claude, codex, identity, muse, provider_reading, Harness};
 use crate::dto::{AgentId, LimitsStatus, ProviderLimitsDto};
 use crate::http::RateLimitReset;
 use crate::limits::ReadFailure;
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 use serde_json::{json, Value};
 use std::{
     sync::Mutex,
@@ -92,7 +94,7 @@ impl Saved {
             &roster.profiles()[0],
             &crate::accounts::SignInDeadlines::new(),
             None,
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
         );
         serde_json::to_value(profile).unwrap()["loginState"].clone()
     }
@@ -174,7 +176,7 @@ impl Saved {
             &roster.profiles()[0],
             &crate::accounts::SignInDeadlines::new(),
             None,
-            chrono::Utc::now().timestamp_millis(),
+            Timestamp::now().epoch_millis(),
         );
         serde_json::to_value(profile).unwrap()["loginState"].clone()
     }

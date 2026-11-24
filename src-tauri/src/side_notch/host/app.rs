@@ -2,6 +2,7 @@ use super::{App, Host, Lifetime, Page, Transport};
 use crate::dto::{AgentId, GithubPrsDto, ProviderLimitsDto};
 use crate::side_notch::model::{NotchSettings, NotchSnapshot};
 use crate::side_notch::sessions::LiveSession;
+use jiff::Timestamp;
 use std::{
     sync::{atomic::AtomicU64, Arc, Condvar, Mutex},
     thread,
@@ -188,7 +189,7 @@ impl<S: Shell> App for Production<S> {
 
     fn read_sessions(&self, agent: AgentId) -> Vec<LiveSession> {
         crate::paths::user_home()
-            .map(|home| crate::side_notch::sessions::read(agent, &home, chrono::Utc::now()))
+            .map(|home| crate::side_notch::sessions::read(agent, &home, Timestamp::now()))
             .unwrap_or_default()
     }
 

@@ -1,3 +1,4 @@
+use crate::timestamp::TimestampExt;
 use std::time::SystemTime;
 
 use serde_json::{json, Value};
@@ -12,16 +13,14 @@ use crate::paths::scratch_dir;
 use crate::usage::transcripts::USAGE_TRANSCRIPT_PARSER_VERSION;
 
 fn at(iso: &str) -> i64 {
-    chrono::DateTime::parse_from_rfc3339(iso)
-        .unwrap()
-        .timestamp_millis()
+    crate::timestamp::parse(iso).unwrap().epoch_millis()
 }
 
 fn write_transcript(path: &Path, lines: &[Value], written: &str) {
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let body: String = lines.iter().map(|line| format!("{line}\n")).collect();
     std::fs::write(path, body).unwrap();
-    let modified = SystemTime::from(chrono::DateTime::parse_from_rfc3339(written).unwrap());
+    let modified = SystemTime::try_from(crate::timestamp::parse(written).unwrap()).unwrap();
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();
@@ -252,7 +251,7 @@ fn write_record(home: &Path, name: &str, timestamp: &str, output_tokens: u64) ->
 
 #[cfg(unix)]
 fn set_mtime(path: &Path, iso: &str) {
-    let modified = SystemTime::from(chrono::DateTime::parse_from_rfc3339(iso).unwrap());
+    let modified = SystemTime::try_from(crate::timestamp::parse(iso).unwrap()).unwrap();
     let file = std::fs::OpenOptions::new().write(true).open(path).unwrap();
     file.set_times(std::fs::FileTimes::new().set_modified(modified))
         .unwrap();

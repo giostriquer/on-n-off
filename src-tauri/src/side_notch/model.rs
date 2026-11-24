@@ -6,6 +6,8 @@ use crate::dto::{
 };
 #[cfg(any(target_os = "windows", test))]
 use crate::limits::window_at::{Meter, WindowAt};
+#[cfg(any(target_os = "windows", test))]
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 #[cfg(any(target_os = "macos", target_os = "windows", test))]
@@ -581,7 +583,7 @@ impl NotchProvider {
         self.windows.iter().find(|window| window.id == id)
     }
 
-    pub fn inner_at(&self, now: chrono::DateTime<chrono::Utc>) -> Option<(&InnerRing, WindowAt)> {
+    pub fn inner_at(&self, now: Timestamp) -> Option<(&InnerRing, WindowAt)> {
         let ring = self.inner_ring.as_ref()?;
         let at = match ring {
             InnerRing::Fable { window_id } => self

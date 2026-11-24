@@ -2,6 +2,8 @@ use super::super::usage::FetchResult;
 use super::fixture::{claude, codex, identity, weekly_reading, Harness, Heard};
 use crate::accounts::Roster;
 use crate::dto::{AgentId, ProviderLimitsDto};
+use crate::timestamp::TimestampExt;
+use jiff::Timestamp;
 
 fn answered(harness: &Harness, provider: AgentId) -> Option<Roster> {
     let mut entries: Vec<ProviderLimitsDto> = Vec::new();
@@ -66,7 +68,7 @@ fn the_saved_refresh_lists_each_profile_as_the_account_list_does_once_given_its_
     );
 
     let signed_in = a.observation_key();
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = Timestamp::now().epoch_millis();
     let read: Vec<_> = roster
         .profiles()
         .iter()
