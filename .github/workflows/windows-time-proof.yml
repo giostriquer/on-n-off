@@ -65,7 +65,7 @@ jobs:
               ./scripts/launch-smoke.ps1 -App $exe -WindowClass 'on-n-off Side notch' -Seconds 2 -WindowSeconds 8
               throw 'Missing notch window was accepted'
             } catch {
-              if ($_.Exception.Message -notmatch 'did not create|did not show|never created') { throw }
+              if ($_.Exception.Message -notmatch "never opened a 'on-n-off Side notch' window") { throw }
               Write-Host "Detected disabled window entry: $($_.Exception.Message)"
             }
           } finally {
