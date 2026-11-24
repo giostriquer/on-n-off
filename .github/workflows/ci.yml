@@ -94,8 +94,8 @@ jobs:
       - *install-frontend
 
       - name: Install Chromium for the layout check
-        timeout-minutes: 5
-        run: bunx playwright install --with-deps chromium
+        timeout-minutes: 10
+        run: bunx playwright install --with-deps --only-shell chromium
 
       - name: Check the Limits card and popover header layout
         timeout-minutes: 5
